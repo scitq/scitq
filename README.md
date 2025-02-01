@@ -1,4 +1,4 @@
-# A rewrite of scitq in Rust
+# A rewrite of scitq in Go
 
 scitq v1, python version, has a lot of quality but suffers from several issues:
 - the overall design is kind of fat with a few adhoc internal repetition like the fact that internal server tasks are completely unrelated to the user tasks,
@@ -7,32 +7,42 @@ scitq v1, python version, has a lot of quality but suffers from several issues:
   - python dependancies make deploy long and complex, copying a single binary would be so nice...
   - REST is uselessly verbose and heavy when things turn bad.
 
-Also, as I am gaining more experience in Rust, I appreciate more and more the solidity of Rust developments that is hard to achieve in Python.
+Also, as I am gaining more experience in Rust, I see that for less clever and more practical code it can be a serious handicap, and I am willing to let go a chance...
 
 # source
 
 ## preparing things
 
-### preparing proto
+### certificates
 
-- run `cargo build` in common and in the source files that use tonic, do `use common::task_proto;`
-
-### preparting database
-
-Decision is taken to use postgreSQL only
-
-#### 
-
-CREATE USER scitq2_user WITH PASSWORD 'your_secure_password';
-
-CREATE DATABASE scitq2;
-
-GRANT ALL PRIVILEGES ON DATABASE scitq2 TO scitq2_user;
+```sh
+openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.pem -days 3650 -nodes -subj "/CN=localhost"
+# optionally check with
+openssl x509 -in server.pem -text -noout
 
 
-These commands should be passed in `./server`:
 
-- install sqlx cli : `cargo install sqlx-cli`
-- create file `touch scitq.db`
-- initialize the database `cargo sqlx migrate run --database-url=sqlite://./scitq.db`
-- prepare database: `cargo sqlx prepare --database-url=sqlite://scitq.db`
+### do it once
+This is done once, so I do not need to redo it: 
+
+```sh
+brew install go
+go mod init  github.com/gmtsciencedev/scitq2
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`
+```
+
+### once in a while
+
+This command should show if any lib may be updated:
+```sh
+go list -u -m all
+go get -u all
+```
+
+### do it each time protocol change
+```sh
+go mod tidy
+protoc --go_out=. --go-grpc_out=. --proto_path=proto proto/taskqueue.proto
+go run server/main.go
+```
