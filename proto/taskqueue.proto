@@ -44,13 +44,13 @@ message TaskStatusUpdate {
 }
 
 message TaskLog {
-    string task_id = 1;
+    int32 task_id = 1;
     string log_type = 2; // 'O' for stdout, 'E' for stderr
     string log_text = 3;
 }
 
 message TaskId {
-    string task_id = 1;
+    int32 task_id = 1;
 }
 
 message Ack {
