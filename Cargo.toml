@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["client", "server", "common"]
+
+[workspace.dependencies]
+tonic = { version = "0.12", features = ["transport", "tls"] }
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2.2"
+openssl = "0.10"
+serde = "1.0"
+tokio = { version = "1", features = ["full"] }
+bollard = "0.18"
+chrono = { version = "0.4", features = ["serde"] }

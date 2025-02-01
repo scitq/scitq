@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package taskqueue;
+
+service TaskQueue {
+    rpc SubmitTask(TaskRequest) returns (TaskResponse);
+    rpc RegisterWorker(WorkerInfo) returns (Ack);
+    rpc PingAndTakeNewTasks(WorkerInfo) returns (TaskList);
+    rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
+    rpc SendTaskLogs(stream TaskLog) returns (Ack);
+    rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
+}
+
+message TaskRequest {
+    string command = 1;
+    string container = 2;
+}
+
+message TaskResponse {
+    int32 task_id = 1;
+}
+
+message WorkerInfo {
+    string name = 1;
+    int32 concurrency = 2;
+}
+
+message Task {
+    int32 task_id = 1;
+    string command = 2;
+    string container = 3;
+    string status = 4;
+}
+
+message TaskList {
+    repeated Task tasks = 1;
+}
+
+message TaskStatusUpdate {
+    string task_id = 1;
+    string new_status = 2;
+}
+
+message TaskLog {
+    string task_id = 1;
+    string log_type = 2; // 'O' for stdout, 'E' for stderr
+    string log_text = 3;
+}
+
+message TaskId {
+    string task_id = 1;
+}
+
+message Ack {
+    bool success = 1;
+}
