@@ -46,3 +46,23 @@ go mod tidy
 protoc --go_out=. --go-grpc_out=. --proto_path=proto proto/taskqueue.proto
 go run server/main.go
 ```
+
+# basic usage
+
+## quick run
+
+```sh
+# run the server
+go run client/main.go 
+
+# run the client
+go run client/main.go -server localhost:50051 -concurrency 2 -name myworker
+```
+
+## compile for deploy
+
+```sh
+CGO_ENABLED=0 go build -o client/bin/scitq-client client/main.go
+CGO_ENABLED=0 go build -o server/bin/scitq-server client/server.go
+CGO_ENABLED=0 go build -o cli/bin/scitq-cli client/cli.go
+```

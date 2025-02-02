@@ -17,8 +17,15 @@ import (
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 )
 
+// optionalInt32 converts an int to a pointer (*int32).
+func optionalInt32(v int) *int32 {
+	i := int32(v)
+	return &i
+}
+
 // WorkerConfig holds worker settings from CLI args.
 type WorkerConfig struct {
+	WorkerId    int
 	ServerAddr  string
 	Concurrency int
 	Name        string
@@ -36,31 +43,31 @@ func createClientConnection(serverAddr string) (*grpc.ClientConn, error) {
 }
 
 // registerWorker registers the client worker with the server.
-func registerWorker(client pb.TaskQueueClient, name string, concurrency int) {
+func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := client.RegisterWorker(ctx, &pb.WorkerInfo{Name: name, Concurrency: int32(concurrency)})
+	res, err := client.RegisterWorker(ctx, &pb.WorkerInfo{Name: w.Name, Concurrency: optionalInt32(w.Concurrency)})
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)
+	} else {
+		w.WorkerId = int(res.WorkerId)
 	}
-	log.Printf("✅ Worker %s registered with concurrency %d", name, concurrency)
+	log.Printf("✅ Worker %s registered with concurrency %d", w.Name, w.Concurrency)
 }
 
 // acknowledgeTask marks the task as "Accepted" (`C` status) before execution.
-func acknowledgeTask(client pb.TaskQueueClient, taskID int32) {
+func acknowledgeTask(client pb.TaskQueueClient, taskID int32) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
-		TaskId:    taskID,
-		NewStatus: "C",
-	})
-	if err != nil {
-		log.Printf("⚠️ Failed to acknowledge task %d: %v", taskID, err)
-	} else {
-		log.Printf("📌 Task %d acknowledged (Accepted)", taskID)
+	res, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: taskID, NewStatus: "C"})
+	if err != nil || !res.Success {
+		log.Printf("❌ Failed to acknowledge task %d: %v", taskID, err)
+		return false
 	}
+	log.Printf("📌 Task %d acknowledged (Accepted)", taskID)
+	return true
 }
 
 // updateTaskStatus marks task as `S` (Success) or `F` (Failed) after execution.
@@ -84,8 +91,15 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
-	// **ACKNOWLEDGE THE TASK ("C" - Accepted)**
-	acknowledgeTask(client, task.TaskId)
+	// 🛑 Only acknowledge if the task is in "A"
+	if task.Status != "A" {
+		log.Printf("⚠️ Task %d is not assigned (A), skipping acknowledgment.", task.TaskId)
+		return
+	}
+	if !acknowledgeTask(client, task.TaskId) {
+		log.Printf("⚠️ Task %d could not be acknowledged, giving up execution.", task.TaskId)
+		return // ❌ Do not execute if acknowledgment failed.
+	}
 
 	cmd := exec.Command("docker", "run", "--rm", task.Container, "sh", "-c", task.Command)
 	stdout, _ := cmd.StdoutPipe()
@@ -116,6 +130,7 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 			line := scanner.Text()
 			stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: logType, LogText: line})
 		}
+		stream.CloseSend() // ✅ Ensure closure of log stream
 	}
 
 	// Stream logs concurrently
@@ -137,11 +152,11 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 }
 
 // fetchTasks requests new tasks from the server.
-func fetchTasks(client pb.TaskQueueClient, name string) []*pb.Task {
+func fetchTasks(client pb.TaskQueueClient, id int) []*pb.Task {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := client.PingAndTakeNewTasks(ctx, &pb.WorkerInfo{Name: name})
+	res, err := client.PingAndTakeNewTasks(ctx, &pb.WorkerId{WorkerId: int32(id)})
 	if err != nil {
 		log.Printf("⚠️ Error fetching tasks: %v", err)
 		return nil
@@ -153,7 +168,7 @@ func fetchTasks(client pb.TaskQueueClient, name string) []*pb.Task {
 func workerLoop(client pb.TaskQueueClient, config WorkerConfig) {
 	sem := make(chan struct{}, config.Concurrency) // Concurrency control
 	for {
-		tasks := fetchTasks(client, config.Name)
+		tasks := fetchTasks(client, config.WorkerId)
 		if len(tasks) == 0 {
 			time.Sleep(5 * time.Second) // No tasks, wait before retrying
 			continue
@@ -192,7 +207,7 @@ func main() {
 	defer conn.Close()
 
 	client := pb.NewTaskQueueClient(conn)
-	registerWorker(client, config.Name, config.Concurrency)
+	config.registerWorker(client)
 
 	// Start processing tasks
 	workerLoop(client, config)

@@ -33,8 +33,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TaskQueueClient interface {
 	SubmitTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
-	RegisterWorker(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*Ack, error)
-	PingAndTakeNewTasks(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*TaskList, error)
+	RegisterWorker(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*WorkerId, error)
+	PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskList, error)
 	UpdateTaskStatus(ctx context.Context, in *TaskStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
 	SendTaskLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TaskLog, Ack], error)
 	StreamTaskLogs(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
@@ -59,9 +59,9 @@ func (c *taskQueueClient) SubmitTask(ctx context.Context, in *TaskRequest, opts 
 	return out, nil
 }
 
-func (c *taskQueueClient) RegisterWorker(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*Ack, error) {
+func (c *taskQueueClient) RegisterWorker(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*WorkerId, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Ack)
+	out := new(WorkerId)
 	err := c.cc.Invoke(ctx, TaskQueue_RegisterWorker_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -69,7 +69,7 @@ func (c *taskQueueClient) RegisterWorker(ctx context.Context, in *WorkerInfo, op
 	return out, nil
 }
 
-func (c *taskQueueClient) PingAndTakeNewTasks(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*TaskList, error) {
+func (c *taskQueueClient) PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskList, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskList)
 	err := c.cc.Invoke(ctx, TaskQueue_PingAndTakeNewTasks_FullMethodName, in, out, cOpts...)
@@ -136,8 +136,8 @@ func (c *taskQueueClient) ListTasks(ctx context.Context, in *ListTasksRequest, o
 // for forward compatibility.
 type TaskQueueServer interface {
 	SubmitTask(context.Context, *TaskRequest) (*TaskResponse, error)
-	RegisterWorker(context.Context, *WorkerInfo) (*Ack, error)
-	PingAndTakeNewTasks(context.Context, *WorkerInfo) (*TaskList, error)
+	RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error)
+	PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskList, error)
 	UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error)
 	SendTaskLogs(grpc.ClientStreamingServer[TaskLog, Ack]) error
 	StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
@@ -155,10 +155,10 @@ type UnimplementedTaskQueueServer struct{}
 func (UnimplementedTaskQueueServer) SubmitTask(context.Context, *TaskRequest) (*TaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitTask not implemented")
 }
-func (UnimplementedTaskQueueServer) RegisterWorker(context.Context, *WorkerInfo) (*Ack, error) {
+func (UnimplementedTaskQueueServer) RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterWorker not implemented")
 }
-func (UnimplementedTaskQueueServer) PingAndTakeNewTasks(context.Context, *WorkerInfo) (*TaskList, error) {
+func (UnimplementedTaskQueueServer) PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PingAndTakeNewTasks not implemented")
 }
 func (UnimplementedTaskQueueServer) UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error) {
@@ -231,7 +231,7 @@ func _TaskQueue_RegisterWorker_Handler(srv interface{}, ctx context.Context, dec
 }
 
 func _TaskQueue_PingAndTakeNewTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(WorkerInfo)
+	in := new(WorkerId)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -243,7 +243,7 @@ func _TaskQueue_PingAndTakeNewTasks_Handler(srv interface{}, ctx context.Context
 		FullMethod: TaskQueue_PingAndTakeNewTasks_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TaskQueueServer).PingAndTakeNewTasks(ctx, req.(*WorkerInfo))
+		return srv.(TaskQueueServer).PingAndTakeNewTasks(ctx, req.(*WorkerId))
 	}
 	return interceptor(ctx, in, info, handler)
 }
