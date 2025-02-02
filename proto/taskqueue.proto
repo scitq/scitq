@@ -11,6 +11,7 @@ service TaskQueue {
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
     rpc SendTaskLogs(stream TaskLog) returns (Ack);
     rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
+    rpc ListTasks (ListTasksRequest) returns (TaskList);
 }
 
 message TaskRequest {
@@ -39,7 +40,7 @@ message TaskList {
 }
 
 message TaskStatusUpdate {
-    string task_id = 1;
+    int32 task_id = 1;
     string new_status = 2;
 }
 
@@ -55,4 +56,8 @@ message TaskId {
 
 message Ack {
     bool success = 1;
+}
+
+message ListTasksRequest {
+    optional string status_filter = 1;
 }

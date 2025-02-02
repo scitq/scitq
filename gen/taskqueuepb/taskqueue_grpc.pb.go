@@ -25,6 +25,7 @@ const (
 	TaskQueue_UpdateTaskStatus_FullMethodName    = "/taskqueue.TaskQueue/UpdateTaskStatus"
 	TaskQueue_SendTaskLogs_FullMethodName        = "/taskqueue.TaskQueue/SendTaskLogs"
 	TaskQueue_StreamTaskLogs_FullMethodName      = "/taskqueue.TaskQueue/StreamTaskLogs"
+	TaskQueue_ListTasks_FullMethodName           = "/taskqueue.TaskQueue/ListTasks"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -37,6 +38,7 @@ type TaskQueueClient interface {
 	UpdateTaskStatus(ctx context.Context, in *TaskStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
 	SendTaskLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TaskLog, Ack], error)
 	StreamTaskLogs(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
+	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskList, error)
 }
 
 type taskQueueClient struct {
@@ -119,6 +121,16 @@ func (c *taskQueueClient) StreamTaskLogs(ctx context.Context, in *TaskId, opts .
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskQueue_StreamTaskLogsClient = grpc.ServerStreamingClient[TaskLog]
 
+func (c *taskQueueClient) ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListTasks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -129,6 +141,7 @@ type TaskQueueServer interface {
 	UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error)
 	SendTaskLogs(grpc.ClientStreamingServer[TaskLog, Ack]) error
 	StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
+	ListTasks(context.Context, *ListTasksRequest) (*TaskList, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -156,6 +169,9 @@ func (UnimplementedTaskQueueServer) SendTaskLogs(grpc.ClientStreamingServer[Task
 }
 func (UnimplementedTaskQueueServer) StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error {
 	return status.Errorf(codes.Unimplemented, "method StreamTaskLogs not implemented")
+}
+func (UnimplementedTaskQueueServer) ListTasks(context.Context, *ListTasksRequest) (*TaskList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -268,6 +284,24 @@ func _TaskQueue_StreamTaskLogs_Handler(srv interface{}, stream grpc.ServerStream
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskQueue_StreamTaskLogsServer = grpc.ServerStreamingServer[TaskLog]
 
+func _TaskQueue_ListTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTasksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListTasks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListTasks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListTasks(ctx, req.(*ListTasksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -290,6 +324,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateTaskStatus",
 			Handler:    _TaskQueue_UpdateTaskStatus_Handler,
+		},
+		{
+			MethodName: "ListTasks",
+			Handler:    _TaskQueue_ListTasks_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
