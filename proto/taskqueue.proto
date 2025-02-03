@@ -7,7 +7,7 @@ option go_package = "gen/taskqueuepb";
 service TaskQueue {
     rpc SubmitTask(TaskRequest) returns (TaskResponse);
     rpc RegisterWorker(WorkerInfo) returns (WorkerId);
-    rpc PingAndTakeNewTasks(WorkerId) returns (TaskList);
+    rpc PingAndTakeNewTasks(WorkerId) returns (TaskListAndOther);
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
     rpc SendTaskLogs(stream TaskLog) returns (Ack);
     rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
@@ -37,6 +37,11 @@ message Task {
 
 message TaskList {
     repeated Task tasks = 1;
+}
+
+message TaskListAndOther {
+    repeated Task tasks = 1;
+    int32 concurrency = 2;
 }
 
 message TaskStatusUpdate {

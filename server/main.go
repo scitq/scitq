@@ -197,55 +197,86 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	return &pb.TaskResponse{TaskId: int32(taskID)}, nil
 }
 
+func bytesToUint64(b []byte) uint64 {
+	var v uint64
+	for i := uint(0); i < 8; i++ {
+		v |= uint64(b[7-i]) << (i * 8)
+	}
+	return v
+}
+
 // RegisterWorker stores or updates a worker in bbolt using gob encoding.
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
 	var workerID uint64
 	err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("workers"))
-		if b == nil {
-			return fmt.Errorf("workers bucket not found")
+		workersBucket, err := tx.CreateBucketIfNotExists([]byte("workers"))
+		if err != nil {
+			return fmt.Errorf("failed to create workers bucket: %w", err)
 		}
 
-		// Check if the worker already exists
-		key := []byte(req.Name)
-		existing := b.Get(key)
+		workerIndexBucket, err := tx.CreateBucketIfNotExists([]byte("worker_index"))
+		if err != nil {
+			return fmt.Errorf("failed to create worker index bucket: %w", err)
+		}
+
+		// Check if the worker already exists using name-based lookup
+		existingID := workerIndexBucket.Get([]byte(req.Name))
 		var worker Worker
 
-		if existing != nil {
-			// Worker already exists, retrieve ID
-			if err := gob.NewDecoder(bytes.NewReader(existing)).Decode(&worker); err != nil {
+		if existingID != nil {
+			workerID = bytesToUint64(existingID)
+			workerData := workersBucket.Get(itob(workerID))
+			if workerData == nil {
+				return fmt.Errorf("worker ID %d not found in workers bucket", workerID)
+			}
+
+			// Decode existing worker
+			if err := gob.NewDecoder(bytes.NewReader(workerData)).Decode(&worker); err != nil {
 				return fmt.Errorf("failed to decode existing worker: %w", err)
 			}
-			workerID = worker.ID
-			//worker.Concurrency = int(*req.Concurrency) // Update concurrency if changed
-			return nil
+
+			// Update concurrency if provided
+			if req.Concurrency != nil {
+				worker.Concurrency = int(*req.Concurrency)
+			}
+
 		} else {
 			// Assign a new unique worker ID
-			id, err := b.NextSequence()
+			id, err := workersBucket.NextSequence()
 			if err != nil {
 				return fmt.Errorf("failed to generate worker ID: %w", err)
 			}
+			workerID = id
+
+			// Ensure concurrency has a default value
 			var concurrency int32 = 0
 			if req.Concurrency != nil && *req.Concurrency > 0 {
 				concurrency = *req.Concurrency
 			}
+
+			// Create new worker
 			worker = Worker{
-				ID:          id,
+				ID:          workerID,
 				Name:        req.Name,
 				Concurrency: int(concurrency),
 			}
-			workerID = id
 
-			// Store the worker by name
-			var buf bytes.Buffer
-			if err := gob.NewEncoder(&buf).Encode(worker); err != nil {
-				return fmt.Errorf("failed to encode worker: %w", err)
+			// Store the name-to-ID mapping
+			if err := workerIndexBucket.Put([]byte(req.Name), itob(workerID)); err != nil {
+				return fmt.Errorf("failed to store worker index: %w", err)
 			}
-
-			return b.Put(key, buf.Bytes())
-
 		}
 
+		// Store the worker in the "workers" bucket under its ID
+		var buf bytes.Buffer
+		if err := gob.NewEncoder(&buf).Encode(worker); err != nil {
+			return fmt.Errorf("failed to encode worker: %w", err)
+		}
+		if err := workersBucket.Put(itob(workerID), buf.Bytes()); err != nil {
+			return fmt.Errorf("failed to store worker: %w", err)
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -298,8 +329,9 @@ func main() {
 	}
 }
 
-func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.WorkerId) (*pb.TaskList, error) {
+func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.WorkerId) (*pb.TaskListAndOther, error) {
 	var tasks []*pb.Task
+	var worker Worker
 
 	err := s.db.View(func(tx *bolt.Tx) error {
 		tasksBucket := tx.Bucket([]byte("tasks_by_status/A"))
@@ -326,6 +358,20 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 			}
 		}
 
+		workerBucket := tx.Bucket([]byte("worker"))
+		if workerBucket == nil {
+			return nil // No worker
+		}
+		workerData := workerBucket.Get(itob(uint64(req.WorkerId)))
+		if workerData == nil {
+			return fmt.Errorf("worker ID %d not found in workers bucket", req.WorkerId)
+		}
+
+		// Decode existing worker
+		if err := gob.NewDecoder(bytes.NewReader(workerData)).Decode(&worker); err != nil {
+			return fmt.Errorf("failed to decode existing worker: %w", err)
+		}
+
 		return nil
 	})
 
@@ -333,7 +379,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 		return nil, fmt.Errorf("failed to fetch tasks: %w", err)
 	}
 
-	return &pb.TaskList{Tasks: tasks}, nil
+	return &pb.TaskListAndOther{Tasks: tasks, Concurrency: int32(worker.Concurrency)}, nil
 }
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {

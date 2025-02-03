@@ -31,6 +31,51 @@ type WorkerConfig struct {
 	Name        string
 }
 
+// ResizableSemaphore manages dynamic concurrency limits.
+type ResizableSemaphore struct {
+	tokens chan struct{}
+	mu     sync.Mutex
+	size   int
+}
+
+// NewResizableSemaphore initializes a semaphore with a given size.
+func NewResizableSemaphore(size int) *ResizableSemaphore {
+	return &ResizableSemaphore{
+		tokens: make(chan struct{}, size),
+		size:   size,
+	}
+}
+
+// Acquire blocks until a token is available.
+func (s *ResizableSemaphore) Acquire() {
+	s.tokens <- struct{}{}
+}
+
+// Release returns a token to the semaphore.
+func (s *ResizableSemaphore) Release() {
+	<-s.tokens
+}
+
+// Resize adjusts the semaphore size dynamically.
+func (s *ResizableSemaphore) Resize(newSize int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if newSize > s.size {
+		// Expanding: Add extra capacity
+		for i := 0; i < newSize-s.size; i++ {
+			s.tokens <- struct{}{} // Add extra tokens
+		}
+	} else {
+		// Shrinking: Block until running tasks complete
+		for i := 0; i < s.size-newSize; i++ {
+			<-s.tokens // Remove excess tokens
+		}
+	}
+
+	s.size = newSize
+}
+
 // createClientConnection establishes a gRPC connection to the server.
 func createClientConnection(serverAddr string) (*grpc.ClientConn, error) {
 	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
@@ -152,7 +197,7 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 }
 
 // fetchTasks requests new tasks from the server.
-func fetchTasks(client pb.TaskQueueClient, id int) []*pb.Task {
+func fetchTasks(client pb.TaskQueueClient, id int, sem *ResizableSemaphore) []*pb.Task {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -165,10 +210,9 @@ func fetchTasks(client pb.TaskQueueClient, id int) []*pb.Task {
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(client pb.TaskQueueClient, config WorkerConfig) {
-	sem := make(chan struct{}, config.Concurrency) // Concurrency control
+func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *ResizableSemaphore) {
 	for {
-		tasks := fetchTasks(client, config.WorkerId)
+		tasks := fetchTasks(client, config.WorkerId, sem)
 		if len(tasks) == 0 {
 			time.Sleep(5 * time.Second) // No tasks, wait before retrying
 			continue
@@ -178,10 +222,10 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig) {
 
 		for _, task := range tasks {
 			wg.Add(1)
-			sem <- struct{}{} // Block if max concurrency is reached
+			sem.Acquire() // Block if max concurrency is reached
 			go func(t *pb.Task) {
 				executeTask(client, t, &wg)
-				<-sem // Release semaphore slot after task completion
+				sem.Release() // Release semaphore slot after task completion
 			}(task)
 		}
 		//wg.Wait() // Ensure all tasks finish before fetching new ones
@@ -208,7 +252,8 @@ func main() {
 
 	client := pb.NewTaskQueueClient(conn)
 	config.registerWorker(client)
+	sem := NewResizableSemaphore(config.Concurrency)
 
 	// Start processing tasks
-	workerLoop(client, config)
+	workerLoop(client, config, sem)
 }

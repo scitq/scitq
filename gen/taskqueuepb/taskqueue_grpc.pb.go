@@ -34,7 +34,7 @@ const (
 type TaskQueueClient interface {
 	SubmitTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	RegisterWorker(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*WorkerId, error)
-	PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskList, error)
+	PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskListAndOther, error)
 	UpdateTaskStatus(ctx context.Context, in *TaskStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
 	SendTaskLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TaskLog, Ack], error)
 	StreamTaskLogs(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
@@ -69,9 +69,9 @@ func (c *taskQueueClient) RegisterWorker(ctx context.Context, in *WorkerInfo, op
 	return out, nil
 }
 
-func (c *taskQueueClient) PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskList, error) {
+func (c *taskQueueClient) PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskListAndOther, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(TaskList)
+	out := new(TaskListAndOther)
 	err := c.cc.Invoke(ctx, TaskQueue_PingAndTakeNewTasks_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (c *taskQueueClient) ListTasks(ctx context.Context, in *ListTasksRequest, o
 type TaskQueueServer interface {
 	SubmitTask(context.Context, *TaskRequest) (*TaskResponse, error)
 	RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error)
-	PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskList, error)
+	PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskListAndOther, error)
 	UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error)
 	SendTaskLogs(grpc.ClientStreamingServer[TaskLog, Ack]) error
 	StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
@@ -158,7 +158,7 @@ func (UnimplementedTaskQueueServer) SubmitTask(context.Context, *TaskRequest) (*
 func (UnimplementedTaskQueueServer) RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterWorker not implemented")
 }
-func (UnimplementedTaskQueueServer) PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskList, error) {
+func (UnimplementedTaskQueueServer) PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskListAndOther, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PingAndTakeNewTasks not implemented")
 }
 func (UnimplementedTaskQueueServer) UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error) {
