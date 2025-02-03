@@ -26,10 +26,20 @@ openssl x509 -in server.pem -text -noout
 This is done once, so I do not need to redo it: 
 
 ```sh
-brew install go
+brew install go golang-migrate
 go mod init  github.com/gmtsciencedev/scitq2
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`
+migrate create -ext sql -dir migrations -seq init_schema
+
+```
+
+In Postgres:
+```sql
+CREATE DATABASE scitq2;
+CREATE USER scitq_user WITH PASSWORD 'dsofposiudipopipII9';
+GRANT ALL PRIVILEGES ON DATABASE scitq2 TO scitq_user;
+ALTER DATABASE scitq2 OWNER TO scitq_user;
 ```
 
 ### once in a while
@@ -64,5 +74,5 @@ go run client/main.go -server localhost:50051 -concurrency 2 -name myworker
 ```sh
 CGO_ENABLED=0 go build -o client/bin/scitq-client client/main.go
 CGO_ENABLED=0 go build -o server/bin/scitq-server client/server.go
-CGO_ENABLED=0 go build -o cli/bin/scitq-cli client/cli.go
+CGO_ENABLED=0 go build -o cli/bin/scitq-cli cli/main.go
 ```

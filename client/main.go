@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os/exec"
@@ -32,28 +33,47 @@ type WorkerConfig struct {
 }
 
 // ResizableSemaphore manages dynamic concurrency limits.
+// ResizableSemaphore manages dynamic concurrency limits.
 type ResizableSemaphore struct {
-	tokens chan struct{}
-	mu     sync.Mutex
-	size   int
+	mu      sync.Mutex
+	cond    *sync.Cond
+	tokens  int
+	maxSize int
 }
 
 // NewResizableSemaphore initializes a semaphore with a given size.
 func NewResizableSemaphore(size int) *ResizableSemaphore {
-	return &ResizableSemaphore{
-		tokens: make(chan struct{}, size),
-		size:   size,
+	sem := &ResizableSemaphore{
+		tokens:  size,
+		maxSize: size,
 	}
+	sem.cond = sync.NewCond(&sem.mu)
+	return sem
 }
 
 // Acquire blocks until a token is available.
-func (s *ResizableSemaphore) Acquire() {
-	s.tokens <- struct{}{}
+func (s *ResizableSemaphore) Acquire(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for s.tokens == 0 {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.cond.Wait()
+	}
+
+	s.tokens--
+	return nil
 }
 
 // Release returns a token to the semaphore.
 func (s *ResizableSemaphore) Release() {
-	<-s.tokens
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.tokens++
+	s.cond.Signal() // Wake up one waiting goroutine
 }
 
 // Resize adjusts the semaphore size dynamically.
@@ -61,19 +81,31 @@ func (s *ResizableSemaphore) Resize(newSize int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if newSize > s.size {
-		// Expanding: Add extra capacity
-		for i := 0; i < newSize-s.size; i++ {
-			s.tokens <- struct{}{} // Add extra tokens
-		}
-	} else {
-		// Shrinking: Block until running tasks complete
-		for i := 0; i < s.size-newSize; i++ {
-			<-s.tokens // Remove excess tokens
-		}
-	}
+	fmt.Printf("🔄 Resizing semaphore from %d to %d\n", s.maxSize, newSize)
+	diff := newSize - s.maxSize
 
-	s.size = newSize
+	// Adjust token count
+	s.tokens += diff
+	s.maxSize = newSize
+
+	// Wake up all waiting goroutines in case of expansion
+	if diff > 0 {
+		s.cond.Broadcast()
+	}
+}
+
+// Cap returns the total capacity of the semaphore.
+func (s *ResizableSemaphore) Cap() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxSize
+}
+
+// Len returns the current available slots.
+func (s *ResizableSemaphore) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tokens
 }
 
 // createClientConnection establishes a gRPC connection to the server.
@@ -197,7 +229,7 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 }
 
 // fetchTasks requests new tasks from the server.
-func fetchTasks(client pb.TaskQueueClient, id uint32, sem *ResizableSemaphore) []*pb.Task {
+func (w *WorkerConfig) fetchTasks(client pb.TaskQueueClient, id uint32, sem *ResizableSemaphore) []*pb.Task {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -206,13 +238,19 @@ func fetchTasks(client pb.TaskQueueClient, id uint32, sem *ResizableSemaphore) [
 		log.Printf("⚠️ Error fetching tasks: %v", err)
 		return nil
 	}
+	newConcurrency := int(res.Concurrency)
+	if newConcurrency != w.Concurrency {
+		log.Printf("Resizing concurrency from %d to %d", w.Concurrency, newConcurrency)
+		sem.Resize(newConcurrency)
+		w.Concurrency = newConcurrency
+	}
 	return res.Tasks
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
 func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *ResizableSemaphore) {
 	for {
-		tasks := fetchTasks(client, config.WorkerId, sem)
+		tasks := config.fetchTasks(client, config.WorkerId, sem)
 		if len(tasks) == 0 {
 			time.Sleep(5 * time.Second) // No tasks, wait before retrying
 			continue
@@ -223,7 +261,7 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *ResizableSe
 		for _, task := range tasks {
 			wg.Add(1)
 			log.Printf("Received task %d with status: %v", task.TaskId, task.Status)
-			sem.Acquire() // Block if max concurrency is reached
+			sem.Acquire(context.Background()) // Block if max concurrency is reached
 			go func(t *pb.Task) {
 				executeTask(client, t, &wg)
 				sem.Release() // Release semaphore slot after task completion
