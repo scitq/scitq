@@ -20,16 +20,16 @@ message TaskRequest {
 }
 
 message TaskResponse {
-    int32 task_id = 1;
+    uint32 task_id = 1;
 }
 
 message WorkerInfo {
     string name = 1;
-    optional int32 concurrency = 2;
+    optional uint32 concurrency = 2;
 }
 
 message Task {
-    int32 task_id = 1;
+    uint32 task_id = 1;
     string command = 2;
     string container = 3;
     string status = 4;
@@ -41,26 +41,26 @@ message TaskList {
 
 message TaskListAndOther {
     repeated Task tasks = 1;
-    int32 concurrency = 2;
+    uint32 concurrency = 2;
 }
 
 message TaskStatusUpdate {
-    int32 task_id = 1;
+    uint32 task_id = 1;
     string new_status = 2;
 }
 
 message TaskLog {
-    int32 task_id = 1;
+    uint32 task_id = 1;
     string log_type = 2; // 'O' for stdout, 'E' for stderr
     string log_text = 3;
 }
 
 message TaskId {
-    int32 task_id = 1;
+    uint32 task_id = 1;
 }
 
 message WorkerId {
-    int32 worker_id = 1;
+    uint32 worker_id = 1;
 }
 
 message Ack {

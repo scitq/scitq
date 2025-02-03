@@ -85,7 +85,7 @@ func listTasks(cmd *cobra.Command, args []string) {
 // fetchTaskLogs fetches and prints logs of a task by ID.
 func fetchTaskLogs(cmd *cobra.Command, args []string) {
 	server, _ := cmd.Flags().GetString("server")
-	taskID, _ := cmd.Flags().GetInt32("id")
+	taskID, _ := cmd.Flags().GetUint32("id")
 
 	if taskID == 0 {
 		log.Fatal("Error: --id is required")
@@ -148,7 +148,7 @@ func main() {
 		Short: "Fetch task output logs",
 		Run:   fetchTaskLogs,
 	}
-	outputCmd.Flags().Int32("id", 0, "Task ID (required)")
+	outputCmd.Flags().Uint32("id", 0, "Task ID (required)")
 	taskCmd.AddCommand(outputCmd)
 
 	// Run CLI

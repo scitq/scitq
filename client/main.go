@@ -18,14 +18,14 @@ import (
 )
 
 // optionalInt32 converts an int to a pointer (*int32).
-func optionalInt32(v int) *int32 {
-	i := int32(v)
+func optionalInt32(v int) *uint32 {
+	i := uint32(v)
 	return &i
 }
 
 // WorkerConfig holds worker settings from CLI args.
 type WorkerConfig struct {
-	WorkerId    int
+	WorkerId    uint32
 	ServerAddr  string
 	Concurrency int
 	Name        string
@@ -96,13 +96,13 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)
 	} else {
-		w.WorkerId = int(res.WorkerId)
+		w.WorkerId = uint32(res.WorkerId)
 	}
 	log.Printf("✅ Worker %s registered with concurrency %d", w.Name, w.Concurrency)
 }
 
 // acknowledgeTask marks the task as "Accepted" (`C` status) before execution.
-func acknowledgeTask(client pb.TaskQueueClient, taskID int32) bool {
+func acknowledgeTask(client pb.TaskQueueClient, taskID uint32) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -116,7 +116,7 @@ func acknowledgeTask(client pb.TaskQueueClient, taskID int32) bool {
 }
 
 // updateTaskStatus marks task as `S` (Success) or `F` (Failed) after execution.
-func updateTaskStatus(client pb.TaskQueueClient, taskID int32, status string) {
+func updateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -197,11 +197,11 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 }
 
 // fetchTasks requests new tasks from the server.
-func fetchTasks(client pb.TaskQueueClient, id int, sem *ResizableSemaphore) []*pb.Task {
+func fetchTasks(client pb.TaskQueueClient, id uint32, sem *ResizableSemaphore) []*pb.Task {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := client.PingAndTakeNewTasks(ctx, &pb.WorkerId{WorkerId: int32(id)})
+	res, err := client.PingAndTakeNewTasks(ctx, &pb.WorkerId{WorkerId: uint32(id)})
 	if err != nil {
 		log.Printf("⚠️ Error fetching tasks: %v", err)
 		return nil
@@ -222,6 +222,7 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *ResizableSe
 
 		for _, task := range tasks {
 			wg.Add(1)
+			log.Printf("Received task %d with status: %v", task.TaskId, task.Status)
 			sem.Acquire() // Block if max concurrency is reached
 			go func(t *pb.Task) {
 				executeTask(client, t, &wg)

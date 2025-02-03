@@ -8,20 +8,77 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
-	bolt "go.etcd.io/bbolt"
+	"github.com/dgraph-io/badger/v4"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 )
 
+// Helper function to convert uint64 to an 8-byte big-endian slice.
+func itob(v uint32) []byte {
+	b := make([]byte, 4) // Now 4 bytes instead of 8
+	for i := uint(0); i < 4; i++ {
+		b[3-i] = byte(v >> (i * 8)) // Store bytes in big-endian order
+	}
+	return b
+}
+
+func bytesToUint32(b []byte) uint32 {
+	var v uint32
+	if len(b) < 4 {
+		return 0 // Safety check in case of an unexpected length
+	}
+	for i := uint(0); i < 4; i++ {
+		v |= uint32(b[3-i]) << (i * 8) // Convert back from big-endian
+	}
+	return v
+}
+
+// getNextID retrieves the next sequential ID from BadgerDB
+func getNextID(txn *badger.Txn, key []byte) (uint32, error) {
+	// Retrieve current value
+	item, err := txn.Get(key)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			// First time: Start at 1
+			err := txn.Set(key, itob(1))
+			if err != nil {
+				return 0, err
+			}
+			return 1, nil
+		}
+		return 0, err
+	}
+
+	// Decode current counter value
+	var id uint32
+	err = item.Value(func(val []byte) error { // 🔥 Explicitly return an error
+		id = bytesToUint32(val)
+		return nil // ✅ No error here
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	// Increment & update
+	id++
+	err = txn.Set(key, itob(id))
+	if err != nil {
+		return 0, err
+	}
+
+	return id, nil
+}
+
 // Task and Worker structures for storage
 type Task struct {
-	ID        uint64
-	WorkerID  *uint64
+	ID        uint32
+	WorkerID  *uint32
 	Command   string
 	Container string
 	Status    string
@@ -29,7 +86,7 @@ type Task struct {
 }
 
 type Worker struct {
-	ID          uint64
+	ID          uint32
 	Name        string
 	Concurrency int
 }
@@ -37,154 +94,207 @@ type Worker struct {
 // taskQueueServer implements the gRPC service.
 type taskQueueServer struct {
 	pb.UnimplementedTaskQueueServer
-	db *bolt.DB
+	db *badger.DB
 	mu sync.Mutex
 }
 
-// newTaskQueueServer creates a new server with the provided bbolt DB.
-func newTaskQueueServer(db *bolt.DB) *taskQueueServer {
+// newTaskQueueServer initializes the BadgerDB-based task queue server.
+func newTaskQueueServer(db *badger.DB) *taskQueueServer {
 	s := &taskQueueServer{db: db}
-	go s.assignTasksLoop() // Start the background task assignment loop
+	go s.assignTasksLoop() // Start task assignment loop
 	return s
 }
 
-// Helper function to convert uint64 to an 8-byte big-endian slice.
-func itob(v uint64) []byte {
-	b := make([]byte, 8)
-	for i := uint(0); i < 8; i++ {
-		b[7-i] = byte(v >> (i * 8))
-	}
-	return b
+// encode encodes an object into bytes
+func encode(v interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	err := gob.NewEncoder(&buf).Encode(v)
+	return buf.Bytes(), err
+}
+
+// decode decodes bytes into an object
+func decode(data []byte, v interface{}) error {
+	return gob.NewDecoder(bytes.NewReader(data)).Decode(v)
 }
 
 // **TASK ASSIGNMENT LOOP**
 func (s *taskQueueServer) assignTasksLoop() {
 	for {
 		time.Sleep(5 * time.Second) // Run every 5 seconds
-		s.mu.Lock()                 // Ensure only one update runs at a time
+		s.mu.Lock()
 
-		err := s.db.Update(func(tx *bolt.Tx) error {
-			workersBucket := tx.Bucket([]byte("workers"))
-			tasksPendingBucket := tx.Bucket([]byte("tasks_by_status/P"))
-			tasksAssignedBucket, err := tx.CreateBucketIfNotExists([]byte("tasks_by_status/A"))
-			if err != nil {
-				return fmt.Errorf("failed to create tasks_by_status/A")
-			}
-			tasksBucket := tx.Bucket([]byte("tasks"))
-			if workersBucket == nil || tasksPendingBucket == nil || tasksBucket == nil {
-				return fmt.Errorf("required buckets not found")
-			}
+		err := s.db.Update(func(txn *badger.Txn) error {
+			workers := make(map[uint32]*Worker)
+			assignedCounts := make(map[uint32]int)
 
-			// **1️⃣ Build Worker Map & Count Assigned Tasks**
-			workerMap := make(map[uint64]*Worker)
-			assignedCounts := make(map[uint64]int)
+			// **1️⃣ Load all workers**
+			it := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
 
-			c := workersBucket.Cursor()
-			for wKey, wVal := c.First(); wKey != nil; wKey, wVal = c.Next() {
-				var worker Worker
-				if err := gob.NewDecoder(bytes.NewReader(wVal)).Decode(&worker); err != nil {
-					log.Printf("Worker decode error: %v", err)
-					continue
-				}
-				workerMap[worker.ID] = &worker
-				assignedCounts[worker.ID] = 0
-			}
-
-			// **2️⃣ Count Assigned Tasks (A, C, R)**
-			taskCursor := tasksBucket.Cursor()
-			for tKey, tVal := taskCursor.First(); tKey != nil; tKey, tVal = taskCursor.Next() {
-				var task Task
-				if err := gob.NewDecoder(bytes.NewReader(tVal)).Decode(&task); err != nil {
-					log.Printf("Task decode error: %v", err)
-					continue
-				}
-				if task.WorkerID != nil && (task.Status == "A" || task.Status == "C" || task.Status == "R") {
-					assignedCounts[*task.WorkerID]++
+			for it.Seek([]byte("workers/")); it.ValidForPrefix([]byte("workers/")); it.Next() {
+				item := it.Item()
+				err := item.Value(func(val []byte) error {
+					var worker Worker
+					err := decode(val, &worker)
+					if err == nil {
+						workers[worker.ID] = &worker
+						assignedCounts[worker.ID] = 0 // Initialize assigned task count
+					}
+					return err
+				})
+				if err != nil {
+					log.Printf("⚠️ Worker decode error: %v", err)
 				}
 			}
 
-			// **3️⃣ Assign Pending Tasks (P → A)**
-			pendingCursor := tasksPendingBucket.Cursor()
-			for tKey, tVal := pendingCursor.First(); tKey != nil; tKey, tVal = pendingCursor.Next() {
-				var task Task
-				if err := gob.NewDecoder(bytes.NewReader(tVal)).Decode(&task); err != nil {
-					log.Printf("Task decode error: %v", err)
-					continue
-				}
-				for workerID, worker := range workerMap {
-					if assignedCounts[workerID] < worker.Concurrency {
-						task.Status = "A" // Assign task
-						task.WorkerID = &workerID
-						var buf bytes.Buffer
-						if err := gob.NewEncoder(&buf).Encode(task); err != nil {
-							log.Printf("Task encoding error: %v", err)
-							continue
+			// **2️⃣ Count assigned tasks (A, C, R) per worker**
+			statusPrefixes := []string{"A", "C", "R"} // Active task states
+			for _, status := range statusPrefixes {
+				prefix := []byte(fmt.Sprintf("tasks_by_status/%s/", status))
+				it.Seek(prefix)
+				for it.ValidForPrefix(prefix) {
+					taskIDStr := string(it.Item().Key()[len(prefix):]) // Extract TaskID from Key
+					taskID, err := strconv.ParseUint(taskIDStr, 10, 32)
+					if err != nil {
+						log.Printf("⚠️ Failed to parse task ID from index: %v", err)
+						it.Next()
+						continue
+					}
+
+					// Fetch task details
+					taskKey := []byte(fmt.Sprintf("tasks/%d", taskID))
+					taskItem, err := txn.Get(taskKey)
+					if err != nil {
+						log.Printf("⚠️ Task ID %d found in index but missing in tasks/", taskID)
+						it.Next()
+						continue
+					}
+
+					err = taskItem.Value(func(val []byte) error {
+						var task Task
+						if err := decode(val, &task); err != nil {
+							log.Printf("⚠️ Task decode error: %v", err)
+							return nil
 						}
-						tasksBucket.Put(tKey, buf.Bytes())
-						tasksAssignedBucket.Put(tKey, buf.Bytes()) // ✅ Move to tasks_by_status/A
-						tasksPendingBucket.Delete(tKey)            // ❌ Remove from P
+						if task.WorkerID != nil {
+							assignedCounts[*task.WorkerID]++ // ✅ Count active task
+						}
+						return nil
+					})
+
+					if err != nil {
+						log.Printf("⚠️ Badger read error: %v", err)
+					}
+
+					it.Next()
+				}
+			}
+
+			// **3️⃣ Assign pending tasks (P → A)**
+			it.Seek([]byte("tasks_by_status/P/"))
+			for it.ValidForPrefix([]byte("tasks_by_status/P/")) {
+				item := it.Item()
+				taskIDStr := string(item.Key()[len("tasks_by_status/P/"):]) // Extract TaskID
+				taskID, err := strconv.ParseUint(taskIDStr, 10, 32)
+				if err != nil {
+					log.Printf("⚠️ Failed to parse task ID from index: %v", err)
+					it.Next()
+					continue
+				}
+
+				// Fetch the actual task
+				taskKey := []byte(fmt.Sprintf("tasks/%d", taskID))
+				taskItem, err := txn.Get(taskKey)
+				if err != nil {
+					log.Printf("⚠️ Task ID %d found in P but missing in tasks/", taskID)
+					it.Next()
+					continue
+				}
+
+				var task Task
+				err = taskItem.Value(func(val []byte) error {
+					return decode(val, &task)
+				})
+				if err != nil {
+					log.Printf("⚠️ Task decode error: %v", err)
+					it.Next()
+					continue
+				}
+
+				// **Find an available worker**
+				assigned := false
+				for workerID, worker := range workers {
+					if assignedCounts[workerID] < worker.Concurrency {
+						task.Status = "A"
+						task.WorkerID = &workerID
+						updatedTaskBytes, _ := encode(task)
+
+						// **Remove from "P", move to "A"**
+						txn.Delete(item.Key())                                             // ❌ Remove from `P`
+						txn.Set(taskKey, updatedTaskBytes)                                 // ✅ Update main task entry
+						txn.Set([]byte(fmt.Sprintf("tasks_by_status/A/%d", task.ID)), nil) // ✅ Index in `A`
 
 						log.Printf("✅ Assigned task %d to worker %d", task.ID, workerID)
-
 						assignedCounts[workerID]++
-						break // Move to next pending task
+						assigned = true
+						break
 					}
 				}
-			}
 
+				if !assigned {
+					log.Printf("⚠️ No available worker for task %d", task.ID)
+				}
+
+				it.Next()
+			}
 			return nil
 		})
+
 		if err != nil {
-			log.Printf("Task assignment loop error: %v", err)
+			log.Printf("❌ Task assignment loop error: %v", err)
 		}
 
 		s.mu.Unlock()
 	}
 }
 
-// SubmitTask stores a new task in bbolt using gob encoding.
-// SubmitTask stores a new task in bbolt using gob encoding and registers it in tasks_by_status/P.
+// **SubmitTask**
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
-	var taskID uint64
+	var taskID uint32
 
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		// Ensure main tasks bucket and pending task bucket exist
-		tasksBucket, err := tx.CreateBucketIfNotExists([]byte("tasks"))
-		tasksPendingBucket, err2 := tx.CreateBucketIfNotExists([]byte("tasks_by_status/P"))
-		if err != nil || err2 != nil {
-			return fmt.Errorf("failed to create required buckets")
-		}
-
-		// Generate new task ID
-		id, err := tasksBucket.NextSequence()
+	err := s.db.Update(func(txn *badger.Txn) error {
+		// **Generate new task ID**
+		id, err := getNextID(txn, []byte("task_sequence"))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to generate task ID: %w", err)
 		}
-		taskID = id
+		taskID = id // Assign task ID
 
-		// Create task object
+		// **Create Task**
 		task := Task{
-			ID:        id,
+			ID:        taskID,
 			Command:   req.Command,
 			Container: req.Container,
-			Status:    "P", // Pending
+			Status:    "P",
 			CreatedAt: time.Now(),
 		}
 
-		// Encode task
-		var buf bytes.Buffer
-		if err := gob.NewEncoder(&buf).Encode(task); err != nil {
-			return err
+		// **Encode Task**
+		taskBytes, _ := encode(task)
+
+		// **Store in Tasks Table (Primary Storage)**
+		err = txn.Set([]byte(fmt.Sprintf("tasks/%d", taskID)), taskBytes)
+		if err != nil {
+			return fmt.Errorf("failed to store task: %w", err)
 		}
 
-		// Store task in `tasks`
-		if err := tasksBucket.Put(itob(id), buf.Bytes()); err != nil {
-			return err
-		}
+		// **Store Task ID in Status Index (tasks_by_status/P/)**
+		//taskIDBytes := itob(taskID) // Convert to bytes
 
-		// Store task in `tasks_by_status/P`
-		if err := tasksPendingBucket.Put(itob(id), buf.Bytes()); err != nil {
-			return err
+		// **Store Task ID in Status Index (tasks_by_status/P/)**
+		err = txn.Set([]byte(fmt.Sprintf("tasks_by_status/P/%d", taskID)), nil) // ✅ Key-only index
+		if err != nil {
+			return fmt.Errorf("failed to store task in status index: %w", err)
 		}
 
 		return nil
@@ -194,85 +304,68 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		return nil, fmt.Errorf("failed to submit task: %w", err)
 	}
 
-	return &pb.TaskResponse{TaskId: int32(taskID)}, nil
+	log.Printf("✅ Task %d submitted (Command: %s, Container: %s)", taskID, req.Command, req.Container)
+	return &pb.TaskResponse{TaskId: taskID}, nil
 }
 
-func bytesToUint64(b []byte) uint64 {
-	var v uint64
-	for i := uint(0); i < 8; i++ {
-		v |= uint64(b[7-i]) << (i * 8)
-	}
-	return v
-}
-
-// RegisterWorker stores or updates a worker in bbolt using gob encoding.
+// register worker
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
-	var workerID uint64
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		workersBucket, err := tx.CreateBucketIfNotExists([]byte("workers"))
-		if err != nil {
-			return fmt.Errorf("failed to create workers bucket: %w", err)
-		}
+	var workerID uint32
+	var existingWorker Worker
 
-		workerIndexBucket, err := tx.CreateBucketIfNotExists([]byte("worker_index"))
-		if err != nil {
-			return fmt.Errorf("failed to create worker index bucket: %w", err)
-		}
+	err := s.db.Update(func(txn *badger.Txn) error {
+		workerIndexKey := []byte(fmt.Sprintf("worker_index/%s", req.Name))
 
-		// Check if the worker already exists using name-based lookup
-		existingID := workerIndexBucket.Get([]byte(req.Name))
-		var worker Worker
-
-		if existingID != nil {
-			workerID = bytesToUint64(existingID)
-			workerData := workersBucket.Get(itob(workerID))
-			if workerData == nil {
-				return fmt.Errorf("worker ID %d not found in workers bucket", workerID)
+		// **Check if worker already exists**
+		item, err := txn.Get(workerIndexKey)
+		if err == nil {
+			// Worker exists, retrieve ID
+			err = item.Value(func(val []byte) error {
+				workerID = bytesToUint32(val)
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("failed to read existing worker ID: %w", err)
 			}
 
-			// Decode existing worker
-			if err := gob.NewDecoder(bytes.NewReader(workerData)).Decode(&worker); err != nil {
+			// Fetch worker data
+			workerKey := []byte(fmt.Sprintf("workers/%d", workerID))
+			item, err = txn.Get(workerKey)
+			if err != nil {
+				return fmt.Errorf("worker ID %d found in index but missing in workers bucket", workerID)
+			}
+
+			err = item.Value(func(val []byte) error {
+				return decode(val, &existingWorker)
+			})
+			if err != nil {
 				return fmt.Errorf("failed to decode existing worker: %w", err)
 			}
-
-			// Update concurrency if provided
-			if req.Concurrency != nil {
-				worker.Concurrency = int(*req.Concurrency)
-			}
-
 		} else {
-			// Assign a new unique worker ID
-			id, err := workersBucket.NextSequence()
+			// **Create new worker**
+			workerID, err = getNextID(txn, []byte("worker_sequence")) // Ensure ID is in the same transaction
 			if err != nil {
 				return fmt.Errorf("failed to generate worker ID: %w", err)
 			}
-			workerID = id
 
-			// Ensure concurrency has a default value
-			var concurrency int32 = 0
-			if req.Concurrency != nil && *req.Concurrency > 0 {
-				concurrency = *req.Concurrency
-			}
-
-			// Create new worker
-			worker = Worker{
+			existingWorker = Worker{
 				ID:          workerID,
 				Name:        req.Name,
-				Concurrency: int(concurrency),
+				Concurrency: int(*req.Concurrency),
 			}
 
-			// Store the name-to-ID mapping
-			if err := workerIndexBucket.Put([]byte(req.Name), itob(workerID)); err != nil {
+			// Store worker name -> ID mapping
+			err = txn.Set(workerIndexKey, itob(workerID))
+			if err != nil {
 				return fmt.Errorf("failed to store worker index: %w", err)
 			}
 		}
 
-		// Store the worker in the "workers" bucket under its ID
-		var buf bytes.Buffer
-		if err := gob.NewEncoder(&buf).Encode(worker); err != nil {
-			return fmt.Errorf("failed to encode worker: %w", err)
-		}
-		if err := workersBucket.Put(itob(workerID), buf.Bytes()); err != nil {
+		// **Ensure worker is properly stored**
+		workerKey := []byte(fmt.Sprintf("workers/%d", workerID))
+		workerBytes, _ := encode(existingWorker)
+		err = txn.Set(workerKey, workerBytes)
+		if err != nil {
 			return fmt.Errorf("failed to store worker: %w", err)
 		}
 
@@ -285,29 +378,16 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	}
 
 	log.Printf("✅ Worker %s registered with ID %d", req.Name, workerID)
-	return &pb.WorkerId{WorkerId: int32(workerID)}, nil
+	return &pb.WorkerId{WorkerId: workerID}, nil
 }
 
 func main() {
-	// Open bbolt database.
-	db, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+	// Open BadgerDB
+	db, err := badger.Open(badger.DefaultOptions("badgerdb"))
 	if err != nil {
-		log.Fatalf("failed to open bbolt db: %v", err)
+		log.Fatalf("Failed to open BadgerDB: %v", err)
 	}
 	defer db.Close()
-
-	// Ensure necessary buckets exist.
-	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("tasks"))
-		if err != nil {
-			return err
-		}
-		_, err = tx.CreateBucketIfNotExists([]byte("workers"))
-		return err
-	})
-	if err != nil {
-		log.Fatalf("failed to create buckets: %v", err)
-	}
 
 	// Load TLS credentials.
 	creds, err := credentials.NewServerTLSFromFile("server.pem", "server.key")
@@ -315,7 +395,7 @@ func main() {
 		log.Fatalf("failed to load TLS credentials: %v", err)
 	}
 
-	// Create gRPC server with TLS.
+	// Create gRPC server
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
 	pb.RegisterTaskQueueServer(grpcServer, newTaskQueueServer(db))
 
@@ -323,6 +403,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
+
 	log.Println("Server listening on port 50051...")
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
@@ -333,43 +414,62 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 	var tasks []*pb.Task
 	var worker Worker
 
-	err := s.db.View(func(tx *bolt.Tx) error {
-		tasksBucket := tx.Bucket([]byte("tasks_by_status/A"))
-		if tasksBucket == nil {
-			return nil // No assigned tasks
+	err := s.db.View(func(txn *badger.Txn) error {
+		// **1️⃣ Retrieve Worker Info**
+		workerKey := []byte(fmt.Sprintf("workers/%d", req.WorkerId))
+		item, err := txn.Get(workerKey)
+		if err != nil {
+			return fmt.Errorf("worker ID %d not found", req.WorkerId)
+		}
+		err = item.Value(func(val []byte) error {
+			return decode(val, &worker)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to decode worker %d: %w", req.WorkerId, err)
 		}
 
-		c := tasksBucket.Cursor()
-		for tKey, tVal := c.First(); tKey != nil; tKey, tVal = c.Next() {
-			var task Task
-			if err := gob.NewDecoder(bytes.NewReader(tVal)).Decode(&task); err != nil {
-				log.Printf("Task decode error: %v", err)
+		// **2️⃣ Retrieve Assigned Tasks (Status 'A')**
+		prefix := []byte("tasks_by_status/A/")
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			taskIDStr := string(item.Key()[len(prefix):]) // Extract TaskID from Key
+			taskID, err := strconv.ParseUint(taskIDStr, 10, 32)
+			if err != nil {
+				log.Printf("⚠️ Failed to parse task ID from index: %v", err)
+				it.Next()
 				continue
 			}
 
-			// Match tasks assigned to this worker ID
-			if task.WorkerID != nil && *task.WorkerID == uint64(req.WorkerId) {
-				tasks = append(tasks, &pb.Task{
-					TaskId:    int32(task.ID),
-					Command:   task.Command,
-					Container: task.Container,
-					Status:    task.Status,
-				})
+			// **Look up the actual task data**
+			taskItem, err := txn.Get([]byte(fmt.Sprintf("tasks/%d", taskID)))
+			if err != nil {
+				log.Printf("⚠️ Task ID %d found in index but missing in tasks/", taskID)
+				continue
 			}
-		}
 
-		workerBucket := tx.Bucket([]byte("worker"))
-		if workerBucket == nil {
-			return nil // No worker
-		}
-		workerData := workerBucket.Get(itob(uint64(req.WorkerId)))
-		if workerData == nil {
-			return fmt.Errorf("worker ID %d not found in workers bucket", req.WorkerId)
-		}
-
-		// Decode existing worker
-		if err := gob.NewDecoder(bytes.NewReader(workerData)).Decode(&worker); err != nil {
-			return fmt.Errorf("failed to decode existing worker: %w", err)
+			err = taskItem.Value(func(val []byte) error {
+				var task Task
+				if err := decode(val, &task); err != nil {
+					log.Printf("⚠️ Task decode error: %v", err)
+					return nil
+				}
+				// **Ensure task is still "A"**
+				if task.WorkerID != nil && *task.WorkerID == uint32(req.WorkerId) && task.Status == "A" {
+					tasks = append(tasks, &pb.Task{
+						TaskId:    uint32(task.ID),
+						Command:   task.Command,
+						Container: task.Container,
+						Status:    task.Status,
+					})
+				}
+				return nil
+			})
+			if err != nil {
+				log.Printf("Badger read error: %v", err)
+			}
 		}
 
 		return nil
@@ -379,41 +479,49 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 		return nil, fmt.Errorf("failed to fetch tasks: %w", err)
 	}
 
-	return &pb.TaskListAndOther{Tasks: tasks, Concurrency: int32(worker.Concurrency)}, nil
+	return &pb.TaskListAndOther{Tasks: tasks, Concurrency: uint32(worker.Concurrency)}, nil
 }
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
 	var tasks []*pb.Task
 	statusFilter := req.StatusFilter
 
-	err := s.db.View(func(tx *bolt.Tx) error {
-		tasksBucket := tx.Bucket([]byte("tasks"))
-		if tasksBucket == nil {
-			return nil
+	err := s.db.View(func(txn *badger.Txn) error {
+		// **If a status filter is applied, read from tasks_by_status/{status}**
+		var prefix []byte
+		if statusFilter != nil && *statusFilter != "" {
+			prefix = []byte(fmt.Sprintf("tasks_by_status/%s/", *statusFilter))
+		} else {
+			prefix = []byte("tasks/") // Read all tasks
 		}
 
-		c := tasksBucket.Cursor()
-		for tKey, tVal := c.First(); tKey != nil; tKey, tVal = c.Next() {
-			var task Task
-			if err := gob.NewDecoder(bytes.NewReader(tVal)).Decode(&task); err != nil {
-				log.Printf("Task decode error: %v", err)
-				continue
-			}
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
 
-			// Apply status filter if provided
-			if statusFilter != nil && *statusFilter != "" && task.Status != *statusFilter {
-				continue
-			}
-
-			tasks = append(tasks, &pb.Task{
-				TaskId:    int32(task.ID),
-				Command:   task.Command,
-				Container: task.Container,
-				Status:    task.Status,
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				var task Task
+				if err := decode(val, &task); err != nil {
+					log.Printf("Task decode error: %v", err)
+					return nil
+				}
+				tasks = append(tasks, &pb.Task{
+					TaskId:    uint32(task.ID),
+					Command:   task.Command,
+					Container: task.Container,
+					Status:    task.Status,
+				})
+				return nil
 			})
+			if err != nil {
+				log.Printf("Badger read error: %v", err)
+			}
 		}
+
 		return nil
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tasks: %w", err)
 	}
@@ -422,66 +530,50 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 }
 
 // UpdateTaskStatus now updates both the task and its indexed status.
+// **UpdateTaskStatus**
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
 	taskID := req.TaskId
 	newStatus := req.NewStatus
 
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		tasksBucket := tx.Bucket([]byte("tasks"))
-		if tasksBucket == nil {
-			return fmt.Errorf("❌ tasks bucket not found")
+	err := s.db.Update(func(txn *badger.Txn) error {
+		taskKey := []byte(fmt.Sprintf("tasks/%d", taskID))
+
+		item, err := txn.Get(taskKey)
+		if err != nil {
+			return fmt.Errorf("task %d not found", taskID)
 		}
 
-		// Fetch task
-		taskKey := itob(uint64(taskID))
-		taskBytes := tasksBucket.Get(taskKey)
-		if taskBytes == nil {
-			return fmt.Errorf("❌ task %d not found", taskID)
-		}
-
-		// Deserialize task
 		var task Task
-		if err := gob.NewDecoder(bytes.NewReader(taskBytes)).Decode(&task); err != nil {
-			return fmt.Errorf("❌ failed to decode task %d: %w", taskID, err)
+		err = item.Value(func(val []byte) error {
+			return decode(val, &task)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to decode task %d: %w", taskID, err)
 		}
 
-		// **1️⃣ Remove Task from Old Status Bucket**
-		if task.Status != "" {
-			oldStatusBucket := tx.Bucket([]byte(fmt.Sprintf("tasks_by_status/%s", task.Status)))
-			if oldStatusBucket != nil {
-				if err := oldStatusBucket.Delete(taskKey); err != nil {
-					log.Printf("⚠️ Failed to remove task %d from old status %s: %v", taskID, task.Status, err)
-				} else {
-					log.Printf("✅ Removed task %d from tasks_by_status/%s", taskID, task.Status)
-				}
-			}
+		// **1️⃣ Remove Task from Old Status Index**
+		oldStatusKey := []byte(fmt.Sprintf("tasks_by_status/%s/%d", task.Status, taskID))
+		if err := txn.Delete(oldStatusKey); err != nil && err != badger.ErrKeyNotFound {
+			log.Printf("⚠️ Failed to remove task %d from %s: %v", taskID, task.Status, err)
 		}
 
-		// **2️⃣ Update Status**
+		// **2️⃣ Update Task Status**
 		oldStatus := task.Status
 		task.Status = newStatus
 
-		// **3️⃣ Store Updated Task in `tasks`**
-		var buf bytes.Buffer
-		if err := gob.NewEncoder(&buf).Encode(task); err != nil {
-			return fmt.Errorf("❌ failed to encode updated task %d: %w", taskID, err)
-		}
-		if err := tasksBucket.Put(taskKey, buf.Bytes()); err != nil {
-			return fmt.Errorf("❌ failed to store updated task %d: %w", taskID, err)
+		// **3️⃣ Store Updated Task in `tasks/{TaskID}` (Primary Table)**
+		taskBytes, _ := encode(task)
+		if err := txn.Set(taskKey, taskBytes); err != nil {
+			return fmt.Errorf("failed to update task %d: %w", taskID, err)
 		}
 
-		// **4️⃣ Store in New Status Bucket (Auto-Create)**
-		newStatusBucket, err := tx.CreateBucketIfNotExists([]byte(fmt.Sprintf("tasks_by_status/%s", newStatus)))
-		if err != nil {
-			return fmt.Errorf("❌ failed to create status bucket %s: %w", newStatus, err)
+		// **4️⃣ Store Task ID in New Status Index (tasks_by_status/{NewStatus}/{TaskID})**
+		newStatusKey := []byte(fmt.Sprintf("tasks_by_status/%s/%d", newStatus, taskID))
+		if err := txn.Set(newStatusKey, nil); err != nil {
+			return fmt.Errorf("failed to store task %d in new status %s: %w", taskID, newStatus, err)
 		}
 
-		if err := newStatusBucket.Put(taskKey, buf.Bytes()); err != nil {
-			return fmt.Errorf("❌ failed to store task %d in new status bucket %s: %w", taskID, newStatus, err)
-		}
-
-		log.Printf("🔄 Task %d transitioned from %s → %s", taskID, oldStatus, newStatus)
-
+		log.Printf("🔄 Task %d transitioned %s → %s", taskID, oldStatus, newStatus)
 		return nil
 	})
 
@@ -490,7 +582,6 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		return &pb.Ack{Success: false}, err
 	}
 
-	log.Printf("✅ Task %d updated to status %s", taskID, newStatus)
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -505,19 +596,16 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 			return err
 		}
 
-		// Store log entry in bbolt under logs/{task_id}
-		err = s.db.Update(func(tx *bolt.Tx) error {
-			logBucket, err := tx.CreateBucketIfNotExists([]byte(fmt.Sprintf("logs/%d", logEntry.TaskId)))
-			if err != nil {
-				return fmt.Errorf("failed to create log bucket: %w", err)
-			}
+		// Store log entry in BadgerDB under logs/{task_id}/{timestamp}
+		err = s.db.Update(func(txn *badger.Txn) error {
+			logKey := []byte(fmt.Sprintf("logs/%d/%d", logEntry.TaskId, time.Now().UnixNano())) // Unique timestamped key
 
-			logKey := itob(uint64(time.Now().UnixNano())) // Unique timestamp key
 			var buf bytes.Buffer
 			if err := gob.NewEncoder(&buf).Encode(logEntry); err != nil {
 				return fmt.Errorf("failed to encode log entry: %w", err)
 			}
-			return logBucket.Put(logKey, buf.Bytes())
+
+			return txn.Set(logKey, buf.Bytes()) // Store log entry in BadgerDB
 		})
 
 		if err != nil {
@@ -528,23 +616,30 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 
 func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsServer) error {
 	taskID := req.TaskId
-	err := s.db.View(func(tx *bolt.Tx) error {
-		logBucket := tx.Bucket([]byte(fmt.Sprintf("logs/%d", taskID)))
-		if logBucket == nil {
-			return fmt.Errorf("no logs found for task %d", taskID)
-		}
 
-		c := logBucket.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var logEntry pb.TaskLog
-			if err := gob.NewDecoder(bytes.NewReader(v)).Decode(&logEntry); err != nil {
-				log.Printf("❌ Log decode error for task %d: %v", taskID, err)
-				continue
-			}
+	err := s.db.View(func(txn *badger.Txn) error {
+		prefix := []byte(fmt.Sprintf("logs/%d/", taskID)) // Logs stored under logs/{task_id}/timestamp
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
 
-			if err := stream.Send(&logEntry); err != nil {
-				log.Printf("❌ Failed to send log entry for task %d: %v", taskID, err)
-				return err
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				var logEntry pb.TaskLog
+				if err := gob.NewDecoder(bytes.NewReader(val)).Decode(&logEntry); err != nil {
+					log.Printf("❌ Log decode error for task %d: %v", taskID, err)
+					return nil
+				}
+
+				// Send log entry to the gRPC stream
+				if err := stream.Send(&logEntry); err != nil {
+					log.Printf("❌ Failed to send log entry for task %d: %v", taskID, err)
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				log.Printf("❌ Badger read error for task %d: %v", taskID, err)
 			}
 		}
 
