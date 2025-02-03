@@ -66,7 +66,15 @@ go run server/main.go
 go run client/main.go 
 
 # run the client
-go run client/main.go -server localhost:50051 -concurrency 2 -name myworker
+go run client/main.go --server localhost:50051 --concurrency 2 -name myworker
+# (or just go run client/main.go --concurrency 2)
+
+go run cli/main.go task create --container alpine --command "echo yes"
+# in loop, used the build version
+for i in $(seq 1 1000); do ./cli/bin/scitq-cli  task create --container alpine --command "echo yes"; done
+go run cli/main.go task list --status P
+go run cli/main.go task output --id 1
+
 ```
 
 ## compile for deploy
