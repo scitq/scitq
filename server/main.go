@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -24,14 +23,12 @@ import (
 
 type taskQueueServer struct {
 	pb.UnimplementedTaskQueueServer
-	db *sql.DB
-	mu sync.Mutex
+	logRoot string
+	db      *sql.DB
 }
 
-const LOGROOT = "log"
-
-func newTaskQueueServer(db *sql.DB) *taskQueueServer {
-	s := &taskQueueServer{db: db}
+func newTaskQueueServer(db *sql.DB, logRoot string) *taskQueueServer {
+	s := &taskQueueServer{db: db, logRoot: logRoot}
 	go s.assignTasksLoop()
 	return s
 }
@@ -161,8 +158,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	return &pb.Ack{Success: true}, nil
 }
 
-func getLogPath(taskID uint32, logType string) string {
-	dir := fmt.Sprintf("%s/%d", LOGROOT, taskID/1000)
+func getLogPath(taskID uint32, logType string, logRoot string) string {
+	dir := fmt.Sprintf("%s/%d", logRoot, taskID/1000)
 	_ = os.MkdirAll(dir, 0755)
 	return filepath.Join(dir, fmt.Sprintf("%d_%s.log", taskID, logType))
 }
@@ -176,7 +173,7 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 			}
 			return err
 		}
-		logPath := getLogPath(logEntry.TaskId, logEntry.LogType)
+		logPath := getLogPath(logEntry.TaskId, logEntry.LogType, s.logRoot)
 		file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %w", err)
@@ -187,7 +184,7 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 }
 
 func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsServer) error {
-	logPath := getLogPath(req.TaskId, "stdout")
+	logPath := getLogPath(req.TaskId, "stdout", s.logRoot)
 	file, err := os.Open(logPath)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
@@ -359,34 +356,46 @@ func applyMigrations(db *sql.DB) error {
 	return nil
 }
 
-func main() {
-	db, err := sql.Open("postgres", "postgres://scitq_user:dsofposiudipopipII9@localhost/scitq2?sslmode=disable")
+func serve(dbURL string, logRoot string, port int) error {
+	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
+		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer db.Close()
 
 	// Apply migrations on startup
 	if err := applyMigrations(db); err != nil {
-		log.Fatalf("Migration error: %v", err)
+		return fmt.Errorf("migration error: %v", err)
 	}
 
 	log.Println("Server started successfully!")
 
 	creds, err := credentials.NewServerTLSFromFile("server.pem", "server.key")
 	if err != nil {
-		log.Fatalf("failed to load TLS credentials: %v", err)
+		return fmt.Errorf("failed to load TLS credentials: %v", err)
 	}
 
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
-	pb.RegisterTaskQueueServer(grpcServer, newTaskQueueServer(db))
+	pb.RegisterTaskQueueServer(grpcServer, newTaskQueueServer(db, logRoot))
 
-	lis, err := net.Listen("tcp", ":50051")
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return fmt.Errorf("failed to listen: %v", err)
 	}
 	log.Println("Server listening on port 50051...")
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
+	}
+
+	return nil
+}
+
+func main() {
+	defaultDBURL := "postgres://scitq_user:dsofposiudipopipII9@localhost/scitq2?sslmode=disable"
+	defaultLogRoot := "log"
+	defaultPort := 50051
+
+	if err := serve(defaultDBURL, defaultLogRoot, defaultPort); err != nil {
+		log.Fatalf("Error: %v", err)
 	}
 }
