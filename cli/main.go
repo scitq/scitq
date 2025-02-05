@@ -2,108 +2,100 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
-	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-
+	"github.com/alexflint/go-arg"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	"github.com/gmtsciencedev/scitq2/lib"
 )
 
-// createClientConnection establishes a gRPC connection to the server.
-func createClientConnection(serverAddr string) (pb.TaskQueueClient, *grpc.ClientConn) {
-	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
+// CLI struct encapsulates task & worker commands
+type CLI struct {
+	Server  string `arg:"-s,--server,env:SCITQ_SERVER" default:"localhost:50051" help:"gRPC server address"`
+	TimeOut int    `arg:"-t,--timeout" default:"5" help:"Timeout for server interaction (in seconds)"`
+	qc      lib.QueueClient
 
-	conn, err := grpc.Dial(serverAddr, grpc.WithTransportCredentials(creds))
-	if err != nil {
-		log.Fatalf("Failed to connect to server: %v", err)
-	}
-	return pb.NewTaskQueueClient(conn), conn
+	// Task Commands (Sub-Subcommands)
+	Task *struct {
+		Create *struct {
+			Container string `arg:"--container,required" help:"Container to run"`
+			Command   string `arg:"--command,required" help:"Command to execute"`
+		} `arg:"subcommand:create" help:"Create a new task"`
+
+		List *struct {
+			Status string `arg:"--status" help:"Filter tasks by status"`
+		} `arg:"subcommand:list" help:"List all tasks"`
+
+		Output *struct {
+			ID uint32 `arg:"--id,required" help:"Task ID"`
+		} `arg:"subcommand:output" help:"Fetch task output logs"`
+	} `arg:"subcommand:task" help:"Manage tasks"`
+
+	// Worker Commands (Sub-Subcommands)
+	Worker *struct {
+		List *struct{} `arg:"subcommand:list" help:"List all workers"`
+	} `arg:"subcommand:worker" help:"Manage workers"`
+}
+
+// WithTimeout provides a context with a timeout
+func (cli *CLI) WithTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), time.Duration(cli.TimeOut)*time.Second)
 }
 
 // createTask sends a task creation request.
-func createTask(cmd *cobra.Command, args []string) {
-	server, _ := cmd.Flags().GetString("server")
-	container, _ := cmd.Flags().GetString("container")
-	command, _ := cmd.Flags().GetString("command")
-
-	if container == "" || command == "" {
-		log.Fatal("Error: --container and --command are required")
-	}
-
-	client, conn := createClientConnection(server)
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (c *CLI) TaskCreate() error {
+	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	taskReq := &pb.TaskRequest{Command: command, Container: container}
-	res, err := client.SubmitTask(ctx, taskReq)
+	req := &pb.TaskRequest{
+		Command:   c.Task.Create.Command,
+		Container: c.Task.Create.Container,
+	}
+	res, err := c.qc.Client.SubmitTask(ctx, req)
 	if err != nil {
-		log.Fatalf("Error creating task: %v", err)
+		return fmt.Errorf("error creating task: %w", err)
 	}
 	fmt.Printf("✅ Task created with ID: %d\n", res.TaskId)
+	return nil
 }
 
 // listTasks fetches and displays all tasks.
-func listTasks(cmd *cobra.Command, args []string) {
-	server, _ := cmd.Flags().GetString("server")
-	statusFilter, _ := cmd.Flags().GetString("status")
-
-	client, conn := createClientConnection(server)
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (c *CLI) TaskList() error {
+	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
 	req := &pb.ListTasksRequest{}
-	if statusFilter != "" {
-		req.StatusFilter = &statusFilter
+	if c.Task.List.Status != "" {
+		req.StatusFilter = &c.Task.List.Status
 	}
 
-	res, err := client.ListTasks(ctx, req)
+	res, err := c.qc.Client.ListTasks(ctx, req)
 	if err != nil {
-		log.Fatalf("Error fetching tasks: %v", err)
+		return fmt.Errorf("error fetching tasks: %w", err)
 	}
 
 	fmt.Println("📋 Task List:")
-	if len(res.Tasks) == 0 {
-		fmt.Println("No tasks available.")
-		return
-	}
 	for _, task := range res.Tasks {
-		fmt.Printf("🆔 ID: %d | 🖥️  Command: %s | 📦 Container: %s | 📌 Status: %s\n",
+		fmt.Printf("🆔 ID: %d | Command: %s | Container: %s | Status: %s\n",
 			task.TaskId, task.Command, task.Container, task.Status)
 	}
+	return nil
 }
 
 // fetchTaskLogs fetches and prints logs of a task by ID.
-func fetchTaskLogs(cmd *cobra.Command, args []string) {
-	server, _ := cmd.Flags().GetString("server")
-	taskID, _ := cmd.Flags().GetUint32("id")
-
-	if taskID == 0 {
-		log.Fatal("Error: --id is required")
-	}
-
-	client, conn := createClientConnection(server)
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (c *CLI) TaskOutput() error {
+	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	req := &pb.TaskId{TaskId: taskID}
-	stream, err := client.StreamTaskLogs(ctx, req)
+	req := &pb.TaskId{TaskId: c.Task.Output.ID}
+	stream, err := c.qc.Client.StreamTaskLogs(ctx, req)
 	if err != nil {
-		log.Fatalf("Error fetching task logs: %v", err)
+		return fmt.Errorf("Error fetching task logs: %v", err)
 	}
 
-	fmt.Printf("📜 Logs for Task %d:\n", taskID)
+	fmt.Printf("📜 Logs for Task %d:\n", c.Task.Output.ID)
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -111,49 +103,59 @@ func fetchTaskLogs(cmd *cobra.Command, args []string) {
 		}
 		fmt.Printf("[%s] %s\n", msg.LogType, msg.LogText)
 	}
+	return nil
+}
+
+// ListWorkers handles listing workers
+func (c *CLI) WorkerList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.ListWorkersRequest{}
+	res, err := c.qc.Client.ListWorkers(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error fetching workers: %w", err)
+	}
+
+	fmt.Println("👷 Worker List:")
+	for _, worker := range res.Workers {
+		fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d\n",
+			worker.WorkerId, worker.Name, worker.Concurrency)
+	}
+	return nil
 }
 
 func main() {
-	var rootCmd = &cobra.Command{Use: "cli"}
+	var args CLI
+	arg.MustParse(&args)
 
-	// Global flags
-	rootCmd.PersistentFlags().String("server", "localhost:50051", "gRPC server address")
-
-	// Task Command
-	var taskCmd = &cobra.Command{Use: "task", Short: "Manage tasks"}
-	rootCmd.AddCommand(taskCmd)
-
-	// task create
-	var createCmd = &cobra.Command{
-		Use:   "create",
-		Short: "Create a new task",
-		Run:   createTask,
+	// Establish gRPC connection
+	qc, err := lib.CreateClient(args.Server)
+	if err != nil {
+		log.Fatalf("Could not connect to server: %v", err)
 	}
-	createCmd.Flags().String("container", "", "Container to run (required)")
-	createCmd.Flags().String("command", "", "Command to execute (required)")
-	taskCmd.AddCommand(createCmd)
+	args.qc = qc
+	defer args.qc.Close()
 
-	// task list
-	var listCmd = &cobra.Command{
-		Use:   "list",
-		Short: "List all tasks",
-		Run:   listTasks,
-	}
-	listCmd.Flags().String("status", "", "Filter tasks by status")
-	taskCmd.AddCommand(listCmd)
-
-	// task output
-	var outputCmd = &cobra.Command{
-		Use:   "output",
-		Short: "Fetch task output logs",
-		Run:   fetchTaskLogs,
-	}
-	outputCmd.Flags().Uint32("id", 0, "Task ID (required)")
-	taskCmd.AddCommand(outputCmd)
-
-	// Run CLI
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+	// Handle commands properly
+	switch {
+	// Task commands
+	case args.Task != nil:
+		switch {
+		case args.Task.Create != nil:
+			args.TaskCreate()
+		case args.Task.List != nil:
+			args.TaskList()
+		case args.Task.Output != nil:
+			args.TaskOutput()
+		}
+	// Worker commands
+	case args.Worker != nil:
+		switch {
+		case args.Worker.List != nil:
+			args.WorkerList()
+		}
+	default:
+		log.Fatal("No command specified. Run with --help for usage.")
 	}
 }

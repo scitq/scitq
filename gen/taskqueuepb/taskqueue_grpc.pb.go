@@ -26,6 +26,7 @@ const (
 	TaskQueue_SendTaskLogs_FullMethodName        = "/taskqueue.TaskQueue/SendTaskLogs"
 	TaskQueue_StreamTaskLogs_FullMethodName      = "/taskqueue.TaskQueue/StreamTaskLogs"
 	TaskQueue_ListTasks_FullMethodName           = "/taskqueue.TaskQueue/ListTasks"
+	TaskQueue_ListWorkers_FullMethodName         = "/taskqueue.TaskQueue/ListWorkers"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -39,6 +40,7 @@ type TaskQueueClient interface {
 	SendTaskLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TaskLog, Ack], error)
 	StreamTaskLogs(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskList, error)
+	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 }
 
 type taskQueueClient struct {
@@ -131,6 +133,16 @@ func (c *taskQueueClient) ListTasks(ctx context.Context, in *ListTasksRequest, o
 	return out, nil
 }
 
+func (c *taskQueueClient) ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkersList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListWorkers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -142,6 +154,7 @@ type TaskQueueServer interface {
 	SendTaskLogs(grpc.ClientStreamingServer[TaskLog, Ack]) error
 	StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
 	ListTasks(context.Context, *ListTasksRequest) (*TaskList, error)
+	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -172,6 +185,9 @@ func (UnimplementedTaskQueueServer) StreamTaskLogs(*TaskId, grpc.ServerStreaming
 }
 func (UnimplementedTaskQueueServer) ListTasks(context.Context, *ListTasksRequest) (*TaskList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
+}
+func (UnimplementedTaskQueueServer) ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkers not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -302,6 +318,24 @@ func _TaskQueue_ListTasks_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ListWorkers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListWorkers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListWorkers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListWorkers(ctx, req.(*ListWorkersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -328,6 +362,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTasks",
 			Handler:    _TaskQueue_ListTasks_Handler,
+		},
+		{
+			MethodName: "ListWorkers",
+			Handler:    _TaskQueue_ListWorkers_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

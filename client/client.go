@@ -1,10 +1,8 @@
-package main
+package client
 
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -12,10 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	"github.com/gmtsciencedev/scitq2/lib"
+	"github.com/gmtsciencedev/scitq2/utils"
 )
 
 // optionalInt32 converts an int to a pointer (*int32).
@@ -30,93 +27,6 @@ type WorkerConfig struct {
 	ServerAddr  string
 	Concurrency int
 	Name        string
-}
-
-// ResizableSemaphore manages dynamic concurrency limits.
-// ResizableSemaphore manages dynamic concurrency limits.
-type ResizableSemaphore struct {
-	mu      sync.Mutex
-	cond    *sync.Cond
-	tokens  int
-	maxSize int
-}
-
-// NewResizableSemaphore initializes a semaphore with a given size.
-func NewResizableSemaphore(size int) *ResizableSemaphore {
-	sem := &ResizableSemaphore{
-		tokens:  size,
-		maxSize: size,
-	}
-	sem.cond = sync.NewCond(&sem.mu)
-	return sem
-}
-
-// Acquire blocks until a token is available.
-func (s *ResizableSemaphore) Acquire(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for s.tokens == 0 {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		s.cond.Wait()
-	}
-
-	s.tokens--
-	return nil
-}
-
-// Release returns a token to the semaphore.
-func (s *ResizableSemaphore) Release() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.tokens++
-	s.cond.Signal() // Wake up one waiting goroutine
-}
-
-// Resize adjusts the semaphore size dynamically.
-func (s *ResizableSemaphore) Resize(newSize int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	fmt.Printf("🔄 Resizing semaphore from %d to %d\n", s.maxSize, newSize)
-	diff := newSize - s.maxSize
-
-	// Adjust token count
-	s.tokens += diff
-	s.maxSize = newSize
-
-	// Wake up all waiting goroutines in case of expansion
-	if diff > 0 {
-		s.cond.Broadcast()
-	}
-}
-
-// Cap returns the total capacity of the semaphore.
-func (s *ResizableSemaphore) Cap() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.maxSize
-}
-
-// Len returns the current available slots.
-func (s *ResizableSemaphore) Len() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.tokens
-}
-
-// createClientConnection establishes a gRPC connection to the server.
-func createClientConnection(serverAddr string) (*grpc.ClientConn, error) {
-	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
-
-	conn, err := grpc.Dial(serverAddr, grpc.WithTransportCredentials(creds))
-	if err != nil {
-		log.Fatalf("Failed to connect to server: %v", err)
-	}
-	return conn, nil
 }
 
 // registerWorker registers the client worker with the server.
@@ -229,7 +139,7 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 }
 
 // fetchTasks requests new tasks from the server.
-func (w *WorkerConfig) fetchTasks(client pb.TaskQueueClient, id uint32, sem *ResizableSemaphore) []*pb.Task {
+func (w *WorkerConfig) fetchTasks(client pb.TaskQueueClient, id uint32, sem *utils.ResizableSemaphore) []*pb.Task {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -248,7 +158,7 @@ func (w *WorkerConfig) fetchTasks(client pb.TaskQueueClient, id uint32, sem *Res
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *ResizableSemaphore) {
+func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.ResizableSemaphore) {
 	for {
 		tasks := config.fetchTasks(client, config.WorkerId, sem)
 		if len(tasks) == 0 {
@@ -272,27 +182,20 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *ResizableSe
 	}
 }
 
-// main initializes the client.
-func main() {
-	// Parse command-line arguments
-	serverAddr := flag.String("server", "localhost:50051", "gRPC server address")
-	concurrency := flag.Int("concurrency", 2, "Number of concurrent tasks")
-	name := flag.String("name", "worker-1", "Worker name")
-	flag.Parse()
-
-	config := WorkerConfig{ServerAddr: *serverAddr, Concurrency: *concurrency, Name: *name}
+func Run(serverAddr string, concurrency int, name string) error {
+	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name}
 
 	// Establish connection to the server
-	conn, err := createClientConnection(config.ServerAddr)
+	qclient, err := lib.CreateClient(config.ServerAddr)
 	if err != nil {
-		log.Fatalf("Could not connect to server: %v", err)
+		return fmt.Errorf("could not connect to server: %v", err)
 	}
-	defer conn.Close()
+	defer qclient.Close()
 
-	client := pb.NewTaskQueueClient(conn)
-	config.registerWorker(client)
-	sem := NewResizableSemaphore(config.Concurrency)
+	config.registerWorker(qclient.Client)
+	sem := utils.NewResizableSemaphore(config.Concurrency)
 
 	// Start processing tasks
-	workerLoop(client, config, sem)
+	workerLoop(qclient.Client, config, sem)
+	return nil
 }

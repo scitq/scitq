@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bufio"
@@ -336,6 +336,50 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 	}, nil
 }
 
+func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*pb.WorkersList, error) {
+	var workers []*pb.Worker
+	var rows *sql.Rows
+	var err error
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// **Filter by status if provided**
+	rows, err = tx.Query(`SELECT worker_id, worker_name, concurrency FROM worker ORDER BY worker_id`)
+
+	if err != nil {
+		log.Printf("⚠️ Failed to list workers: %v", err)
+		return nil, fmt.Errorf("failed to list workers: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var worker pb.Worker
+		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency)
+		if err != nil {
+			log.Printf("⚠️ Failed to scan task: %v", err)
+			continue
+		}
+		workers = append(workers, &worker)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("⚠️ Error iterating workers: %v", err)
+		return nil, fmt.Errorf("error iterating workers: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit worker listing: %v", err)
+		return nil, fmt.Errorf("failed to commit worker listing: %w", err)
+	}
+
+	return &pb.WorkersList{Workers: workers}, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -356,7 +400,7 @@ func applyMigrations(db *sql.DB) error {
 	return nil
 }
 
-func serve(dbURL string, logRoot string, port int) error {
+func Serve(dbURL string, logRoot string, port int) error {
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
@@ -388,14 +432,4 @@ func serve(dbURL string, logRoot string, port int) error {
 	}
 
 	return nil
-}
-
-func main() {
-	defaultDBURL := "postgres://scitq_user:dsofposiudipopipII9@localhost/scitq2?sslmode=disable"
-	defaultLogRoot := "log"
-	defaultPort := 50051
-
-	if err := serve(defaultDBURL, defaultLogRoot, defaultPort); err != nil {
-		log.Fatalf("Error: %v", err)
-	}
 }

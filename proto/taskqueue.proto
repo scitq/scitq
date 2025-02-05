@@ -12,6 +12,7 @@ service TaskQueue {
     rpc SendTaskLogs(stream TaskLog) returns (Ack);
     rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
     rpc ListTasks (ListTasksRequest) returns (TaskList);
+    rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
 }
 
 message TaskRequest {
@@ -37,6 +38,20 @@ message Task {
 
 message TaskList {
     repeated Task tasks = 1;
+}
+
+message Worker {
+    uint32 worker_id = 1;
+    string name = 2;
+    uint32 concurrency = 3;
+}
+
+
+message WorkersList {
+    repeated Worker workers = 1;
+}
+
+message ListWorkersRequest {
 }
 
 message TaskListAndOther {
