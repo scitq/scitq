@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
 	"log"
 	"net"
@@ -14,12 +15,16 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 )
+
+//go:embed migrations/*
+var embeddedMigrations embed.FS
 
 type taskQueueServer struct {
 	pb.UnimplementedTaskQueueServer
@@ -380,15 +385,28 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	return &pb.WorkersList{Workers: workers}, nil
 }
 
-func applyMigrations(db *sql.DB) error {
+func applyMigrations(db *sql.DB, migrationPath string) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
 		return err
 	}
 
-	m, err := migrate.NewWithDatabaseInstance("file://migrations", "postgres", driver)
-	if err != nil {
-		return err
+	var m *migrate.Migrate
+	var migrate_err error
+	if migrationPath == "" {
+		// ✅ FIX: Use `iofs.New()` to create a migration source from `embed.FS`
+		sourceDriver, err := iofs.New(embeddedMigrations, "migrations")
+		if err != nil {
+			return fmt.Errorf("failed to create embedded migration source: %w", err)
+		}
+		m, migrate_err = migrate.NewWithInstance("iofs", sourceDriver, "postgres", driver)
+
+	} else {
+		m, migrate_err = migrate.NewWithDatabaseInstance(fmt.Sprintf("file://%s", migrationPath), "postgres", driver)
+	}
+
+	if migrate_err != nil {
+		return migrate_err
 	}
 
 	err = m.Up() // Apply all migrations
@@ -400,7 +418,7 @@ func applyMigrations(db *sql.DB) error {
 	return nil
 }
 
-func Serve(dbURL string, logRoot string, port int) error {
+func Serve(dbURL string, logRoot string, port int, migrationPath string) error {
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
@@ -408,7 +426,7 @@ func Serve(dbURL string, logRoot string, port int) error {
 	defer db.Close()
 
 	// Apply migrations on startup
-	if err := applyMigrations(db); err != nil {
+	if err := applyMigrations(db, migrationPath); err != nil {
 		return fmt.Errorf("migration error: %v", err)
 	}
 

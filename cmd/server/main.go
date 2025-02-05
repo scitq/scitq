@@ -11,7 +11,7 @@ func main() {
 	defaultLogRoot := "log"
 	defaultPort := 50051
 
-	if err := server.Serve(defaultDBURL, defaultLogRoot, defaultPort); err != nil {
+	if err := server.Serve(defaultDBURL, defaultLogRoot, defaultPort, ""); err != nil {
 		log.Fatalf("Error: %v", err)
 	}
 }

@@ -1,12 +1,10 @@
-package main
+package cli
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
-	"github.com/alexflint/go-arg"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/gmtsciencedev/scitq2/lib"
 )
@@ -15,7 +13,7 @@ import (
 type CLI struct {
 	Server  string `arg:"-s,--server,env:SCITQ_SERVER" default:"localhost:50051" help:"gRPC server address"`
 	TimeOut int    `arg:"-t,--timeout" default:"5" help:"Timeout for server interaction (in seconds)"`
-	qc      lib.QueueClient
+	QC      lib.QueueClient
 
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
@@ -53,7 +51,7 @@ func (c *CLI) TaskCreate() error {
 		Command:   c.Task.Create.Command,
 		Container: c.Task.Create.Container,
 	}
-	res, err := c.qc.Client.SubmitTask(ctx, req)
+	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error creating task: %w", err)
 	}
@@ -71,7 +69,7 @@ func (c *CLI) TaskList() error {
 		req.StatusFilter = &c.Task.List.Status
 	}
 
-	res, err := c.qc.Client.ListTasks(ctx, req)
+	res, err := c.QC.Client.ListTasks(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error fetching tasks: %w", err)
 	}
@@ -90,9 +88,9 @@ func (c *CLI) TaskOutput() error {
 	defer cancel()
 
 	req := &pb.TaskId{TaskId: c.Task.Output.ID}
-	stream, err := c.qc.Client.StreamTaskLogs(ctx, req)
+	stream, err := c.QC.Client.StreamTaskLogs(ctx, req)
 	if err != nil {
-		return fmt.Errorf("Error fetching task logs: %v", err)
+		return fmt.Errorf("error fetching task logs: %v", err)
 	}
 
 	fmt.Printf("📜 Logs for Task %d:\n", c.Task.Output.ID)
@@ -112,7 +110,7 @@ func (c *CLI) WorkerList() error {
 	defer cancel()
 
 	req := &pb.ListWorkersRequest{}
-	res, err := c.qc.Client.ListWorkers(ctx, req)
+	res, err := c.QC.Client.ListWorkers(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error fetching workers: %w", err)
 	}
@@ -123,39 +121,4 @@ func (c *CLI) WorkerList() error {
 			worker.WorkerId, worker.Name, worker.Concurrency)
 	}
 	return nil
-}
-
-func main() {
-	var args CLI
-	arg.MustParse(&args)
-
-	// Establish gRPC connection
-	qc, err := lib.CreateClient(args.Server)
-	if err != nil {
-		log.Fatalf("Could not connect to server: %v", err)
-	}
-	args.qc = qc
-	defer args.qc.Close()
-
-	// Handle commands properly
-	switch {
-	// Task commands
-	case args.Task != nil:
-		switch {
-		case args.Task.Create != nil:
-			args.TaskCreate()
-		case args.Task.List != nil:
-			args.TaskList()
-		case args.Task.Output != nil:
-			args.TaskOutput()
-		}
-	// Worker commands
-	case args.Worker != nil:
-		switch {
-		case args.Worker.List != nil:
-			args.WorkerList()
-		}
-	default:
-		log.Fatal("No command specified. Run with --help for usage.")
-	}
 }
