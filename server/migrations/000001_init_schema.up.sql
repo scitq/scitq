@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS worker (
     worker_id SERIAL PRIMARY KEY,
     worker_name TEXT UNIQUE NOT NULL,
     concurrency INT NOT NULL DEFAULT 1,
+    status CHAR(1) NOT NULL DEFAULT 'O', -- (O: Offline, R: Ready, P: Paused, F: Failing)
+    stats JSONB,
     last_ping TIMESTAMP NOT NULL DEFAULT NOW()
 );
 

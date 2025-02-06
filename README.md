@@ -1,86 +1,32 @@
-# A rewrite of scitq in Go
+# README.md
 
-scitq v1, python version, has a lot of quality but suffers from several issues:
-- the overall design is kind of fat with a few adhoc internal repetition like the fact that internal server tasks are completely unrelated to the user tasks,
-- Some things are slugish: 
-  - ansible for a start, and overall ansible brings little benefits in scitq context, each provider's library is so specific that a lot of things has to be redesigned, ansible dependancies are hellish, and I won't say again how slow ansible is but I'm crying blood each time I launch it...
-  - python dependancies make deploy long and complex, copying a single binary would be so nice...
-  - REST is uselessly verbose and heavy when things turn bad.
+## scitq
 
-Also, as I am gaining more experience in Rust, I see that for less clever and more practical code it can be a serious handicap, and I am willing to let go a chance...
+A lightweight and efficient distributed task queue with gRPC and PostgreSQL.
 
-# source
-
-## preparing things
-
-### certificates
-
+### Quick Start
 ```sh
-openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.pem -days 3650 -nodes -subj "/CN=localhost"
-# optionally check with
-openssl x509 -in server.pem -text -noout
-
-
-
-### do it once
-This is done once, so I do not need to redo it: 
-
-```sh
-brew install go golang-migrate
-go mod init  github.com/gmtsciencedev/scitq2
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`
-migrate create -ext sql -dir migrations -seq init_schema
-
+make install
+#scitq-server --config=config.yaml &
+scitq-server &
+scitq-client --concurrency 1 & 
+scitq-cli worker list
+scitq-cli task create --command "ls -la" --container ubuntu
+scitq-cli task list
+scitq-cli task output --id 1
 ```
 
-In Postgres:
-```sql
-CREATE DATABASE scitq2;
-CREATE USER scitq_user WITH PASSWORD 'dsofposiudipopipII9';
-GRANT ALL PRIVILEGES ON DATABASE scitq2 TO scitq_user;
-ALTER DATABASE scitq2 OWNER TO scitq_user;
-```
 
-### once in a while
 
-This command should show if any lib may be updated:
-```sh
-go list -u -m all
-go get -u all
-```
+### Architecture
+- **Server**: Manages tasks, workers, and logs (PostgreSQL-backed).
+- **Clients**:
+  - **Python producer**: Submits tasks.
+  - **Go worker client**: Executes tasks.
+  - **CLI**: Provides manual interaction.
 
-### do it each time protocol change
-```sh
-go mod tidy
-protoc --go_out=. --go-grpc_out=. --proto_path=proto proto/taskqueue.proto
-go run server/main.go
-```
+### API
+Refer to [`docs/api.md`](docs/api.md) for gRPC API documentation.
 
-# basic usage
-
-## quick run
-
-```sh
-# run the server
-go run client/main.go 
-
-# run the client
-go run client/main.go --server localhost:50051 --concurrency 2 -name myworker
-# (or just go run client/main.go --concurrency 2)
-
-go run cli/main.go task create --container alpine --command "echo yes"
-# in loop, used the build version
-for i in $(seq 1 1000); do ./cli/bin/scitq-cli  task create --container alpine --command "echo yes"; done
-go run cli/main.go task list --status P
-go run cli/main.go task output --id 1
-
-```
-
-## compile for deploy
-
-```sh
-CGO_ENABLED=0 go build -o client/bin/scitq-client client/main.go
-CGO_ENABLED=0 go build -o server/bin/scitq-server client/server.go
-CGO_ENABLED=0 go build -o cli/bin/scitq-cli cli/main.go
-```
+### Contributing
+For development details, see [`docs/dev.md`](docs/dev.md).
