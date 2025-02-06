@@ -260,4 +260,13 @@ func TestIntegration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, output, "sbin -> usr/sbin")
 
+	// test failing task
+	_, err = runCLICommand(c, []string{"task", "create", "--container", "ubuntu", "--command", "ls non-existing-file"})
+	assert.NoError(t, err)
+	// Allow some time for the client to accept and execute task
+	time.Sleep(10 * time.Second)
+	output, err = runCLICommand(c, []string{"task", "list"})
+	assert.NoError(t, err)
+	assert.Contains(t, output, "ID: 2 | Command: ls non-existing-file | Container: ubuntu | Status: F")
+
 }
