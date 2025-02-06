@@ -115,9 +115,7 @@ func TestIntegration(t *testing.T) {
 		err = c.TaskList()
 	})
 	assert.NoError(t, err)
-
-	assert.Contains(t, output, "📋 Task List:")
-	assert.Contains(t, output, "🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: pending")
+	assert.Contains(t, output, "📋 Task List:\n🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: P\n")
 
 	// TODO: Launch client and CLI to interact with the server
 }
