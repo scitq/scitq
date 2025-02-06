@@ -87,7 +87,7 @@ func TestIntegration(t *testing.T) {
 
 	// Start server in a separate goroutine
 	go func() {
-		if err := server.Serve(dbURL, tempLogRoot, serverPort, ""); err != nil {
+		if err := server.Serve(dbURL, tempLogRoot, serverPort, "", "", ""); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
@@ -97,22 +97,22 @@ func TestIntegration(t *testing.T) {
 
 	// Initializing CLI
 	server_connection_string := fmt.Sprintf("localhost:%d", serverPort)
-	var args cli.CLI
+	var c cli.CLI
 	qc, err := lib.CreateClient(server_connection_string)
 	assert.NoError(t, err)
-	args.QC = qc
+	c.QC = qc
 
 	// creating Task
 	os.Args = []string{"scitq-cli", "task", "create", "--container", "ubuntu", "--command", "ls -la"}
-	arg.MustParse(&args)
-	err = args.TaskCreate()
+	arg.MustParse(&c.Attr)
+	err = c.TaskCreate()
 	assert.NoError(t, err)
 
 	// looking up Task
 	os.Args = []string{"scitq-cli", "task", "list", "--status", "P"}
-	arg.MustParse(&args)
+	arg.MustParse(&c.Attr)
 	output := captureOutput(func() {
-		err = args.TaskList()
+		err = c.TaskList()
 	})
 	assert.NoError(t, err)
 

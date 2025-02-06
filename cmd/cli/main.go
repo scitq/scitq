@@ -9,34 +9,34 @@ import (
 )
 
 func main() {
-	var args cli.CLI
-	arg.MustParse(&args)
+	var c cli.CLI
+	arg.MustParse(&c.Attr)
 
 	// Establish gRPC connection
-	qc, err := lib.CreateClient(args.Server)
+	qc, err := lib.CreateClient(c.Attr.Server)
 	if err != nil {
 		log.Fatalf("Could not connect to server: %v", err)
 	}
-	args.QC = qc
-	defer args.QC.Close()
+	c.QC = qc
+	defer c.QC.Close()
 
 	// Handle commands properly
 	switch {
 	// Task commands
-	case args.Task != nil:
+	case c.Attr.Task != nil:
 		switch {
-		case args.Task.Create != nil:
-			args.TaskCreate()
-		case args.Task.List != nil:
-			args.TaskList()
-		case args.Task.Output != nil:
-			args.TaskOutput()
+		case c.Attr.Task.Create != nil:
+			c.TaskCreate()
+		case c.Attr.Task.List != nil:
+			c.TaskList()
+		case c.Attr.Task.Output != nil:
+			c.TaskOutput()
 		}
 	// Worker commands
-	case args.Worker != nil:
+	case c.Attr.Worker != nil:
 		switch {
-		case args.Worker.List != nil:
-			args.WorkerList()
+		case c.Attr.Worker.List != nil:
+			c.WorkerList()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

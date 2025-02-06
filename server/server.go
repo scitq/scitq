@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -25,6 +26,9 @@ import (
 
 //go:embed migrations/*
 var embeddedMigrations embed.FS
+
+//go:embed certificates/*
+var embeddedCertificates embed.FS
 
 type taskQueueServer struct {
 	pb.UnimplementedTaskQueueServer
@@ -418,7 +422,29 @@ func applyMigrations(db *sql.DB, migrationPath string) error {
 	return nil
 }
 
-func Serve(dbURL string, logRoot string, port int, migrationPath string) error {
+func LoadEmbeddedCertificates() (credentials.TransportCredentials, error) {
+	// Read server certificate & key from embedded files
+	serverCertPEM, err := embeddedCertificates.ReadFile("certificates/server.pem")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read embedded server.pem: %w", err)
+	}
+
+	serverKeyPEM, err := embeddedCertificates.ReadFile("certificates/server.key")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read embedded server.key: %w", err)
+	}
+
+	// Load the certificate
+	serverCert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load server key pair: %w", err)
+	}
+
+	// ✅ Use `credentials.NewServerTLSFromCert()` instead of `NewServerTLSFromFile()`
+	return credentials.NewServerTLSFromCert(&serverCert), nil
+}
+
+func Serve(dbURL string, logRoot string, port int, migrationPath string, certificate_key string, certificate_pem string) error {
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
@@ -432,9 +458,18 @@ func Serve(dbURL string, logRoot string, port int, migrationPath string) error {
 
 	log.Println("Server started successfully!")
 
-	creds, err := credentials.NewServerTLSFromFile("server.pem", "server.key")
-	if err != nil {
-		return fmt.Errorf("failed to load TLS credentials: %v", err)
+	var creds credentials.TransportCredentials
+	if certificate_key == "" || certificate_pem == "" {
+		log.Printf("Using embedded certificates")
+		creds, err = LoadEmbeddedCertificates()
+		if err != nil {
+			return fmt.Errorf("failed to load embedded TLS credentials: %v", err)
+		}
+	} else {
+		creds, err = credentials.NewServerTLSFromFile(certificate_pem, certificate_key)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS credentials: %v", err)
+		}
 	}
 
 	grpcServer := grpc.NewServer(grpc.Creds(creds))

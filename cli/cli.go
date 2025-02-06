@@ -10,10 +10,9 @@ import (
 )
 
 // CLI struct encapsulates task & worker commands
-type CLI struct {
+type Attr struct {
 	Server  string `arg:"-s,--server,env:SCITQ_SERVER" default:"localhost:50051" help:"gRPC server address"`
 	TimeOut int    `arg:"-t,--timeout" default:"5" help:"Timeout for server interaction (in seconds)"`
-	QC      lib.QueueClient
 
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
@@ -37,9 +36,14 @@ type CLI struct {
 	} `arg:"subcommand:worker" help:"Manage workers"`
 }
 
+type CLI struct {
+	QC   lib.QueueClient
+	Attr Attr
+}
+
 // WithTimeout provides a context with a timeout
 func (cli *CLI) WithTimeout() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), time.Duration(cli.TimeOut)*time.Second)
+	return context.WithTimeout(context.Background(), time.Duration(cli.Attr.TimeOut)*time.Second)
 }
 
 // createTask sends a task creation request.
@@ -48,8 +52,8 @@ func (c *CLI) TaskCreate() error {
 	defer cancel()
 
 	req := &pb.TaskRequest{
-		Command:   c.Task.Create.Command,
-		Container: c.Task.Create.Container,
+		Command:   c.Attr.Task.Create.Command,
+		Container: c.Attr.Task.Create.Container,
 	}
 	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {
@@ -65,8 +69,8 @@ func (c *CLI) TaskList() error {
 	defer cancel()
 
 	req := &pb.ListTasksRequest{}
-	if c.Task.List.Status != "" {
-		req.StatusFilter = &c.Task.List.Status
+	if c.Attr.Task.List.Status != "" {
+		req.StatusFilter = &c.Attr.Task.List.Status
 	}
 
 	res, err := c.QC.Client.ListTasks(ctx, req)
@@ -87,13 +91,13 @@ func (c *CLI) TaskOutput() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	req := &pb.TaskId{TaskId: c.Task.Output.ID}
+	req := &pb.TaskId{TaskId: c.Attr.Task.Output.ID}
 	stream, err := c.QC.Client.StreamTaskLogs(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error fetching task logs: %v", err)
 	}
 
-	fmt.Printf("📜 Logs for Task %d:\n", c.Task.Output.ID)
+	fmt.Printf("📜 Logs for Task %d:\n", c.Attr.Task.Output.ID)
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
