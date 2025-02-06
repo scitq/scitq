@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
+	"github.com/alexflint/go-arg"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/gmtsciencedev/scitq2/lib"
 )
@@ -125,4 +127,40 @@ func (c *CLI) WorkerList() error {
 			worker.WorkerId, worker.Name, worker.Concurrency)
 	}
 	return nil
+}
+
+func Run(c CLI) error {
+	arg.MustParse(&c.Attr)
+
+	// Establish gRPC connection
+	qc, err := lib.CreateClient(c.Attr.Server)
+	if err != nil {
+		log.Fatalf("Could not connect to server: %v", err)
+	}
+	c.QC = qc
+	defer c.QC.Close()
+
+	// Handle commands properly
+	switch {
+	// Task commands
+	case c.Attr.Task != nil:
+		switch {
+		case c.Attr.Task.Create != nil:
+			err = c.TaskCreate()
+		case c.Attr.Task.List != nil:
+			err = c.TaskList()
+		case c.Attr.Task.Output != nil:
+			err = c.TaskOutput()
+		}
+	// Worker commands
+	case c.Attr.Worker != nil:
+		switch {
+		case c.Attr.Worker.List != nil:
+			err = c.WorkerList()
+		}
+	default:
+		log.Fatal("No command specified. Run with --help for usage.")
+	}
+
+	return err
 }
