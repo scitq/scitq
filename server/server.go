@@ -17,7 +17,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -445,7 +445,7 @@ func LoadEmbeddedCertificates() (credentials.TransportCredentials, error) {
 }
 
 func Serve(dbURL string, logRoot string, port int, migrationPath string, certificate_key string, certificate_pem string) error {
-	db, err := sql.Open("postgres", dbURL)
+	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
