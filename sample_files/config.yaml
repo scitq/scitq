@@ -1,0 +1,39 @@
+scitq:
+  port: 50051
+  log_level: "info"
+providers:
+  azure:
+    primary:
+      default_region: "swedencentral"
+      subscription_id: "sub1"
+      resource_group: "group1"
+      location: "eastus"
+      admin_username: "admin1"
+      admin_password: "secret1"
+      vm_size: "Standard_DS1_v2"
+      nic_name: "nic1"
+  openstack:
+    ovh:
+      auth_url: "https://ovh.example.com:5000/v3"
+      username: "ovhuser"
+      password: "ovhpass"
+      domain_name: "default"
+      tenant_name: "ovh-project"
+      region: "RegionOne"
+      image_id: "img-ovh"
+      flavor_id: "flavor-ovh"
+      network_id: "net-ovh"
+      custom:
+        quota_endpoint: "https://ovh.example.com/api/quotas"
+        pricing_endpoint: "https://ovh.example.com/api/pricing"
+    standard:
+      auth_url: "https://openstack.example.com:5000/v3"
+      username: "stduser"
+      password: "stdpass"
+      domain_name: "default"
+      tenant_name: "std-project"
+      region: "RegionTwo"
+      image_id: "img-std"
+      flavor_id: "flavor-std"
+      network_id: "net-std"
+      custom: {}

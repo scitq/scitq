@@ -3,18 +3,39 @@ package main
 import (
 	"flag"
 	"log"
+	"sync"
 
 	"github.com/gmtsciencedev/scitq2/server"
+	"github.com/gmtsciencedev/scitq2/server/config"
 )
 
 func main() {
-	dbURL := flag.String("dburl", "postgres://scitq_user:dsofposiudipopipII9@localhost/scitq2?sslmode=disable", "db URL like postgres://user:pass@host/dbname?sslmode=disable")
-	logRoot := flag.String("logroot", "log", "Root of log files")
-	port := flag.Int("port", 50051, "Server port")
-	certificatePem := flag.String("pem", "", "Certificate, PEM file, leave blank to use embedded")
-	certificateKey := flag.String("key", "", "Certificate, key file, leave blank to use embedded")
+	config_file := flag.String("config", "", "Configuration file")
 
-	if err := server.Serve(*dbURL, *logRoot, *port, "", *certificateKey, *certificatePem); err != nil {
-		log.Fatalf("Error: %v", err)
+	cfg, err := config.LoadConfig(*config_file)
+	if err != nil {
+		log.Fatalf("failed to load configuration: %v", err)
 	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Launch the HTTP server as a goroutine.
+	go func() {
+		defer wg.Done()
+		if err := server.HttpServer(*cfg); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Launch the gRPC server as a goroutine.
+	go func() {
+		defer wg.Done()
+		if err := server.Serve(*cfg); err != nil {
+			log.Fatalf("gRPC server error: %v", err)
+		}
+	}()
+
+	// Wait for both servers to exit (which should not happen in normal operation).
+	wg.Wait()
 }

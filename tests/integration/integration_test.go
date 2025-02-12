@@ -16,6 +16,7 @@ import (
 	"github.com/gmtsciencedev/scitq2/client"
 	"github.com/gmtsciencedev/scitq2/lib"
 	"github.com/gmtsciencedev/scitq2/server"
+	"github.com/gmtsciencedev/scitq2/server/config"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -197,7 +198,12 @@ func TestIntegration(t *testing.T) {
 
 	// Start server in a separate goroutine
 	go func() {
-		if err := server.Serve(dbURL, tempLogRoot, serverPort, "", "", ""); err != nil {
+		var cfg config.Config
+		cfg.Scitq.DBURL = dbURL
+		cfg.Scitq.Port = serverPort
+		cfg.Scitq.LogLevel = "debug"
+		cfg.Scitq.LogRoot = tempLogRoot
+		if err := server.Serve(cfg); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()

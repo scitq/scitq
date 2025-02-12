@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS task (
     download_timeout FLOAT,
     running_timeout FLOAT,
     upload_timeout FLOAT,
+    pid INT,
     input_hash UUID
 );
 
@@ -132,7 +133,7 @@ CREATE TABLE IF NOT EXISTS recruiter (
 
 
 -- Task dependencies table
-CREATE TABLE task_dependencies (
+CREATE TABLE IF NOT EXISTS task_dependencies (
     dependent_task_id INTEGER NOT NULL,
     prerequisite_task_id INTEGER NOT NULL,
     PRIMARY KEY (dependent_task_id, prerequisite_task_id),
@@ -141,3 +142,17 @@ CREATE TABLE task_dependencies (
     CHECK (dependent_task_id <> prerequisite_task_id)
 );
 
+
+-- Job Table (contrarily to Task, Job are server internal tasks) - Jobs should stay in memory now?
+-- CREATE TABLE IF NOT EXISTS job (
+--     job_id SERIAL PRIMARY KEY,
+--     target TEXT,
+--     action CHAR(1) NOT NULL DEFAULT 'C',  -- (C: Create (worker), D: Delete (worker), R: restart (worker), U: Update (worker))
+--     args JSONB,
+--     retry INT DEFAULT 0,
+--     status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, R: Running, S: Succeeded, F: Failed, X: canceled)
+--     log TEXT, 
+--     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+--     modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
+--     progression SMALLINT DEFAULT 0
+--     );

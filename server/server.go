@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gmtsciencedev/scitq2/server/config"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -389,7 +390,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	return &pb.WorkersList{Workers: workers}, nil
 }
 
-func applyMigrations(db *sql.DB, migrationPath string) error {
+func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
 		return err
@@ -397,17 +398,11 @@ func applyMigrations(db *sql.DB, migrationPath string) error {
 
 	var m *migrate.Migrate
 	var migrate_err error
-	if migrationPath == "" {
-		// ✅ FIX: Use `iofs.New()` to create a migration source from `embed.FS`
-		sourceDriver, err := iofs.New(embeddedMigrations, "migrations")
-		if err != nil {
-			return fmt.Errorf("failed to create embedded migration source: %w", err)
-		}
-		m, migrate_err = migrate.NewWithInstance("iofs", sourceDriver, "postgres", driver)
-
-	} else {
-		m, migrate_err = migrate.NewWithDatabaseInstance(fmt.Sprintf("file://%s", migrationPath), "postgres", driver)
+	sourceDriver, err := iofs.New(embeddedMigrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create embedded migration source: %w", err)
 	}
+	m, migrate_err = migrate.NewWithInstance("iofs", sourceDriver, "postgres", driver)
 
 	if migrate_err != nil {
 		return migrate_err
@@ -422,60 +417,61 @@ func applyMigrations(db *sql.DB, migrationPath string) error {
 	return nil
 }
 
-func LoadEmbeddedCertificates() (credentials.TransportCredentials, error) {
+func LoadEmbeddedCertificates() (tls.Certificate, error) {
+
+	var serverCert tls.Certificate
 	// Read server certificate & key from embedded files
 	serverCertPEM, err := embeddedCertificates.ReadFile("certificates/server.pem")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read embedded server.pem: %w", err)
+		return serverCert, fmt.Errorf("failed to read embedded server.pem: %w", err)
 	}
 
 	serverKeyPEM, err := embeddedCertificates.ReadFile("certificates/server.key")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read embedded server.key: %w", err)
+		return serverCert, fmt.Errorf("failed to read embedded server.key: %w", err)
 	}
 
 	// Load the certificate
-	serverCert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load server key pair: %w", err)
-	}
+	serverCert, err = tls.X509KeyPair(serverCertPEM, serverKeyPEM)
 
-	// ✅ Use `credentials.NewServerTLSFromCert()` instead of `NewServerTLSFromFile()`
-	return credentials.NewServerTLSFromCert(&serverCert), nil
+	return serverCert, err
 }
 
-func Serve(dbURL string, logRoot string, port int, migrationPath string, certificate_key string, certificate_pem string) error {
-	db, err := sql.Open("pgx", dbURL)
+func Serve(cfg config.Config) error {
+	db, err := sql.Open("pgx", cfg.Scitq.DBURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer db.Close()
 
 	// Apply migrations on startup
-	if err := applyMigrations(db, migrationPath); err != nil {
+	if err := applyMigrations(db); err != nil {
 		return fmt.Errorf("migration error: %v", err)
 	}
 
 	log.Println("Server started successfully!")
 
 	var creds credentials.TransportCredentials
-	if certificate_key == "" || certificate_pem == "" {
+	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
 		log.Printf("Using embedded certificates")
-		creds, err = LoadEmbeddedCertificates()
+		serverCert, err := LoadEmbeddedCertificates()
 		if err != nil {
 			return fmt.Errorf("failed to load embedded TLS credentials: %v", err)
 		}
+
+		// ✅ Use `credentials.NewServerTLSFromCert()` instead of `NewServerTLSFromFile()`
+		creds = credentials.NewServerTLSFromCert(&serverCert)
 	} else {
-		creds, err = credentials.NewServerTLSFromFile(certificate_pem, certificate_key)
+		creds, err = credentials.NewServerTLSFromFile(cfg.Scitq.CertificatePem, cfg.Scitq.CertificateKey)
 		if err != nil {
 			return fmt.Errorf("failed to load TLS credentials: %v", err)
 		}
 	}
 
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
-	pb.RegisterTaskQueueServer(grpcServer, newTaskQueueServer(db, logRoot))
+	pb.RegisterTaskQueueServer(grpcServer, newTaskQueueServer(db, cfg.Scitq.LogRoot))
 
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
 	if err != nil {
 		return fmt.Errorf("failed to listen: %v", err)
 	}
