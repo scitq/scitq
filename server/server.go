@@ -11,9 +11,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/gmtsciencedev/scitq2/server/providers"
+	"github.com/gmtsciencedev/scitq2/server/providers/azure"
+
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -25,6 +29,11 @@ import (
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 )
 
+const defaultJobRetry = 3
+const defaultJobTimeout = 10 * time.Minute
+const defaultJobConcurrency = 10
+const defaultJobQueueSize = 100
+
 //go:embed migrations/*
 var embeddedMigrations embed.FS
 
@@ -33,12 +42,17 @@ var embeddedCertificates embed.FS
 
 type taskQueueServer struct {
 	pb.UnimplementedTaskQueueServer
-	logRoot string
-	db      *sql.DB
+	logRoot   string
+	db        *sql.DB
+	cfg       config.Config
+	jobQueue  chan Job
+	jobWG     sync.WaitGroup
+	providers map[uint32]providers.Provider
+	semaphore chan struct{} // Semaphore to limit concurrency
 }
 
-func newTaskQueueServer(db *sql.DB, logRoot string) *taskQueueServer {
-	s := &taskQueueServer{db: db, logRoot: logRoot}
+func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
+	s := &taskQueueServer{db: db, cfg: cfg, logRoot: logRoot, jobQueue: make(chan Job, defaultJobQueueSize), semaphore: make(chan struct{}, defaultJobConcurrency)}
 	go s.assignTasksLoop()
 	return s
 }
@@ -222,7 +236,7 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	err = tx.QueryRow(`SELECT worker_id FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID)
 	if err == sql.ErrNoRows {
 		// **Worker doesn't exist, create a new worker ID**
-		err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, last_ping) VALUES ($1, $2, NOW()) RETURNING worker_id`,
+		err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, status, last_ping) VALUES ($1, $2, 'R', NOW()) RETURNING worker_id`,
 			req.Name, req.Concurrency).Scan(&workerID)
 		if err != nil {
 			log.Printf("⚠️ Failed to create worker: %v", err)
@@ -239,11 +253,17 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		//	log.Printf("⚠️ Failed to update worker %s: %v", req.Name, err)
 		//	return nil, fmt.Errorf("failed to update worker: %w", err)
 		//}
-		_, err = tx.Exec(`UPDATE task SET status='F' WHERE status='C' AND worker_id=$1`,
+		_, err = tx.Exec(`UPDATE task SET status='F' WHERE status IN ('C','D','R','U') AND worker_id=$1`,
 			workerID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fail tasks that were running when client %d crashed: %w", workerID, err)
 		}
+		_, err = tx.Exec(`UPDATE worker SET status='R' WHERE status IN ('O','I') AND worker_id=$1`,
+			workerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update worker %d status : %w", workerID, err)
+		}
+
 		log.Printf("✅ Worker %s already registered, sending back id %d", req.Name, workerID)
 	}
 
@@ -253,6 +273,52 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	}
 
 	return &pb.WorkerId{WorkerId: workerID}, nil
+}
+
+func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
+	var workerIDs []uint32
+	var jobIDs []uint32
+
+	{
+		tx, err := s.db.Begin()
+		if err != nil {
+			log.Printf("⚠️ Failed to start transaction: %v", err)
+			return nil, fmt.Errorf("failed to start transaction: %w", err)
+		}
+		defer tx.Rollback()
+
+		for req.Number > 0 {
+			req.Number--
+			var workerID uint32
+			err := tx.QueryRow(`WITH insertquery AS (
+  INSERT INTO worker (step_id, concurrency, flavor_id, region_id)
+  VALUES ($1, $2, $3, $4)
+  RETURNING worker_id
+)
+UPDATE worker
+SET name = $5 || '_worker_' || worker_id
+WHERE worker_id IN (SELECT worker_id FROM insertquery)
+RETURNING worker_id`,
+				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(&workerID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to register worker: %w", err)
+			}
+			workerIDs = append(workerIDs, workerID)
+
+			var jobID uint32
+			tx.QueryRow("INSERT INTO job (worker_id,flavor_id,region_id,retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
+				workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
+			jobIDs = append(jobIDs, jobID)
+
+			if err := tx.Commit(); err != nil {
+				log.Printf("⚠️ Failed to commit worker registration: %v", err)
+				return nil, fmt.Errorf("failed to commit worker registration: %w", err)
+			}
+		}
+	}
+	// TODO launch the jobs
+
+	return &pb.WorkerIds{WorkerIds: workerIDs}, nil
 }
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
@@ -390,6 +456,68 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	return &pb.WorkersList{Workers: workers}, nil
 }
 
+func (s *taskQueueServer) checkProviders() error {
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var rows *sql.Rows
+	rows, err = tx.Query(`SELECT provider_id, provider_name, config_name FROM provider ORDER BY provider_id`)
+
+	if err != nil {
+		log.Printf("⚠️ Failed to list providers: %v", err)
+		return fmt.Errorf("failed to list providers: %w", err)
+	}
+	defer rows.Close()
+
+	var mappedConfig map[string]map[string]bool
+	for rows.Next() {
+		var providerId uint32
+		var configName, providerName string
+
+		err := rows.Scan(&providerId, &providerName, &configName)
+		if err != nil {
+			log.Printf("⚠️ Failed to scan provider: %v", err)
+			continue
+		}
+		switch providerName {
+		case "azure":
+			{
+				for paramConfigName, config := range s.cfg.Providers.Azure {
+					if configName == paramConfigName {
+						provider := azure.New(config, s.cfg)
+						s.providers[providerId] = provider
+						mappedConfig[providerName][configName] = true
+					}
+					log.Printf("Azure provider %s: %v", providerName, paramConfigName)
+				}
+			}
+		default:
+			{
+				return fmt.Errorf("unknown provider %s", providerName)
+			}
+		}
+	}
+
+	for configName, config := range s.cfg.Providers.Azure {
+		if _, ok := mappedConfig["azure"][configName]; !ok {
+			var providerId uint32
+			tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
+				"azure", configName).Scan(&providerId)
+			provider := azure.New(config, s.cfg)
+			s.providers[providerId] = provider
+		}
+	}
+	for provider, config := range s.cfg.Providers.Openstack {
+		return fmt.Errorf("Openstack provider unsupported yet %s: %v", provider, config)
+	}
+	return nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -469,7 +597,9 @@ func Serve(cfg config.Config) error {
 	}
 
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
-	pb.RegisterTaskQueueServer(grpcServer, newTaskQueueServer(db, cfg.Scitq.LogRoot))
+	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+	s.checkProviders()
+	pb.RegisterTaskQueueServer(grpcServer, s)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
 	if err != nil {

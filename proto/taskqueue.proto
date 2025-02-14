@@ -13,7 +13,9 @@ service TaskQueue {
     rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
     rpc ListTasks (ListTasksRequest) returns (TaskList);
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
-}
+    rpc CreateWorker(WorkerRequest) returns (WorkerIds);
+    rpc DeleteWorker(WorkerId) returns (Ack);
+    }
 
 message TaskRequest {
     string command = 1;
@@ -78,10 +80,25 @@ message WorkerId {
     uint32 worker_id = 1;
 }
 
+message WorkerIds {
+    repeated uint32 worker_ids = 1;
+}
+
 message Ack {
     bool success = 1;
 }
 
 message ListTasksRequest {
     optional string status_filter = 1;
+}
+
+message WorkerRequest {
+    string provider = 1;
+    string flavor = 2;
+    uint32 number = 3;
+    uint32 concurrency = 4;
+    uint32 prefetch = 5;
+    uint32 step_id = 6;
+    uint32 flavor_id = 7;
+    uint32 region_id = 8;
 }

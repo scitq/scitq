@@ -20,6 +20,8 @@ type Config struct {
 		ClientDownloadToken string `yaml:"client_download_token"`
 		CertificateKey      string `yaml:"certificate_key"`
 		CertificatePem      string `yaml:"certificate_pem"`
+		ServerName          string `yaml:"server_name"`
+		ServerFQDN          string `yaml:"server_fqdn"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]AzureConfig     `yaml:"azure"`
@@ -30,12 +32,14 @@ type Config struct {
 type AzureConfig struct {
 	DefaultRegion  string     `yaml:"default_region"`
 	SubscriptionID string     `yaml:"subscription_id"`
-	ResourceGroup  string     `yaml:"resource_group"`
-	Location       string     `yaml:"location"`
+	ClientID       string     `yaml:"client_id"`
+	ClientSecret   string     `yaml:"client_secret"`
+	TenantID       string     `yaml:"tenant_id"`
+	UseSpot        bool       `yaml:"use_spot" default:"true"`
+	Username       string     `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
+	SSHPublicKey   string     `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
 	AdminUsername  string     `yaml:"admin_username"`
 	AdminPassword  string     `yaml:"admin_password"`
-	VMSize         string     `yaml:"vm_size"`
-	NICName        string     `yaml:"nic_name"`
 	Image          AzureImage `yaml:"image"`
 }
 

@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS step (
 -- Provider Table
 CREATE TABLE IF NOT EXISTS provider (
     provider_id SERIAL PRIMARY KEY,
-    provider_name TEXT
+    provider_name TEXT NOT NULL,
+    config_name TEXT NOT NULL,
 );
 
 -- Region Table
@@ -59,10 +60,10 @@ CREATE TABLE IF NOT EXISTS worker (
     worker_name TEXT UNIQUE NOT NULL,
     step_id INT REFERENCES step(step_id) ON DELETE SET NULL,
     concurrency INT NOT NULL DEFAULT 1,
-    status CHAR(1) NOT NULL DEFAULT 'O', -- (O: Offline, I: Installing, R: Ready, P: Paused, F: Failing)
+    status CHAR(1) NOT NULL DEFAULT 'I', -- (O: Offline, I: Installing, R: Ready, P: Paused, F: Failing)
     stats JSONB,
     last_ping TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP,
     task_properties JSONB,
     install_strategy JSONB,
     flavor_id INT,
@@ -144,15 +145,16 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
 
 
 -- Job Table (contrarily to Task, Job are server internal tasks) - Jobs should stay in memory now?
--- CREATE TABLE IF NOT EXISTS job (
---     job_id SERIAL PRIMARY KEY,
---     target TEXT,
---     action CHAR(1) NOT NULL DEFAULT 'C',  -- (C: Create (worker), D: Delete (worker), R: restart (worker), U: Update (worker))
---     args JSONB,
---     retry INT DEFAULT 0,
---     status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, R: Running, S: Succeeded, F: Failed, X: canceled)
---     log TEXT, 
---     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
---     modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
---     progression SMALLINT DEFAULT 0
---     );
+CREATE TABLE IF NOT EXISTS job (
+    job_id SERIAL PRIMARY KEY,
+    worker_id INT REFERENCES worker(worker_id) ON DELETE SET NULL,
+    action CHAR(1) NOT NULL DEFAULT 'C',  -- (C: Create (worker), D: Delete (worker), R: restart (worker), U: Update (worker))
+    flavor_id INT REFERENCES flavor(flavor_id) ON DELETE SET NULL,
+    region_id INT REFERENCES region(region_id) ON DELETE SET NULL,
+    retry INT DEFAULT 0,
+    status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, R: Running, S: Succeeded, F: Failed, X: canceled)
+    log TEXT, 
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    progression SMALLINT DEFAULT 0
+    );

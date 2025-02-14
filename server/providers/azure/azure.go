@@ -5,8 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +13,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	"github.com/gmtsciencedev/scitq2/server/config"
 )
 
 // AzureProvider holds global configuration for Azure.
@@ -23,31 +22,37 @@ type AzureProvider struct {
 	ClientID           string
 	ClientSecret       string
 	TenantID           string
-	DefaultLocation    string
+	DefaultRegion      string
+	useSpot            bool
+	sshPublicKey       string
+	publisher          string
+	offer              string
+	sku                string
+	version            string
+	username           string
 	ScitqServerTag     string
 	ScitqServerAddress string
 	ScitqServerPort    int
 }
 
-// NewAzureProviderFromEnv creates an AzureProvider from environment variables.
-// Probably a very bad idea
-func NewAzureProviderFromEnv() *AzureProvider {
-	serverPort := strings.Split(os.Getenv("SCITQ_SERVER"), ":")
-	server := serverPort[0]
-	port, err := strconv.Atoi(serverPort[1])
-	if err != nil {
-		port = 50051
-	}
-
+// NewAzureProvider creates an AzureProvider with the given configuration.
+func New(cfg config.AzureConfig, scitqCfg config.Config) *AzureProvider {
 	return &AzureProvider{
-		SubscriptionID:     os.Getenv("AZURE_SUBSCRIPTION_ID"),
-		ClientID:           os.Getenv("AZURE_CLIENT_ID"),
-		ClientSecret:       os.Getenv("AZURE_SECRET"),
-		TenantID:           os.Getenv("AZURE_TENANT"),
-		DefaultLocation:    os.Getenv("AZURE_LOCATION"),
-		ScitqServerTag:     "scitq",
-		ScitqServerAddress: server,
-		ScitqServerPort:    port,
+		SubscriptionID:     cfg.SubscriptionID,
+		ClientID:           cfg.ClientID,
+		ClientSecret:       cfg.ClientSecret,
+		TenantID:           cfg.TenantID,
+		DefaultRegion:      cfg.DefaultRegion,
+		useSpot:            cfg.UseSpot,
+		sshPublicKey:       cfg.SSHPublicKey,
+		publisher:          cfg.Image.Publisher,
+		offer:              cfg.Image.Offer,
+		sku:                cfg.Image.Sku,
+		version:            cfg.Image.Version,
+		username:           cfg.Username,
+		ScitqServerTag:     scitqCfg.Scitq.ServerName,
+		ScitqServerAddress: scitqCfg.Scitq.ServerFQDN,
+		ScitqServerPort:    scitqCfg.Scitq.Port,
 	}
 }
 
@@ -137,7 +142,7 @@ func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidenti
 }
 
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
-func (ap *AzureProvider) Create(workerName, flavor string, useSpot bool, sshPublicKey, publisher, offer, sku, version, location string) (string, error) {
+func (ap *AzureProvider) Create(workerName, flavor, location string) (string, error) {
 	var ipAddress string
 	var pubIPID string
 
@@ -202,23 +207,23 @@ runcmd:
 				},
 				StorageProfile: &armcompute.StorageProfile{
 					ImageReference: &armcompute.ImageReference{
-						Publisher: to.Ptr(publisher),
-						Offer:     to.Ptr(offer),
-						SKU:       to.Ptr(sku),
-						Version:   to.Ptr(version),
+						Publisher: to.Ptr(ap.publisher),
+						Offer:     to.Ptr(ap.offer),
+						SKU:       to.Ptr(ap.sku),
+						Version:   to.Ptr(ap.version),
 					},
 				},
 				OSProfile: &armcompute.OSProfile{
 					ComputerName:  to.Ptr(vmName),
 					CustomData:    to.Ptr(customData),
-					AdminUsername: to.Ptr("azureuser"),
+					AdminUsername: to.Ptr(ap.username),
 					LinuxConfiguration: &armcompute.LinuxConfiguration{
 						DisablePasswordAuthentication: to.Ptr(true),
 						SSH: &armcompute.SSHConfiguration{
 							PublicKeys: []*armcompute.SSHPublicKey{
 								{
 									Path:    to.Ptr("/home/azureuser/.ssh/authorized_keys"),
-									KeyData: to.Ptr(sshPublicKey),
+									KeyData: to.Ptr(ap.sshPublicKey),
 								},
 							},
 						},
@@ -236,7 +241,7 @@ runcmd:
 				},
 			},
 		}
-		if useSpot {
+		if ap.useSpot {
 			vmParameters.Properties.Priority = to.Ptr(armcompute.VirtualMachinePriorityTypesSpot)
 			vmParameters.Properties.EvictionPolicy = to.Ptr(armcompute.VirtualMachineEvictionPolicyTypesDeallocate)
 		}
