@@ -17,7 +17,9 @@
     - [TaskStatusUpdate](#taskqueue-TaskStatusUpdate)
     - [Worker](#taskqueue-Worker)
     - [WorkerId](#taskqueue-WorkerId)
+    - [WorkerIds](#taskqueue-WorkerIds)
     - [WorkerInfo](#taskqueue-WorkerInfo)
+    - [WorkerRequest](#taskqueue-WorkerRequest)
     - [WorkersList](#taskqueue-WorkersList)
   
     - [TaskQueue](#taskqueue-TaskQueue)
@@ -233,6 +235,21 @@
 
 
 
+<a name="taskqueue-WorkerIds"></a>
+
+### WorkerIds
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| worker_ids | [uint32](#uint32) | repeated |  |
+
+
+
+
+
+
 <a name="taskqueue-WorkerInfo"></a>
 
 ### WorkerInfo
@@ -243,6 +260,28 @@
 | ----- | ---- | ----- | ----------- |
 | name | [string](#string) |  |  |
 | concurrency | [uint32](#uint32) | optional |  |
+
+
+
+
+
+
+<a name="taskqueue-WorkerRequest"></a>
+
+### WorkerRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| provider | [string](#string) |  |  |
+| flavor | [string](#string) |  |  |
+| number | [uint32](#uint32) |  |  |
+| concurrency | [uint32](#uint32) |  |  |
+| prefetch | [uint32](#uint32) |  |  |
+| step_id | [uint32](#uint32) |  |  |
+| flavor_id | [uint32](#uint32) |  |  |
+| region_id | [uint32](#uint32) |  |  |
 
 
 
@@ -285,6 +324,8 @@
 | StreamTaskLogs | [TaskId](#taskqueue-TaskId) | [TaskLog](#taskqueue-TaskLog) stream |  |
 | ListTasks | [ListTasksRequest](#taskqueue-ListTasksRequest) | [TaskList](#taskqueue-TaskList) |  |
 | ListWorkers | [ListWorkersRequest](#taskqueue-ListWorkersRequest) | [WorkersList](#taskqueue-WorkersList) |  |
+| CreateWorker | [WorkerRequest](#taskqueue-WorkerRequest) | [WorkerIds](#taskqueue-WorkerIds) |  |
+| DeleteWorker | [WorkerId](#taskqueue-WorkerId) | [Ack](#taskqueue-Ack) |  |
 
  
 

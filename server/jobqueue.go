@@ -20,16 +20,15 @@ type Job struct {
 	Action     rune // "C", "D", "R"
 	Retry      int
 	Timeout    time.Duration
-	CreatedAt  time.Time
 }
 
 // Start initializes the job queue.
-func (s *taskQueueServer) Start(ctx context.Context) {
+func (s *taskQueueServer) startJobQueue() {
 	s.semaphore = make(chan struct{}, defaultJobConcurrency)
 }
 
 // AddJob adds a new job and processes it immediately.
-func (s *taskQueueServer) AddJob(job Job) {
+func (s *taskQueueServer) addJob(job Job) {
 	go s.processJobWithTimeout(context.Background(), job)
 }
 
@@ -65,14 +64,14 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 		}
 		if job.Retry > 0 {
 			job.Retry--
-			s.AddJob(job) // Retry job
+			s.addJob(job) // Retry job
 		}
 	case err := <-done:
 		if err != nil {
 			log.Printf("⚠️ Failed to process job %d: %v", job.JobID, err)
 			if job.Retry > 0 {
 				job.Retry--
-				s.AddJob(job) // Retry job
+				s.addJob(job) // Retry job
 			} else {
 				// Update job status to failed
 				if err := s.updateJobStatus(job.JobID, "F"); err != nil {

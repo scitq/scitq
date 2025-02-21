@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS step (
 CREATE TABLE IF NOT EXISTS provider (
     provider_id SERIAL PRIMARY KEY,
     provider_name TEXT NOT NULL,
-    config_name TEXT NOT NULL,
+    config_name TEXT NOT NULL
 );
 
 -- Region Table
@@ -36,13 +36,13 @@ CREATE TABLE IF NOT EXISTS flavor (
     provider_id INT REFERENCES provider(provider_id) ON DELETE CASCADE,
     flavor_name TEXT NOT NULL,
     cpu INT NOT NULL,
-    mem INT NOT NULL,
-    disk INT NOT NULL,
+    mem FLOAT NOT NULL,
+    disk FLOAT NOT NULL,
     bandwidth INT,
     gpu TEXT,
     gpumem INT,
-    has_gpu BOOLEAN,
-    has_quick_disks BOOLEAN
+    has_gpu BOOLEAN DEFAULT FALSE,
+    has_quick_disks BOOLEAN DEFAULT FALSE
 );
 
 -- Flavor Region table 

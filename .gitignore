@@ -1,3 +1,5 @@
 *.db
 bin
 log
+gmts.yaml
+misc_tests

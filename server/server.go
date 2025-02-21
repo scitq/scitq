@@ -11,7 +11,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
@@ -42,17 +41,24 @@ var embeddedCertificates embed.FS
 
 type taskQueueServer struct {
 	pb.UnimplementedTaskQueueServer
-	logRoot   string
-	db        *sql.DB
-	cfg       config.Config
-	jobQueue  chan Job
-	jobWG     sync.WaitGroup
+	logRoot  string
+	db       *sql.DB
+	cfg      config.Config
+	jobQueue chan Job
+	//jobWG     sync.WaitGroup
 	providers map[uint32]providers.Provider
 	semaphore chan struct{} // Semaphore to limit concurrency
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
-	s := &taskQueueServer{db: db, cfg: cfg, logRoot: logRoot, jobQueue: make(chan Job, defaultJobQueueSize), semaphore: make(chan struct{}, defaultJobConcurrency)}
+	s := &taskQueueServer{
+		db:        db,
+		cfg:       cfg,
+		logRoot:   logRoot,
+		jobQueue:  make(chan Job, defaultJobQueueSize),
+		semaphore: make(chan struct{}, defaultJobConcurrency),
+		providers: make(map[uint32]providers.Provider),
+	}
 	go s.assignTasksLoop()
 	return s
 }
@@ -277,7 +283,7 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
 	var workerIDs []uint32
-	var jobIDs []uint32
+	var jobs []Job
 
 	{
 		tx, err := s.db.Begin()
@@ -290,16 +296,28 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		for req.Number > 0 {
 			req.Number--
 			var workerID uint32
+			var workerName string
+			var providerId uint32
+			var regionName string
+			var flavorName string
 			err := tx.QueryRow(`WITH insertquery AS (
   INSERT INTO worker (step_id, concurrency, flavor_id, region_id)
   VALUES ($1, $2, $3, $4)
   RETURNING worker_id
+),
+updated_worker AS (
+  UPDATE worker
+  SET name = $5 || '_worker_' || worker_id
+  FROM insertquery
+  WHERE worker.worker_id = insertquery.worker_id
+  RETURNING worker.worker_id, worker.name, worker.region_id
 )
-UPDATE worker
-SET name = $5 || '_worker_' || worker_id
-WHERE worker_id IN (SELECT worker_id FROM insertquery)
-RETURNING worker_id`,
-				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(&workerID)
+SELECT uw.worker_id, uw.name, r.provider_id, r.region_name, f.flavor_name
+FROM updated_worker uw
+JOIN region r ON uw.region_id = r.region_id
+JOIN flavor f ON uw.flavor_id = f.flavor_id`,
+				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
+				&workerID, &workerName, &providerId, &regionName, &flavorName)
 			if err != nil {
 				return nil, fmt.Errorf("failed to register worker: %w", err)
 			}
@@ -308,7 +326,17 @@ RETURNING worker_id`,
 			var jobID uint32
 			tx.QueryRow("INSERT INTO job (worker_id,flavor_id,region_id,retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
 				workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
-			jobIDs = append(jobIDs, jobID)
+			jobs = append(jobs, Job{
+				JobID:      jobID,
+				WorkerID:   workerID,
+				WorkerName: workerName,
+				ProviderID: providerId,
+				Region:     regionName,
+				Flavor:     flavorName,
+				Action:     'C',
+				Retry:      defaultJobRetry,
+				Timeout:    defaultJobTimeout,
+			})
 
 			if err := tx.Commit(); err != nil {
 				log.Printf("⚠️ Failed to commit worker registration: %v", err)
@@ -317,6 +345,9 @@ RETURNING worker_id`,
 		}
 	}
 	// TODO launch the jobs
+	for _, job := range jobs {
+		s.addJob(job)
+	}
 
 	return &pb.WorkerIds{WorkerIds: workerIDs}, nil
 }
@@ -457,7 +488,6 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 }
 
 func (s *taskQueueServer) checkProviders() error {
-
 	tx, err := s.db.Begin()
 	if err != nil {
 		log.Printf("⚠️ Failed to start transaction: %v", err)
@@ -465,56 +495,148 @@ func (s *taskQueueServer) checkProviders() error {
 	}
 	defer tx.Rollback()
 
-	var rows *sql.Rows
-	rows, err = tx.Query(`SELECT provider_id, provider_name, config_name FROM provider ORDER BY provider_id`)
-
+	// First scanning for known providers
+	rows, err := tx.Query(`SELECT provider_id, provider_name, config_name FROM provider ORDER BY provider_id`)
 	if err != nil {
 		log.Printf("⚠️ Failed to list providers: %v", err)
 		return fmt.Errorf("failed to list providers: %w", err)
 	}
 	defer rows.Close()
 
-	var mappedConfig map[string]map[string]bool
-	for rows.Next() {
-		var providerId uint32
-		var configName, providerName string
+	// ✅ Store rows into memory before processing (to avoid querying while iterating)
+	type ProviderInfo struct {
+		ProviderID   uint32
+		ProviderName string
+		ConfigName   string
+	}
+	var providers []ProviderInfo
 
-		err := rows.Scan(&providerId, &providerName, &configName)
-		if err != nil {
+	for rows.Next() {
+		var p ProviderInfo
+		if err := rows.Scan(&p.ProviderID, &p.ProviderName, &p.ConfigName); err != nil {
 			log.Printf("⚠️ Failed to scan provider: %v", err)
 			continue
 		}
-		switch providerName {
+		providers = append(providers, p)
+	}
+	rows.Close() // ✅ Ensure rows are fully processed before executing new queries
+
+	// ✅ Now process each provider safely
+	mappedConfig := make(map[string]map[string]bool)
+	for _, p := range providers {
+		switch p.ProviderName {
 		case "azure":
-			{
-				for paramConfigName, config := range s.cfg.Providers.Azure {
-					if configName == paramConfigName {
-						provider := azure.New(config, s.cfg)
-						s.providers[providerId] = provider
-						mappedConfig[providerName][configName] = true
+			for paramConfigName, config := range s.cfg.Providers.Azure {
+				if p.ConfigName == paramConfigName {
+					provider := azure.New(*config, s.cfg)
+					s.providers[p.ProviderID] = provider
+					if mappedConfig[p.ProviderName] == nil {
+						mappedConfig[p.ProviderName] = make(map[string]bool)
 					}
-					log.Printf("Azure provider %s: %v", providerName, paramConfigName)
+					mappedConfig[p.ProviderName][p.ConfigName] = true
+
+					// ✅ Now it's safe to sync regions inside this loop
+					if err := s.syncRegions(tx, p.ProviderID, config.Regions); err != nil {
+						log.Printf("⚠️ Failed to sync regions for provider %s: %v", p.ConfigName, err)
+					}
 				}
+				log.Printf("Azure provider %s: %v", p.ProviderName, paramConfigName)
 			}
 		default:
-			{
-				return fmt.Errorf("unknown provider %s", providerName)
+			return fmt.Errorf("unknown provider %s", p.ProviderName)
+		}
+	}
+
+	// Then adding new providers
+	for configName, config := range s.cfg.Providers.Azure {
+		if _, ok := mappedConfig["azure"][configName]; !ok {
+			var providerId uint32
+			log.Printf("Adding Azure provider %s: %v", "azure", configName)
+			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
+				"azure", configName).Scan(&providerId)
+			if err != nil {
+				log.Printf("⚠️ Failed to add provider: %v", err)
+				continue
+			}
+			provider := azure.New(*config, s.cfg)
+			s.providers[providerId] = provider
+
+			// Manage regions for this newly created provider
+			if err := s.syncRegions(tx, providerId, config.Regions); err != nil {
+				return fmt.Errorf("failed to sync regions for new provider %s: %w", configName, err)
 			}
 		}
 	}
 
-	for configName, config := range s.cfg.Providers.Azure {
-		if _, ok := mappedConfig["azure"][configName]; !ok {
-			var providerId uint32
-			tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
-				"azure", configName).Scan(&providerId)
-			provider := azure.New(config, s.cfg)
-			s.providers[providerId] = provider
+	for provider, config := range s.cfg.Providers.Openstack {
+		return fmt.Errorf("openstack provider unsupported yet %s: %v", provider, config)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredRegions []string) error {
+	log.Printf("🔄 Syncing regions for provider %d : %v", providerId, configuredRegions)
+	// Track existing regions
+	existingRegions := make(map[string]uint32)
+	rows, err := tx.Query(`SELECT region_id, region_name FROM region WHERE provider_id = $1`, providerId)
+	if err != nil {
+		log.Printf("⚠️ Failed to list regions for provider %d: %v", providerId, err)
+		return fmt.Errorf("failed to list regions: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var regionId uint32
+		var regionName string
+		if err := rows.Scan(&regionId, &regionName); err != nil {
+			log.Printf("⚠️ Failed to scan region: %v", err)
+			continue
+		}
+		existingRegions[regionName] = regionId
+	}
+
+	// Track configured regions
+	configuredRegionSet := make(map[string]bool)
+	for _, region := range configuredRegions {
+		configuredRegionSet[region] = true
+		if _, exists := existingRegions[region]; !exists {
+			// Insert missing region
+			_, err := tx.Exec(`INSERT INTO region (provider_id, region_name) VALUES ($1, $2)`, providerId, region)
+			if err != nil {
+				log.Printf("⚠️ Failed to insert region %s: %v", region, err)
+				return fmt.Errorf("failed to insert region %s: %w", region, err)
+			}
+			log.Printf("✅ Added new region %s for provider %d", region, providerId)
 		}
 	}
-	for provider, config := range s.cfg.Providers.Openstack {
-		return fmt.Errorf("Openstack provider unsupported yet %s: %v", provider, config)
+
+	// Remove regions that are in DB but not in config
+	for region, regionId := range existingRegions {
+		if !configuredRegionSet[region] {
+			if err := s.cleanupRegion(tx, regionId, region, providerId); err != nil {
+				return err
+			}
+		}
 	}
+
+	return nil
+}
+
+func (s *taskQueueServer) cleanupRegion(tx *sql.Tx, regionId uint32, regionName string, providerId uint32) error {
+	log.Printf("🛑 Removing region %s (ID: %d) for provider %d", regionName, regionId, providerId)
+
+	_, err := tx.Exec(`DELETE FROM region WHERE region_id = $1`, regionId)
+	if err != nil {
+		log.Printf("⚠️ Failed to delete region %s: %v", regionName, err)
+		return fmt.Errorf("failed to delete region %s: %w", regionName, err)
+	}
+
+	log.Printf("✅ Successfully deleted region %s (ID: %d)", regionName, regionId)
 	return nil
 }
 
@@ -599,6 +721,7 @@ func Serve(cfg config.Config) error {
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
 	s.checkProviders()
+	s.startJobQueue()
 	pb.RegisterTaskQueueServer(grpcServer, s)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
