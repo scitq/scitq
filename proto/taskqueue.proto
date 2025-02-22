@@ -15,6 +15,7 @@ service TaskQueue {
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc DeleteWorker(WorkerId) returns (Ack);
+    rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     }
 
 message TaskRequest {
@@ -101,4 +102,35 @@ message WorkerRequest {
     uint32 step_id = 6;
     uint32 flavor_id = 7;
     uint32 region_id = 8;
+}
+
+message ListFlavorsRequest {
+    uint32 limit = 1 ;
+    string filter = 2 ; 
+}
+
+message Flavor {
+  // Fields from the "flavor" table
+  uint32 flavor_id      = 1;  // PRIMARY KEY
+  string flavor_name    = 2;  // Name of the flavor
+  uint32 provider_id    = 3;  // Foreign key to provider table
+  string provider = 4; // Name of the provider (provider_name.config_name)
+  int32  cpu            = 5;  // Number of CPU cores
+  float mem             = 6;  // Memory in GB (or as needed)
+  float disk            = 7;  // Disk size in GB (or as needed)
+  int32  bandwidth      = 8;  // Bandwidth (if applicable)
+  string gpu            = 9;  // GPU description
+  int32  gpumem         = 10;  // GPU memory (in GB, for example)
+  bool   has_gpu        = 11; // Whether a GPU is present
+  bool   has_quick_disks = 12; // Whether quick disks are supported
+
+  // Fields from the "flavor_region" table
+  uint32 region_id      = 13; // Foreign key to region table
+  string region         = 14; // (Optional) Region name
+  float  eviction       = 15; // Eviction rate value
+  float  cost           = 16; // Cost value
+}
+
+message FlavorsList {
+    repeated Flavor flavors = 1;
 }

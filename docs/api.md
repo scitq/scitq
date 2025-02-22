@@ -5,6 +5,9 @@
 
 - [proto/taskqueue.proto](#proto_taskqueue-proto)
     - [Ack](#taskqueue-Ack)
+    - [Flavor](#taskqueue-Flavor)
+    - [FlavorsList](#taskqueue-FlavorsList)
+    - [ListFlavorsRequest](#taskqueue-ListFlavorsRequest)
     - [ListTasksRequest](#taskqueue-ListTasksRequest)
     - [ListWorkersRequest](#taskqueue-ListWorkersRequest)
     - [Task](#taskqueue-Task)
@@ -44,6 +47,71 @@
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | success | [bool](#bool) |  |  |
+
+
+
+
+
+
+<a name="taskqueue-Flavor"></a>
+
+### Flavor
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| flavor_id | [uint32](#uint32) |  | Fields from the &#34;flavor&#34; table
+
+PRIMARY KEY |
+| flavor_name | [string](#string) |  | Name of the flavor |
+| provider_id | [uint32](#uint32) |  | Foreign key to provider table |
+| provider | [string](#string) |  | Name of the provider (provider_name.config_name) |
+| cpu | [int32](#int32) |  | Number of CPU cores |
+| mem | [float](#float) |  | Memory in GB (or as needed) |
+| disk | [float](#float) |  | Disk size in GB (or as needed) |
+| bandwidth | [int32](#int32) |  | Bandwidth (if applicable) |
+| gpu | [string](#string) |  | GPU description |
+| gpumem | [int32](#int32) |  | GPU memory (in GB, for example) |
+| has_gpu | [bool](#bool) |  | Whether a GPU is present |
+| has_quick_disks | [bool](#bool) |  | Whether quick disks are supported |
+| region_id | [uint32](#uint32) |  | Fields from the &#34;flavor_region&#34; table
+
+Foreign key to region table |
+| region | [string](#string) |  | (Optional) Region name |
+| eviction | [float](#float) |  | Eviction rate value |
+| cost | [float](#float) |  | Cost value |
+
+
+
+
+
+
+<a name="taskqueue-FlavorsList"></a>
+
+### FlavorsList
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| flavors | [Flavor](#taskqueue-Flavor) | repeated |  |
+
+
+
+
+
+
+<a name="taskqueue-ListFlavorsRequest"></a>
+
+### ListFlavorsRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| limit | [uint32](#uint32) |  |  |
+| filter | [string](#string) |  |  |
 
 
 
@@ -326,6 +394,7 @@
 | ListWorkers | [ListWorkersRequest](#taskqueue-ListWorkersRequest) | [WorkersList](#taskqueue-WorkersList) |  |
 | CreateWorker | [WorkerRequest](#taskqueue-WorkerRequest) | [WorkerIds](#taskqueue-WorkerIds) |  |
 | DeleteWorker | [WorkerId](#taskqueue-WorkerId) | [Ack](#taskqueue-Ack) |  |
+| ListFlavors | [ListFlavorsRequest](#taskqueue-ListFlavorsRequest) | [FlavorsList](#taskqueue-FlavorsList) |  |
 
  
 

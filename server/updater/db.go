@@ -3,7 +3,6 @@ package updater
 import (
 	"database/sql"
 	"fmt"
-	"log"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
 )
@@ -229,7 +228,7 @@ func (ps *PostgresSession) Commit() error {
 	if err := ps.tx.Commit(); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
 	}
-	log.Printf("Commit successful")
+	//log.Printf("Commit successful")
 	return nil
 }
 

@@ -34,8 +34,24 @@ type Attr struct {
 
 	// Worker Commands (Sub-Subcommands)
 	Worker *struct {
-		List *struct{} `arg:"subcommand:list" help:"List all workers"`
+		List   *struct{} `arg:"subcommand:list" help:"List all workers"`
+		Deploy *struct {
+			Flavor      string `arg:"--flavor,required" help:"Worker flavor"`
+			Provider    string `arg:"--provider,required" help:"Worker provider in the form providerName.configName like azure.primary"`
+			Region      string `arg:"--region" help:"Worker region, default to provider default region"`
+			StepId      int    `arg:"--step" help:"Worker step ID if worker is affected to a task"`
+			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
+			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
+		} `arg:"subcommand:deploy" help:"Create and deploy a new worker instance"`
 	} `arg:"subcommand:worker" help:"Manage workers"`
+
+	// Flavor commands
+	Flavor *struct {
+		List *struct {
+			Limit  int    `arg:"--limit" help:"Limit the number of answers" default:"10"`
+			Filter string `arg:"--filter" help:"Filter flavor by a filter string like 'cpu>=12:mem>=30'"`
+		} `arg:"subcommand:list" help:"List flavors"`
+	} `arg:"subcommand:flavor" help:"Find flavors"`
 }
 
 type CLI struct {
@@ -129,6 +145,25 @@ func (c *CLI) WorkerList() error {
 	return nil
 }
 
+// ListFlavors handles listing flavors.
+func (c *CLI) FlavorList(limit uint32, filter string) error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.ListFlavorsRequest{Limit: limit, Filter: filter}
+	res, err := c.QC.Client.ListFlavors(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error fetching flavors: %w", err)
+	}
+
+	fmt.Println("👷 Flavor List:")
+	for _, flavor := range res.Flavors {
+		fmt.Printf("🔹 ID: %d | Provider: %s | Name: %s | CPU: %d | Mem: %.2f | Disk: %.2f | GPU: %s | Eviction: %.2f | Cost: %.2f\n",
+			flavor.FlavorId, flavor.Provider, flavor.FlavorName, flavor.Cpu, flavor.Mem, flavor.Disk, flavor.Gpu, flavor.Eviction, flavor.Cost)
+	}
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -157,6 +192,11 @@ func Run(c CLI) error {
 		switch {
 		case c.Attr.Worker.List != nil:
 			err = c.WorkerList()
+		}
+	case c.Attr.Flavor != nil:
+		switch {
+		case c.Attr.Flavor.List != nil:
+			err = c.FlavorList(uint32(c.Attr.Flavor.List.Limit), c.Attr.Flavor.List.Filter)
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

@@ -29,6 +29,7 @@ const (
 	TaskQueue_ListWorkers_FullMethodName         = "/taskqueue.TaskQueue/ListWorkers"
 	TaskQueue_CreateWorker_FullMethodName        = "/taskqueue.TaskQueue/CreateWorker"
 	TaskQueue_DeleteWorker_FullMethodName        = "/taskqueue.TaskQueue/DeleteWorker"
+	TaskQueue_ListFlavors_FullMethodName         = "/taskqueue.TaskQueue/ListFlavors"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -45,6 +46,7 @@ type TaskQueueClient interface {
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
 	DeleteWorker(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*Ack, error)
+	ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error)
 }
 
 type taskQueueClient struct {
@@ -167,6 +169,16 @@ func (c *taskQueueClient) DeleteWorker(ctx context.Context, in *WorkerId, opts .
 	return out, nil
 }
 
+func (c *taskQueueClient) ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FlavorsList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListFlavors_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -181,6 +193,7 @@ type TaskQueueServer interface {
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
 	DeleteWorker(context.Context, *WorkerId) (*Ack, error)
+	ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -220,6 +233,9 @@ func (UnimplementedTaskQueueServer) CreateWorker(context.Context, *WorkerRequest
 }
 func (UnimplementedTaskQueueServer) DeleteWorker(context.Context, *WorkerId) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorker not implemented")
+}
+func (UnimplementedTaskQueueServer) ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListFlavors not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -404,6 +420,24 @@ func _TaskQueue_DeleteWorker_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ListFlavors_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListFlavorsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListFlavors(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListFlavors_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListFlavors(ctx, req.(*ListFlavorsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -442,6 +476,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteWorker",
 			Handler:    _TaskQueue_DeleteWorker_Handler,
+		},
+		{
+			MethodName: "ListFlavors",
+			Handler:    _TaskQueue_ListFlavors_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

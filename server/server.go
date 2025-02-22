@@ -11,6 +11,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
@@ -485,6 +487,201 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	}
 
 	return &pb.WorkersList{Workers: workers}, nil
+}
+
+// New regex: operator and value are optional.
+var filterRegex = regexp.MustCompile(`^([a-zA-Z_]+)(?:\s*(>=|<=|>|<|==|=|~)\s*(\S+))?$`)
+
+// Maps for field types.
+var numericFields = map[string]bool{
+	"cpu":       true,
+	"mem":       true,
+	"disk":      true,
+	"bandwidth": true,
+	"gpumem":    true,
+	"eviction":  true,
+	"cost":      true,
+}
+var booleanFields = map[string]bool{
+	"has_gpu":         true,
+	"has_quick_disks": true,
+}
+
+// getColumnMapping returns the appropriate table alias and database column name.
+func getColumnMapping(col string) (dbColumn string) {
+	lcol := strings.ToLower(col)
+	switch lcol {
+	case "provider":
+		return "p.provider_name||'.'||p.config_name"
+	case "eviction", "cost":
+		return fmt.Sprintf("fr.%s", lcol)
+	case "region", "region_name":
+		return "r.region_name"
+	default:
+		return fmt.Sprintf("f.%s", lcol)
+	}
+}
+
+// parseFilterToken converts a filter token into a SQL condition string.
+// For numeric and string fields, the operator and value are mandatory.
+// For boolean fields, they are optional. For strings, "~" is converted to a LIKE clause.
+func parseFilterToken(token string) (string, error) {
+	token = strings.TrimSpace(token)
+	matches := filterRegex.FindStringSubmatch(token)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("invalid filter token: %s", token)
+	}
+	col := matches[1]
+	op := matches[2]
+	val := matches[3]
+	dbCol := getColumnMapping(col)
+	lowerCol := strings.ToLower(col)
+
+	// If operator/value are missing...
+	if op == "" || val == "" {
+		// For boolean fields, allow a token like "has_gpu"
+		if booleanFields[lowerCol] {
+			// Return a condition that simply checks the column
+			return fmt.Sprintf("f.%s", lowerCol), nil
+		}
+		return "", fmt.Errorf("missing operator or value for field %s", col)
+	}
+
+	// Normalize equality: "==" becomes "=".
+	if op == "==" {
+		op = "="
+	}
+
+	// Validate and construct condition based on field type.
+	if numericFields[lowerCol] {
+		if op == "~" {
+			return "", fmt.Errorf("invalid operator '~' for numeric field %s", col)
+		}
+		// For numeric fields, assume the value is numeric (no quotes)
+		return fmt.Sprintf("%s %s %s", dbCol, op, val), nil
+	} else if booleanFields[lowerCol] {
+		// For boolean fields, if operator is provided, only "=" is allowed.
+		if op != "=" {
+			return "", fmt.Errorf("invalid operator %s for boolean field %s", op, col)
+		}
+		// Return condition as "f.has_gpu = <val>"
+		return fmt.Sprintf("%s %s %s", lowerCol, op, val), nil
+	} else {
+		// For string fields, allow "~" (which converts to LIKE) or normal operators.
+		if op == "~" {
+			return fmt.Sprintf("%s LIKE '%s'", dbCol, val), nil
+		} else if op != "=" {
+			return "", fmt.Errorf("invalid operator %s for string field %s", op, col)
+		}
+		// For equality or other comparisons, ensure that the value is quoted.
+		if !(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
+			val = fmt.Sprintf("'%s'", val)
+		}
+		return fmt.Sprintf("%s %s %s", dbCol, op, val), nil
+	}
+}
+
+func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRequest) (*pb.FlavorsList, error) {
+	var flavors []*pb.Flavor
+
+	var conditions []string
+	if req.Filter != "" {
+		tokens := strings.Split(req.Filter, ":")
+		for _, token := range tokens {
+			token = strings.TrimSpace(token)
+			if token == "" {
+				continue
+			}
+			cond, err := parseFilterToken(token)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse filter %s: %w", token, err)
+			}
+			conditions = append(conditions, cond)
+		}
+	}
+
+	baseQuery := `
+	SELECT 
+		f.flavor_id,
+		f.provider_id,
+		f.flavor_name,
+		p.provider_name||'.'||p.config_name as provider,
+		f.cpu,
+		f.mem,
+		f.disk,
+		f.bandwidth,
+		f.gpu,
+		f.gpumem,
+		f.has_gpu,
+		f.has_quick_disks,
+		r.region_id,
+		r.region_name,
+		fr.eviction,
+		fr.cost
+	FROM flavor f
+	JOIN flavor_region fr ON f.flavor_id = fr.flavor_id
+	JOIN region r ON fr.region_id = r.region_id
+	JOIN provider p ON p.provider_id = f.provider_id`
+
+	if len(conditions) > 0 {
+		baseQuery += "\nWHERE " + strings.Join(conditions, " AND ")
+	}
+	baseQuery += fmt.Sprintf("\nORDER BY fr.cost LIMIT %d;", req.Limit)
+
+	log.Printf("Final query: %s", baseQuery)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(baseQuery)
+	if err != nil {
+		log.Printf("⚠️ Failed to list flavors: %v", err)
+		return nil, fmt.Errorf("failed to list flavors: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var flavor pb.Flavor
+		err := rows.Scan(
+			&flavor.FlavorId,
+			&flavor.ProviderId,
+			&flavor.FlavorName,
+			&flavor.Provider,
+			&flavor.Cpu,
+			&flavor.Mem,
+			&flavor.Disk,
+			&flavor.Bandwidth,
+			&flavor.Gpu,
+			&flavor.Gpumem,
+			&flavor.HasGpu,
+			&flavor.HasQuickDisks,
+			&flavor.RegionId,
+			&flavor.Region,
+			&flavor.Eviction,
+			&flavor.Cost,
+		)
+		if err != nil {
+			log.Printf("⚠️ Failed to scan flavor: %v", err)
+			continue
+		}
+		flavors = append(flavors, &flavor)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("⚠️ Error iterating flavors: %v", err)
+		return nil, fmt.Errorf("error iterating flavors: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit flavor listing: %v", err)
+		return nil, fmt.Errorf("failed to commit flavor listing: %w", err)
+	}
+
+	return &pb.FlavorsList{Flavors: flavors}, nil
 }
 
 func (s *taskQueueServer) checkProviders() error {
