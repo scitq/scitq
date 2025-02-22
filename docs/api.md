@@ -342,14 +342,13 @@ Foreign key to region table |
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| provider | [string](#string) |  |  |
-| flavor | [string](#string) |  |  |
+| provider_id | [uint32](#uint32) |  |  |
+| flavor_id | [uint32](#uint32) |  |  |
+| region_id | [uint32](#uint32) |  |  |
 | number | [uint32](#uint32) |  |  |
 | concurrency | [uint32](#uint32) |  |  |
 | prefetch | [uint32](#uint32) |  |  |
 | step_id | [uint32](#uint32) |  |  |
-| flavor_id | [uint32](#uint32) |  |  |
-| region_id | [uint32](#uint32) |  |  |
 
 
 

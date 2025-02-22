@@ -94,14 +94,13 @@ message ListTasksRequest {
 }
 
 message WorkerRequest {
-    string provider = 1;
-    string flavor = 2;
-    uint32 number = 3;
-    uint32 concurrency = 4;
-    uint32 prefetch = 5;
-    uint32 step_id = 6;
-    uint32 flavor_id = 7;
-    uint32 region_id = 8;
+    uint32 provider_id = 1;
+    uint32 flavor_id = 2;
+    uint32 region_id = 3;
+    uint32 number = 4;
+    uint32 concurrency = 5;
+    uint32 prefetch = 6;
+    uint32 step_id = 7;
 }
 
 message ListFlavorsRequest {

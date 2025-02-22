@@ -39,6 +39,7 @@ type Attr struct {
 			Flavor      string `arg:"--flavor,required" help:"Worker flavor"`
 			Provider    string `arg:"--provider,required" help:"Worker provider in the form providerName.configName like azure.primary"`
 			Region      string `arg:"--region" help:"Worker region, default to provider default region"`
+			Count       int    `arg:"--count" help:"How many worker to create" default:"1"`
 			StepId      int    `arg:"--step" help:"Worker step ID if worker is affected to a task"`
 			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
 			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
@@ -164,6 +165,55 @@ func (c *CLI) FlavorList(limit uint32, filter string) error {
 	return nil
 }
 
+// WorkerDeploy deploys a new worker instance.
+func (c *CLI) WorkerDeploy() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	var regionFilter string
+	if c.Attr.Worker.Deploy.Region == "" {
+		regionFilter = "region is default"
+	} else {
+		regionFilter = fmt.Sprintf("region=%s", c.Attr.Worker.Deploy.Region)
+	}
+
+	req := &pb.ListFlavorsRequest{
+		Limit:  1,
+		Filter: fmt.Sprintf("provider=%s:flavor_name=%s:%s", c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Flavor, regionFilter),
+	}
+	res, err := c.QC.Client.ListFlavors(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error fetching flavor: %w", err)
+	}
+	if len(res.Flavors) != 1 {
+		return fmt.Errorf("expected exactly one flavor, got %d", len(res.Flavors))
+	}
+
+	flavor := res.Flavors[0]
+	// Now you can work with 'flavor'
+	fmt.Printf("✅ Identified flavor: %s (ID: %d)\n", flavor.FlavorName, flavor.FlavorId)
+
+	// Build the WorkerDeployRequest using parameters from CLI.
+	req2 := &pb.WorkerRequest{
+		ProviderId:  flavor.ProviderId,
+		FlavorId:    flavor.FlavorId,
+		RegionId:    flavor.RegionId,
+		Number:      uint32(c.Attr.Worker.Deploy.Count),
+		StepId:      uint32(c.Attr.Worker.Deploy.StepId),
+		Concurrency: uint32(c.Attr.Worker.Deploy.Concurrency),
+		Prefetch:    uint32(c.Attr.Worker.Deploy.Prefetch),
+	}
+
+	// Call the gRPC DeployWorker RPC.
+	res2, err := c.QC.Client.CreateWorker(ctx, req2)
+	if err != nil {
+		return fmt.Errorf("error deploying worker: %w", err)
+	}
+
+	fmt.Printf("✅ Worker deployed with ID: %d\n", res2.WorkerIds)
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -192,6 +242,8 @@ func Run(c CLI) error {
 		switch {
 		case c.Attr.Worker.List != nil:
 			err = c.WorkerList()
+		case c.Attr.Worker.Deploy != nil:
+			err = c.WorkerDeploy()
 		}
 	case c.Attr.Flavor != nil:
 		switch {

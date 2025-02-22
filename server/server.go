@@ -490,7 +490,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 }
 
 // New regex: operator and value are optional.
-var filterRegex = regexp.MustCompile(`^([a-zA-Z_]+)(?:\s*(>=|<=|>|<|==|=|~)\s*(\S+))?$`)
+var filterRegex = regexp.MustCompile(`^([a-zA-Z_]+)(?:\s*(>=|<=|>|<|==|=|~|is)\s*(\S+))?$`)
 
 // Maps for field types.
 var numericFields = map[string]bool{
@@ -517,6 +517,8 @@ func getColumnMapping(col string) (dbColumn string) {
 		return fmt.Sprintf("fr.%s", lcol)
 	case "region", "region_name":
 		return "r.region_name"
+	case "flavor", "flavor_name":
+		return "f.flavor_name"
 	default:
 		return fmt.Sprintf("f.%s", lcol)
 	}
@@ -537,12 +539,19 @@ func parseFilterToken(token string) (string, error) {
 	dbCol := getColumnMapping(col)
 	lowerCol := strings.ToLower(col)
 
+	if op == "is" {
+		if lowerCol == "region" && val == "default" {
+			return "r.is_default", nil
+		} else {
+			return "", fmt.Errorf("invalid 'is' operator for column %s and value %s", col, val)
+		}
+	}
 	// If operator/value are missing...
 	if op == "" || val == "" {
 		// For boolean fields, allow a token like "has_gpu"
 		if booleanFields[lowerCol] {
 			// Return a condition that simply checks the column
-			return fmt.Sprintf("f.%s", lowerCol), nil
+			return dbCol, nil
 		}
 		return "", fmt.Errorf("missing operator or value for field %s", col)
 	}
@@ -628,7 +637,7 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 	}
 	baseQuery += fmt.Sprintf("\nORDER BY fr.cost LIMIT %d;", req.Limit)
 
-	log.Printf("Final query: %s", baseQuery)
+	//log.Printf("Final query: %s", baseQuery)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -733,7 +742,7 @@ func (s *taskQueueServer) checkProviders() error {
 					mappedConfig[p.ProviderName][p.ConfigName] = true
 
 					// ✅ Now it's safe to sync regions inside this loop
-					if err := s.syncRegions(tx, p.ProviderID, config.Regions); err != nil {
+					if err := s.syncRegions(tx, p.ProviderID, config.Regions, config.DefaultRegion); err != nil {
 						log.Printf("⚠️ Failed to sync regions for provider %s: %v", p.ConfigName, err)
 					}
 				}
@@ -759,7 +768,7 @@ func (s *taskQueueServer) checkProviders() error {
 			s.providers[providerId] = provider
 
 			// Manage regions for this newly created provider
-			if err := s.syncRegions(tx, providerId, config.Regions); err != nil {
+			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {
 				return fmt.Errorf("failed to sync regions for new provider %s: %w", configName, err)
 			}
 		}
@@ -776,11 +785,12 @@ func (s *taskQueueServer) checkProviders() error {
 	return nil
 }
 
-func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredRegions []string) error {
+func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredRegions []string, defaultRegion string) error {
 	log.Printf("🔄 Syncing regions for provider %d : %v", providerId, configuredRegions)
 	// Track existing regions
 	existingRegions := make(map[string]uint32)
-	rows, err := tx.Query(`SELECT region_id, region_name FROM region WHERE provider_id = $1`, providerId)
+	defaultRegions := make(map[string]bool)
+	rows, err := tx.Query(`SELECT region_id, region_name, is_default FROM region WHERE provider_id = $1`, providerId)
 	if err != nil {
 		log.Printf("⚠️ Failed to list regions for provider %d: %v", providerId, err)
 		return fmt.Errorf("failed to list regions: %w", err)
@@ -790,11 +800,13 @@ func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredR
 	for rows.Next() {
 		var regionId uint32
 		var regionName string
-		if err := rows.Scan(&regionId, &regionName); err != nil {
+		var isDefault bool
+		if err := rows.Scan(&regionId, &regionName, &isDefault); err != nil {
 			log.Printf("⚠️ Failed to scan region: %v", err)
 			continue
 		}
 		existingRegions[regionName] = regionId
+		defaultRegions[regionName] = isDefault
 	}
 
 	// Track configured regions
@@ -803,7 +815,7 @@ func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredR
 		configuredRegionSet[region] = true
 		if _, exists := existingRegions[region]; !exists {
 			// Insert missing region
-			_, err := tx.Exec(`INSERT INTO region (provider_id, region_name) VALUES ($1, $2)`, providerId, region)
+			_, err := tx.Exec(`INSERT INTO region (provider_id, region_name, is_default) VALUES ($1, $2, $3)`, providerId, region, region == defaultRegion)
 			if err != nil {
 				log.Printf("⚠️ Failed to insert region %s: %v", region, err)
 				return fmt.Errorf("failed to insert region %s: %w", region, err)
@@ -817,6 +829,13 @@ func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredR
 		if !configuredRegionSet[region] {
 			if err := s.cleanupRegion(tx, regionId, region, providerId); err != nil {
 				return err
+			}
+		} else if defaultRegions[region] != (region == defaultRegion) {
+			log.Printf("Updating region %s", region)
+			_, err = tx.Exec(`UPDATE region SET is_default=$3 WHERE provider_id=$1 AND region_name=$2`, providerId, region, region == defaultRegion)
+			if err != nil {
+				log.Printf("⚠️ Failed to update region %s: %v", region, err)
+				return fmt.Errorf("failed to update region %s: %w", region, err)
 			}
 		}
 	}

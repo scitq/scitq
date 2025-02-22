@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS provider (
 CREATE TABLE IF NOT EXISTS region (
     region_id SERIAL PRIMARY KEY,
     provider_id INT REFERENCES provider(provider_id) ON DELETE CASCADE,
-    region_name TEXT
+    region_name TEXT,
+    is_default BOOLEAN DEFAULT FALSE
 );
 
 -- Flavor Table
