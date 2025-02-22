@@ -43,14 +43,25 @@ func (ps *PostgresSession) Rollback() error {
 	return nil
 }
 
-// QueryFlavors returns all flavors for a given provider.
-func (ps *PostgresSession) QueryFlavors(provider string) ([]*Flavor, error) {
+func (ps *PostgresSession) GetProviderID(provider string) (uint32, error) {
 	query := `
-	SELECT f.flavor_name, p.provider_name, f.cpu, f.mem, f.disk, f.bandwidth, f.gpu, f.gpumem, f.has_gpu, f.has_quick_disks
+	SELECT provider_id FROM provider WHERE provider_name||'.'||config_name = $1`
+	var providerID uint32
+	err := ps.tx.QueryRow(query, provider).Scan(&providerID)
+	if err != nil {
+		return 0, fmt.Errorf("query provider %s for ID: %w", provider, err)
+	}
+	return providerID, nil
+}
+
+// QueryFlavors returns all flavors for a given provider.
+func (ps *PostgresSession) QueryFlavors(providerID uint32) ([]*Flavor, error) {
+	query := `
+	SELECT f.flavor_name, p.provider_name||'.'||p.config_name, f.cpu, f.mem, f.disk, f.bandwidth, f.gpu, f.gpumem, f.has_gpu, f.has_quick_disks
 	FROM flavor f
 	JOIN provider p ON f.provider_id = p.provider_id
-	WHERE p.provider_name = $1`
-	rows, err := ps.tx.Query(query, provider)
+	WHERE f.provider_id = $1`
+	rows, err := ps.tx.Query(query, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("query flavors: %w", err)
 	}
@@ -67,7 +78,8 @@ func (ps *PostgresSession) QueryFlavors(provider string) ([]*Flavor, error) {
 		}
 		flavors = append(flavors, &Flavor{
 			Name:         name.String,
-			Provider:     prov.String,
+			ProviderID:   int(providerID),
+			ProviderName: prov.String,
 			CPU:          int(cpu.Int64),
 			Mem:          mem.Float64,
 			Disk:         disk.Float64,
@@ -89,8 +101,8 @@ func (ps *PostgresSession) DeleteFlavor(f *Flavor) error {
 	query := `
 	DELETE FROM flavor
 	WHERE flavor_name = $1
-	  AND provider_id = (SELECT provider_id FROM provider WHERE provider_name = $2)`
-	_, err := ps.tx.Exec(query, f.Name, f.Provider)
+	  AND provider_id = $2`
+	_, err := ps.tx.Exec(query, f.Name, f.ProviderID)
 	if err != nil {
 		return fmt.Errorf("delete flavor: %w", err)
 	}
@@ -102,10 +114,9 @@ func (ps *PostgresSession) AddFlavor(f *Flavor) error {
 	query := `
 	INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, bandwidth, gpu, gpumem)
 	VALUES (
-	  (SELECT provider_id FROM provider WHERE provider_name = $1),
-	  $2, $3, $4, $5, $6, $7, $8
+	  $1, $2, $3, $4, $5, $6, $7, $8
 	)`
-	_, err := ps.tx.Exec(query, f.Provider, f.Name, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem)
+	_, err := ps.tx.Exec(query, f.ProviderID, f.Name, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem)
 	if err != nil {
 		return fmt.Errorf("add flavor: %w", err)
 	}
@@ -118,8 +129,8 @@ func (ps *PostgresSession) UpdateFlavor(f *Flavor) error {
 	UPDATE flavor
 	SET cpu = $3, mem = $4, disk = $5, bandwidth = $6, gpu = $7, gpumem = $8, has_gpu = $9, has_quick_disks = $10
 	WHERE flavor_name = $1
-	  AND provider_id = (SELECT provider_id FROM provider WHERE provider_name = $2)`
-	_, err := ps.tx.Exec(query, f.Name, f.Provider, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem, f.HasGPU, f.HasQuickDisk)
+	  AND provider_id = $2`
+	_, err := ps.tx.Exec(query, f.Name, f.ProviderID, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem, f.HasGPU, f.HasQuickDisk)
 	if err != nil {
 		return fmt.Errorf("update flavor: %w", err)
 	}
@@ -130,15 +141,14 @@ func (ps *PostgresSession) UpdateFlavor(f *Flavor) error {
 }
 
 // QueryFlavorMetrics returns flavor metrics for a given provider.
-func (ps *PostgresSession) QueryFlavorMetrics(provider string) ([]*FlavorMetrics, error) {
+func (ps *PostgresSession) QueryFlavorMetrics(providerID int) ([]*FlavorMetrics, error) {
 	query := `
-	SELECT f.flavor_name, p.provider_name, r.region_name, fr.cost, fr.eviction
+	SELECT f.flavor_name, r.region_name, fr.cost, fr.eviction
 	FROM flavor_region fr
 	JOIN region r ON fr.region_id = r.region_id
 	JOIN flavor f ON fr.flavor_id = f.flavor_id
-	JOIN provider p ON f.provider_id = p.provider_id
-	WHERE p.provider_name = $1`
-	rows, err := ps.tx.Query(query, provider)
+	WHERE f.provider_id = $1`
+	rows, err := ps.tx.Query(query, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("query flavor metrics: %w", err)
 	}
@@ -146,14 +156,14 @@ func (ps *PostgresSession) QueryFlavorMetrics(provider string) ([]*FlavorMetrics
 
 	var metrics []*FlavorMetrics
 	for rows.Next() {
-		var flavorName, prov, regionName sql.NullString
+		var flavorName, regionName sql.NullString
 		var cost, eviction sql.NullFloat64
-		if err := rows.Scan(&flavorName, &prov, &regionName, &cost, &eviction); err != nil {
+		if err := rows.Scan(&flavorName, &regionName, &cost, &eviction); err != nil {
 			return nil, fmt.Errorf("scan flavor metrics: %w", err)
 		}
 		metrics = append(metrics, &FlavorMetrics{
 			FlavorName: flavorName.String,
-			Provider:   prov.String,
+			ProviderID: providerID,
 			RegionName: regionName.String,
 			Cost:       cost.Float64,
 			Eviction:   int(eviction.Float64),
@@ -171,15 +181,13 @@ func (ps *PostgresSession) DeleteFlavorMetrics(fm *FlavorMetrics) error {
 	DELETE FROM flavor_region
 	WHERE flavor_id = (
 	  SELECT f.flavor_id FROM flavor f
-	  JOIN provider p ON f.provider_id = p.provider_id
-	  WHERE f.flavor_name = $1 AND p.provider_name = $2
+	  WHERE f.flavor_name = $1 AND f.provider_id = $2
 	)
 	  AND region_id = (
 	  SELECT r.region_id FROM region r
-	  JOIN provider p ON r.provider_id = p.provider_id
-	  WHERE r.region_name = $3 AND p.provider_name = $2
+	  WHERE r.region_name = $3 AND r.provider_ID = $2
 	)`
-	_, err := ps.tx.Exec(query, fm.FlavorName, fm.Provider, fm.RegionName)
+	_, err := ps.tx.Exec(query, fm.FlavorName, fm.ProviderID, fm.RegionName)
 	if err != nil {
 		return fmt.Errorf("delete flavor metrics: %w", err)
 	}
@@ -191,13 +199,11 @@ func (ps *PostgresSession) AddFlavorMetrics(fm *FlavorMetrics) error {
 	query := `
 	INSERT INTO flavor_region (flavor_id, region_id, eviction, cost)
 	VALUES (
-	  (SELECT f.flavor_id FROM flavor f JOIN provider p ON f.provider_id = p.provider_id
-	   WHERE f.flavor_name = $1 AND p.provider_name = $2),
-	  (SELECT r.region_id FROM region r JOIN provider p ON r.provider_id = p.provider_id
-	   WHERE r.region_name = $3 AND p.provider_name = $2),
+	  (SELECT f.flavor_id FROM flavor f WHERE f.flavor_name = $1 AND f.provider_id = $2),
+	  (SELECT r.region_id FROM region r WHERE r.region_name = $3 AND r.provider_id = $2),
 	  $4, $5
 	)`
-	_, err := ps.tx.Exec(query, fm.FlavorName, fm.Provider, fm.RegionName, fm.Eviction, fm.Cost)
+	_, err := ps.tx.Exec(query, fm.FlavorName, fm.ProviderID, fm.RegionName, fm.Eviction, fm.Cost)
 	if err != nil {
 		return fmt.Errorf("add flavor metrics: %w", err)
 	}

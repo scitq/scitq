@@ -28,45 +28,45 @@ import (
 )
 
 // loggingPolicy is a custom pipeline policy for logging HTTP requests and responses.
-type loggingPolicy struct{}
-
-func (lp loggingPolicy) Do(req *policy.Request) (*http.Response, error) {
-	r := req.Raw()
-	log.Printf("Request: %s %s", r.Method, r.URL.String())
-	for name, values := range r.Header {
-		log.Printf("Request Header: %s: %v", name, values)
-	}
-	if r.Body != nil {
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err == nil {
-			log.Printf("Request Body: %s", string(bodyBytes))
-			// Reset the body so it can be read later.
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		} else {
-			log.Printf("Error reading request body: %v", err)
-		}
-	}
-
-	resp, err := req.Next()
-	if err != nil {
-		log.Printf("Response error: %v", err)
-	} else {
-		log.Printf("Response status: %d", resp.StatusCode)
-		for name, values := range resp.Header {
-			log.Printf("Response Header: %s: %v", name, values)
-		}
-		if resp.Body != nil {
-			respBodyBytes, err := io.ReadAll(resp.Body)
-			if err == nil {
-				log.Printf("Response Body: %s", string(respBodyBytes))
-				resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
-			} else {
-				log.Printf("Error reading response body: %v", err)
-			}
-		}
-	}
-	return resp, err
-}
+//type loggingPolicy struct{}
+//
+//func (lp loggingPolicy) Do(req *policy.Request) (*http.Response, error) {
+//	r := req.Raw()
+//	log.Printf("Request: %s %s", r.Method, r.URL.String())
+//	for name, values := range r.Header {
+//		log.Printf("Request Header: %s: %v", name, values)
+//	}
+//	if r.Body != nil {
+//		bodyBytes, err := io.ReadAll(r.Body)
+//		if err == nil {
+//			log.Printf("Request Body: %s", string(bodyBytes))
+//			// Reset the body so it can be read later.
+//			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+//		} else {
+//			log.Printf("Error reading request body: %v", err)
+//		}
+//	}
+//
+//	resp, err := req.Next()
+//	if err != nil {
+//		log.Printf("Response error: %v", err)
+//	} else {
+//		log.Printf("Response status: %d", resp.StatusCode)
+//		for name, values := range resp.Header {
+//			log.Printf("Response Header: %s: %v", name, values)
+//		}
+//		if resp.Body != nil {
+//			respBodyBytes, err := io.ReadAll(resp.Body)
+//			if err == nil {
+//				log.Printf("Response Body: %s", string(respBodyBytes))
+//				resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+//			} else {
+//				log.Printf("Error reading response body: %v", err)
+//			}
+//		}
+//	}
+//	return resp, err
+//}
 
 // Constants and regex definitions.
 const DEFAULT_OS_DISK = 30.0
@@ -114,7 +114,11 @@ func NewAzure(cfg config.Config, providerCfg config.AzureConfig) (*Azure, error)
 		return nil, err
 	}
 
-	gp := updater.NewGenericProvider(cfg, "azure")
+	gp, err := updater.NewGenericProvider(cfg, providerCfg.GetName())
+	if err != nil {
+		return nil, err
+	}
+
 	return &Azure{
 		GenericProvider:  gp,
 		SubscriptionID:   providerCfg.SubscriptionID,
@@ -230,7 +234,8 @@ func (az *Azure) GetFlavors() error {
 			if !seenFlavors[vm.Name] {
 				f := &updater.Flavor{
 					Name:         vm.Name,
-					Provider:     az.GenericProvider.Provider,
+					ProviderID:   int(az.GenericProvider.ProviderID),
+					ProviderName: az.ProviderName,
 					CPU:          vm.NumberOfCores,
 					Mem:          float64(vm.MemoryInMB) / 1024,
 					Disk:         maxFloat(DEFAULT_OS_DISK, float64(vm.ResourceDiskSizeInMB)/1024),
@@ -254,7 +259,7 @@ func (az *Azure) GetFlavors() error {
 			key := fmt.Sprintf("%s|%s", vm.Name, region)
 			flavorMetricsMap[key] = &updater.FlavorMetrics{
 				FlavorName: vm.Name,
-				Provider:   az.GenericProvider.Provider,
+				ProviderID: int(az.GenericProvider.ProviderID),
 				RegionName: region,
 			}
 		}

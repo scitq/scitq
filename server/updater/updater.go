@@ -3,6 +3,7 @@ package updater
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
 )
@@ -11,11 +12,11 @@ import (
 // In a real implementation, these methods would be implemented
 // using your chosen database/ORM library.
 type Session interface {
-	QueryFlavors(provider string) ([]*Flavor, error)
+	QueryFlavors(providerID uint32) ([]*Flavor, error)
 	DeleteFlavor(f *Flavor) error
 	AddFlavor(f *Flavor) error
 	UpdateFlavor(f *Flavor) error
-	QueryFlavorMetrics(provider string) ([]*FlavorMetrics, error)
+	QueryFlavorMetrics(providerID int) ([]*FlavorMetrics, error)
 	DeleteFlavorMetrics(fm *FlavorMetrics) error
 	AddFlavorMetrics(fm *FlavorMetrics) error
 	Commit() error
@@ -26,7 +27,8 @@ type Session interface {
 // Flavor represents a compute flavor.
 type Flavor struct {
 	Name         string
-	Provider     string
+	ProviderID   int
+	ProviderName string
 	CPU          int
 	Mem          float64
 	Disk         float64
@@ -40,7 +42,7 @@ type Flavor struct {
 // FlavorMetrics holds regional or cost data for a Flavor.
 type FlavorMetrics struct {
 	FlavorName string
-	Provider   string
+	ProviderID int
 	RegionName string
 	Cost       float64
 	Eviction   int
@@ -49,20 +51,45 @@ type FlavorMetrics struct {
 // GenericProvider holds a database session, provider name,
 // a live flag, and a buffer for non-live output.
 type GenericProvider struct {
-	Session  Session
-	Provider string
+	Session      Session
+	ProviderID   uint32
+	ProviderName string
 }
 
+const maxRetries = 5
+
 // NewGenericProvider creates a new GenericProvider.
-func NewGenericProvider(cfg config.Config, provider string) *GenericProvider {
+func NewGenericProvider(cfg config.Config, provider string) (*GenericProvider, error) {
 	db, err := NewPostgresSession(cfg)
 	if err != nil {
-		log.Fatalf("failed to create database session: %v", err)
+		return nil, fmt.Errorf("failed to create database session: %w", err)
 	}
+	err = db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer db.Rollback()
+
+	var providerID uint32
+	for i := 0; i < maxRetries; i++ {
+		providerID, err = db.GetProviderID(provider)
+		if err == nil {
+			break
+		}
+		log.Printf("Attempt %d: failed to find provider %s: %v", i+1, provider, err)
+		time.Sleep(time.Duration(i+1) * time.Second) // Increasing sleep duration
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("provider %s not found after %d retries: %v", provider, maxRetries, err)
+	}
+
+	db.Commit()
 	return &GenericProvider{
-		Session:  db,
-		Provider: provider,
-	}
+		Session:      db,
+		ProviderID:   providerID,
+		ProviderName: provider,
+	}, nil
 }
 
 // UpdateFlavors compares the list of new flavors with what is stored in the DB
@@ -77,18 +104,18 @@ func (gp *GenericProvider) UpdateFlavors(newFlavors []*Flavor) error {
 	// For Flavor, primary keys are Provider and Name.
 	newMap := make(map[string]*Flavor)
 	for _, f := range newFlavors {
-		key := fmt.Sprintf("%s|%s", f.Provider, f.Name)
+		key := fmt.Sprintf("%d|%s", f.ProviderID, f.Name)
 		newMap[key] = f
 	}
 
-	existingFlavors, err := gp.Session.QueryFlavors(gp.Provider)
+	existingFlavors, err := gp.Session.QueryFlavors(gp.ProviderID)
 	if err != nil {
 		return err
 	}
 
 	// Compare each existing flavor.
 	for _, existing := range existingFlavors {
-		key := fmt.Sprintf("%s|%s", existing.Provider, existing.Name)
+		key := fmt.Sprintf("%d|%s", existing.ProviderID, existing.Name)
 		if newFlavor, ok := newMap[key]; !ok {
 			log.Printf("Flavor %s is removed\n", key)
 			if err := gp.Session.DeleteFlavor(existing); err != nil {
@@ -174,17 +201,17 @@ func (gp *GenericProvider) UpdateFlavorMetrics(newMetrics []*FlavorMetrics) erro
 	defer gp.Session.Rollback()
 	newMap := make(map[string]*FlavorMetrics)
 	for _, fm := range newMetrics {
-		key := fmt.Sprintf("%s|%s|%s", fm.Provider, fm.FlavorName, fm.RegionName)
+		key := fmt.Sprintf("%d|%s|%s", fm.ProviderID, fm.FlavorName, fm.RegionName)
 		newMap[key] = fm
 	}
 
-	existingMetrics, err := gp.Session.QueryFlavorMetrics(gp.Provider)
+	existingMetrics, err := gp.Session.QueryFlavorMetrics(int(gp.ProviderID))
 	if err != nil {
 		return err
 	}
 
 	for _, existing := range existingMetrics {
-		key := fmt.Sprintf("%s|%s|%s", existing.Provider, existing.FlavorName, existing.RegionName)
+		key := fmt.Sprintf("%d|%s|%s", existing.ProviderID, existing.FlavorName, existing.RegionName)
 		if newMetric, ok := newMap[key]; !ok {
 			log.Printf("FlavorMetrics %s is removed\n", key)
 			if err := gp.Session.DeleteFlavorMetrics(existing); err != nil {
