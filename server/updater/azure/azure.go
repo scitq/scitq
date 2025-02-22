@@ -369,7 +369,7 @@ func (az *Azure) GetMetrics() error {
 			key := fmt.Sprintf("%s|%s", item["skuName"], item["location"])
 			lowerKey := strings.ToLower(key)
 			if fm, ok := flavorsLower[lowerKey]; ok {
-				log.Printf("Eviction %s %s %s", key, item["evictionRate"], item["price"])
+				//log.Printf("Eviction %s %s %s", key, item["evictionRate"], item["price"])
 				// Parse eviction rate (assumes format like "rate-10+").
 				parts := strings.Split(item["evictionRate"], "-")
 				evictionRatePart := strings.Trim(parts[len(parts)-1], " +")
@@ -379,7 +379,7 @@ func (az *Azure) GetMetrics() error {
 					log.Printf("!")
 				}
 				if !contains(fullMetricKeys, key) {
-					log.Printf("Eviction %s %d", key, fm.Eviction)
+					//log.Printf("Eviction %s %d", key, fm.Eviction)
 					fullMetricKeys = append(fullMetricKeys, key)
 				}
 			}
@@ -485,7 +485,7 @@ func (az *Azure) runResourceGraphQuery(qr QueryRequest) (*QueryResponse, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal resp.Data: %w", err)
 	}
-	log.Printf("Raw resp.Data: %s", string(dataBytes))
+	//log.Printf("Raw resp.Data: %s", string(dataBytes))
 
 	// With resultFormat set to objectArray, resp.Data should now be a JSON array.
 	var dataArray []map[string]interface{}

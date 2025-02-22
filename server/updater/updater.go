@@ -19,6 +19,7 @@ type Session interface {
 	QueryFlavorMetrics(providerID int) ([]*FlavorMetrics, error)
 	DeleteFlavorMetrics(fm *FlavorMetrics) error
 	AddFlavorMetrics(fm *FlavorMetrics) error
+	UpdateFlavorMetrics(fm *FlavorMetrics) error
 	Commit() error
 	Begin() error
 	Rollback() error
@@ -219,13 +220,19 @@ func (gp *GenericProvider) UpdateFlavorMetrics(newMetrics []*FlavorMetrics) erro
 			}
 		} else {
 			delete(newMap, key)
+			changed := false
 			if existing.Cost != newMetric.Cost {
 				log.Printf("FlavorMetrics %s update Cost: %f->%f\n", key, existing.Cost, newMetric.Cost)
 				existing.Cost = newMetric.Cost
+				changed = true
 			}
 			if existing.Eviction != newMetric.Eviction {
 				log.Printf("FlavorMetrics %s update Eviction: %d->%d\n", key, existing.Eviction, newMetric.Eviction)
 				existing.Eviction = newMetric.Eviction
+				changed = true
+			}
+			if changed {
+				gp.Session.UpdateFlavorMetrics(existing)
 			}
 		}
 	}

@@ -185,7 +185,7 @@ func (ps *PostgresSession) DeleteFlavorMetrics(fm *FlavorMetrics) error {
 	)
 	  AND region_id = (
 	  SELECT r.region_id FROM region r
-	  WHERE r.region_name = $3 AND r.provider_ID = $2
+	  WHERE r.region_name = $3 AND r.provider_id = $2
 	)`
 	_, err := ps.tx.Exec(query, fm.FlavorName, fm.ProviderID, fm.RegionName)
 	if err != nil {
@@ -206,6 +206,20 @@ func (ps *PostgresSession) AddFlavorMetrics(fm *FlavorMetrics) error {
 	_, err := ps.tx.Exec(query, fm.FlavorName, fm.ProviderID, fm.RegionName, fm.Eviction, fm.Cost)
 	if err != nil {
 		return fmt.Errorf("add flavor metrics: %w", err)
+	}
+	return nil
+}
+
+// UpdateFlavorMetrics inserts new flavor metrics into the database.
+func (ps *PostgresSession) UpdateFlavorMetrics(fm *FlavorMetrics) error {
+	query := `
+	UPDATE flavor_region SET 
+	 eviction = $4, cost = $5
+	WHERE flavor_id = (SELECT f.flavor_id FROM flavor f WHERE f.flavor_name = $1 AND f.provider_id = $2)
+	 AND region_id =  (SELECT r.region_id FROM region r WHERE r.region_name = $3 AND r.provider_id = $2)`
+	_, err := ps.tx.Exec(query, fm.FlavorName, fm.ProviderID, fm.RegionName, fm.Eviction, fm.Cost)
+	if err != nil {
+		return fmt.Errorf("updated flavor metrics %d:%s %s failed: %w", fm.ProviderID, fm.RegionName, fm.FlavorName, err)
 	}
 	return nil
 }
