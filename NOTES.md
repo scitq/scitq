@@ -84,3 +84,17 @@ CGO_ENABLED=0 go build -o client/bin/scitq-client client/main.go
 CGO_ENABLED=0 go build -o server/bin/scitq-server client/server.go
 CGO_ENABLED=0 go build -o cli/bin/scitq-cli cli/main.go
 ```
+
+# life cycle
+
+## listing and creating
+
+Server run with:
+```sh
+scitq-server -config sample_files/gmts.yaml
+```
+
+```sh
+scitq-cli flavor list --filter "cost>0:eviction<=5"
+scitq-cli worker deploy --flavor Standard_D2s_v4 --provider azure.primary 
+```

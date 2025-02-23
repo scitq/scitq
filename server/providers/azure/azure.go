@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,7 +26,7 @@ type AzureProvider struct {
 	TenantID           string
 	DefaultRegion      string
 	useSpot            bool
-	sshPublicKey       string
+	sshPublicKeyData   string
 	publisher          string
 	offer              string
 	sku                string
@@ -35,8 +37,39 @@ type AzureProvider struct {
 	ScitqServerPort    int
 }
 
+// expandPath expands a leading ~ in a file path to the user's home directory.
+func expandPath(path string) (string, error) {
+	if len(path) > 0 && path[0] == '~' {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, path[1:]), nil
+	}
+	return path, nil
+}
+
+func readFileContent(filePath string) (string, error) {
+	fullFilePath, err := expandPath(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(fullFilePath)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 // NewAzureProvider creates an AzureProvider with the given configuration.
 func New(cfg config.AzureConfig, scitqCfg config.Config) *AzureProvider {
+
+	sshKeyContent, err := readFileContent(cfg.SSHPublicKey)
+	if err != nil {
+		log.Fatalf("Error reading SSH key file: %v\n", err)
+	}
+
 	return &AzureProvider{
 		SubscriptionID:     cfg.SubscriptionID,
 		ClientID:           cfg.ClientID,
@@ -44,7 +77,7 @@ func New(cfg config.AzureConfig, scitqCfg config.Config) *AzureProvider {
 		TenantID:           cfg.TenantID,
 		DefaultRegion:      cfg.DefaultRegion,
 		useSpot:            cfg.UseSpot,
-		sshPublicKey:       cfg.SSHPublicKey,
+		sshPublicKeyData:   sshKeyContent,
 		publisher:          cfg.Image.Publisher,
 		offer:              cfg.Image.Offer,
 		sku:                cfg.Image.Sku,
@@ -72,6 +105,7 @@ func retry(fn func() error, attempts int, delay time.Duration) error {
 		if err = fn(); err == nil {
 			return nil
 		}
+		log.Printf("Error during processing: %v, retrying", err)
 		time.Sleep(delay * time.Duration(i+1))
 	}
 	return fmt.Errorf("after %d attempts, last error: %w", attempts, err)
@@ -113,14 +147,29 @@ func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidenti
 				},
 			},
 		}
-		vnetPoller, err := vnetClient.BeginCreateOrUpdate(ctx, rgName, vnetName, vnetParams, nil)
+		// Check if the VNet already exists.
+		_, err = vnetClient.Get(ctx, rgName, vnetName, nil)
 		if err != nil {
-			return err
+			// Assume error means "not found" and try to create.
+			vnetPoller, err := vnetClient.BeginCreateOrUpdate(ctx, rgName, vnetName, vnetParams, nil)
+			if err != nil {
+				return fmt.Errorf("failed to begin VNet creation: %w", err)
+			}
+			_, err = vnetPoller.PollUntilDone(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("failed to create VNet: %w", err)
+			}
+		} else {
+			log.Printf("VNet %s already exists in resource group %s", vnetName, rgName)
 		}
-		_, err = vnetPoller.PollUntilDone(ctx, nil)
-		if err != nil {
-			return err
-		}
+		//vnetPoller, err := vnetClient.BeginCreateOrUpdate(ctx, rgName, vnetName, vnetParams, nil)
+		//if err != nil {
+		//	return err
+		//}
+		//_, err = vnetPoller.PollUntilDone(ctx, nil)
+		//if err != nil {
+		//	return err
+		//}
 
 		subnetParams := armnetwork.Subnet{
 			Properties: &armnetwork.SubnetPropertiesFormat{
@@ -145,6 +194,8 @@ func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidenti
 func (ap *AzureProvider) Create(workerName, flavor, location string) (string, error) {
 	var ipAddress string
 	var pubIPID string
+
+	log.Printf("Creating VM for worker %s", workerName)
 
 	err := retry(func() error {
 		vmName := workerName
@@ -222,8 +273,8 @@ runcmd:
 						SSH: &armcompute.SSHConfiguration{
 							PublicKeys: []*armcompute.SSHPublicKey{
 								{
-									Path:    to.Ptr("/home/azureuser/.ssh/authorized_keys"),
-									KeyData: to.Ptr(ap.sshPublicKey),
+									Path:    to.Ptr(fmt.Sprintf("/home/%s/.ssh/authorized_keys", ap.username)),
+									KeyData: to.Ptr(ap.sshPublicKeyData),
 								},
 							},
 						},
@@ -275,7 +326,7 @@ runcmd:
 // createDefaultNICWithPubIP creates a new NIC with a public IP and returns both IDs.
 func (ap *AzureProvider) createDefaultNIC(ctx context.Context, cred *azidentity.ClientSecretCredential, rgName, workerName, location string) (string, string, error) {
 	vnetName := workerName + "-vnet"
-	subnetName := "default-subnet"
+	subnetName := workerName + "-subnet"
 	nicName := workerName + "-nic"
 
 	subnetID, err := ap.createVNetAndSubnet(ctx, cred, rgName, vnetName, subnetName, location)

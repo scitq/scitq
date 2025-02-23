@@ -303,21 +303,14 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			var regionName string
 			var flavorName string
 			err := tx.QueryRow(`WITH insertquery AS (
-  INSERT INTO worker (step_id, concurrency, flavor_id, region_id)
-  VALUES ($1, $2, $3, $4)
-  RETURNING worker_id
-),
-updated_worker AS (
-  UPDATE worker
-  SET name = $5 || '_worker_' || worker_id
-  FROM insertquery
-  WHERE worker.worker_id = insertquery.worker_id
-  RETURNING worker.worker_id, worker.name, worker.region_id
+  INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id)
+  VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4)
+  RETURNING worker_id,worker_name,region_id, flavor_id
 )
-SELECT uw.worker_id, uw.name, r.provider_id, r.region_name, f.flavor_name
-FROM updated_worker uw
-JOIN region r ON uw.region_id = r.region_id
-JOIN flavor f ON uw.flavor_id = f.flavor_id`,
+SELECT iq.worker_id, iq.worker_name, r.provider_id, r.region_name, f.flavor_name
+FROM insertquery iq
+JOIN region r ON iq.region_id = r.region_id
+JOIN flavor f ON iq.flavor_id = f.flavor_id`,
 				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
 				&workerID, &workerName, &providerId, &regionName, &flavorName)
 			if err != nil {

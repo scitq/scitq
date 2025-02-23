@@ -122,6 +122,6 @@ func (s *taskQueueServer) processJob(job Job) error {
 
 // updateJobStatus updates the job status in the database.
 func (s *taskQueueServer) updateJobStatus(jobID uint32, status string) error {
-	_, err := s.db.Exec("UPDATE jobs SET status=$1 WHERE job_id=$2", status, jobID)
+	_, err := s.db.Exec("UPDATE job SET status=$1 WHERE job_id=$2", status, jobID)
 	return err
 }

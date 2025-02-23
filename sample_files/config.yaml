@@ -4,14 +4,17 @@ scitq:
 providers:
   azure:
     primary:
-      default_region: "swedencentral"
-      subscription_id: "sub1"
-      resource_group: "group1"
-      location: "eastus"
-      admin_username: "admin1"
-      admin_password: "secret1"
-      vm_size: "Standard_DS1_v2"
-      nic_name: "nic1"
+      default_region: swedencentral
+      subscription_id: XXXXXX
+      client_id: XXXXX
+      client_secret: XXXXX
+      tenant_id: XXXXX
+      update_periodicity: 10m
+      image:
+        publisher: "Canonical"
+        offer: "ubuntu-24_04-lts"
+        sku: "server"
+        version: "latest"      
   openstack:
     ovh:
       auth_url: "https://ovh.example.com:5000/v3"

@@ -176,6 +176,10 @@ func LoadConfig(file string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	// Then set defaults on any zero-valued fields.
+	if err := defaults.Set(&cfg); err != nil {
+		log.Printf("failed to set defaults: %v", err)
+	}
 	if cfg.Scitq.ClientDownloadToken == "" {
 		cfg.Scitq.ClientDownloadToken = randomToken()
 	}
