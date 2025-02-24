@@ -44,6 +44,9 @@ type Attr struct {
 			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
 			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
 		} `arg:"subcommand:deploy" help:"Create and deploy a new worker instance"`
+		Delete *struct {
+			WorkerId int `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
+		} `arg:"subcommand:delete" help:"Delete a worker instance"`
 	} `arg:"subcommand:worker" help:"Manage workers"`
 
 	// Flavor commands
@@ -214,6 +217,26 @@ func (c *CLI) WorkerDeploy() error {
 	return nil
 }
 
+// WorkerDelete deletes a worker instance.
+func (c *CLI) WorkerDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	// Call the gRPC DeleteWorker RPC.
+	res, err := c.QC.Client.DeleteWorker(ctx, &pb.WorkerId{WorkerId: uint32(c.Attr.Worker.Delete.WorkerId)})
+	if err != nil {
+		return fmt.Errorf("error deleting worker: %w", err)
+	}
+
+	if res.Success {
+		fmt.Printf("✅ Worker %d is being deleted", c.Attr.Worker.Delete.WorkerId)
+		return nil
+	} else {
+		return fmt.Errorf("deletion order is in an unknown status for worker %d", c.Attr.Worker.Delete.WorkerId)
+	}
+
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -244,6 +267,8 @@ func Run(c CLI) error {
 			err = c.WorkerList()
 		case c.Attr.Worker.Deploy != nil:
 			err = c.WorkerDeploy()
+		case c.Attr.Worker.Delete != nil:
+			err = c.WorkerDelete()
 		}
 	case c.Attr.Flavor != nil:
 		switch {

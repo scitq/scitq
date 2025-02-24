@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS worker (
     install_strategy JSONB,
     flavor_id INT,
     region_id INT,
-    permanent BOOLEAN DEFAULT TRUE,
+    is_permanent BOOLEAN DEFAULT TRUE,
     hostname TEXT,
     ipv4 inet,
     ipv6 inet

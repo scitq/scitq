@@ -303,8 +303,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			var regionName string
 			var flavorName string
 			err := tx.QueryRow(`WITH insertquery AS (
-  INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id)
-  VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4)
+  INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
+  VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
   RETURNING worker_id,worker_name,region_id, flavor_id
 )
 SELECT iq.worker_id, iq.worker_name, r.provider_id, r.region_name, f.flavor_name
@@ -345,6 +345,67 @@ JOIN flavor f ON iq.flavor_id = f.flavor_id`,
 	}
 
 	return &pb.WorkerIds{WorkerIds: workerIDs}, nil
+}
+
+func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*pb.Ack, error) {
+	var job Job
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var workerName string
+	var providerId int
+	var regionId int
+	var is_permanent bool
+	var statusStr string
+	err = tx.QueryRow(`SELECT w.worker_name, r.provider_id, r.region_id, w.is_permanent, w.status FROM worker w
+	JOIN region r ON w.region_id=r.region_id
+	WHERE w.worker_id=$1`, req.WorkerId).Scan(&workerName, &providerId, &regionId, &is_permanent, &statusStr)
+	status := rune(statusStr[0])
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to find worker %d: %w", req.WorkerId, err)
+	}
+
+	if !is_permanent {
+		var jobId uint32
+		err = tx.QueryRow("INSERT INTO job (worker_id,action,region_id,retry) VALUES ($1,'D',$2,$3) RETURNING job_id",
+			req.WorkerId, regionId, defaultJobRetry).Scan(&jobId)
+		if err != nil {
+			return &pb.Ack{Success: false}, fmt.Errorf("failed to create job for worker %d: %w", req.WorkerId, err)
+		}
+		job = Job{
+			JobID:      jobId,
+			WorkerID:   req.WorkerId,
+			WorkerName: workerName,
+			ProviderID: uint32(providerId),
+			Action:     'D',
+			Retry:      defaultJobRetry,
+			Timeout:    defaultJobTimeout,
+		}
+
+		s.addJob(job)
+
+	} else {
+		if status == 'O' || status == 'I' {
+			_, err = tx.Exec("DELETE FROM worker WHERE worker_id=$1", req.WorkerId)
+			if err != nil {
+				return &pb.Ack{Success: false}, fmt.Errorf("failed to delete worker %d: %w", req.WorkerId, err)
+			}
+		} else {
+			return &pb.Ack{Success: false}, fmt.Errorf("will not delete permanent worker %d with status %c", req.WorkerId, status)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit worker deletion: %v", err)
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to commit worker deletion: %w", err)
+	}
+
+	return &pb.Ack{Success: true}, nil
 }
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
