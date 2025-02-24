@@ -12,7 +12,7 @@ OUTDIR=bin
 
 .PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install
 
-all: build-server build-client build-cli docs
+all: build-server build-client build-cli
 
 build-server:
 	mkdir -p $(BINARY_DIR)
@@ -55,6 +55,12 @@ install: all
 	install -m 755 $(BINARY_SERVER) /usr/local/bin/
 	install -m 755 $(BINARY_CLIENT) /usr/local/bin/
 	install -m 755 $(BINARY_CLI) /usr/local/bin/
+
+install2: all
+	install -m 755 $(BINARY_SERVER) /usr/local/bin/scitq2-server
+	install -m 755 $(BINARY_CLIENT) /usr/local/bin/scitq2-client
+	install -m 755 $(BINARY_CLI) /usr/local/bin/scitq2-cli
+
 
 # Helper for cross-compilation
 define build_binary

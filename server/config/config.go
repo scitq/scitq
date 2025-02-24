@@ -13,16 +13,19 @@ import (
 
 type Config struct {
 	Scitq struct {
-		Port                int    `yaml:"port" default:"50051"`
-		DBURL               string `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
-		LogLevel            string `yaml:"log_level" default:"info"`
-		LogRoot             string `yaml:"log_root" default:"log"`
-		ClientBinaryPath    string `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
-		ClientDownloadToken string `yaml:"client_download_token"`
-		CertificateKey      string `yaml:"certificate_key"`
-		CertificatePem      string `yaml:"certificate_pem"`
-		ServerName          string `yaml:"server_name"`
-		ServerFQDN          string `yaml:"server_fqdn"`
+		Port                 int     `yaml:"port" default:"50051"`
+		DBURL                string  `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
+		LogLevel             string  `yaml:"log_level" default:"info"`
+		LogRoot              string  `yaml:"log_root" default:"log"`
+		ClientBinaryPath     string  `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
+		ClientDownloadToken  string  `yaml:"client_download_token"`
+		CertificateKey       string  `yaml:"certificate_key"`
+		CertificatePem       string  `yaml:"certificate_pem"`
+		ServerName           string  `yaml:"server_name"`
+		ServerFQDN           string  `yaml:"server_fqdn"`
+		DockerRegistry       string  `yaml:"docker_registry"`
+		DockerAuthentication string  `yaml:"docker_authentication"`
+		SwapProportion       float32 `yaml:"swap_proportion" default:"0.1"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`

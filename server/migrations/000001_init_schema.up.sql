@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS worker (
     worker_name TEXT UNIQUE NOT NULL,
     step_id INT NULL REFERENCES step(step_id) ON DELETE SET NULL,
     concurrency INT NOT NULL DEFAULT 1,
+    prefetch INT NOT NULL DEFAULT 0,
     status CHAR(1) NOT NULL DEFAULT 'I', -- (O: Offline, I: Installing, R: Ready, P: Paused, F: Failing)
     stats JSONB,
     last_ping TIMESTAMP,

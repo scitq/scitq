@@ -29,7 +29,7 @@ This is done once, so I do not need to redo it:
 brew install go golang-migrate protoc-gen-doc
 go mod init  github.com/gmtsciencedev/scitq2
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 migrate create -ext sql -dir migrations -seq init_schema
 
 ```
@@ -83,6 +83,21 @@ go run cli/main.go task output --id 1
 CGO_ENABLED=0 go build -o client/bin/scitq-client client/main.go
 CGO_ENABLED=0 go build -o server/bin/scitq-server client/server.go
 CGO_ENABLED=0 go build -o cli/bin/scitq-cli cli/main.go
+```
+
+## install on linux
+
+```sh
+wget https://go.dev/dl/go1.24.0.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go1.24.0.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+echo !! >> /etc/profile.d/ZZZ-locale-functions.sh
+cd scitq2
+make install2
+sudo -u postgres createuser scitq_user -d -P
+psql -h localhost -U scitq_user template1
+# CREATE DATABASE scitq2;
+
 ```
 
 # life cycle

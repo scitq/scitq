@@ -143,8 +143,17 @@ func (c *CLI) WorkerList() error {
 
 	fmt.Println("👷 Worker List:")
 	for _, worker := range res.Workers {
-		fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d\n",
-			worker.WorkerId, worker.Name, worker.Concurrency)
+		fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | IPv4: %s | IPv6: %s | Flavor: %s | Provider: %s | Region: %s\n",
+			worker.WorkerId,
+			worker.Name,
+			worker.Concurrency,
+			worker.Prefetch,
+			worker.Status,
+			worker.Ipv4,
+			worker.Ipv6,
+			worker.Flavor,
+			worker.Provider,
+			worker.Region)
 	}
 	return nil
 }
@@ -229,7 +238,7 @@ func (c *CLI) WorkerDelete() error {
 	}
 
 	if res.Success {
-		fmt.Printf("✅ Worker %d is being deleted", c.Attr.Worker.Delete.WorkerId)
+		fmt.Printf("✅ Worker %d is being deleted\n", c.Attr.Worker.Delete.WorkerId)
 		return nil
 	} else {
 		return fmt.Errorf("deletion order is in an unknown status for worker %d", c.Attr.Worker.Delete.WorkerId)

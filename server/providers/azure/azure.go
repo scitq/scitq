@@ -20,21 +20,9 @@ import (
 
 // AzureProvider holds global configuration for Azure.
 type AzureProvider struct {
-	SubscriptionID     string
-	ClientID           string
-	ClientSecret       string
-	TenantID           string
-	DefaultRegion      string
-	useSpot            bool
-	sshPublicKeyData   string
-	publisher          string
-	offer              string
-	sku                string
-	version            string
-	username           string
-	ScitqServerTag     string
-	ScitqServerAddress string
-	ScitqServerPort    int
+	az               config.AzureConfig
+	sshPublicKeyData string
+	cfg              config.Config
 }
 
 // expandPath expands a leading ~ in a file path to the user's home directory.
@@ -71,26 +59,14 @@ func New(cfg config.AzureConfig, scitqCfg config.Config) *AzureProvider {
 	}
 
 	return &AzureProvider{
-		SubscriptionID:     cfg.SubscriptionID,
-		ClientID:           cfg.ClientID,
-		ClientSecret:       cfg.ClientSecret,
-		TenantID:           cfg.TenantID,
-		DefaultRegion:      cfg.DefaultRegion,
-		useSpot:            cfg.UseSpot,
-		sshPublicKeyData:   sshKeyContent,
-		publisher:          cfg.Image.Publisher,
-		offer:              cfg.Image.Offer,
-		sku:                cfg.Image.Sku,
-		version:            cfg.Image.Version,
-		username:           cfg.Username,
-		ScitqServerTag:     scitqCfg.Scitq.ServerName,
-		ScitqServerAddress: scitqCfg.Scitq.ServerFQDN,
-		ScitqServerPort:    scitqCfg.Scitq.Port,
+		az:               cfg,
+		sshPublicKeyData: sshKeyContent,
+		cfg:              scitqCfg,
 	}
 }
 
 func (ap *AzureProvider) resourceGroupSuffix() string {
-	return "_" + ap.ScitqServerTag + "_group"
+	return "_" + ap.cfg.Scitq.ServerName + "_group"
 }
 
 // resourceGroupName derives the resource group name from the worker name.
@@ -125,13 +101,13 @@ func createClient[T any](newClientFunc func() (*T, error)) (*T, error) {
 // createVNetAndSubnet creates a VNet and subnet with retry logic.
 func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidentity.ClientSecretCredential, rgName, vnetName, subnetName, location string) (string, error) {
 	vnetClient, err := createClient(func() (*armnetwork.VirtualNetworksClient, error) {
-		return armnetwork.NewVirtualNetworksClient(ap.SubscriptionID, cred, nil)
+		return armnetwork.NewVirtualNetworksClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return "", err
 	}
 	subnetClient, err := createClient(func() (*armnetwork.SubnetsClient, error) {
-		return armnetwork.NewSubnetsClient(ap.SubscriptionID, cred, nil)
+		return armnetwork.NewSubnetsClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return "", err
@@ -204,13 +180,17 @@ func (ap *AzureProvider) Create(workerName, flavor, location string) (string, er
 		// Prepare the cloud-init script.
 		cloudInit := fmt.Sprintf(`#cloud-config
 runcmd:
-  - curl -sSL https://%s/scitq-client -o /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client --server %s:%d --install`,
-			ap.ScitqServerAddress, ap.ScitqServerAddress, ap.ScitqServerPort)
+  - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
+  - chmod a+x /usr/local/bin/scitq-client
+  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f"`,
+			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
+			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
+			ap.cfg.Scitq.DockerRegistry, ap.cfg.Scitq.DockerAuthentication,
+			ap.cfg.Scitq.SwapProportion)
 		customData := base64.StdEncoding.EncodeToString([]byte(cloudInit))
 
 		// Create credential.
-		cred, err := azidentity.NewClientSecretCredential(ap.TenantID, ap.ClientID, ap.ClientSecret, nil)
+		cred, err := azidentity.NewClientSecretCredential(ap.az.TenantID, ap.az.ClientID, ap.az.ClientSecret, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create credential: %w", err)
 		}
@@ -218,7 +198,7 @@ runcmd:
 
 		// Create or update the resource group.
 		rgClient, err := createClient(func() (*armresources.ResourceGroupsClient, error) {
-			return armresources.NewResourceGroupsClient(ap.SubscriptionID, cred, nil)
+			return armresources.NewResourceGroupsClient(ap.az.SubscriptionID, cred, nil)
 		})
 		if err != nil {
 			return err
@@ -239,7 +219,7 @@ runcmd:
 
 		// Create VM client.
 		vmClient, err := createClient(func() (*armcompute.VirtualMachinesClient, error) {
-			return armcompute.NewVirtualMachinesClient(ap.SubscriptionID, cred, nil)
+			return armcompute.NewVirtualMachinesClient(ap.az.SubscriptionID, cred, nil)
 		})
 		if err != nil {
 			return err
@@ -249,7 +229,7 @@ runcmd:
 		vmParameters := armcompute.VirtualMachine{
 			Location: to.Ptr(location),
 			Tags: map[string]*string{
-				"scitq":      to.Ptr(ap.ScitqServerTag),
+				"scitq":      to.Ptr(ap.cfg.Scitq.ServerName),
 				"workerName": to.Ptr(workerName),
 			},
 			Properties: &armcompute.VirtualMachineProperties{
@@ -258,22 +238,22 @@ runcmd:
 				},
 				StorageProfile: &armcompute.StorageProfile{
 					ImageReference: &armcompute.ImageReference{
-						Publisher: to.Ptr(ap.publisher),
-						Offer:     to.Ptr(ap.offer),
-						SKU:       to.Ptr(ap.sku),
-						Version:   to.Ptr(ap.version),
+						Publisher: to.Ptr(ap.az.Image.Publisher),
+						Offer:     to.Ptr(ap.az.Image.Offer),
+						SKU:       to.Ptr(ap.az.Image.Sku),
+						Version:   to.Ptr(ap.az.Image.Version),
 					},
 				},
 				OSProfile: &armcompute.OSProfile{
 					ComputerName:  to.Ptr(vmName),
 					CustomData:    to.Ptr(customData),
-					AdminUsername: to.Ptr(ap.username),
+					AdminUsername: to.Ptr(ap.az.Username),
 					LinuxConfiguration: &armcompute.LinuxConfiguration{
 						DisablePasswordAuthentication: to.Ptr(true),
 						SSH: &armcompute.SSHConfiguration{
 							PublicKeys: []*armcompute.SSHPublicKey{
 								{
-									Path:    to.Ptr(fmt.Sprintf("/home/%s/.ssh/authorized_keys", ap.username)),
+									Path:    to.Ptr(fmt.Sprintf("/home/%s/.ssh/authorized_keys", ap.az.Username)),
 									KeyData: to.Ptr(ap.sshPublicKeyData),
 								},
 							},
@@ -292,7 +272,7 @@ runcmd:
 				},
 			},
 		}
-		if ap.useSpot {
+		if ap.az.UseSpot {
 			vmParameters.Properties.Priority = to.Ptr(armcompute.VirtualMachinePriorityTypesSpot)
 			vmParameters.Properties.EvictionPolicy = to.Ptr(armcompute.VirtualMachineEvictionPolicyTypesDeallocate)
 		}
@@ -335,13 +315,13 @@ func (ap *AzureProvider) createDefaultNIC(ctx context.Context, cred *azidentity.
 	}
 
 	pubIPClient, err := createClient(func() (*armnetwork.PublicIPAddressesClient, error) {
-		return armnetwork.NewPublicIPAddressesClient(ap.SubscriptionID, cred, nil)
+		return armnetwork.NewPublicIPAddressesClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return "", "", err
 	}
 	nicClient, err := createClient(func() (*armnetwork.InterfacesClient, error) {
-		return armnetwork.NewInterfacesClient(ap.SubscriptionID, cred, nil)
+		return armnetwork.NewInterfacesClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return "", "", err
@@ -400,7 +380,7 @@ func (ap *AzureProvider) createDefaultNIC(ctx context.Context, cred *azidentity.
 // getIPAddressFromPubIPID retrieves the IP address from the public IP ID.
 func (ap *AzureProvider) getIPAddressFromPubIPID(ctx context.Context, cred *azidentity.ClientSecretCredential, rgName, pubIPID string) (string, error) {
 	pubIPClient, err := createClient(func() (*armnetwork.PublicIPAddressesClient, error) {
-		return armnetwork.NewPublicIPAddressesClient(ap.SubscriptionID, cred, nil)
+		return armnetwork.NewPublicIPAddressesClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return "", err
@@ -421,14 +401,14 @@ func (ap *AzureProvider) getIPAddressFromPubIPID(ctx context.Context, cred *azid
 
 // List returns the worker names and IP addresses for VMs created by scitq.
 func (ap *AzureProvider) List() (map[string]string, error) {
-	cred, err := azidentity.NewClientSecretCredential(ap.TenantID, ap.ClientID, ap.ClientSecret, nil)
+	cred, err := azidentity.NewClientSecretCredential(ap.az.TenantID, ap.az.ClientID, ap.az.ClientSecret, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create credential: %w", err)
 	}
 	ctx := context.Background()
 
 	rgClient, err := createClient(func() (*armresources.ResourceGroupsClient, error) {
-		return armresources.NewResourceGroupsClient(ap.SubscriptionID, cred, nil)
+		return armresources.NewResourceGroupsClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return nil, err
@@ -444,7 +424,7 @@ func (ap *AzureProvider) List() (map[string]string, error) {
 			if rg.Name != nil && strings.HasSuffix(*rg.Name, ap.resourceGroupSuffix()) {
 				workerName := strings.TrimSuffix(*rg.Name, ap.resourceGroupSuffix())
 				vmClient, err := createClient(func() (*armcompute.VirtualMachinesClient, error) {
-					return armcompute.NewVirtualMachinesClient(ap.SubscriptionID, cred, nil)
+					return armcompute.NewVirtualMachinesClient(ap.az.SubscriptionID, cred, nil)
 				})
 				if err != nil {
 					return nil, err
@@ -456,7 +436,7 @@ func (ap *AzureProvider) List() (map[string]string, error) {
 						return nil, fmt.Errorf("failed to get next page of VMs: %w", err)
 					}
 					for _, vm := range page.VirtualMachineListResult.Value {
-						if vm.Tags != nil && vm.Tags["scitq"] != nil && *vm.Tags["scitq"] == ap.ScitqServerTag {
+						if vm.Tags != nil && vm.Tags["scitq"] != nil && *vm.Tags["scitq"] == ap.cfg.Scitq.ServerName {
 							// Get the network interface ID
 							if vm.Properties != nil && vm.Properties.NetworkProfile != nil && len(vm.Properties.NetworkProfile.NetworkInterfaces) > 0 {
 								networkInterfaceID := *vm.Properties.NetworkProfile.NetworkInterfaces[0].ID
@@ -466,7 +446,7 @@ func (ap *AzureProvider) List() (map[string]string, error) {
 								networkInterfaceName := parts[len(parts)-1]
 
 								// Get the network interface client
-								nicClient, err := armnetwork.NewInterfacesClient(ap.SubscriptionID, cred, nil)
+								nicClient, err := armnetwork.NewInterfacesClient(ap.az.SubscriptionID, cred, nil)
 								if err != nil {
 									return nil, fmt.Errorf("failed to create network interfaces client: %w", err)
 								}
@@ -498,7 +478,7 @@ func (ap *AzureProvider) Delete(workerName string) error {
 	vmName := workerName
 	rgName := ap.resourceGroupName(workerName)
 
-	cred, err := azidentity.NewClientSecretCredential(ap.TenantID, ap.ClientID, ap.ClientSecret, nil)
+	cred, err := azidentity.NewClientSecretCredential(ap.az.TenantID, ap.az.ClientID, ap.az.ClientSecret, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create credential: %w", err)
 	}
@@ -506,7 +486,7 @@ func (ap *AzureProvider) Delete(workerName string) error {
 
 	// Create the VM client.
 	vmClient, err := createClient(func() (*armcompute.VirtualMachinesClient, error) {
-		return armcompute.NewVirtualMachinesClient(ap.SubscriptionID, cred, nil)
+		return armcompute.NewVirtualMachinesClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return err
@@ -528,7 +508,7 @@ func (ap *AzureProvider) Delete(workerName string) error {
 
 	// Create the Resource Group client.
 	rgClient, err := createClient(func() (*armresources.ResourceGroupsClient, error) {
-		return armresources.NewResourceGroupsClient(ap.SubscriptionID, cred, nil)
+		return armresources.NewResourceGroupsClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return err
@@ -555,14 +535,14 @@ func (ap *AzureProvider) Restart(workerName string) error {
 	vmName := workerName
 	rgName := ap.resourceGroupName(workerName)
 
-	cred, err := azidentity.NewClientSecretCredential(ap.TenantID, ap.ClientID, ap.ClientSecret, nil)
+	cred, err := azidentity.NewClientSecretCredential(ap.az.TenantID, ap.az.ClientID, ap.az.ClientSecret, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create credential: %w", err)
 	}
 	ctx := context.Background()
 
 	vmClient, err := createClient(func() (*armcompute.VirtualMachinesClient, error) {
-		return armcompute.NewVirtualMachinesClient(ap.SubscriptionID, cred, nil)
+		return armcompute.NewVirtualMachinesClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err != nil {
 		return err

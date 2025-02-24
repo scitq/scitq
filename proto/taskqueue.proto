@@ -47,6 +47,13 @@ message Worker {
     uint32 worker_id = 1;
     string name = 2;
     uint32 concurrency = 3;
+    uint32 prefetch = 4;
+    string status = 5;
+    string ipv4 = 6;
+    string ipv6 = 7;
+    string flavor = 8;
+    string provider = 9;
+    string region = 10;
 }
 
 

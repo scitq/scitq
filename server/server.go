@@ -512,7 +512,22 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	defer tx.Rollback()
 
 	// **Filter by status if provided**
-	rows, err = tx.Query(`SELECT worker_id, worker_name, concurrency FROM worker ORDER BY worker_id`)
+	rows, err = tx.Query(`SELECT 
+		w.worker_id, 
+		worker_name, 
+		concurrency, 
+		prefetch, 
+		w.status, 
+		COALESCE(w.ipv4::text, '') AS ipv4, 
+		COALESCE(w.ipv6::text, '') AS ipv6, 
+		r.region_name, 
+		p.provider_name||'.'||p.config_name,
+		f.flavor_name
+	FROM worker w
+	JOIN region r ON r.region_id=w.region_id
+	JOIN provider p ON r.provider_id=p.provider_id
+	JOIN flavor f ON f.flavor_id=w.flavor_id
+	ORDER BY worker_id`)
 
 	if err != nil {
 		log.Printf("⚠️ Failed to list workers: %v", err)
@@ -522,7 +537,8 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 
 	for rows.Next() {
 		var worker pb.Worker
-		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency)
+		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
+			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue
