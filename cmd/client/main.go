@@ -43,7 +43,7 @@ func main() {
 			dockerAuthentication = dockerCfg[1]
 		}
 
-		err := install.Run(dockerRegistry, dockerAuthentication, float32(*swapProportion))
+		err := install.Run(dockerRegistry, dockerAuthentication, float32(*swapProportion), *serverAddr, *concurrency)
 		if err != nil {
 			log.Fatalf("Could not perform install: %v", err)
 		}

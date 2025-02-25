@@ -178,13 +178,45 @@ func checkSwap(swapProportion float32) error {
 	return err
 }
 
-func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32) error {
+func checkService(dockerRegistry, dockerAuthentication string, swapProportion float32, serverAddr string, concurrency int) error {
+
+	if fileNotExist("/etc/systemd/system/scitq-client.service") {
+		err := writeFile("/etc/systemd/system/scitq-client.service", fmt.Sprintf(`[Unit]
+Description=scitq-client
+After=multi-user.target
+
+[Service]
+Environment=PATH=/usr/bin:/usr/local/bin:/usr/sbin
+Type=simple
+ExecStart=/usr/local/bin/scitq-client -server %s -install -docker "%s:%s" -swap "%f" -concurrency %d
+
+[Install]
+WantedBy=multi-user.target`, serverAddr, dockerRegistry, dockerAuthentication, swapProportion, concurrency), false)
+		if err != nil {
+			return fmt.Errorf("could not create service %w", err)
+		}
+		err = executeCommands(3, "systemctl daemon-reload", "systemctl enable scitq-client")
+		return err
+	} else {
+		_, err := executeShellCommand("systemctl is-enabled scitq-client")
+		if err != nil {
+			err = executeCommands(3, "systemctl daemon-reload", "systemctl enable scitq-client")
+		}
+		return err
+	}
+
+}
+
+func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32, serverAddress string, concurrency int) error {
 	err := checkScratch()
 	if err == nil {
 		err = checkDocker(dockerRegistry, dockerAuthentication)
 	}
 	if err == nil && swapProportion > 0 {
 		err = checkSwap(swapProportion)
+	}
+	if err == nil {
+		checkService(dockerRegistry, dockerAuthentication, swapProportion, serverAddress, concurrency)
 	}
 
 	return err
