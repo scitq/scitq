@@ -112,6 +112,45 @@ func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath str
 	return nil
 }
 
+func RecursiveCopy(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
+	ctx := context.Background()
+
+	// List the contents of the source directory
+	entries, err := srcFs.List(ctx, srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to list source directory: %v", err)
+	}
+
+	// Iterate over each entry in the source directory
+	for _, entry := range entries {
+		srcEntryPath := entry.Remote()
+		dstEntryPath := dstPath + "/" + entry.Remote()
+
+		// Check if the entry is a directory
+		if _, ok := entry.(fs.Directory); ok {
+			// Create the directory in the destination
+			err := dstFs.Mkdir(ctx, dstEntryPath)
+			if err != nil {
+				return fmt.Errorf("failed to create directory: %v", err)
+			}
+
+			// Recursively copy the contents of the directory
+			err = RecursiveCopy(srcFs, srcEntryPath, dstFs, dstEntryPath)
+			if err != nil {
+				return fmt.Errorf("failed to recursively copy directory: %v", err)
+			}
+		} else {
+			// Copy the file
+			err := CopyFilesWithProgress(srcFs, srcEntryPath, dstFs, dstEntryPath)
+			if err != nil {
+				return fmt.Errorf("failed to copy file: %v", err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	// Initialize the rclone configuration
 	config.SetConfigPath("/etc/rclone.conf")
