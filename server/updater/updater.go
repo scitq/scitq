@@ -23,6 +23,7 @@ type Session interface {
 	Commit() error
 	Begin() error
 	Rollback() error
+	Close() error
 }
 
 // Flavor represents a compute flavor.
@@ -245,4 +246,8 @@ func (gp *GenericProvider) UpdateFlavorMetrics(newMetrics []*FlavorMetrics) erro
 	}
 
 	return gp.Session.Commit()
+}
+
+func (gp *GenericProvider) Close() error {
+	return gp.Session.Close()
 }

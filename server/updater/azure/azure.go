@@ -173,7 +173,7 @@ func maxFloat(a, b float64) float64 {
 
 // GetFlavors retrieves flavor information from Azure.
 func (az *Azure) GetFlavors() error {
-	fmt.Println("Adding GPU info")
+	//fmt.Println("Adding GPU info")
 	flavorGPU := make(map[string]map[string]string)
 	f, err := embeddedResource.ReadFile("resource/gpu.tsv")
 	if err != nil {
@@ -535,5 +535,5 @@ func Run(cfg config.Config, providerCfg config.AzureConfig) error {
 	if err := updater.GetMetrics(); err != nil {
 		return err
 	}
-	return nil
+	return updater.Close()
 }
