@@ -65,11 +65,21 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 	return s
 }
 
-func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
+func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.Task) (*pb.TaskResponse, error) {
 	var taskID int
 	err := s.db.QueryRow(
-		"INSERT INTO task (command, container, status, created_at) VALUES ($1, $2, 'P', NOW()) RETURNING task_id",
-		req.Command, req.Container,
+		`INSERT INTO task (command, shell, container, container_options, step_id, 
+					input, resource, output, retry, is_final, uses_cache, 
+					download_timeout, running_timeout, upload_timeout,  
+					status, created_at) 
+		VALUES ($1, $2, $3, $4, 
+			$5, $6, $7, $8, $9, $10,
+			 $11, $12, $13, 
+			 'P', NOW()) 
+		RETURNING task_id`,
+		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
+		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
+		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 	).Scan(&taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -471,9 +481,12 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 	}
 
 	rows, err := s.db.Query(`
-		SELECT task_id, command, container, status
+		SELECT task_id, command, shell, container, container_options,
+			input, resource, output, retry, is_final, uses_cache, 
+			download_timeout, running_timeout, upload_timeout,  
+			status
 		FROM task
-		WHERE worker_id = $1 AND status = 'A'
+		WHERE worker_id = $1 AND status = 'A' AND task.step_id=(SELECT step_id FROM worker WHERE worker_id=$1)
 	`, req.WorkerId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch assigned tasks: %w", err)
@@ -482,7 +495,9 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 
 	for rows.Next() {
 		var task pb.Task
-		if err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status); err != nil {
+		if err := rows.Scan(&task.TaskId, &task.Command, &task.Shell, &task.Container, &task.ContainerOptions,
+			&task.Input, &task.Resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &task.Status); err != nil {
 			log.Printf("Task decode error: %v", err)
 			continue
 		}

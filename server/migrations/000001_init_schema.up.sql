@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS task (
     task_id SERIAL PRIMARY KEY,
     step_id INT REFERENCES step(step_id) ON DELETE SET NULL,
     command TEXT NOT NULL,
+    shell TEXT,
     container TEXT NOT NULL,
     container_options TEXT[],
     status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, A: Assigned, C: Accepted, D: Downloading, R: Running, U: Uploading, S: Succeeded, F: Failed, Z: suspended, X: canceled, W: waiting)
@@ -98,7 +99,7 @@ CREATE TABLE IF NOT EXISTS task (
     output_is_compressed BOOLEAN,
     retry INT DEFAULT 0,
     is_final BOOLEAN DEFAULT FALSE,
-    cache BOOLEAN DEFAULT FALSE,
+    uses_cache BOOLEAN DEFAULT FALSE,
     download_timeout FLOAT,
     running_timeout FLOAT,
     upload_timeout FLOAT,

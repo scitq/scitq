@@ -36,7 +36,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TaskQueueClient interface {
-	SubmitTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
+	SubmitTask(ctx context.Context, in *Task, opts ...grpc.CallOption) (*TaskResponse, error)
 	RegisterWorker(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*WorkerId, error)
 	PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskListAndOther, error)
 	UpdateTaskStatus(ctx context.Context, in *TaskStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
@@ -57,7 +57,7 @@ func NewTaskQueueClient(cc grpc.ClientConnInterface) TaskQueueClient {
 	return &taskQueueClient{cc}
 }
 
-func (c *taskQueueClient) SubmitTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResponse, error) {
+func (c *taskQueueClient) SubmitTask(ctx context.Context, in *Task, opts ...grpc.CallOption) (*TaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskResponse)
 	err := c.cc.Invoke(ctx, TaskQueue_SubmitTask_FullMethodName, in, out, cOpts...)
@@ -183,7 +183,7 @@ func (c *taskQueueClient) ListFlavors(ctx context.Context, in *ListFlavorsReques
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
 type TaskQueueServer interface {
-	SubmitTask(context.Context, *TaskRequest) (*TaskResponse, error)
+	SubmitTask(context.Context, *Task) (*TaskResponse, error)
 	RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error)
 	PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskListAndOther, error)
 	UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error)
@@ -204,7 +204,7 @@ type TaskQueueServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTaskQueueServer struct{}
 
-func (UnimplementedTaskQueueServer) SubmitTask(context.Context, *TaskRequest) (*TaskResponse, error) {
+func (UnimplementedTaskQueueServer) SubmitTask(context.Context, *Task) (*TaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitTask not implemented")
 }
 func (UnimplementedTaskQueueServer) RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error) {
@@ -259,7 +259,7 @@ func RegisterTaskQueueServer(s grpc.ServiceRegistrar, srv TaskQueueServer) {
 }
 
 func _TaskQueue_SubmitTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(TaskRequest)
+	in := new(Task)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func _TaskQueue_SubmitTask_Handler(srv interface{}, ctx context.Context, dec fun
 		FullMethod: TaskQueue_SubmitTask_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TaskQueueServer).SubmitTask(ctx, req.(*TaskRequest))
+		return srv.(TaskQueueServer).SubmitTask(ctx, req.(*Task))
 	}
 	return interceptor(ctx, in, info, handler)
 }

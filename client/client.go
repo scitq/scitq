@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,25 +77,36 @@ func updateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
 // executeTask runs the Docker command and streams logs.
 func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
+	log.Printf("🚀 Executing task %d: %s", *task.TaskId, task.Command)
 
 	// 🛑 Only acknowledge if the task is in "A"
 	if task.Status != "A" {
-		log.Printf("⚠️ Task %d is not assigned (A), skipping acknowledgment.", task.TaskId)
+		log.Printf("⚠️ Task %d is not assigned (A), skipping acknowledgment.", *task.TaskId)
 		return
 	}
-	if !acknowledgeTask(client, task.TaskId) {
-		log.Printf("⚠️ Task %d could not be acknowledged, giving up execution.", task.TaskId)
+	if !acknowledgeTask(client, *task.TaskId) {
+		log.Printf("⚠️ Task %d could not be acknowledged, giving up execution.", *task.TaskId)
 		return // ❌ Do not execute if acknowledgment failed.
 	}
 
-	cmd := exec.Command("docker", "run", "--rm", task.Container, "sh", "-c", task.Command)
+	command := []string{"run", "--rm", task.Container}
+	if task.ContainerOptions != nil {
+		options := strings.Fields(*task.ContainerOptions)
+		command = append(command, options...)
+	}
+	if task.Shell != nil {
+		command = append(command, *task.Shell, "-c", task.Command)
+	} else {
+		command = append(command, task.Command)
+	}
+
+	cmd := exec.Command("docker", command...)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("❌ Failed to start task %d: %v", task.TaskId, err)
-		updateTaskStatus(client, task.TaskId, "F") // Mark as failed
+		updateTaskStatus(client, *task.TaskId, "F") // Mark as failed
 		return
 	}
 
@@ -106,7 +118,7 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 	if err != nil {
 		log.Printf("⚠️ Failed to open log stream for task %d: %v", task.TaskId, err)
 		cmd.Wait()
-		updateTaskStatus(client, task.TaskId, "F") // Mark as failed
+		updateTaskStatus(client, *task.TaskId, "F") // Mark as failed
 		return
 	}
 
@@ -115,7 +127,7 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := scanner.Text()
-			stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: logType, LogText: line})
+			stream.Send(&pb.TaskLog{TaskId: *task.TaskId, LogType: logType, LogText: line})
 		}
 		stream.CloseSend() // ✅ Ensure closure of log stream
 	}
@@ -131,10 +143,10 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
 	if err != nil {
 		log.Printf("❌ Task %d failed: %v", task.TaskId, err)
-		updateTaskStatus(client, task.TaskId, "F")
+		updateTaskStatus(client, *task.TaskId, "F")
 	} else {
 		log.Printf("✅ Task %d completed successfully", task.TaskId)
-		updateTaskStatus(client, task.TaskId, "S")
+		updateTaskStatus(client, *task.TaskId, "S")
 	}
 }
 

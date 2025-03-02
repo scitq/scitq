@@ -4,46 +4,62 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
+	"strings"
 
+	//"net/url"
+	"regexp"
+	//"strings"
+
+	"github.com/rclone/rclone/fs/config/configmap"
+	"github.com/rclone/rclone/fs/walk"
+
+	//"github.com/rclone/rclone/fs/config/registry"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/object"
 	"github.com/rclone/rclone/fs/operations"
 
+	"github.com/google/uuid"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
+	"github.com/rclone/rclone/fs/config/configfile"
+	"github.com/rclone/rclone/fs/rc"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
+
+	_ "github.com/rclone/rclone/backend/all" // Ensure all backends are loaded
 )
 
-func CopyFiles(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
-	// Create a context for the operation
-	ctx := context.Background()
-	// Copy the file
-	err := operations.CopyFile(ctx, dstFs, srcFs, dstPath, srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to copy file: %v", err)
-	}
+//func CopyFiles(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
+//	// Create a context for the operation
+//	ctx := context.Background()
+//	// Copy the file
+//	err := operations.CopyFile(ctx, dstFs, srcFs, dstPath, srcPath)
+//	if err != nil {
+//		return fmt.Errorf("failed to copy file: %v", err)
+//	}
+//
+//	return nil
+//}
 
-	return nil
-}
-
-func ListFiles(fsys fs.Fs, path string) error {
-	// Create a context for the operation
-	ctx := context.Background()
-
-	// List the files in the directory
-	dir, err := fsys.List(ctx, path)
-	if err != nil {
-		return fmt.Errorf("failed to list files: %v", err)
-	}
-
-	// Print the file names
-	for _, entry := range dir {
-		fmt.Println(entry.Remote())
-	}
-
-	return nil
-}
+//func ListFiles(fsys fs.Fs, path string) error {
+//	// Create a context for the operation
+//	ctx := context.Background()
+//
+//	// List the files in the directory
+//	dir, err := fsys.List(ctx, path)
+//	if err != nil {
+//		return fmt.Errorf("failed to list files: %v", err)
+//	}
+//
+//	// Print the file names
+//	for _, entry := range dir {
+//		fmt.Println(entry.Remote())
+//	}
+//
+//	return nil
+//}
 
 func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
 	// Create a context for the operation
@@ -112,71 +128,477 @@ func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath str
 	return nil
 }
 
-func RecursiveCopy(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
-	ctx := context.Background()
+//func RecursiveCopy(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
+//	ctx := context.Background()
+//
+//	// List the contents of the source directory
+//	entries, err := srcFs.List(ctx, srcPath)
+//	if err != nil {
+//		return fmt.Errorf("failed to list source directory: %v", err)
+//	}
+//
+//	// Iterate over each entry in the source directory
+//	for _, entry := range entries {
+//		srcEntryPath := entry.Remote()
+//		dstEntryPath := dstPath + "/" + entry.Remote()
+//
+//		// Check if the entry is a directory
+//		if _, ok := entry.(fs.Directory); ok {
+//			// Create the directory in the destination
+//			err := dstFs.Mkdir(ctx, dstEntryPath)
+//			if err != nil {
+//				return fmt.Errorf("failed to create directory: %v", err)
+//			}
+//
+//			// Recursively copy the contents of the directory
+//			err = RecursiveCopy(srcFs, srcEntryPath, dstFs, dstEntryPath)
+//			if err != nil {
+//				return fmt.Errorf("failed to recursively copy directory: %v", err)
+//			}
+//		} else {
+//			// Copy the file
+//			err := CopyFilesWithProgress(srcFs, srcEntryPath, dstFs, dstEntryPath)
+//			if err != nil {
+//				return fmt.Errorf("failed to copy file: %v", err)
+//			}
+//		}
+//	}
+//
+//	return nil
+//}
 
-	// List the contents of the source directory
-	entries, err := srcFs.List(ctx, srcPath)
+// FetchContext holds global configuration settings for the fetch package.
+var RcloneRemotes []string
+var localPathRegex = regexp.MustCompile(`^(?P<component>[a-zA-Z]:\\|/|\./)?((?P<path>(?:[\w\s.-]+[/\\]?)+)(?P<separator>[/\\]))?(?P<file>[^/\\]*)$`)
+var uriRegex = regexp.MustCompile(`^(?P<proto>[a-z0-9+]*)(?P<options>(@[a-z0-9_]+)*)?:\/\/((?P<user>[^@:]+)(:(?P<password>[^@]+))?@)?(?P<component>[^/]+)\/((?P<path>[^|]*)/)?(?P<file>[^|]*)(?P<actions>(\|[^\|]+)*)$`)
+
+// stringInSlice checks if a string is present in a slice of strings.
+func stringInSlice(target string, slice []string) bool {
+	for _, element := range slice {
+		if element == target {
+			return true
+		}
+	}
+	return false
+}
+
+// FileSystemInterface defines the methods for file operations.
+type FileSystemInterface interface {
+	Copy(otherFs FileSystemInterface, src, dst URI, isSelfSource bool) error
+	List(path string) (fs.DirEntries, error)
+	Mkdir(path string) error
+}
+
+// MetaFileSystem provides common functionality for file operations using any FileSystemInterface.
+type MetaFileSystem struct {
+	fs FileSystemInterface
+}
+
+// NewMetaFileSystem creates a new MetaFileSystem with the given FileSystemInterface.
+func NewMetaFileSystem(fs FileSystemInterface, err error) (*MetaFileSystem, error) {
+	if err != nil {
+		return nil, err
+	} else {
+		return &MetaFileSystem{fs: fs}, nil
+	}
+}
+
+// RecursiveCopy performs a recursive copy using the embedded FileSystemInterface.
+func (mfs *MetaFileSystem) RecursiveCopy(otherFs MetaFileSystem, src, dst URI, isSelfSource bool) error {
+	entries, err := mfs.fs.List(src.Path)
 	if err != nil {
 		return fmt.Errorf("failed to list source directory: %v", err)
 	}
-
-	// Iterate over each entry in the source directory
 	for _, entry := range entries {
-		srcEntryPath := entry.Remote()
-		dstEntryPath := dstPath + "/" + entry.Remote()
-
-		// Check if the entry is a directory
+		srcEntry := src.Subpath(entry.Remote())
+		dstEntry := dst.Subpath(dst.Path + "/" + entry.Remote())
 		if _, ok := entry.(fs.Directory); ok {
-			// Create the directory in the destination
-			err := dstFs.Mkdir(ctx, dstEntryPath)
+			err := mfs.fs.Mkdir(dstEntry.Path)
 			if err != nil {
 				return fmt.Errorf("failed to create directory: %v", err)
 			}
-
-			// Recursively copy the contents of the directory
-			err = RecursiveCopy(srcFs, srcEntryPath, dstFs, dstEntryPath)
+			err = mfs.RecursiveCopy(otherFs, srcEntry, dstEntry, isSelfSource)
 			if err != nil {
 				return fmt.Errorf("failed to recursively copy directory: %v", err)
 			}
 		} else {
-			// Copy the file
-			err := CopyFilesWithProgress(srcFs, srcEntryPath, dstFs, dstEntryPath)
+			err := mfs.fs.Copy(otherFs.fs, srcEntry, dstEntry, isSelfSource)
 			if err != nil {
 				return fmt.Errorf("failed to copy file: %v", err)
 			}
 		}
 	}
-
 	return nil
 }
 
-func main() {
-	// Initialize the rclone configuration
-	config.SetConfigPath("/etc/rclone.conf")
+// RcloneBackend implements the FileSystemInterface using rclone.
+type RcloneBackend struct {
+	rcloneFs fs.Fs
+}
+
+// NewRcloneBackend creates a new RcloneBackend.
+func NewRcloneBackend(ctx context.Context, remote string) (*RcloneBackend, error) {
+	rcloneFs, err := fs.NewFs(ctx, remote)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rclone filesystem: %v", err)
+	}
+	return &RcloneBackend{rcloneFs: rcloneFs}, nil
+}
+
+// Copy implements the Copy method for RcloneBackend.
+func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI, selfIsSource bool) error {
+	var otherFs *RcloneBackend // Pointer to hold the concrete type
+
+	switch v := otherFsInterface.(type) {
+	case *RcloneBackend:
+		otherFs = v // Correct type assertion
+	case *LocalBackend:
+		var localFs *LocalBackend
+		localFs = v
+		otherFs = &localFs.RcloneBackend
+	default:
+		return fmt.Errorf("Copy of RcloneBackend only supports RcloneBackend or LocalBackend, not %T", v)
+	}
+
 	ctx := context.Background()
-
-	// Set up the source filesystem (e.g., local filesystem)
-	srcFs, err := fs.NewFs(ctx, "/")
+	var err error
+	if selfIsSource {
+		//log.Printf("Copy <%s>:<%s> -> <%s>:<%s>", rb.rcloneFs.Name()+":"+rb.rcloneFs.Root(), src.CompletePath(), otherFs.rcloneFs.Name()+":"+otherFs.rcloneFs.Root(), dst.CompletePath())
+		err = operations.CopyFile(ctx, otherFs.rcloneFs, rb.rcloneFs, dst.CompletePath(), src.CompletePath())
+	} else {
+		//log.Printf("Copy <%s>:<%s> -> <%s>:<%s>", otherFs.rcloneFs.Name()+":"+otherFs.rcloneFs.Root(), src.CompletePath(), rb.rcloneFs.Name()+":"+rb.rcloneFs.Root(), dst.CompletePath())
+		err = operations.CopyFile(ctx, rb.rcloneFs, otherFs.rcloneFs, dst.CompletePath(), src.CompletePath())
+	}
 	if err != nil {
-		log.Fatalf("failed to create source filesystem: %v", err)
+		return fmt.Errorf("failed to copy file: %v", err)
+	}
+	return nil
+}
+
+// List implements the List method for RcloneBackend.
+func (rb *RcloneBackend) List(path string) (fs.DirEntries, error) {
+	ctx := context.Background()
+	//fmt.Printf("{%s} ==> |%s|", rb.rcloneFs.Name(), rb.rcloneFs.Root())
+	//fmt.Printf("--- path [%s] ---\n", path)
+
+	var entries fs.DirEntries
+	err := walk.ListR(ctx, rb.rcloneFs, path, true, 0, walk.ListAll, func(newEntries fs.DirEntries) error {
+		entries = append(entries, newEntries...)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list directory: %v", err)
+	}
+	return entries, nil
+}
+
+// Mkdir implements the Mkdir method for RcloneBackend.
+func (rb *RcloneBackend) Mkdir(path string) error {
+	ctx := context.Background()
+	return rb.rcloneFs.Mkdir(ctx, path)
+}
+
+// LocalBackend implements a local FileSystemInterface using rclone but is also capable of working with other backends
+type LocalBackend struct {
+	RcloneBackend
+	localPath string
+}
+
+// NewLocalBackend creates a new LocalBackend.
+func NewLocalBackend(ctx context.Context, component string) (*LocalBackend, error) {
+	rcloneFs, err := fs.NewFs(ctx, component)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rclone filesystem: %v", err)
+	}
+	rb := RcloneBackend{rcloneFs: rcloneFs}
+	return &LocalBackend{RcloneBackend: rb, localPath: component}, nil
+}
+
+type URI struct {
+	Proto     string
+	Options   []string
+	User      string
+	Password  string
+	Component string
+	Path      string
+	File      string
+	Separator string
+	Actions   []string
+}
+
+// ParseURI parses a URI using a regular expression and returns the appropriate backend and path.
+func ParseURI(uri_string string) (*URI, error) {
+	matches := uriRegex.FindStringSubmatch(uri_string)
+	if matches == nil {
+		// most cases of local files will be handled here except file://./path/to/my/file
+		matches = localPathRegex.FindStringSubmatch(uri_string)
+		if matches == nil {
+			if strings.HasPrefix(uri_string, "file://") {
+				return ParseURI(uri_string[7:])
+			} else {
+				return nil, fmt.Errorf("failed to parse URI %s", uri_string)
+			}
+		} else {
+			component := matches[localPathRegex.SubexpIndex("component")]
+			separator := "/"
+			if s := matches[localPathRegex.SubexpIndex("separator")]; s != "" {
+				separator = s
+			} else if len(component) > 1 {
+				separator = string(component[len(component)-1])
+			}
+			if component == "" {
+				component = "./"
+			}
+			return &URI{
+				Proto:     "file",
+				Component: component,
+				Separator: separator,
+				Path:      matches[localPathRegex.SubexpIndex("path")],
+				File:      matches[localPathRegex.SubexpIndex("file")],
+			}, nil
+		}
+
 	}
 
-	// Set up the destination filesystem (e.g., remote filesystem)
-	dstFs, err := fs.NewFs(ctx, "azure:rnd/")
-	if err != nil {
-		log.Fatalf("failed to create destination filesystem: %v", err)
+	var uri URI
+
+	// Extract components from the URI
+	uri.Proto = matches[uriRegex.SubexpIndex("proto")]
+	uri.Separator = "/"
+	if options := matches[uriRegex.SubexpIndex("options")]; options != "" {
+		uri.Options = strings.Split(options[1:], "@")
+	}
+	uri.User = matches[uriRegex.SubexpIndex("user")]
+	uri.Password = matches[uriRegex.SubexpIndex("password")]
+	if uri.Proto == "file" {
+		// cover the case of file://./path/to/myfile
+		uri.Component = matches[uriRegex.SubexpIndex("component")] + "/"
+	} else {
+		uri.Component = matches[uriRegex.SubexpIndex("component")]
+	}
+	uri.Path = matches[uriRegex.SubexpIndex("path")]
+	uri.File = matches[uriRegex.SubexpIndex("file")]
+	if actions := matches[uriRegex.SubexpIndex("actions")]; actions != "" {
+		uri.Actions = strings.Split(actions[1:], "|")
 	}
 
-	// Example usage of copy function
-	err = CopyFiles(srcFs, "toto.txt", dstFs, "test/toto.txt")
-	if err != nil {
-		log.Fatalf("failed to copy files: %v", err)
+	return &uri, nil
+}
+
+func (uri URI) fs() (*MetaFileSystem, error) {
+	// Default to rclone if the protocol is unknown or not explicitly handled
+	switch uri.Proto {
+	case "file":
+		ctx := context.Background()
+		return NewMetaFileSystem(NewLocalBackend(ctx, uri.Component))
+	case "ftp", "ftps":
+		ftpOptions := map[string]string{
+			"host":         uri.Component,
+			"user":         uri.User,
+			"pass":         uri.Password,
+			"explicit_tls": strconv.FormatBool(uri.Proto == "ftps"),
+		}
+		ftpRemote, err := addRemoteInMemory("ftp", ftpOptions)
+		if err != nil {
+			log.Printf("Error adding FTP remote on %s: %v", uri.Component, err)
+			return nil, err
+		}
+		url := ftpRemote + ":"
+		ctx := context.Background()
+		return NewMetaFileSystem(NewRcloneBackend(ctx, url))
+	case "http", "https":
+		url := uri.Proto + "://" + uri.Component
+		httpOptions := map[string]string{
+			"url":      url,
+			"user":     uri.User,
+			"password": uri.Password,
+		}
+		httpRemote, err := addRemoteInMemory("http", httpOptions)
+		if err != nil {
+			log.Printf("Error adding HTTP remote on %s: %v", url, err)
+			return nil, err
+		}
+		new_url := httpRemote + ":"
+		ctx := context.Background()
+		return NewMetaFileSystem(NewRcloneBackend(ctx, new_url))
+	default:
+		// Check if the protocol is present in rclone configuration
+		if stringInSlice(uri.Proto, RcloneRemotes) {
+			rclone_uri := uri.Proto + ":" + uri.Component
+			ctx := context.Background()
+			return NewMetaFileSystem(NewRcloneBackend(ctx, rclone_uri))
+		}
+		return nil, fmt.Errorf("unsupported URI protocol: %s (protocols %v)", uri.Proto, RcloneRemotes)
+	}
+}
+
+func (uri URI) String() string {
+	uriString := uri.Proto + "://"
+	if uri.Component != "" {
+		uriString += uri.Component + uri.Separator
+	}
+	if uri.Path != "" {
+		uriString += uri.Path + uri.Separator
+	}
+	return uriString + uri.File
+}
+
+func (uri URI) CompletePath() string {
+	return uri.Path + uri.Separator + uri.File
+}
+
+func (uri URI) Subpath(path string) URI {
+	sub := uri
+	sub.Path = path
+	return sub
+}
+
+type Operation struct {
+	src    *MetaFileSystem
+	dst    *MetaFileSystem
+	srcUri URI
+	dstUri URI
+}
+
+// Load Rclone config from a file into memory
+func loadConfigFromFile(configPath string) {
+	config.SetConfigPath(configPath)
+	_ = os.Setenv("RCLONE_CONFIG_DIR", configPath)
+	configfile.Install()
+	//ci := fs.GetConfig(ctx)
+	//log.Printf("Storage: %+v", ci)
+	//err := str.Load()
+	//if err != nil {
+	//	log.Printf("Warning: failed to load config %s: %v", configPath, err)
+	//	return // Exit early to avoid misleading success message
+	//}
+	//log.Printf("Storage: %+v", str)
+	// Debug: Print the raw config data
+	//log.Printf("Config data: %+v", config.LoadedData())
+
+	RcloneRemotes = config.GetRemoteNames()
+	//log.Printf("Rclone config loaded from %s [remotes %s]", configPath, RcloneRemotes)
+}
+
+// Add a new remote in memory without modifying the config file
+func addRemoteInMemory(protocol string, options map[string]string) (string, error) {
+	uniqueName := protocol + "-" + uuid.New().String()
+
+	cfg := configmap.Simple{}
+	for k, v := range options {
+		cfg[k] = v
 	}
 
-	// Example usage of list function
-	err = ListFiles(dstFs, "test/")
-	if err != nil {
-		log.Fatalf("failed to list files: %v", err)
+	ctx := context.Background()
+	params := rc.Params{}
+	for k, v := range cfg {
+		params[k] = v
 	}
+	_, err := config.CreateRemote(ctx, uniqueName, protocol, params, config.UpdateRemoteOpt{})
+	if err != nil {
+		return "", fmt.Errorf("failed to register remote: %v", err)
+	}
+
+	fmt.Println("Remote", uniqueName, "added in memory!")
+	return uniqueName, nil
+}
+
+func NewOperation(rcloneConfig, srcStr, dstStr string) (*Operation, error) {
+	loadConfigFromFile(rcloneConfig)
+
+	src, err := ParseURI(srcStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse source URI: %v", err)
+	}
+	srcFs, err := src.fs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source FS: %v", err)
+	}
+
+	if dstStr == "" {
+		return &Operation{src: srcFs, srcUri: *src}, nil
+	}
+
+	dst, err := ParseURI(dstStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse destination URI: %v", err)
+	}
+	dstFs, err := dst.fs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get destination FS: %v", err)
+	}
+
+	return &Operation{
+		src:    srcFs,
+		dst:    dstFs,
+		srcUri: *src,
+		dstUri: *dst,
+	}, nil
+}
+
+func (op *Operation) Copy() error {
+	var err error
+	if op.dst == nil {
+		return fmt.Errorf("cannot copy with no destination (source %s)", op.srcUri)
+	}
+	if op.srcUri.File == "" {
+		return fmt.Errorf("cannot copy directory: source %s", op.srcUri)
+	}
+	if op.dstUri.File == "" {
+		op.dstUri.File = op.srcUri.File
+	}
+	switch v := op.src.fs.(type) {
+	case *RcloneBackend:
+		err = v.Copy(op.dst.fs, op.srcUri, op.dstUri, true)
+	case *LocalBackend:
+		switch w := op.dst.fs.(type) {
+		case *RcloneBackend:
+			err = w.Copy(&v.RcloneBackend, op.srcUri, op.dstUri, false)
+		case *LocalBackend:
+			err = v.Copy(&w.RcloneBackend, op.srcUri, op.dstUri, true)
+		default:
+			err = w.Copy(v, op.srcUri, op.dstUri, false)
+		}
+	default:
+		return fmt.Errorf("unsupported source type: %T", v)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to copy %s -> %s: %v", op.srcUri, op.dstUri, err)
+	}
+	return nil
+}
+
+func (op *Operation) List() (fs.DirEntries, error) {
+	path := op.srcUri.Path
+	if op.srcUri.File != "" {
+		if path == "" {
+			path = op.srcUri.File
+		} else {
+			path = path + op.srcUri.Separator + op.srcUri.File
+		}
+	}
+	//log.Printf("Path <%s> | File <%s> -> <%s>\n", op.srcUri.Path, op.srcUri.File, path)
+
+	return op.src.fs.List(path)
+}
+func Copy(rcloneConfig, srcStr, dstStr string) error {
+	op, err := NewOperation(rcloneConfig, srcStr, dstStr)
+	if err != nil {
+		log.Fatalf("Could not initiate copy operation %v", err)
+	}
+	err = op.Copy()
+	return err
+}
+
+// test if a DirEntry is a dir
+func IsDir(f fs.DirEntry) bool {
+	_, ok := f.(fs.Directory)
+	return ok
+}
+
+// test if a DirEntry is a file
+func IsFile(f fs.DirEntry) bool {
+	_, ok := f.(fs.Object)
+	return ok
 }

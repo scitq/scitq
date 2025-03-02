@@ -5,7 +5,7 @@ package taskqueue;
 option go_package = "gen/taskqueuepb";
 
 service TaskQueue {
-    rpc SubmitTask(TaskRequest) returns (TaskResponse);
+    rpc SubmitTask(Task) returns (TaskResponse);
     rpc RegisterWorker(WorkerInfo) returns (WorkerId);
     rpc PingAndTakeNewTasks(WorkerId) returns (TaskListAndOther);
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
@@ -18,11 +18,6 @@ service TaskQueue {
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     }
 
-message TaskRequest {
-    string command = 1;
-    string container = 2;
-}
-
 message TaskResponse {
     uint32 task_id = 1;
 }
@@ -33,10 +28,22 @@ message WorkerInfo {
 }
 
 message Task {
-    uint32 task_id = 1;
+    optional uint32 task_id = 1;
     string command = 2;
-    string container = 3;
-    string status = 4;
+    optional string shell = 3;
+    string container = 4;
+    optional string container_options = 5;
+    optional uint32 step_id = 6;
+    repeated string input = 7;
+    repeated string resource = 8;
+    optional string output = 9;
+    optional uint32 retry = 10;
+    optional bool is_final  = 11;
+    optional bool uses_cache  = 12;
+    optional float download_timeout  = 13;
+    optional float running_timeout  = 14;
+    optional float upload_timeout  = 15;
+    string status = 16;
 }
 
 message TaskList {
