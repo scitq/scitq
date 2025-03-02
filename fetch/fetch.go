@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -302,6 +303,7 @@ func (rb *RcloneBackend) Mkdir(path string) error {
 type LocalBackend struct {
 	RcloneBackend
 	localPath string
+	isLocal   bool
 }
 
 // NewLocalBackend creates a new LocalBackend.
@@ -311,7 +313,19 @@ func NewLocalBackend(ctx context.Context, component string) (*LocalBackend, erro
 		return nil, fmt.Errorf("failed to create rclone filesystem: %v", err)
 	}
 	rb := RcloneBackend{rcloneFs: rcloneFs}
-	return &LocalBackend{RcloneBackend: rb, localPath: component}, nil
+	return &LocalBackend{RcloneBackend: rb, localPath: component, isLocal: component == "./"}, nil
+}
+
+func (lb LocalBackend) AbsolutePath(path string) (string, error) {
+	if lb.isLocal {
+		absolutePath, err := filepath.Abs(lb.localPath)
+		if err != nil {
+			return "", fmt.Errorf("could not get absolute path of %s: %w", lb.localPath, err)
+		}
+		return filepath.Join(absolutePath, path), nil
+	} else {
+		return path, nil
+	}
 }
 
 type URI struct {
@@ -421,6 +435,8 @@ func (uri URI) fs() (*MetaFileSystem, error) {
 		new_url := httpRemote + ":"
 		ctx := context.Background()
 		return NewMetaFileSystem(NewRcloneBackend(ctx, new_url))
+	case "fasp":
+		return NewMetaFileSystem(&AsperaBackend{}, nil)
 	default:
 		// Check if the protocol is present in rclone configuration
 		if stringInSlice(uri.Proto, RcloneRemotes) {
@@ -499,7 +515,7 @@ func addRemoteInMemory(protocol string, options map[string]string) (string, erro
 		return "", fmt.Errorf("failed to register remote: %v", err)
 	}
 
-	fmt.Println("Remote", uniqueName, "added in memory!")
+	//fmt.Println("Remote", uniqueName, "added in memory!")
 	return uniqueName, nil
 }
 
@@ -549,7 +565,12 @@ func (op *Operation) Copy() error {
 	}
 	switch v := op.src.fs.(type) {
 	case *RcloneBackend:
-		err = v.Copy(op.dst.fs, op.srcUri, op.dstUri, true)
+		switch w := op.dst.fs.(type) {
+		case *RcloneBackend, *LocalBackend:
+			err = v.Copy(w, op.srcUri, op.dstUri, true)
+		default:
+			return fmt.Errorf("RcloneBackend only support operations with RcloneBackend or LocalBackend, not %T", v)
+		}
 	case *LocalBackend:
 		switch w := op.dst.fs.(type) {
 		case *RcloneBackend:
@@ -558,6 +579,13 @@ func (op *Operation) Copy() error {
 			err = v.Copy(&w.RcloneBackend, op.srcUri, op.dstUri, true)
 		default:
 			err = w.Copy(v, op.srcUri, op.dstUri, false)
+		}
+	case *AsperaBackend:
+		switch w := op.dst.fs.(type) {
+		case *LocalBackend:
+			err = v.Copy(w, op.srcUri, op.dstUri, true)
+		default:
+			return fmt.Errorf("AsperaBackend only support copy to LocalBackend, not %T", w)
 		}
 	default:
 		return fmt.Errorf("unsupported source type: %T", v)
