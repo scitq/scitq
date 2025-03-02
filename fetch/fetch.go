@@ -324,7 +324,7 @@ func (lb LocalBackend) AbsolutePath(path string) (string, error) {
 		}
 		return filepath.Join(absolutePath, path), nil
 	} else {
-		return path, nil
+		return lb.rcloneFs.Root() + path, nil
 	}
 }
 
