@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 
@@ -73,10 +74,9 @@ func (ab *AsperaBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsS
 
 	// Running the command
 	cmd := exec.Command("docker", append([]string{"run"}, cmdArgs...)...)
-	fmt.Println("Command", cmd.Args)
 
 	output, err := cmd.CombinedOutput()
-	fmt.Println("Command output:", string(output))
+	//fmt.Println("Command output:", string(output))
 
 	if err != nil {
 		return fmt.Errorf("AsperaBackend download failure %s -> %s : %v\n%s", src, dst, err, output)
@@ -86,6 +86,7 @@ func (ab *AsperaBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsS
 	if dst.File != "" && dst.File != src.File {
 		oldPath := dst.Path + dst.Separator + src.File
 		newPath := dst.CompletePath()
+		log.Printf("Renaming %s -> %s", oldPath, newPath)
 		err = os.Rename(oldPath, newPath)
 		if err != nil {
 			return fmt.Errorf("AsperaBackend failed to rename downloaded file %s -> %s : %v", oldPath, newPath, err)
@@ -101,4 +102,8 @@ func (ab *AsperaBackend) List(path string) (fs.DirEntries, error) {
 
 func (rb *AsperaBackend) Mkdir(path string) error {
 	return fmt.Errorf("AsperaBackend does not support Mkdir")
+}
+
+func (rb *AsperaBackend) Info(path string) (fs.DirEntry, error) {
+	return nil, fmt.Errorf("AsperaBackend does not support Info")
 }

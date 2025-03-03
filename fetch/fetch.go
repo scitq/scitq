@@ -6,12 +6,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	//"net/url"
-	"regexp"
+
 	//"strings"
+	"time"
 
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/walk"
@@ -170,8 +169,6 @@ func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath str
 
 // FetchContext holds global configuration settings for the fetch package.
 var RcloneRemotes []string
-var localPathRegex = regexp.MustCompile(`^(?P<component>[a-zA-Z]:\\|/|\./)?((?P<path>(?:[\w\s.-]+[/\\]?)+)(?P<separator>[/\\]))?(?P<file>[^/\\]*)$`)
-var uriRegex = regexp.MustCompile(`^(?P<proto>[a-z0-9+]*)(?P<options>(@[a-z0-9_]+)*)?:\/\/((?P<user>[^@:]+)(:(?P<password>[^@]+))?@)?(?P<component>[^/]+)\/((?P<path>[^|]*)/)?(?P<file>[^|]*)(?P<actions>(\|[^\|]+)*)$`)
 
 // stringInSlice checks if a string is present in a slice of strings.
 func stringInSlice(target string, slice []string) bool {
@@ -188,6 +185,7 @@ type FileSystemInterface interface {
 	Copy(otherFs FileSystemInterface, src, dst URI, isSelfSource bool) error
 	List(path string) (fs.DirEntries, error)
 	Mkdir(path string) error
+	Info(path string) (fs.DirEntry, error)
 }
 
 // MetaFileSystem provides common functionality for file operations using any FileSystemInterface.
@@ -250,6 +248,10 @@ func NewRcloneBackend(ctx context.Context, remote string) (*RcloneBackend, error
 func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI, selfIsSource bool) error {
 	var otherFs *RcloneBackend // Pointer to hold the concrete type
 
+	if src.File == "" {
+		return fmt.Errorf("cannot copy directory: source %s", src)
+	}
+
 	switch v := otherFsInterface.(type) {
 	case *RcloneBackend:
 		otherFs = v // Correct type assertion
@@ -279,8 +281,6 @@ func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI
 // List implements the List method for RcloneBackend.
 func (rb *RcloneBackend) List(path string) (fs.DirEntries, error) {
 	ctx := context.Background()
-	//fmt.Printf("{%s} ==> |%s|", rb.rcloneFs.Name(), rb.rcloneFs.Root())
-	//fmt.Printf("--- path [%s] ---\n", path)
 
 	var entries fs.DirEntries
 	err := walk.ListR(ctx, rb.rcloneFs, path, true, 0, walk.ListAll, func(newEntries fs.DirEntries) error {
@@ -299,6 +299,23 @@ func (rb *RcloneBackend) Mkdir(path string) error {
 	return rb.rcloneFs.Mkdir(ctx, path)
 }
 
+func (rb *RcloneBackend) Info(path string) (fs.DirEntry, error) {
+	ctx := context.Background()
+	obj, err := rb.rcloneFs.NewObject(ctx, path)
+	if err == nil {
+		return obj, nil
+	}
+
+	// Check if the error is because `path` is a directory
+	if err == fs.ErrorIsDir {
+		// Return a manually created directory entry
+		dir := fs.NewDir(path, time.Now()) // Use current time as placeholder
+		return dir, nil
+	}
+
+	return nil, err // Return the original error if it's not a directory issue
+}
+
 // LocalBackend implements a local FileSystemInterface using rclone but is also capable of working with other backends
 type LocalBackend struct {
 	RcloneBackend
@@ -313,7 +330,7 @@ func NewLocalBackend(ctx context.Context, component string) (*LocalBackend, erro
 		return nil, fmt.Errorf("failed to create rclone filesystem: %v", err)
 	}
 	rb := RcloneBackend{rcloneFs: rcloneFs}
-	return &LocalBackend{RcloneBackend: rb, localPath: component, isLocal: component == "./"}, nil
+	return &LocalBackend{RcloneBackend: rb, localPath: component, isLocal: component == "./" || component == "../" || component == ".\\" || component == "..\\"}, nil
 }
 
 func (lb LocalBackend) AbsolutePath(path string) (string, error) {
@@ -326,147 +343,6 @@ func (lb LocalBackend) AbsolutePath(path string) (string, error) {
 	} else {
 		return lb.rcloneFs.Root() + path, nil
 	}
-}
-
-type URI struct {
-	Proto     string
-	Options   []string
-	User      string
-	Password  string
-	Component string
-	Path      string
-	File      string
-	Separator string
-	Actions   []string
-}
-
-// ParseURI parses a URI using a regular expression and returns the appropriate backend and path.
-func ParseURI(uri_string string) (*URI, error) {
-	matches := uriRegex.FindStringSubmatch(uri_string)
-	if matches == nil {
-		// most cases of local files will be handled here except file://./path/to/my/file
-		matches = localPathRegex.FindStringSubmatch(uri_string)
-		if matches == nil {
-			if strings.HasPrefix(uri_string, "file://") {
-				return ParseURI(uri_string[7:])
-			} else {
-				return nil, fmt.Errorf("failed to parse URI %s", uri_string)
-			}
-		} else {
-			component := matches[localPathRegex.SubexpIndex("component")]
-			separator := "/"
-			if s := matches[localPathRegex.SubexpIndex("separator")]; s != "" {
-				separator = s
-			} else if len(component) > 1 {
-				separator = string(component[len(component)-1])
-			}
-			if component == "" {
-				component = "./"
-			}
-			return &URI{
-				Proto:     "file",
-				Component: component,
-				Separator: separator,
-				Path:      matches[localPathRegex.SubexpIndex("path")],
-				File:      matches[localPathRegex.SubexpIndex("file")],
-			}, nil
-		}
-
-	}
-
-	var uri URI
-
-	// Extract components from the URI
-	uri.Proto = matches[uriRegex.SubexpIndex("proto")]
-	uri.Separator = "/"
-	if options := matches[uriRegex.SubexpIndex("options")]; options != "" {
-		uri.Options = strings.Split(options[1:], "@")
-	}
-	uri.User = matches[uriRegex.SubexpIndex("user")]
-	uri.Password = matches[uriRegex.SubexpIndex("password")]
-	if uri.Proto == "file" {
-		// cover the case of file://./path/to/myfile
-		uri.Component = matches[uriRegex.SubexpIndex("component")] + "/"
-	} else {
-		uri.Component = matches[uriRegex.SubexpIndex("component")]
-	}
-	uri.Path = matches[uriRegex.SubexpIndex("path")]
-	uri.File = matches[uriRegex.SubexpIndex("file")]
-	if actions := matches[uriRegex.SubexpIndex("actions")]; actions != "" {
-		uri.Actions = strings.Split(actions[1:], "|")
-	}
-
-	return &uri, nil
-}
-
-func (uri URI) fs() (*MetaFileSystem, error) {
-	// Default to rclone if the protocol is unknown or not explicitly handled
-	switch uri.Proto {
-	case "file":
-		ctx := context.Background()
-		return NewMetaFileSystem(NewLocalBackend(ctx, uri.Component))
-	case "ftp", "ftps":
-		ftpOptions := map[string]string{
-			"host":         uri.Component,
-			"user":         uri.User,
-			"pass":         uri.Password,
-			"explicit_tls": strconv.FormatBool(uri.Proto == "ftps"),
-		}
-		ftpRemote, err := addRemoteInMemory("ftp", ftpOptions)
-		if err != nil {
-			log.Printf("Error adding FTP remote on %s: %v", uri.Component, err)
-			return nil, err
-		}
-		url := ftpRemote + ":"
-		ctx := context.Background()
-		return NewMetaFileSystem(NewRcloneBackend(ctx, url))
-	case "http", "https":
-		url := uri.Proto + "://" + uri.Component
-		httpOptions := map[string]string{
-			"url":      url,
-			"user":     uri.User,
-			"password": uri.Password,
-		}
-		httpRemote, err := addRemoteInMemory("http", httpOptions)
-		if err != nil {
-			log.Printf("Error adding HTTP remote on %s: %v", url, err)
-			return nil, err
-		}
-		new_url := httpRemote + ":"
-		ctx := context.Background()
-		return NewMetaFileSystem(NewRcloneBackend(ctx, new_url))
-	case "fasp":
-		return NewMetaFileSystem(&AsperaBackend{}, nil)
-	default:
-		// Check if the protocol is present in rclone configuration
-		if stringInSlice(uri.Proto, RcloneRemotes) {
-			rclone_uri := uri.Proto + ":" + uri.Component
-			ctx := context.Background()
-			return NewMetaFileSystem(NewRcloneBackend(ctx, rclone_uri))
-		}
-		return nil, fmt.Errorf("unsupported URI protocol: %s (protocols %v)", uri.Proto, RcloneRemotes)
-	}
-}
-
-func (uri URI) String() string {
-	uriString := uri.Proto + "://"
-	if uri.Component != "" {
-		uriString += uri.Component + uri.Separator
-	}
-	if uri.Path != "" {
-		uriString += uri.Path + uri.Separator
-	}
-	return uriString + uri.File
-}
-
-func (uri URI) CompletePath() string {
-	return uri.Path + uri.Separator + uri.File
-}
-
-func (uri URI) Subpath(path string) URI {
-	sub := uri
-	sub.Path = path
-	return sub
 }
 
 type Operation struct {
@@ -557,9 +433,6 @@ func (op *Operation) Copy() error {
 	if op.dst == nil {
 		return fmt.Errorf("cannot copy with no destination (source %s)", op.srcUri)
 	}
-	if op.srcUri.File == "" {
-		return fmt.Errorf("cannot copy directory: source %s", op.srcUri)
-	}
 	if op.dstUri.File == "" {
 		op.dstUri.File = op.srcUri.File
 	}
@@ -571,6 +444,15 @@ func (op *Operation) Copy() error {
 		default:
 			return fmt.Errorf("RcloneBackend only support operations with RcloneBackend or LocalBackend, not %T", v)
 		}
+	case *AsperaBackend:
+		switch w := op.dst.fs.(type) {
+		case *LocalBackend:
+			err = v.Copy(w, op.srcUri, op.dstUri, true)
+		default:
+			return fmt.Errorf("AsperaBackend only support copy to LocalBackend, not %T", w)
+		}
+	case *FastqBackend:
+		err = v.Copy(op.dst.fs, op.srcUri, op.dstUri, true)
 	case *LocalBackend:
 		switch w := op.dst.fs.(type) {
 		case *RcloneBackend:
@@ -580,13 +462,7 @@ func (op *Operation) Copy() error {
 		default:
 			err = w.Copy(v, op.srcUri, op.dstUri, false)
 		}
-	case *AsperaBackend:
-		switch w := op.dst.fs.(type) {
-		case *LocalBackend:
-			err = v.Copy(w, op.srcUri, op.dstUri, true)
-		default:
-			return fmt.Errorf("AsperaBackend only support copy to LocalBackend, not %T", w)
-		}
+
 	default:
 		return fmt.Errorf("unsupported source type: %T", v)
 	}
