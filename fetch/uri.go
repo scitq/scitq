@@ -46,17 +46,41 @@ func ParseURI(uri_string string) (*URI, error) {
 				if separator == "" {
 					separator = string(component[l-1])
 				}
-				component = component[:l-1]
+				//component = component[:l-1]
+			}
+			file := matches[localPathRegex.SubexpIndex("file")]
+			path := matches[localPathRegex.SubexpIndex("path")]
+			if file == "." || file == ".." {
+				// . or .. are folders so . is always the same as ./ and .. the same as ../
+				if path == "" {
+					path = file
+				} else {
+					path = path + separator + file
+				}
+				file = ""
 			}
 			if component == "" {
-				component = "."
+				if path == ".." {
+					component = "../"
+					path = ""
+				} else {
+					component = "./"
+					if path == "." {
+						path = ""
+					}
+				}
 			}
+			if strings.Contains(path, ".") || strings.Contains(path, "..") {
+				component = component + path
+				path = ""
+			}
+			//log.Printf(" ----> <%s> <%s> <%s> <%s> <---- ", component, path, separator, file)
 			return &URI{
 				Proto:     "file",
 				Component: component,
 				Separator: separator,
-				Path:      matches[localPathRegex.SubexpIndex("path")],
-				File:      matches[localPathRegex.SubexpIndex("file")],
+				Path:      path,
+				File:      file,
 			}, nil
 		}
 
@@ -84,6 +108,16 @@ func ParseURI(uri_string string) (*URI, error) {
 		uri.Actions = strings.Split(actions[1:], "|")
 	}
 
+	if strings.Contains(uri.Path, ".") || strings.Contains(uri.Path, "..") {
+		if uri.Proto == "file" {
+			uri.Component = uri.Component + uri.Path
+			uri.Path = ""
+		} else {
+			return nil, fmt.Errorf("URI path may not contain relative strings except with file:// : %s", uri)
+		}
+	}
+
+	//log.Printf(" ====> <%s> <%s> <%s> <%s> <==== ", uri.Component, uri.Path, uri.Separator, uri.File)
 	return &uri, nil
 }
 

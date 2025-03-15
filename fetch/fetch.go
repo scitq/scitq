@@ -12,6 +12,7 @@ import (
 	//"strings"
 	"time"
 
+	"github.com/rclone/rclone/fs/config/configfile"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/walk"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
-	"github.com/rclone/rclone/fs/config/configfile"
 	"github.com/rclone/rclone/fs/rc"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
@@ -355,21 +355,47 @@ type Operation struct {
 // Load Rclone config from a file into memory
 func loadConfigFromFile(configPath string) {
 	config.SetConfigPath(configPath)
-	_ = os.Setenv("RCLONE_CONFIG_DIR", configPath)
 	configfile.Install()
-	//ci := fs.GetConfig(ctx)
-	//log.Printf("Storage: %+v", ci)
-	//err := str.Load()
-	//if err != nil {
-	//	log.Printf("Warning: failed to load config %s: %v", configPath, err)
-	//	return // Exit early to avoid misleading success message
-	//}
-	//log.Printf("Storage: %+v", str)
-	// Debug: Print the raw config data
-	//log.Printf("Config data: %+v", config.LoadedData())
+
+	// Clone the loaded config into memory
+	cfg := config.Data()
+	tempConfig := make(map[string]map[string]string)
+	if cfg != nil {
+		// Convert to a temporary in-memory config
+		for _, remote := range cfg.GetSectionList() {
+			options := make(map[string]string)
+			for _, k := range cfg.GetKeyList(remote) {
+				options[k], _ = cfg.GetValue(remote, k)
+			}
+			tempConfig[remote] = options
+		}
+	}
+
+	tmpFile, err := os.CreateTemp("", "rclone-config-*.conf")
+	if err != nil {
+		log.Fatalf("failed to create temp file: %v", err)
+	}
+	//defer os.Remove(tmpFile.Name())
+
+	//config.SetData(cfg)
+	//configfile.Install()
+	//config.Data().Save()
+
+	// Write the cloned config to the temporary file
+	for name, options := range tempConfig {
+		fmt.Fprintf(tmpFile, "[%s]\n", name)
+		for k, v := range options {
+			fmt.Fprintf(tmpFile, "%s = %s\n", k, v)
+		}
+	}
+	tmpFile.Close()
+
+	// Set the fake config path
+	config.SetConfigPath(tmpFile.Name())
+	configfile.Install()
 
 	RcloneRemotes = config.GetRemoteNames()
-	//log.Printf("Rclone config loaded from %s [remotes %s]", configPath, RcloneRemotes)
+	log.Printf("Rclone config loaded from %s [remotes %s]", configPath, RcloneRemotes)
 }
 
 // Add a new remote in memory without modifying the config file
@@ -386,6 +412,7 @@ func addRemoteInMemory(protocol string, options map[string]string) (string, erro
 	for k, v := range cfg {
 		params[k] = v
 	}
+
 	_, err := config.CreateRemote(ctx, uniqueName, protocol, params, config.UpdateRemoteOpt{})
 	if err != nil {
 		return "", fmt.Errorf("failed to register remote: %v", err)
@@ -393,6 +420,12 @@ func addRemoteInMemory(protocol string, options map[string]string) (string, erro
 
 	//fmt.Println("Remote", uniqueName, "added in memory!")
 	return uniqueName, nil
+}
+
+func CleanConfig() {
+	configTemp := config.GetConfigPath()
+	fmt.Printf("Cleaning temporary conf %s\n", configTemp)
+	os.Remove(configTemp)
 }
 
 func NewOperation(rcloneConfig, srcStr, dstStr string) (*Operation, error) {
@@ -433,9 +466,20 @@ func (op *Operation) Copy() error {
 	if op.dst == nil {
 		return fmt.Errorf("cannot copy with no destination (source %s)", op.srcUri)
 	}
+	if len(op.dstUri.Actions) > 0 {
+		return fmt.Errorf("actions for destination are declared on source for now, cannot handle destination action: %s", op.dstUri)
+	}
 	if op.dstUri.File == "" {
 		op.dstUri.File = op.srcUri.File
 	}
+
+	for _, action := range op.dstUri.Actions {
+		err := performAction(action, op.dstUri, op.dst, true)
+		if err != nil {
+			return fmt.Errorf("early action %s failed in URI %s with error: %s", action, op.dstUri, err)
+		}
+	}
+
 	switch v := op.src.fs.(type) {
 	case *RcloneBackend:
 		switch w := op.dst.fs.(type) {
@@ -470,6 +514,14 @@ func (op *Operation) Copy() error {
 	if err != nil {
 		return fmt.Errorf("failed to copy %s -> %s: %v", op.srcUri, op.dstUri, err)
 	}
+
+	for _, action := range op.srcUri.Actions {
+		err := performAction(action, op.dstUri, op.dst, false)
+		if err != nil {
+			return fmt.Errorf("late action %s failed in URI %s with error: %s", action, op.dstUri, err)
+		}
+	}
+
 	return nil
 }
 
@@ -488,6 +540,7 @@ func (op *Operation) List() (fs.DirEntries, error) {
 }
 func Copy(rcloneConfig, srcStr, dstStr string) error {
 	op, err := NewOperation(rcloneConfig, srcStr, dstStr)
+	defer CleanConfig()
 	if err != nil {
 		log.Fatalf("Could not initiate copy operation %v", err)
 	}

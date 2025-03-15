@@ -41,6 +41,7 @@ func main() {
 	}
 
 	op, err := fetch.NewOperation(rcloneConfig, args.Src, args.Dst)
+	defer fetch.CleanConfig()
 	if err != nil {
 		log.Fatalf("Could not initiate %s operation %v", args.Command, err)
 	}

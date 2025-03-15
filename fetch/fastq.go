@@ -243,7 +243,7 @@ func (fb *FastqBackend) fetchFromSRA(runAccession, destination string) error {
 		"-v", destination+":/destination",
 		"ncbi/sra-tools",
 		"sh", "-c",
-		fmt.Sprintf("cd /destination && prefetch %s && fasterq-dump -f --split-files %s && (for f in *.fastq; do gzip \"$f\" & done; wait; rm -fr %s) || exit 1", runAccession, runAccession, runAccession),
+		fmt.Sprintf("cd /destination && prefetch -X 9999999999999 %s && fasterq-dump -f --split-files %s && (for f in *.fastq; do gzip \"$f\" & done; wait; rm -fr %s) || exit 1", runAccession, runAccession, runAccession),
 	)
 
 	output, err := cmd.CombinedOutput()
