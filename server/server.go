@@ -128,10 +128,10 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 	// **2️⃣ Get workers & their assigned task count**
 	rows, err := tx.Query(`
-			SELECT w.worker_id, w.concurrency, COUNT(t.task_id) 
+			SELECT w.worker_id, w.concurrency+w.prefetch as assignable, COUNT(t.task_id) as assigned 
 			FROM worker w
 			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A', 'C', 'R')
-			GROUP BY w.worker_id, w.concurrency
+			GROUP BY w.worker_id, w.concurrency, w.prefetch
 		`)
 	if err != nil {
 		log.Printf("⚠️ Failed to fetch workers: %v", err)
@@ -142,13 +142,13 @@ func (s *taskQueueServer) assignPendingTasks() {
 	workerSlots := make(map[uint32]int) // worker_id → available slots
 	for rows.Next() {
 		var workerID uint32
-		var concurrency, assigned int
-		if err := rows.Scan(&workerID, &concurrency, &assigned); err != nil {
+		var assignable, assigned int
+		if err := rows.Scan(&workerID, &assignable, &assigned); err != nil {
 			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
 		}
-		if assigned < concurrency {
-			workerSlots[workerID] = concurrency - assigned // Free slots
+		if assigned < assignable {
+			workerSlots[workerID] = assignable - assigned // Free slots
 		}
 	}
 	rows.Close()
@@ -1068,6 +1068,10 @@ func Serve(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen: %v", err)
 	}
+
+	// **Trigger task assignment**
+	s.triggerAssign()
+
 	log.Println("Server listening on port 50051...")
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
