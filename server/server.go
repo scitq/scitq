@@ -49,20 +49,23 @@ type taskQueueServer struct {
 	cfg      config.Config
 	jobQueue chan Job
 	//jobWG     sync.WaitGroup
-	providers map[uint32]providers.Provider
-	semaphore chan struct{} // Semaphore to limit concurrency
+	providers     map[uint32]providers.Provider
+	semaphore     chan struct{} // Semaphore to limit concurrency
+	assignTrigger chan struct{}
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
 	s := &taskQueueServer{
-		db:        db,
-		cfg:       cfg,
-		logRoot:   logRoot,
-		jobQueue:  make(chan Job, defaultJobQueueSize),
-		semaphore: make(chan struct{}, defaultJobConcurrency),
-		providers: make(map[uint32]providers.Provider),
+		db:            db,
+		cfg:           cfg,
+		logRoot:       logRoot,
+		jobQueue:      make(chan Job, defaultJobQueueSize),
+		semaphore:     make(chan struct{}, defaultJobConcurrency),
+		providers:     make(map[uint32]providers.Provider),
+		assignTrigger: make(chan struct{}, 1), // buffered, avoids blocking
 	}
-	go s.assignTasksLoop()
+	//go s.assignTasksLoop()
+	go s.waitForAssignEvents()
 	return s
 }
 
@@ -87,78 +90,86 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.Task) (*pb.Tas
 	}
 
 	log.Printf("✅ Task %d submitted (Command: %s, Container: %s)", taskID, req.Command, req.Container)
+
+	// **Trigger task assignment**
+	s.triggerAssign()
+
 	return &pb.TaskResponse{TaskId: uint32(taskID)}, nil
 }
 
-func (s *taskQueueServer) assignTasksLoop() {
-	for {
-		time.Sleep(5 * time.Second) // Run every 5 seconds
+func (s *taskQueueServer) waitForAssignEvents() {
+	for range s.assignTrigger {
+		s.assignPendingTasks() // this logic is your current assignTasksLoop(), minus the loop and sleep
+	}
+}
 
-		tx, err := s.db.Begin()
-		if err != nil {
-			log.Printf("⚠️ Failed to begin transaction: %v", err)
-			continue
-		}
+func (s *taskQueueServer) assignPendingTasks() {
 
-		// **1️⃣ Count pending tasks**
-		var pendingTaskCount int
-		err = tx.QueryRow(`SELECT COUNT(*) FROM task WHERE status = 'P'`).Scan(&pendingTaskCount)
-		if err != nil {
-			log.Printf("⚠️ Failed to count pending tasks: %v", err)
-			tx.Rollback()
-			continue
-		}
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to begin transaction: %v", err)
+		return
+	}
 
-		// **🚨 If no pending tasks, skip this cycle**
-		if pendingTaskCount == 0 {
-			tx.Rollback()
-			continue
-		}
+	// **1️⃣ Count pending tasks**
+	var pendingTaskCount int
+	err = tx.QueryRow(`SELECT COUNT(*) FROM task WHERE status = 'P'`).Scan(&pendingTaskCount)
+	if err != nil {
+		log.Printf("⚠️ Failed to count pending tasks: %v", err)
+		tx.Rollback()
+		return
+	}
 
-		// **2️⃣ Get workers & their assigned task count**
-		rows, err := tx.Query(`
+	// **🚨 If no pending tasks, skip this cycle**
+	if pendingTaskCount == 0 {
+		tx.Rollback()
+		return
+	}
+
+	// **2️⃣ Get workers & their assigned task count**
+	rows, err := tx.Query(`
 			SELECT w.worker_id, w.concurrency, COUNT(t.task_id) 
 			FROM worker w
 			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A', 'C', 'R')
 			GROUP BY w.worker_id, w.concurrency
 		`)
-		if err != nil {
-			log.Printf("⚠️ Failed to fetch workers: %v", err)
-			tx.Rollback()
+	if err != nil {
+		log.Printf("⚠️ Failed to fetch workers: %v", err)
+		tx.Rollback()
+		return
+	}
+
+	workerSlots := make(map[uint32]int) // worker_id → available slots
+	for rows.Next() {
+		var workerID uint32
+		var concurrency, assigned int
+		if err := rows.Scan(&workerID, &concurrency, &assigned); err != nil {
+			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
 		}
-
-		workerSlots := make(map[uint32]int) // worker_id → available slots
-		for rows.Next() {
-			var workerID uint32
-			var concurrency, assigned int
-			if err := rows.Scan(&workerID, &concurrency, &assigned); err != nil {
-				log.Printf("⚠️ Failed to scan worker row: %v", err)
-				continue
-			}
-			if assigned < concurrency {
-				workerSlots[workerID] = concurrency - assigned // Free slots
-			}
+		if assigned < concurrency {
+			workerSlots[workerID] = concurrency - assigned // Free slots
 		}
-		rows.Close()
+	}
+	rows.Close()
 
-		// **🚨 If no worker has available slots, skip this cycle**
-		if len(workerSlots) == 0 {
-			tx.Rollback()
-			continue
+	// **🚨 If no worker has available slots, skip this cycle**
+	if len(workerSlots) == 0 {
+		tx.Rollback()
+		return
+	}
+
+	// **3️⃣ Assign tasks to workers with available slots**
+	for workerID, slots := range workerSlots {
+		if pendingTaskCount == 0 {
+			break // 🚀 Stop if no more tasks left
 		}
 
-		// **3️⃣ Assign tasks to workers with available slots**
-		for workerID, slots := range workerSlots {
-			if pendingTaskCount == 0 {
-				break // 🚀 Stop if no more tasks left
-			}
+		if slots > 0 {
+			// Assign only up to available pending tasks
+			tasksToAssign := min(slots, pendingTaskCount)
 
-			if slots > 0 {
-				// Assign only up to available pending tasks
-				tasksToAssign := min(slots, pendingTaskCount)
-
-				res, err := tx.Exec(`
+			res, err := tx.Exec(`
 					UPDATE task 
 					SET status = 'A', worker_id = $1
 					WHERE task_id IN (
@@ -168,20 +179,27 @@ func (s *taskQueueServer) assignTasksLoop() {
 					)
 				`, workerID, tasksToAssign)
 
-				if err != nil {
-					log.Printf("⚠️ Failed to assign tasks for worker %d: %v", workerID, err)
-				} else {
-					rowsAffected, _ := res.RowsAffected()
-					log.Printf("✅ Assigned %d tasks to worker %d", rowsAffected, workerID)
-					pendingTaskCount -= int(rowsAffected) // 🛑 Reduce remaining task count
-				}
+			if err != nil {
+				log.Printf("⚠️ Failed to assign tasks for worker %d: %v", workerID, err)
+			} else {
+				rowsAffected, _ := res.RowsAffected()
+				log.Printf("✅ Assigned %d tasks to worker %d", rowsAffected, workerID)
+				pendingTaskCount -= int(rowsAffected) // 🛑 Reduce remaining task count
 			}
 		}
+	}
 
-		// Commit transaction
-		if err := tx.Commit(); err != nil {
-			log.Printf("⚠️ Failed to commit task assignment: %v", err)
-		}
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit task assignment: %v", err)
+	}
+}
+
+func (s *taskQueueServer) triggerAssign() {
+	select {
+	case s.assignTrigger <- struct{}{}:
+	default:
+		// Already triggered, no need to push again
 	}
 }
 
@@ -198,6 +216,10 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
 	}
+
+	// **Trigger task assignment**
+	s.triggerAssign()
+
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -291,6 +313,9 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		return nil, fmt.Errorf("failed to commit worker registration: %w", err)
 	}
 
+	// **Trigger task assignment**
+	s.triggerAssign()
+
 	return &pb.WorkerId{WorkerId: workerID}, nil
 }
 
@@ -354,6 +379,9 @@ JOIN flavor f ON iq.flavor_id = f.flavor_id`,
 	for _, job := range jobs {
 		s.addJob(job)
 	}
+
+	// **Trigger task assignment**
+	s.triggerAssign()
 
 	return &pb.WorkerIds{WorkerIds: workerIDs}, nil
 }

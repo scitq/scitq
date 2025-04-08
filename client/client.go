@@ -221,7 +221,7 @@ func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *util
 		}(task)
 	}
 	//wg.Wait() // Ensure all tasks finish before fetching new ones
-	time.Sleep(1 * time.Second)
+	//time.Sleep(1 * time.Second)
 }
 
 // / client launcher
@@ -247,6 +247,6 @@ func Run(serverAddr string, concurrency int, name string, store string) error {
 	go excuterThread(dm.ExecQueue, qclient.Client, sem, store)
 
 	// Start processing tasks
-	workerLoop(qclient.Client, config, sem, dm)
-	return nil
+	go workerLoop(qclient.Client, config, sem, dm)
+	select {} // Block forever
 }
