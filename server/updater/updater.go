@@ -79,7 +79,12 @@ func NewGenericProvider(cfg config.Config, provider string) (*GenericProvider, e
 			break
 		}
 		log.Printf("Attempt %d: failed to find provider %s: %v", i+1, provider, err)
+		db.Rollback()
 		time.Sleep(time.Duration(i+1) * time.Second) // Increasing sleep duration
+		err = db.Begin()
+		if err != nil {
+			return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		}
 	}
 
 	if err != nil {

@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS workflow (
     workflow_id SERIAL PRIMARY KEY,
     workflow_name TEXT NOT NULL,
     run_strategy CHAR(1) NOT NULL DEFAULT 'B',  -- (B: Batch wise execution, T: Thread wise execution - follow thread logic, D: Debug execution, Z: suspended execution)
-    maximum_worker INT
+    maximum_worker INT DEFAULT 0
 );
 
 -- Step Table
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS step (
     step_id SERIAL PRIMARY KEY,
     step_name TEXT NOT NULL,
     workflow_id INT REFERENCES workflow(workflow_id) ON DELETE CASCADE,
-    stats JSONB
+    stats JSONB DEFAULT '{}'
 );
 
 
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS provider (
 CREATE TABLE IF NOT EXISTS region (
     region_id SERIAL PRIMARY KEY,
     provider_id INT REFERENCES provider(provider_id) ON DELETE CASCADE,
-    region_name TEXT,
+    region_name TEXT NOT NULL,
     is_default BOOLEAN DEFAULT FALSE
 );
 
@@ -39,9 +39,9 @@ CREATE TABLE IF NOT EXISTS flavor (
     cpu INT NOT NULL,
     mem FLOAT NOT NULL,
     disk FLOAT NOT NULL,
-    bandwidth INT,
-    gpu TEXT,
-    gpumem INT,
+    bandwidth INT DEFAULT 0,
+    gpu TEXT DEFAULT '',
+    gpumem INT DEFAULT 0,
     has_gpu BOOLEAN DEFAULT FALSE,
     has_quick_disks BOOLEAN DEFAULT FALSE
 );
@@ -50,8 +50,8 @@ CREATE TABLE IF NOT EXISTS flavor (
 CREATE TABLE IF NOT EXISTS flavor_region (
     flavor_id SERIAL PRIMARY KEY,
     region_id INT REFERENCES region(region_id) ON DELETE CASCADE,
-    eviction FLOAT, -- the risk of an instance to be reclaimed, the name come from Azure Spot
-    cost FLOAT
+    eviction FLOAT DEFAULT 0, -- the risk of an instance to be reclaimed, the name come from Azure Spot
+    cost FLOAT DEFAULT 0
 );
 
 
@@ -63,15 +63,15 @@ CREATE TABLE IF NOT EXISTS worker (
     concurrency INT NOT NULL DEFAULT 1,
     prefetch INT NOT NULL DEFAULT 0,
     status CHAR(1) NOT NULL DEFAULT 'I', -- (O: Offline, I: Installing, R: Ready, P: Paused, F: Failing)
-    stats JSONB,
+    stats JSONB DEFAULT '{}',
     last_ping TIMESTAMP,
-    created_at TIMESTAMP,
-    task_properties JSONB,
-    install_strategy JSONB,
-    flavor_id INT,
-    region_id INT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    task_properties JSONB DEFAULT '{}',
+    install_strategy JSONB DEFAULT '{}',
+    flavor_id INT REFERENCES flavor(flavor_id) ON DELETE SET NULL,
+    region_id INT REFERENCES region(region_id) ON DELETE SET NULL,
     is_permanent BOOLEAN DEFAULT TRUE,
-    hostname TEXT,
+    hostname TEXT DEFAULT '',
     ipv4 inet,
     ipv6 inet
 );
@@ -84,25 +84,25 @@ CREATE TABLE IF NOT EXISTS task (
     command TEXT NOT NULL,
     shell TEXT,
     container TEXT NOT NULL,
-    container_options TEXT[],
+    container_options TEXT[] DEFAULT '{}',
     status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, A: Assigned, C: Accepted, D: Downloading, R: Running, U: Uploading, S: Succeeded, F: Failed, Z: suspended, X: canceled, W: waiting)
     worker_id INT REFERENCES worker(worker_id) ON DELETE SET NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    output_log CHAR(1) DEFAULT NULL,  -- (P: Present, Z: Compressed, NULL: Absent)
-    error_log CHAR(1) DEFAULT NULL,
+    output_log CHAR(1) DEFAULT '',  -- (P: Present, Z: Compressed, NULL: Absent)
+    error_log CHAR(1) DEFAULT '',
     previous_task_id INT REFERENCES task(task_id) ON DELETE SET NULL,
-    input TEXT[],
-    resource TEXT[],
-    output TEXT,
-    output_files TEXT[],
-    output_is_compressed BOOLEAN,
+    input TEXT[] DEFAULT '{}',
+    resource TEXT[] DEFAULT '{}',
+    output TEXT DEFAULT '',
+    output_files TEXT[] DEFAULT '{}',
+    output_is_compressed BOOLEAN DEFAULT FALSE,
     retry INT DEFAULT 0,
     is_final BOOLEAN DEFAULT FALSE,
     uses_cache BOOLEAN DEFAULT FALSE,
-    download_timeout FLOAT,
-    running_timeout FLOAT,
-    upload_timeout FLOAT,
+    download_timeout FLOAT DEFAULT 0,
+    running_timeout FLOAT DEFAULT 0,
+    upload_timeout FLOAT DEFAULT 0,
     pid INT,
     input_hash UUID
 );
@@ -119,16 +119,16 @@ CREATE INDEX idx_task_worker ON task(worker_id);
 CREATE TABLE IF NOT EXISTS recruiter (
     step_id INT REFERENCES step(step_id),
     rank INT DEFAULT 1,
-    step_name TEXT,
-    timeout INT,
+    step_name TEXT DEFAULT '',
+    timeout INT DEFAULT 0,
     is_recycling BOOLEAN DEFAULT FALSE,
-    worker_flavor TEXT,
-    worker_provider TEXT,
-    worker_region TEXT,
-    worker_concurrency INT,
-    worker_prefetch INT,
-    maximum_worker INT,
-    rounds INT,
+    worker_flavor TEXT NOT NULL,
+    worker_provider TEXT DEFAULT '',
+    worker_region TEXT DEFAULT '',
+    worker_concurrency INT DEFAULT 1,
+    worker_prefetch INT DEFAULT 0,
+    maximum_worker INT DEFAULT 0,
+    rounds INT DEFAULT 1,
     is_active BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (step_id, rank)
 );
@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS job (
     region_id INT REFERENCES region(region_id) ON DELETE SET NULL,
     retry INT DEFAULT 0,
     status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, R: Running, S: Succeeded, F: Failed, X: canceled)
-    log TEXT, 
+    log TEXT DEFAULT '', 
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
     progression SMALLINT DEFAULT 0

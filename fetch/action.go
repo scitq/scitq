@@ -4,20 +4,23 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
-func performAction(action string, uri URI, fs *MetaFileSystem, isEarly bool) error {
-	switch action {
-	case "gunzip":
+func performAction(action string, uri *URI, fs *MetaFileSystem, isEarly bool) error {
+	switch {
+	case action == "gunzip":
 		return gunzip(uri, fs, isEarly)
-	case "untar":
+	case action == "untar":
 		return untar(uri, fs, isEarly)
+	case strings.HasPrefix(action, "mv:"):
+		return move(uri, isEarly, action[3:])
 	default:
 		return fmt.Errorf("unsupported action: %s", action)
 	}
 }
 
-func gunzip(uri URI, fs *MetaFileSystem, isEarly bool) error {
+func gunzip(uri *URI, fs *MetaFileSystem, isEarly bool) error {
 	switch v := fs.fs.(type) {
 	case *LocalBackend:
 		{
@@ -47,7 +50,7 @@ func gunzip(uri URI, fs *MetaFileSystem, isEarly bool) error {
 	}
 }
 
-func untar(uri URI, fs *MetaFileSystem, isEarly bool) error {
+func untar(uri *URI, fs *MetaFileSystem, isEarly bool) error {
 	switch v := fs.fs.(type) {
 	case *LocalBackend:
 		{
@@ -74,5 +77,19 @@ func untar(uri URI, fs *MetaFileSystem, isEarly bool) error {
 		}
 	default:
 		return fmt.Errorf("unsupported file system: %T", v)
+	}
+}
+
+// move moves the file to the target location (simply modifying the target URI)
+func move(uri *URI, isEarly bool, target string) error {
+	if isEarly {
+		if strings.HasPrefix(target, "/") {
+			uri.Path = target
+		} else {
+			uri.Path = uri.Path + uri.Separator + target
+		}
+		return nil
+	} else {
+		return nil
 	}
 }

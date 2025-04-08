@@ -108,7 +108,7 @@ func ParseURI(uri_string string) (*URI, error) {
 		uri.Actions = strings.Split(actions[1:], "|")
 	}
 
-	if strings.Contains(uri.Path, ".") || strings.Contains(uri.Path, "..") {
+	if strings.Contains(uri.Path, "./") || strings.Contains(uri.Path, "../") || strings.HasSuffix(uri.Path, ".") || strings.HasSuffix(uri.Path, "..") {
 		if uri.Proto == "file" {
 			uri.Component = uri.Component + uri.Path
 			uri.Path = ""

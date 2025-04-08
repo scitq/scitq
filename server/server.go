@@ -18,7 +18,9 @@ import (
 	"github.com/gmtsciencedev/scitq2/server/config"
 	"github.com/gmtsciencedev/scitq2/server/providers"
 	"github.com/gmtsciencedev/scitq2/server/providers/azure"
+	"github.com/lib/pq"
 
+	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -26,8 +28,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	"google.golang.org/protobuf/proto"
 )
 
 const defaultJobRetry = 3
@@ -72,9 +73,9 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.Task) (*pb.Tas
 					input, resource, output, retry, is_final, uses_cache, 
 					download_timeout, running_timeout, upload_timeout,  
 					status, created_at) 
-		VALUES ($1, $2, $3, $4, 
-			$5, $6, $7, $8, $9, $10,
-			 $11, $12, $13, 
+		VALUES ($1, $2, $3, $4, $5,
+			$6, $7, $8, $9, $10, $11, 
+			$12, $13, $14,
 			 'P', NOW()) 
 		RETURNING task_id`,
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
@@ -467,8 +468,13 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 }
 
 func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.WorkerId) (*pb.TaskListAndOther, error) {
-	var tasks []*pb.Task
-	var concurrency uint32
+	var (
+		tasks       []*pb.Task
+		concurrency uint32
+		input       pq.StringArray
+		resource    pq.StringArray
+		shell       sql.NullString
+	)
 
 	err := s.db.QueryRow(`
 		SELECT concurrency FROM worker WHERE worker_id = $1
@@ -486,7 +492,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 			download_timeout, running_timeout, upload_timeout,  
 			status
 		FROM task
-		WHERE worker_id = $1 AND status = 'A' AND task.step_id=(SELECT step_id FROM worker WHERE worker_id=$1)
+		WHERE worker_id = $1 AND status = 'A' AND coalesce(task.step_id,0)=coalesce((SELECT step_id FROM worker WHERE worker_id=$1),0)
 	`, req.WorkerId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch assigned tasks: %w", err)
@@ -495,11 +501,16 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 
 	for rows.Next() {
 		var task pb.Task
-		if err := rows.Scan(&task.TaskId, &task.Command, &task.Shell, &task.Container, &task.ContainerOptions,
-			&task.Input, &task.Resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
+		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
+			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
 			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &task.Status); err != nil {
 			log.Printf("Task decode error: %v", err)
 			continue
+		}
+		task.Input = []string(input)
+		task.Resource = []string(resource)
+		if shell.Valid {
+			task.Shell = proto.String(shell.String) // uses *string
 		}
 		tasks = append(tasks, &task)
 	}
@@ -535,13 +546,13 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		w.status, 
 		COALESCE(w.ipv4::text, '') AS ipv4, 
 		COALESCE(w.ipv6::text, '') AS ipv6, 
-		r.region_name, 
-		p.provider_name||'.'||p.config_name,
-		f.flavor_name
+		COALESCE(r.region_name, ''), 
+		COALESCE(p.provider_name||'.'||p.config_name, ''),
+		COALESCE(f.flavor_name, '')
 	FROM worker w
-	JOIN region r ON r.region_id=w.region_id
-	JOIN provider p ON r.provider_id=p.provider_id
-	JOIN flavor f ON f.flavor_id=w.flavor_id
+	LEFT JOIN region r ON r.region_id=w.region_id
+	LEFT JOIN provider p ON r.provider_id=p.provider_id
+	LEFT JOIN flavor f ON f.flavor_id=w.flavor_id
 	ORDER BY worker_id`)
 
 	if err != nil {

@@ -11,7 +11,7 @@ make install
 scitq-server &
 scitq-client --concurrency 1 & 
 scitq-cli worker list
-scitq-cli task create --command "ls -la" --container ubuntu
+scitq-cli task create --command "ls -la" --container ubuntu --shell bash
 scitq-cli task list
 scitq-cli task output --id 1
 ```

@@ -19,8 +19,10 @@ type Attr struct {
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
 		Create *struct {
-			Container string `arg:"--container,required" help:"Container to run"`
-			Command   string `arg:"--command,required" help:"Command to execute"`
+			Container string   `arg:"--container,required" help:"Container to run"`
+			Command   string   `arg:"--command,required" help:"Command to execute"`
+			Shell     string   `arg:"--shell" help:"Shell to use"`
+			Input     []string `arg:"--input,separate" help:"Input values for the task (can be repeated)"`
 		} `arg:"subcommand:create" help:"Create a new task"`
 
 		List *struct {
@@ -76,6 +78,8 @@ func (c *CLI) TaskCreate() error {
 	req := &pb.Task{
 		Command:   c.Attr.Task.Create.Command,
 		Container: c.Attr.Task.Create.Container,
+		Shell:     &c.Attr.Task.Create.Shell,
+		Input:     c.Attr.Task.Create.Input,
 	}
 	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {

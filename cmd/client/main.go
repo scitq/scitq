@@ -17,6 +17,7 @@ func main() {
 	// Parse command-line arguments
 	serverAddr := flag.String("server", "localhost:50051", "gRPC server address")
 	concurrency := flag.Int("concurrency", 1, "Number of concurrent tasks")
+	store := flag.String("store", "/scratch", "Path to the store directory")
 
 	// Get the hostname
 	hostname, err := os.Hostname()
@@ -49,5 +50,5 @@ func main() {
 		}
 	}
 
-	client.Run(*serverAddr, *concurrency, *name)
+	client.Run(*serverAddr, *concurrency, *name, *store)
 }

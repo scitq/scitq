@@ -61,6 +61,8 @@ import (
 //	return nil
 //}
 
+const DefaultRcloneConfig = "/etc/rclone.conf"
+
 func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
 	// Create a context for the operation
 	ctx := context.Background()
@@ -474,7 +476,7 @@ func (op *Operation) Copy() error {
 	}
 
 	for _, action := range op.dstUri.Actions {
-		err := performAction(action, op.dstUri, op.dst, true)
+		err := performAction(action, &op.dstUri, op.dst, true)
 		if err != nil {
 			return fmt.Errorf("early action %s failed in URI %s with error: %s", action, op.dstUri, err)
 		}
@@ -516,7 +518,7 @@ func (op *Operation) Copy() error {
 	}
 
 	for _, action := range op.srcUri.Actions {
-		err := performAction(action, op.dstUri, op.dst, false)
+		err := performAction(action, &op.dstUri, op.dst, false)
 		if err != nil {
 			return fmt.Errorf("late action %s failed in URI %s with error: %s", action, op.dstUri, err)
 		}
@@ -538,6 +540,21 @@ func (op *Operation) List() (fs.DirEntries, error) {
 
 	return op.src.fs.List(path)
 }
+
+func (op *Operation) Info() (fs.DirEntry, error) {
+	path := op.srcUri.Path
+	if op.srcUri.File != "" {
+		if path == "" {
+			path = op.srcUri.File
+		} else {
+			path = path + op.srcUri.Separator + op.srcUri.File
+		}
+	}
+	//log.Printf("Path <%s> | File <%s> -> <%s>\n", op.srcUri.Path, op.srcUri.File, path)
+
+	return op.src.fs.Info(path)
+}
+
 func Copy(rcloneConfig, srcStr, dstStr string) error {
 	op, err := NewOperation(rcloneConfig, srcStr, dstStr)
 	defer CleanConfig()
@@ -546,6 +563,24 @@ func Copy(rcloneConfig, srcStr, dstStr string) error {
 	}
 	err = op.Copy()
 	return err
+}
+
+func List(rcloneConfig, srcStr string) (fs.DirEntries, error) {
+	op, err := NewOperation(rcloneConfig, srcStr, "")
+	defer CleanConfig()
+	if err != nil {
+		log.Fatalf("Could not initiate list operation %v", err)
+	}
+	return op.List()
+}
+
+func Info(rcloneConfig, srcStr string) (fs.DirEntry, error) {
+	op, err := NewOperation(rcloneConfig, srcStr, "")
+	defer CleanConfig()
+	if err != nil {
+		log.Fatalf("Could not initiate info operation %v", err)
+	}
+	return op.Info()
 }
 
 // test if a DirEntry is a dir
@@ -558,4 +593,22 @@ func IsDir(f fs.DirEntry) bool {
 func IsFile(f fs.DirEntry) bool {
 	_, ok := f.(fs.Object)
 	return ok
+}
+
+// provide MD5
+func GetMD5(f fs.DirEntry) string {
+	ctx := context.Background()
+
+	var md5sum string
+	var err error
+	if obj, ok := f.(fs.Object); ok {
+		md5sum, err = obj.Hash(ctx, hash.MD5)
+		if err != nil {
+			// Not all remotes support hashes so it's ok to leave it empty.
+			md5sum = ""
+		}
+	}
+
+	return md5sum
+
 }

@@ -1,14 +1,18 @@
 package client
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/gmtsciencedev/scitq2/fetch"
 
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/google/uuid"
@@ -18,7 +22,7 @@ const (
 	maxDownloads = 20
 	retryLimit   = 3
 	retryWait    = 10 * time.Second
-	resourceFile = "/scratch/resources.json"
+	resourceFile = "resources.json"
 	maxQueueSize = 200
 )
 
@@ -32,7 +36,8 @@ const (
 )
 
 type FileTransfer struct {
-	TaskID     uint32
+	TaskId     uint32
+	Task       *pb.Task
 	FileType   FileType
 	SourcePath string
 	TargetPath string
@@ -40,6 +45,8 @@ type FileTransfer struct {
 
 // ResourceMetadata stores metadata for downloaded resources.
 type FileMetadata struct {
+	TaskId     uint32
+	Task       *pb.Task
 	SourcePath string
 	FilePath   string
 	FileType   FileType
@@ -51,40 +58,48 @@ type FileMetadata struct {
 // DownloadManager manages task downloads.
 type DownloadManager struct {
 	TaskDownloads     map[uint32]int          // Task ID → Remaining file count
-	ResourceDownloads map[string][]uint32     // SourcePath → Tasks waiting
+	ResourceDownloads map[string][]*pb.Task   // SourcePath → Tasks waiting
 	ResourceMemory    map[string]FileMetadata // SourcePath → Metadata
 
 	FileQueue       chan *FileTransfer // Limited queue (maxDownloads=20)
 	TaskQueue       chan *pb.Task      // Unlimited queue (tasks waiting for download)
 	CompletionQueue chan *FileMetadata // Completed downloads
+	ExecQueue       chan *pb.Task      // Tasks ready for execution
+	Store           string
 }
 
 // NewDownloadManager initializes the download manager.
-func NewDownloadManager() *DownloadManager {
+func NewDownloadManager(store string) *DownloadManager {
 	return &DownloadManager{
 		TaskDownloads:     make(map[uint32]int),
-		ResourceDownloads: make(map[string][]uint32),
+		ResourceDownloads: make(map[string][]*pb.Task),
 		ResourceMemory:    make(map[string]FileMetadata),
 		FileQueue:         make(chan *FileTransfer, maxDownloads),
 		TaskQueue:         make(chan *pb.Task, maxQueueSize),
 		CompletionQueue:   make(chan *FileMetadata, maxQueueSize),
+		ExecQueue:         make(chan *pb.Task, maxQueueSize),
+		Store:             store,
 	}
 }
 
 // loadResourceMemory loads the resource memory from a file.
 func (dm *DownloadManager) loadResourceMemory() {
-	file, err := os.Open(resourceFile)
-	if err == nil {
-		defer file.Close()
-		decoder := json.NewDecoder(file)
-		decoder.Decode(&dm.ResourceMemory)
-		log.Println("🔄 Loaded resource memory from disk")
+	resourcePath := fmt.Sprintf("%s/%s", dm.Store, resourceFile)
+	if fileInfo, err := os.Stat(resourcePath); err == nil && !fileInfo.IsDir() {
+		file, err := os.Open(resourcePath)
+		if err == nil {
+			defer file.Close()
+			decoder := json.NewDecoder(file)
+			decoder.Decode(&dm.ResourceMemory)
+			log.Println("🔄 Loaded resource memory from disk")
+		}
 	}
 }
 
 // saveResourceMemory persists the resource memory to a file.
 func (dm *DownloadManager) saveResourceMemory() {
-	file, err := os.Create(resourceFile)
+	resourcePath := fmt.Sprintf("%s/%s", dm.Store, resourceFile)
+	file, err := os.Create(resourcePath)
 	if err == nil {
 		encoder := json.NewEncoder(file)
 		encoder.Encode(dm.ResourceMemory)
@@ -104,28 +119,82 @@ func (dm *DownloadManager) StartDownloadWorkers() {
 	}
 }
 
+// pullDockerImage pulls a docker image using the `docker pull` command.
+func pullDockerImage(image string) error {
+	image = strings.TrimPrefix(image, "docker:")
+	cmd := exec.Command("docker", "pull", image)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to pull docker image %s: %v\nOutput:\n%s", image, err, output)
+	}
+
+	fmt.Printf("✅ Successfully pulled docker image %s\nOutput:\n%s", image, output)
+	return nil
+}
+
 // downloadFile simulates a file download and notifies completion.
 func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 	log.Printf("📥 Downloading: %s → %s", file.SourcePath, file.TargetPath)
-	time.Sleep(2 * time.Second) // Simulated download time
+
+	const maxRetries = 3
+	const retryDelay = 5 * time.Second
+
+	var err error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		switch file.FileType {
+		case ResourceFile, InputFile:
+			err = fetch.Copy(fetch.DefaultRcloneConfig, file.SourcePath, file.TargetPath)
+
+		case DockerImage:
+			err = pullDockerImage(file.SourcePath)
+		}
+
+		if err == nil {
+			// Success, exit retry loop
+			break
+		}
+
+		log.Printf("❌ Attempt %d/%d failed for %s: %v", attempt, maxRetries, file.SourcePath, err)
+
+		if attempt < maxRetries {
+			log.Printf("🔄 Retrying in %v...", retryDelay)
+			time.Sleep(retryDelay)
+		}
+	}
+
+	if err != nil {
+		log.Printf("🚨 Failed to download after %d attempts: %s", maxRetries, file.SourcePath)
+		return
+	}
 
 	// Simulate metadata extraction
 	size := int64(1024) // Dummy size
 	hash := md5.Sum([]byte(file.SourcePath))
 	md5Str := hex.EncodeToString(hash[:])
-	metadata := FileMetadata{SourcePath: file.SourcePath, FileType: file.FileType, Size: size, Date: time.Now(), MD5: md5Str}
+
+	metadata := FileMetadata{
+		TaskId:     file.TaskId,
+		Task:       file.Task,
+		SourcePath: file.SourcePath,
+		FileType:   file.FileType,
+		Size:       size,
+		Date:       time.Now(),
+		MD5:        md5Str,
+	}
+
 	dm.CompletionQueue <- &metadata
-	//dm.ResourceMemory[file.SourcePath] = metadata
 }
 
 // ProcessDownloads manages incoming tasks and processes downloads.
-func (dm *DownloadManager) ProcessDownloads(execQueue chan *pb.Task) {
+func (dm *DownloadManager) ProcessDownloads() {
 	for {
 		select {
 		case task := <-dm.TaskQueue:
 			dm.handleNewTask(task)
 		case completedFile := <-dm.CompletionQueue:
-			dm.handleFileCompletion(completedFile, execQueue)
+			dm.handleFileCompletion(completedFile)
 		}
 	}
 }
@@ -138,10 +207,11 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 	// Queue input files
 	for _, input := range task.Input {
 		ft := &FileTransfer{
-			TaskID:     *task.TaskId,
+			TaskId:     *task.TaskId,
+			Task:       task,
 			FileType:   InputFile,
 			SourcePath: input,
-			TargetPath: fmt.Sprintf("/scratch/tasks/%d/input/", *task.TaskId),
+			TargetPath: fmt.Sprintf("%s/tasks/%d/input/", dm.Store, *task.TaskId),
 		}
 		go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
 		numFiles++
@@ -150,22 +220,64 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 	// Queue resources (if not already downloaded or outdated)
 	for _, resource := range task.Resource {
 		meta, exists := dm.ResourceMemory[resource]
-		if exists && time.Since(meta.Date) < 24*time.Hour {
-			//numFiles++
-			//TODO change this test
-			continue // Assume it's fresh if less than 24h old
+
+		if exists {
+			log.Printf("Checking resource %v", meta)
+			fileInfo, err := fetch.Info(fetch.DefaultRcloneConfig, meta.SourcePath)
+			if err != nil {
+				// likely a file method that does not support Info, we have little choice but to trust
+				continue
+			}
+
+			func() { // ✅ Anonymous function to allow early exit
+				if meta.MD5 != "" {
+					if meta.MD5 == fetch.GetMD5(fileInfo) {
+						return
+					} else {
+						log.Printf("Resource %s seems to have changed (MD5 differs), redownloading", resource)
+						delete(dm.ResourceMemory, resource)
+						dm.saveResourceMemory()
+						return
+					}
+				}
+
+				if !meta.Date.IsZero() {
+					ctx := context.Background()
+					if meta.Date != fileInfo.ModTime(ctx) {
+						log.Printf("Resource %s seems to have changed (date differs), redownloading", resource)
+						delete(dm.ResourceMemory, resource)
+						dm.saveResourceMemory()
+						return
+					}
+				}
+
+				if meta.Size != 0 {
+					if meta.Size == fileInfo.Size() {
+						return
+					} else {
+						log.Printf("Resource %s seems to have changed (size differs), redownloading", resource)
+						delete(dm.ResourceMemory, resource)
+						dm.saveResourceMemory()
+						return
+					}
+				}
+			}()
+
+			// here either MD5 is unchanged or date and size are unchanged or no checking method is available
+			continue
 		}
 		rd, exists := dm.ResourceDownloads[resource]
 		numFiles++
 		if exists {
-			dm.ResourceDownloads[resource] = append(rd, *task.TaskId)
+			dm.ResourceDownloads[resource] = append(rd, task)
 		} else {
-			dm.ResourceDownloads[resource] = []uint32{*task.TaskId}
+			dm.ResourceDownloads[resource] = []*pb.Task{task}
 			ft := &FileTransfer{
-				TaskID:     *task.TaskId,
+				TaskId:     *task.TaskId,
+				Task:       task,
 				FileType:   ResourceFile,
 				SourcePath: resource,
-				TargetPath: fmt.Sprintf("/scratch/resources/%s/", uuid.New()),
+				TargetPath: fmt.Sprintf("%s/resources/%s/", dm.Store, uuid.New()),
 			}
 			go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
 		}
@@ -177,13 +289,15 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 		rd, exists := dm.ResourceDownloads[container]
 		numFiles++
 		if exists {
-			dm.ResourceDownloads[container] = append(rd, *task.TaskId)
+			dm.ResourceDownloads[container] = append(rd, task)
 		} else {
-			dm.ResourceDownloads[container] = []uint32{*task.TaskId}
+			dm.ResourceDownloads[container] = []*pb.Task{task}
 			ft := &FileTransfer{
-				TaskID:     *task.TaskId,
+				TaskId:     *task.TaskId,
+				Task:       task,
 				FileType:   DockerImage,
 				SourcePath: container,
+				TargetPath: task.Container,
 			}
 			go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
 		}
@@ -194,7 +308,7 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 }
 
 // handleFileCompletion updates the state when a download completes.
-func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata, execQueue chan *pb.Task) {
+func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 	if fileMeta == nil {
 		log.Printf("ERROR: empty FileMetadata")
 		return
@@ -204,22 +318,43 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata, execQueu
 	//dm.ResourceMemory[filePath] = dm.ResourceMemory[filePath]
 
 	// Check if it's a resource, notify all waiting tasks
-	if fm.FileType == InputFile {
-
-	}
-	if fm.FileType == ResourceFile {
-		if tasks, exists := dm.ResourceDownloads[fm.SourcePath]; exists {
-			for _, taskID := range tasks {
-				if count, ok := dm.TaskDownloads[taskID]; ok {
-					dm.TaskDownloads[taskID] = count - 1
-					if dm.TaskDownloads[taskID] == 0 {
-						delete(dm.TaskDownloads, taskID)
-						log.Printf("🚀 Task %d ready for execution", taskID)
-					}
+	switch fm.FileType {
+	case InputFile:
+		{
+			if count, ok := dm.TaskDownloads[fm.TaskId]; ok {
+				dm.TaskDownloads[fm.TaskId] = count - 1
+				if count <= 1 {
+					// no more input/resource files to wait we can queue task for execution
+					delete(dm.TaskDownloads, fm.TaskId)
+					log.Printf("🚀 Task %d ready for execution", fm.TaskId)
+					dm.ExecQueue <- fm.Task
+				} else {
+					log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)
 				}
 			}
-			delete(dm.ResourceDownloads, fm.SourcePath)
 		}
+	case ResourceFile, DockerImage:
+		{
+			if tasks, exists := dm.ResourceDownloads[fm.SourcePath]; exists {
+				for _, task := range tasks {
+					if count, ok := dm.TaskDownloads[*task.TaskId]; ok {
+						dm.TaskDownloads[*task.TaskId] = count - 1
+						if count <= 1 {
+							delete(dm.TaskDownloads, *task.TaskId)
+							log.Printf("🚀 Task %d ready for execution", *task.TaskId)
+							dm.ExecQueue <- task
+						} else {
+							log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)
+						}
+					}
+				}
+				delete(dm.ResourceDownloads, fm.SourcePath)
+			}
+			dm.ResourceMemory[fm.SourcePath] = *fileMeta
+			dm.saveResourceMemory()
+		}
+	default:
+		log.Printf("Unknown file type for %s", fm.SourcePath)
 	}
 
 }
@@ -228,4 +363,15 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata, execQueu
 func extractFilename(path string) string {
 	parts := strings.Split(path, "/")
 	return parts[len(parts)-1]
+}
+
+// run downloader
+func RunDownloader(store string) *DownloadManager {
+	dm := NewDownloadManager(store)
+	go func() { dm.StartDownloadWorkers() }()
+	go func() {
+		dm.loadResourceMemory()
+		dm.ProcessDownloads()
+	}()
+	return dm
 }

@@ -15,7 +15,7 @@ type Args struct {
 	Command      string `arg:"positional,required" help:"Command to execute (copy or ls)"`
 	Src          string `arg:"positional,required" help:"Source URI"`
 	Dst          string `arg:"positional" help:"Destination URI (required for copy)"`
-	RcloneConfig string `arg:"--config" default:"~/.config/rclone/rclone.conf" `
+	RcloneConfig string `arg:"--config" default:"/etc/rclone.conf" `
 }
 
 // expandPath expands a leading ~ in a file path to the user's home directory.

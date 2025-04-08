@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -22,12 +23,18 @@ func optionalInt32(v int) *uint32 {
 	return &i
 }
 
+// the client is divided in several loops to accomplish its tasks:
+// - the main loop (essentially this file)
+//
+//
+
 // WorkerConfig holds worker settings from CLI args.
 type WorkerConfig struct {
 	WorkerId    uint32
 	ServerAddr  string
 	Concurrency int
 	Name        string
+	Store       string
 }
 
 // registerWorker registers the client worker with the server.
@@ -75,13 +82,13 @@ func updateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
+func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, store string) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", *task.TaskId, task.Command)
 
-	// 🛑 Only acknowledge if the task is in "A"
-	if task.Status != "A" {
-		log.Printf("⚠️ Task %d is not assigned (A), skipping acknowledgment.", *task.TaskId)
+	// 🛑 Only acknowledge if the task is in "C" or "D"
+	if task.Status != "C" && task.Status != "D" {
+		log.Printf("⚠️ Task %d is not accepted (C) or downloading (D) but %s, skipping acknowledgment.", *task.TaskId, task.Status)
 		return
 	}
 	if !acknowledgeTask(client, *task.TaskId) {
@@ -89,17 +96,22 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup) {
 		return // ❌ Do not execute if acknowledgment failed.
 	}
 
-	command := []string{"run", "--rm", task.Container}
+	command := []string{"run", "--rm"}
+	for _, folder := range []string{"input", "output", "tmp", "resource"} {
+		command = append(command, "-v", store+"/tasks/"+fmt.Sprint(*task.TaskId)+"/"+folder+":/"+folder)
+	}
+
 	if task.ContainerOptions != nil {
 		options := strings.Fields(*task.ContainerOptions)
 		command = append(command, options...)
 	}
 	if task.Shell != nil {
-		command = append(command, *task.Shell, "-c", task.Command)
+		command = append(command, task.Container, *task.Shell, "-c", task.Command)
 	} else {
-		command = append(command, task.Command)
+		command = append(command, task.Container, task.Command)
 	}
 
+	log.Printf("🛠️  Running command: docker %s", strings.Join(command, " "))
 	cmd := exec.Command("docker", command...)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -170,32 +182,51 @@ func (w *WorkerConfig) fetchTasks(client pb.TaskQueueClient, id uint32, sem *uti
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.ResizableSemaphore) {
+func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager) {
+	store := dm.Store
 	for {
 		tasks := config.fetchTasks(client, config.WorkerId, sem)
 		if len(tasks) == 0 {
+			log.Printf("No tasks available, retrying in 5 seconds...")
 			time.Sleep(5 * time.Second) // No tasks, wait before retrying
 			continue
 		}
 
-		var wg sync.WaitGroup
-
 		for _, task := range tasks {
-			wg.Add(1)
-			log.Printf("Received task %d with status: %v", task.TaskId, task.Status)
-			sem.Acquire(context.Background()) // Block if max concurrency is reached
-			go func(t *pb.Task) {
-				executeTask(client, t, &wg)
-				sem.Release() // Release semaphore slot after task completion
-			}(task)
+			task.Status = "C" // Mark as "C" (Accepted)
+			updateTaskStatus(client, *task.TaskId, task.Status)
+			log.Printf("📝 Task %d accepted", *task.TaskId)
+			for _, folder := range []string{"input", "output", "tmp", "resource"} {
+				if err := os.MkdirAll(store+"/tasks/"+fmt.Sprint(*task.TaskId)+"/"+folder, 0777); err != nil {
+					log.Printf("⚠️ Failed to create directory %s for task %d: %v", folder, *task.TaskId, err)
+				}
+			}
+			dm.TaskQueue <- task
 		}
-		//wg.Wait() // Ensure all tasks finish before fetching new ones
-		time.Sleep(1 * time.Second)
+
 	}
 }
 
-func Run(serverAddr string, concurrency int, name string) error {
-	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name}
+func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *utils.ResizableSemaphore, store string) {
+	// WaitGroup to synchronize goroutines
+	var wg sync.WaitGroup
+
+	for task := range exexQueue {
+		wg.Add(1)
+		log.Printf("Received task %d with status: %v", task.TaskId, task.Status)
+		sem.Acquire(context.Background()) // Block if max concurrency is reached
+		go func(t *pb.Task) {
+			executeTask(client, t, &wg, store)
+			sem.Release() // Release semaphore slot after task completion
+		}(task)
+	}
+	//wg.Wait() // Ensure all tasks finish before fetching new ones
+	time.Sleep(1 * time.Second)
+}
+
+// / client launcher
+func Run(serverAddr string, concurrency int, name string, store string) error {
+	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store}
 
 	// Establish connection to the server
 	qclient, err := lib.CreateClient(config.ServerAddr)
@@ -207,7 +238,15 @@ func Run(serverAddr string, concurrency int, name string) error {
 	config.registerWorker(qclient.Client)
 	sem := utils.NewResizableSemaphore(config.Concurrency)
 
+	//TODO: we need to add somehow an error state (or we could update the task status in the task with the error notably in case download fails)
+
+	// Launching download Manager
+	dm := RunDownloader(store)
+
+	// Launching execution thread
+	go excuterThread(dm.ExecQueue, qclient.Client, sem, store)
+
 	// Start processing tasks
-	workerLoop(qclient.Client, config, sem)
+	workerLoop(qclient.Client, config, sem, dm)
 	return nil
 }
