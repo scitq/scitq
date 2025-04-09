@@ -312,6 +312,12 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 
 	// Track total downloads needed
 	dm.TaskDownloads[*task.TaskId] = numFiles
+	if numFiles == 0 {
+		log.Printf("🚀 Task %d ready for execution", *task.TaskId)
+		dm.ExecQueue <- task
+	} else {
+		log.Printf("📝 Task %d waiting for %d files", *task.TaskId, numFiles)
+	}
 }
 
 // handleFileCompletion updates the state when a download completes.
