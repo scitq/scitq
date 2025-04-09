@@ -2,8 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -169,15 +167,21 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 		return
 	}
 
-	// Simulate metadata extraction
-	size := int64(1024) // Dummy size
-	hash := md5.Sum([]byte(file.SourcePath))
-	md5Str := hex.EncodeToString(hash[:])
+	var size int64
+	var md5Str string
+	info, err := fetch.Info(fetch.DefaultRcloneConfig, file.SourcePath)
+	if err != nil {
+		log.Printf("Error fetching file info: %v", err)
+	} else {
+		size = info.Size() // Correctly call the Size function
+		md5Str = fetch.GetMD5(info)
+	}
 
 	metadata := FileMetadata{
 		TaskId:     file.TaskId,
 		Task:       file.Task,
 		SourcePath: file.SourcePath,
+		FilePath:   file.TargetPath,
 		FileType:   file.FileType,
 		Size:       size,
 		Date:       time.Now(),
@@ -229,15 +233,15 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 				continue
 			}
 
-			func() { // ✅ Anonymous function to allow early exit
+			if func() bool { // ✅ Anonymous function to allow early exit
 				if meta.MD5 != "" {
 					if meta.MD5 == fetch.GetMD5(fileInfo) {
-						return
+						return true
 					} else {
 						log.Printf("Resource %s seems to have changed (MD5 differs), redownloading", resource)
 						delete(dm.ResourceMemory, resource)
 						dm.saveResourceMemory()
-						return
+						return false
 					}
 				}
 
@@ -247,24 +251,27 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 						log.Printf("Resource %s seems to have changed (date differs), redownloading", resource)
 						delete(dm.ResourceMemory, resource)
 						dm.saveResourceMemory()
-						return
+						return false
 					}
 				}
 
 				if meta.Size != 0 {
 					if meta.Size == fileInfo.Size() {
-						return
+						return true
 					} else {
 						log.Printf("Resource %s seems to have changed (size differs), redownloading", resource)
 						delete(dm.ResourceMemory, resource)
 						dm.saveResourceMemory()
-						return
+						return false
 					}
 				}
-			}()
 
+				return true
+			}() {
+				continue
+			}
 			// here either MD5 is unchanged or date and size are unchanged or no checking method is available
-			continue
+
 		}
 		rd, exists := dm.ResourceDownloads[resource]
 		numFiles++
@@ -357,6 +364,23 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 		log.Printf("Unknown file type for %s", fm.SourcePath)
 	}
 
+}
+
+// resourceLink creates hard links for resources in the task's resource folder.
+func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string) {
+	fileMeta := dm.ResourceMemory[resourcePath]
+	entries, err := os.ReadDir(fileMeta.FilePath)
+	if err != nil {
+		log.Printf("Error reading directory %s (%v): %v", fileMeta.FilePath, fileMeta, err)
+		return
+	}
+	for _, entry := range entries {
+		err := os.Link(fileMeta.FilePath+"/"+entry.Name(), taskResourceFolder+"/"+entry.Name())
+		if err != nil {
+			log.Printf("Error creating hard link for %s: %v", entry.Name(), err)
+		}
+	}
+	log.Printf("Linked %s in %s", resourcePath, taskResourceFolder)
 }
 
 // extractFilename extracts filename from a path.

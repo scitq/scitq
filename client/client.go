@@ -51,17 +51,18 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	log.Printf("✅ Worker %s registered with concurrency %d", w.Name, w.Concurrency)
 }
 
-// acknowledgeTask marks the task as "Accepted" (`C` status) before execution.
+// acknowledgeTask marks the task as "Running" (`R` status) before execution.
 func acknowledgeTask(client pb.TaskQueueClient, taskID uint32) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: taskID, NewStatus: "C"})
+	res, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: taskID, NewStatus: "R"})
+
 	if err != nil || !res.Success {
 		log.Printf("❌ Failed to acknowledge task %d: %v", taskID, err)
 		return false
 	}
-	log.Printf("📌 Task %d acknowledged (Accepted)", taskID)
+	log.Printf("📌 Task %d running", taskID)
 	return true
 }
 
@@ -82,7 +83,7 @@ func updateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, store string) {
+func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", *task.TaskId, task.Command)
 
@@ -94,6 +95,12 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 	if !acknowledgeTask(client, *task.TaskId) {
 		log.Printf("⚠️ Task %d could not be acknowledged, giving up execution.", *task.TaskId)
 		return // ❌ Do not execute if acknowledgment failed.
+	}
+	task.Status = "R"
+
+	//TODO: linking resource
+	for _, r := range task.Resource {
+		dm.resourceLink(r, store+"/tasks/"+fmt.Sprint(*task.TaskId)+"/resource")
 	}
 
 	command := []string{"run", "--rm"}
@@ -207,7 +214,7 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.Resiz
 	}
 }
 
-func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *utils.ResizableSemaphore, store string) {
+func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *utils.ResizableSemaphore, store string, dm *DownloadManager) {
 	// WaitGroup to synchronize goroutines
 	var wg sync.WaitGroup
 
@@ -215,8 +222,9 @@ func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *util
 		wg.Add(1)
 		log.Printf("Received task %d with status: %v", task.TaskId, task.Status)
 		sem.Acquire(context.Background()) // Block if max concurrency is reached
+
 		go func(t *pb.Task) {
-			executeTask(client, t, &wg, store)
+			executeTask(client, t, &wg, store, dm)
 			sem.Release() // Release semaphore slot after task completion
 		}(task)
 	}
@@ -244,7 +252,7 @@ func Run(serverAddr string, concurrency int, name string, store string) error {
 	dm := RunDownloader(store)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, sem, store)
+	go excuterThread(dm.ExecQueue, qclient.Client, sem, store, dm)
 
 	// Start processing tasks
 	go workerLoop(qclient.Client, config, sem, dm)
