@@ -125,7 +125,8 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("❌ Failed to start task %d: %v", task.TaskId, err)
-		updateTaskStatus(client, *task.TaskId, "F") // Mark as failed
+		task.Status = "F"                           // Mark as failed
+		updateTaskStatus(client, *task.TaskId, "V") // Mark as failed
 		return
 	}
 
@@ -137,7 +138,8 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 	if err != nil {
 		log.Printf("⚠️ Failed to open log stream for task %d: %v", task.TaskId, err)
 		cmd.Wait()
-		updateTaskStatus(client, *task.TaskId, "F") // Mark as failed
+		task.Status = "F"                           // Mark as failed
+		updateTaskStatus(client, *task.TaskId, "V") // Mark as failed
 		return
 	}
 
@@ -162,10 +164,12 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
 	if err != nil {
 		log.Printf("❌ Task %d failed: %v", task.TaskId, err)
-		updateTaskStatus(client, *task.TaskId, "F")
+		task.Status = "F"                           // Mark as failed
+		updateTaskStatus(client, *task.TaskId, "V") // Mark as failed
 	} else {
 		log.Printf("✅ Task %d completed successfully", task.TaskId)
-		updateTaskStatus(client, *task.TaskId, "S")
+		task.Status = "S"                           // Mark as success
+		updateTaskStatus(client, *task.TaskId, "U") // Mark as success
 	}
 }
 
@@ -214,7 +218,7 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.Resiz
 	}
 }
 
-func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *utils.ResizableSemaphore, store string, dm *DownloadManager) {
+func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *utils.ResizableSemaphore, store string, dm *DownloadManager, um *UploadManager) {
 	// WaitGroup to synchronize goroutines
 	var wg sync.WaitGroup
 
@@ -225,7 +229,8 @@ func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *util
 
 		go func(t *pb.Task) {
 			executeTask(client, t, &wg, store, dm)
-			sem.Release() // Release semaphore slot after task completion
+			sem.Release()           // Release semaphore slot after task completion
+			um.EnqueueTaskOutput(t) // Enqueue task output for upload
 		}(task)
 	}
 	//wg.Wait() // Ensure all tasks finish before fetching new ones
@@ -251,8 +256,11 @@ func Run(serverAddr string, concurrency int, name string, store string) error {
 	// Launching download Manager
 	dm := RunDownloader(store)
 
+	// Launching upload Manager
+	um := RunUploader(store, qclient.Client)
+
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, sem, store, dm)
+	go excuterThread(dm.ExecQueue, qclient.Client, sem, store, dm, um)
 
 	// Start processing tasks
 	go workerLoop(qclient.Client, config, sem, dm)

@@ -9,7 +9,7 @@ import (
 
 	//"net/url"
 
-	//"strings"
+	"strings"
 	"time"
 
 	"github.com/rclone/rclone/fs/config/configfile"
@@ -559,7 +559,7 @@ func Copy(rcloneConfig, srcStr, dstStr string) error {
 	op, err := NewOperation(rcloneConfig, srcStr, dstStr)
 	defer CleanConfig()
 	if err != nil {
-		log.Fatalf("Could not initiate copy operation %v", err)
+		return fmt.Errorf("could not initiate copy operation %v", err)
 	}
 	err = op.Copy()
 	return err
@@ -569,7 +569,7 @@ func List(rcloneConfig, srcStr string) (fs.DirEntries, error) {
 	op, err := NewOperation(rcloneConfig, srcStr, "")
 	defer CleanConfig()
 	if err != nil {
-		log.Fatalf("Could not initiate list operation %v", err)
+		return nil, fmt.Errorf("could not initiate list operation %v", err)
 	}
 	return op.List()
 }
@@ -578,7 +578,7 @@ func Info(rcloneConfig, srcStr string) (fs.DirEntry, error) {
 	op, err := NewOperation(rcloneConfig, srcStr, "")
 	defer CleanConfig()
 	if err != nil {
-		log.Fatalf("Could not initiate info operation %v", err)
+		return nil, fmt.Errorf("could not initiate info operation %v", err)
 	}
 	return op.Info()
 }
@@ -611,4 +611,21 @@ func GetMD5(f fs.DirEntry) string {
 
 	return md5sum
 
+}
+
+func Join(path, file string) string {
+	switch {
+	case path == "":
+		return file
+	case strings.HasSuffix(path, "/"):
+		if strings.HasPrefix(file, "/") {
+			return path + file[1:]
+		}
+		return path + file
+	default:
+		if strings.HasPrefix(file, "/") {
+			return path + file
+		}
+		return path + "/" + file
+	}
 }

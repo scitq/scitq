@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS task (
     shell TEXT,
     container TEXT NOT NULL,
     container_options TEXT[] DEFAULT '{}',
-    status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, A: Assigned, C: Accepted, D: Downloading, R: Running, U: Uploading, S: Succeeded, F: Failed, Z: suspended, X: canceled, W: waiting)
+    status CHAR(1) NOT NULL DEFAULT 'P',  -- (P: Pending, A: Assigned, C: Accepted, D: Downloading, R: Running, U: Uploading (after success), V: Uploading (after failure), S: Succeeded, F: Failed, Z: suspended, X: canceled, W: waiting)
     worker_id INT REFERENCES worker(worker_id) ON DELETE SET NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
