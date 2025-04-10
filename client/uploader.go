@@ -25,18 +25,20 @@ type UploadFile struct {
 }
 
 type UploadManager struct {
-	UploadQueue chan *UploadFile
-	Completion  chan *pb.Task
-	Store       string
-	Client      pb.TaskQueueClient
+	UploadQueue    chan *UploadFile
+	Completion     chan *pb.Task
+	Store          string
+	Client         pb.TaskQueueClient
+	pendingUploads map[uint32]int // taskID → remaining files
 }
 
 func NewUploadManager(store string, client pb.TaskQueueClient) *UploadManager {
 	return &UploadManager{
-		UploadQueue: make(chan *UploadFile, maxUploads),
-		Completion:  make(chan *pb.Task, maxQueueSize),
-		Store:       store,
-		Client:      client,
+		UploadQueue:    make(chan *UploadFile, maxUploads),
+		Completion:     make(chan *pb.Task, maxQueueSize),
+		Store:          store,
+		Client:         client,
+		pendingUploads: make(map[uint32]int),
 	}
 }
 
@@ -54,6 +56,7 @@ func (um *UploadManager) StartUploadWorkers() {
 
 func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 	outputDir := filepath.Join(um.Store, "tasks", fmt.Sprint(*task.TaskId), "output")
+	count := 0
 	err := filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			log.Printf("❌ Error walking path %s: %v", path, err)
@@ -69,30 +72,59 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 		}
 		target := fetch.Join(*task.Output, relPath)
 		um.UploadQueue <- &UploadFile{Task: task, SourcePath: path, TargetPath: target}
+		count++
 		return nil
 	})
 	if err != nil {
 		log.Printf("❌ Failed walking output directory: %v", err)
+		task.Status = "F"
+		um.Completion <- task
+		//um.Client.SendTaskLogs(context.Background(), &pb.TaskLog{
+		//	TaskId:    task.TaskId,
+		//	Log:       err.Error(),
+		//	Timestamp: time.Now().Unix(),
+		//})
 		return
 	}
-
-	// signal that task uploads were queued
-	um.Completion <- task
+	if count == 0 {
+		log.Printf("⚠️ No files to upload for task %d", *task.TaskId)
+		um.Completion <- task
+		return
+	}
+	um.pendingUploads[*task.TaskId] = count
 }
 
 func (um *UploadManager) uploadFile(file *UploadFile) {
 	var err error
+	success := false
+
 	for attempt := 1; attempt <= uploadRetry; attempt++ {
 		err = fetch.Copy(fetch.DefaultRcloneConfig, file.SourcePath, file.TargetPath)
 		if err == nil {
 			log.Printf("✅ Uploaded: %s → %s", file.SourcePath, file.TargetPath)
-			return
+			success = true
+			break
 		}
 		log.Printf("⚠️ Upload attempt %d failed for %s: %v", attempt, file.SourcePath, err)
 		time.Sleep(uploadInterval)
 	}
-	log.Printf("❌ Failed to upload %s after %d attempts", file.SourcePath, uploadRetry)
-	file.Task.Status = "F"
+
+	if !success {
+		log.Printf("❌ Failed to upload %s after %d attempts", file.SourcePath, uploadRetry)
+		file.Task.Status = "F"
+	}
+
+	// decrement counter
+	taskID := *file.Task.TaskId
+	if count, ok := um.pendingUploads[taskID]; ok {
+		count--
+		if count == 0 {
+			delete(um.pendingUploads, taskID)
+			um.Completion <- file.Task
+		} else {
+			um.pendingUploads[taskID] = count
+		}
+	}
 }
 
 func (um *UploadManager) watchCompletions() {
