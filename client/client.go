@@ -28,6 +28,21 @@ func optionalInt32(v int) *uint32 {
 //
 //
 
+// send simple log message
+func logMessage(msg string, client pb.TaskQueueClient, taskID uint32) {
+	stream, serr := client.SendTaskLogs(context.Background())
+	if serr != nil {
+		log.Printf("❌ Failed to open error log stream: %v", serr)
+	}
+	defer stream.CloseSend()
+
+	stream.Send(&pb.TaskLog{
+		TaskId:  taskID,
+		LogType: "stderr",
+		LogText: msg,
+	})
+}
+
 // WorkerConfig holds worker settings from CLI args.
 type WorkerConfig struct {
 	WorkerId    uint32

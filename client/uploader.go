@@ -1,11 +1,11 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/fetch"
@@ -18,6 +18,28 @@ const (
 	uploadInterval = 10 * time.Second
 )
 
+type SyncCounter struct {
+	m sync.Map // map[uint32]int
+}
+
+func (sc *SyncCounter) Set(taskID uint32, count int) {
+	sc.m.Store(taskID, count)
+}
+
+func (sc *SyncCounter) Decrement(taskID uint32) (int, bool) {
+	val, ok := sc.m.Load(taskID)
+	if !ok {
+		return 0, true
+	}
+	count := val.(int) - 1
+	if count <= 0 {
+		sc.m.Delete(taskID)
+		return 0, true
+	}
+	sc.m.Store(taskID, count)
+	return count, false
+}
+
 type UploadFile struct {
 	Task       *pb.Task
 	SourcePath string
@@ -29,7 +51,7 @@ type UploadManager struct {
 	Completion     chan *pb.Task
 	Store          string
 	Client         pb.TaskQueueClient
-	pendingUploads map[uint32]int // taskID → remaining files
+	pendingUploads SyncCounter // taskID → remaining files
 }
 
 func NewUploadManager(store string, client pb.TaskQueueClient) *UploadManager {
@@ -38,7 +60,7 @@ func NewUploadManager(store string, client pb.TaskQueueClient) *UploadManager {
 		Completion:     make(chan *pb.Task, maxQueueSize),
 		Store:          store,
 		Client:         client,
-		pendingUploads: make(map[uint32]int),
+		pendingUploads: SyncCounter{},
 	}
 }
 
@@ -76,14 +98,11 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 		return nil
 	})
 	if err != nil {
-		log.Printf("❌ Failed walking output directory: %v", err)
+		message := fmt.Sprintf("❌ Failed walking output directory: %v", err)
+		log.Print(message)
+		logMessage(message, um.Client, *task.TaskId)
 		task.Status = "F"
 		um.Completion <- task
-		//um.Client.SendTaskLogs(context.Background(), &pb.TaskLog{
-		//	TaskId:    task.TaskId,
-		//	Log:       err.Error(),
-		//	Timestamp: time.Now().Unix(),
-		//})
 		return
 	}
 	if count == 0 {
@@ -91,56 +110,39 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 		um.Completion <- task
 		return
 	}
-	um.pendingUploads[*task.TaskId] = count
+	um.pendingUploads.Set(*task.TaskId, count)
 }
 
-func (um *UploadManager) uploadFile(file *UploadFile) {
+func (um *UploadManager) uploadFile(file *UploadFile) error {
 	var err error
-	success := false
-
+	var message string
 	for attempt := 1; attempt <= uploadRetry; attempt++ {
 		err = fetch.Copy(fetch.DefaultRcloneConfig, file.SourcePath, file.TargetPath)
 		if err == nil {
 			log.Printf("✅ Uploaded: %s → %s", file.SourcePath, file.TargetPath)
-			success = true
-			break
+			um.Completion <- file.Task
+			return nil
 		}
-		log.Printf("⚠️ Upload attempt %d failed for %s: %v", attempt, file.SourcePath, err)
+		message = fmt.Sprintf("⚠️ Upload attempt %d failed for %s: %v", attempt, file.SourcePath, err)
+		log.Print(message)
 		time.Sleep(uploadInterval)
 	}
-
-	if !success {
-		log.Printf("❌ Failed to upload %s after %d attempts", file.SourcePath, uploadRetry)
-		file.Task.Status = "F"
-	}
-
-	// decrement counter
-	taskID := *file.Task.TaskId
-	if count, ok := um.pendingUploads[taskID]; ok {
-		count--
-		if count == 0 {
-			delete(um.pendingUploads, taskID)
-			um.Completion <- file.Task
-		} else {
-			um.pendingUploads[taskID] = count
-		}
-	}
+	log.Printf("❌ Failed to upload %s after %d attempts", file.SourcePath, uploadRetry)
+	logMessage(message, um.Client, *file.Task.TaskId)
+	file.Task.Status = "F"
+	um.Completion <- file.Task
+	return err
 }
 
 func (um *UploadManager) watchCompletions() {
 	for task := range um.Completion {
-		log.Printf("📤 Upload completed for task %d, marking as %s", *task.TaskId, task.Status)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, err := um.Client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
-			TaskId:    *task.TaskId,
-			NewStatus: task.Status,
-		})
-		if err != nil {
-			log.Printf("❌ Failed to update status for task %d: %v", *task.TaskId, err)
+		taskID := *task.TaskId
+		if remaining, done := um.pendingUploads.Decrement(taskID); done {
+			log.Printf("📤 Upload completed for task %d, marking as %s", taskID, task.Status)
+			updateTaskStatus(um.Client, taskID, task.Status)
 		} else {
-			log.Printf("✅ Status updated for task %d to %s", *task.TaskId, task.Status)
+			log.Printf("📤 Remaining uploads for task %d: %d", taskID, remaining)
 		}
-		cancel()
 	}
 }
 
