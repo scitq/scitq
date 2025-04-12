@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"syscall"
 	"time"
 
 	"github.com/alexflint/go-arg"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/gmtsciencedev/scitq2/lib"
+	"golang.org/x/term"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // CLI struct encapsulates task & worker commands
@@ -60,6 +63,30 @@ type Attr struct {
 			Filter string `arg:"--filter" help:"Filter flavor by a filter string like 'cpu>=12:mem>=30'"`
 		} `arg:"subcommand:list" help:"List flavors"`
 	} `arg:"subcommand:flavor" help:"Find flavors"`
+
+	// User commands
+	User *struct {
+		List   *struct{} `arg:"subcommand:list" help:"List all users"`
+		Update *struct {
+			UserId   uint32  `arg:"--id,required" help:"User ID to update"`
+			Username *string `arg:"--username" help:"New username"`
+			Email    *string `arg:"--email" help:"New email"`
+			Admin    bool    `arg:"--admin" help:"Set admin status"`
+			NoAdmin  bool    `arg:"--no-admin" help:"Remove admin rights"`
+		} `arg:"subcommand:update" help:"Update a user"`
+		Create *struct {
+			Username string `arg:"--username,required" help:"New username"`
+			Email    string `arg:"--email,required" help:"New email"`
+			Password string `arg:"--password,required" help:"New password"`
+			Admin    bool   `arg:"--admin" help:"Set admin status"`
+		} `arg:"subcommand:create" help:"Create a new user"`
+		Delete *struct {
+			UserId uint32 `arg:"--id,required" help:"User ID to delete"`
+		} `arg:"subcommand:delete" help:"Delete a user"`
+		ChangePassword *struct {
+			Username string `arg:"--username,required" help:"Username for which password will be changed"`
+		} `arg:"subcommand:change-password" help:"Change your password"`
+	} `arg:"subcommand:user" help:"User management"`
 
 	// Login commands
 	Login *struct {
@@ -258,6 +285,109 @@ func (c *CLI) WorkerDelete() error {
 
 }
 
+func ListUsers(client pb.TaskQueueClient) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.ListUsers(ctx, &emptypb.Empty{})
+	if err != nil {
+		return fmt.Errorf("failed to list users: %w", err)
+	}
+
+	fmt.Printf("%-10s %-20s %-30s %-8s\n", "User ID", "Username", "Email", "Admin")
+	for _, user := range resp.Users {
+		fmt.Printf("%-10d %-20s %-30s %-8t\n", user.UserId, user.GetUsername(), user.GetEmail(), user.GetIsAdmin())
+	}
+	return nil
+}
+
+func DeleteUser(client pb.TaskQueueClient, userId uint32) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := client.DeleteUser(ctx, &pb.UserId{UserId: userId})
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	fmt.Println("✅ User deleted successfully")
+	return nil
+}
+
+func UpdateUser(client pb.TaskQueueClient, user *pb.User) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := client.UpdateUser(ctx, user)
+	if err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	fmt.Println("✅ User updated successfully")
+	return nil
+}
+
+func ChangePassword(serverAddr, username string) error {
+	qc, err := lib.CreateLoginClient(serverAddr)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
+	defer qc.Close()
+	client := qc.Client
+
+	// Prompt old password
+	fmt.Print("🔐 Current password: ")
+	oldPwBytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return fmt.Errorf("failed to read old password: %w", err)
+	}
+
+	// Prompt new password (twice)
+	fmt.Print("🔐 New password: ")
+	newPwBytes1, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return fmt.Errorf("failed to read new password: %w", err)
+	}
+
+	fmt.Print("🔁 Confirm new password: ")
+	newPwBytes2, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return fmt.Errorf("failed to confirm new password: %w", err)
+	}
+
+	if string(newPwBytes1) != string(newPwBytes2) {
+		return fmt.Errorf("❌ Passwords do not match")
+	}
+
+	_, err = client.ChangePassword(context.Background(), &pb.ChangePasswordRequest{
+		Username:    username,
+		OldPassword: string(oldPwBytes),
+		NewPassword: string(newPwBytes1),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to change password: %w", err)
+	}
+
+	fmt.Println("✅ Password changed successfully")
+	return nil
+}
+
+func CreateUser(client pb.TaskQueueClient, user *pb.CreateUserRequest) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := client.CreateUser(ctx, user)
+	if err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+
+	fmt.Println("✅ User created successfully")
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -306,6 +436,43 @@ func Run(c CLI) error {
 		switch {
 		case c.Attr.Flavor.List != nil:
 			err = c.FlavorList(uint32(c.Attr.Flavor.List.Limit), c.Attr.Flavor.List.Filter)
+		}
+	// In Run(), after handling Flavor, add:
+	case c.Attr.User != nil:
+		switch {
+		case c.Attr.User.List != nil:
+			err = ListUsers(c.QC.Client)
+		case c.Attr.User.Update != nil:
+			if c.Attr.User.Update.Admin && c.Attr.User.Update.NoAdmin {
+				return fmt.Errorf("cannot use both --admin and --no-admin")
+			}
+			var IsAdmin *bool
+			if c.Attr.User.Update.Admin {
+				val := true
+				IsAdmin = &val
+			} else if c.Attr.User.Update.NoAdmin {
+				val := false
+				IsAdmin = &val
+			}
+			user := &pb.User{
+				UserId:   c.Attr.User.Update.UserId,
+				Username: c.Attr.User.Update.Username,
+				Email:    c.Attr.User.Update.Email,
+				IsAdmin:  IsAdmin,
+			}
+			err = UpdateUser(c.QC.Client, user)
+		case c.Attr.User.Delete != nil:
+			err = DeleteUser(c.QC.Client, c.Attr.User.Delete.UserId)
+		case c.Attr.User.Create != nil:
+			user := &pb.CreateUserRequest{
+				Username: c.Attr.User.Create.Username,
+				Email:    c.Attr.User.Create.Email,
+				Password: c.Attr.User.Create.Password,
+				IsAdmin:  c.Attr.User.Create.Admin,
+			}
+			err = CreateUser(c.QC.Client, user)
+		case c.Attr.User.ChangePassword != nil:
+			err = ChangePassword(c.Attr.Server, c.Attr.User.ChangePassword.Username)
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

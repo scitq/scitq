@@ -1039,6 +1039,131 @@ func (s *taskQueueServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	return &pb.LoginResponse{Token: tokenStr}, nil
 }
 
+func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.Ack, error) {
+	if !IsAdmin(ctx) {
+		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
+	}
+
+	hashedPw, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to hash password")
+	}
+
+	_, err = s.db.Exec(`INSERT INTO scitq_user (username, password, email, is_admin) VALUES ($1, $2, $3, $4)`,
+		req.Username, hashedPw, req.Email, req.IsAdmin)
+	if err != nil {
+		if strings.Contains(err.Error(), "unique constraint") {
+			return nil, status.Error(codes.AlreadyExists, "username already exists")
+		}
+		return nil, status.Error(codes.Internal, "failed to create user")
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) ListUsers(ctx context.Context, _ *emptypb.Empty) (*pb.UsersList, error) {
+	rows, err := s.db.Query("SELECT user_id, username, email, is_admin FROM scitq_user")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*pb.User
+	for rows.Next() {
+		var user pb.User
+		if err := rows.Scan(&user.UserId, &user.Username, &user.Email, &user.IsAdmin); err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, &user)
+	}
+
+	return &pb.UsersList{Users: users}, nil
+}
+
+func (s *taskQueueServer) DeleteUser(ctx context.Context, req *pb.UserId) (*pb.Ack, error) {
+	if !IsAdmin(ctx) {
+		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
+	}
+	_, err := s.db.Exec("DELETE FROM scitq_user WHERE user_id=$1", req.UserId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete user %d: %w", req.UserId, err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func joinWithComma(fields []string) string {
+	result := ""
+	for i, field := range fields {
+		if i > 0 {
+			result += ", "
+		}
+		result += field
+	}
+	return result
+}
+
+func (s *taskQueueServer) UpdateUser(ctx context.Context, req *pb.User) (*pb.Ack, error) {
+
+	if !IsAdmin(ctx) {
+		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
+	}
+
+	query := "UPDATE scitq_user SET"
+	args := []interface{}{}
+	set := []string{}
+	index := 1
+
+	if req.Username != nil {
+		set = append(set, fmt.Sprintf("username=$%d", index))
+		args = append(args, *req.Username)
+		index++
+	}
+	if req.Email != nil {
+		set = append(set, fmt.Sprintf("email=$%d", index))
+		args = append(args, *req.Email)
+		index++
+	}
+	if req.IsAdmin != nil {
+		set = append(set, fmt.Sprintf("is_admin=$%d", index))
+		args = append(args, *req.IsAdmin)
+		index++
+	}
+
+	if len(set) == 0 {
+		return &pb.Ack{Success: false}, status.Error(codes.InvalidArgument, "no fields to update")
+	}
+
+	query += " " + fmt.Sprintf("%s WHERE user_id=$%d",
+		joinWithComma(set), index)
+	args = append(args, req.UserId)
+
+	_, err := s.db.Exec(query, args...)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update user %d: %w", req.UserId, err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequest) (*pb.Ack, error) {
+	var currentHash string
+	err := s.db.QueryRow("SELECT password FROM scitq_user WHERE username=$1", req.Username).Scan(&currentHash)
+	if err != nil || !CheckPassword(req.OldPassword, currentHash) {
+		return &pb.Ack{Success: false}, fmt.Errorf("incorrect credentials")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to hash new password: %w", err)
+	}
+
+	_, err = s.db.Exec("UPDATE scitq_user SET password=$1 WHERE username=$2", hash, req.NewPassword)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update password: %w", err)
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {

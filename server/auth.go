@@ -17,10 +17,28 @@ import (
 
 type contextKey string
 
-const (
-	ctxUserIDKey  contextKey = "user_id"
-	ctxIsAdminKey contextKey = "is_admin"
-)
+const userContextKey contextKey = "user"
+
+type AuthenticatedUser struct {
+	UserID   int
+	Username string
+	IsAdmin  bool
+}
+
+func GetUserFromContext(ctx context.Context) *AuthenticatedUser {
+	if u, ok := ctx.Value(userContextKey).(*AuthenticatedUser); ok {
+		return u
+	}
+	return nil
+}
+
+func IsAdmin(ctx context.Context) bool {
+	user := GetUserFromContext(ctx)
+	if user == nil {
+		return false
+	}
+	return user.IsAdmin
+}
 
 func workerAuthInterceptor(expectedToken string, db *sql.DB) grpc.UnaryServerInterceptor {
 	return func(
@@ -30,7 +48,7 @@ func workerAuthInterceptor(expectedToken string, db *sql.DB) grpc.UnaryServerInt
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
 		// ✅ Bypass auth for Login RPC
-		if info.FullMethod == "/taskqueue.TaskQueue/Login" {
+		if info.FullMethod == "/taskqueue.TaskQueue/Login" || info.FullMethod == "/taskqueue.TaskQueue/ChangePassword" {
 			return handler(ctx, req)
 		}
 
@@ -49,29 +67,31 @@ func workerAuthInterceptor(expectedToken string, db *sql.DB) grpc.UnaryServerInt
 					session_id := strings.TrimPrefix(tokens[0], "Bearer ")
 
 					// Check if the session ID is valid
-					var userID int
-					err := db.QueryRow("SELECT user_id FROM scitq_user_session WHERE session_id=$1 AND expires_at > now()", session_id).Scan(&userID)
+					var (
+						userID   int
+						username string
+						isAdmin  bool
+					)
+					err := db.QueryRow(`SELECT u.user_id, u.username, u.is_admin FROM scitq_user_session s JOIN
+						 scitq_user u ON s.user_id=u.user_id WHERE s.session_id=$1 AND s.expires_at > now()`,
+						session_id).Scan(&userID, &username, &isAdmin)
 					if err != nil {
 						if err == sql.ErrNoRows {
 							return nil, status.Error(codes.Unauthenticated, "invalid session ID")
 						}
 						return nil, status.Error(codes.Internal, fmt.Sprintf("failed to check session ID %s", session_id))
 					}
-					ctx = context.WithValue(ctx, ctxUserIDKey, userID)
+					ctx = context.WithValue(ctx, userContextKey, &AuthenticatedUser{
+						UserID:   userID,
+						Username: username,
+						IsAdmin:  isAdmin,
+					})
 
 					// Update the last used time for the session
 					_, err = db.Exec("UPDATE scitq_user_session SET last_used=now() WHERE session_id=$1", session_id)
 					if err != nil {
 						log.Printf("Failed to update last used time for session ID %s: %v", session_id, err)
 					}
-
-					// Check if the user is an admin
-					var isAdmin bool
-					err = db.QueryRow("SELECT is_admin FROM scitq_user WHERE user_id=$1", userID).Scan(&isAdmin)
-					if err != nil {
-						return nil, status.Error(codes.Internal, "failed to check user role")
-					}
-					ctx = context.WithValue(ctx, ctxIsAdminKey, isAdmin)
 
 				} else {
 					return nil, status.Error(codes.Unauthenticated, "invalid token")

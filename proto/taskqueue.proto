@@ -20,6 +20,11 @@ service TaskQueue {
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
     rpc Login(LoginRequest) returns (LoginResponse);
+    rpc CreateUser(CreateUserRequest) returns (Ack);
+    rpc ListUsers(google.protobuf.Empty) returns (UsersList);
+    rpc DeleteUser(UserId) returns (Ack);
+    rpc UpdateUser(User) returns (Ack);
+    rpc ChangePassword(ChangePasswordRequest) returns (Ack);
     }
 
 message TaskResponse {
@@ -163,4 +168,32 @@ message LoginRequest {
 
 message LoginResponse {
   string token = 1;
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string password = 2;
+  string email = 3;
+  bool is_admin = 4;
+}
+
+message UserId {
+  uint32 user_id = 1;
+}
+
+message User {
+  uint32 user_id = 1;
+  optional string username = 2;
+  optional string email = 3;
+  optional bool is_admin = 4;
+}
+
+message UsersList {
+  repeated User users = 1;
+}
+
+message ChangePasswordRequest {
+    string username = 1;
+  string old_password = 2;
+  string new_password = 3;
 }
