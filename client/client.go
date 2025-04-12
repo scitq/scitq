@@ -12,9 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gmtsciencedev/scitq2/client/install"
+	"github.com/gmtsciencedev/scitq2/fetch"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/gmtsciencedev/scitq2/lib"
 	"github.com/gmtsciencedev/scitq2/utils"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // optionalInt32 converts an int to a pointer (*int32).
@@ -50,6 +53,7 @@ type WorkerConfig struct {
 	Concurrency int
 	Name        string
 	Store       string
+	Token       string
 }
 
 // registerWorker registers the client worker with the server.
@@ -253,15 +257,25 @@ func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *util
 }
 
 // / client launcher
-func Run(serverAddr string, concurrency int, name string, store string) error {
-	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store}
+func Run(serverAddr string, concurrency int, name, store, token string) error {
+
+	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token}
 
 	// Establish connection to the server
-	qclient, err := lib.CreateClient(config.ServerAddr)
+	qclient, err := lib.CreateClient(config.ServerAddr, config.Token)
 	if err != nil {
 		return fmt.Errorf("could not connect to server: %v", err)
 	}
 	defer qclient.Close()
+
+	if _, err := os.Stat(fetch.DefaultRcloneConfig); os.IsNotExist(err) {
+		log.Printf("⚠️ Rclone config file not found, creating a new one.")
+		rCloneConfig, err := qclient.Client.GetRcloneConfig(context.Background(), &emptypb.Empty{})
+		if err != nil {
+			return fmt.Errorf("could not get Rclone config: %v", err)
+		}
+		install.InstallRcloneConfig(rCloneConfig.Config, fetch.DefaultRcloneConfig)
+	}
 
 	config.registerWorker(qclient.Client)
 	sem := utils.NewResizableSemaphore(config.Concurrency)

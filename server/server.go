@@ -18,7 +18,9 @@ import (
 	"github.com/gmtsciencedev/scitq2/server/config"
 	"github.com/gmtsciencedev/scitq2/server/providers"
 	"github.com/gmtsciencedev/scitq2/server/providers/azure"
+	"github.com/golang-jwt/jwt"
 	"github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/golang-migrate/migrate/v4"
@@ -27,14 +29,18 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const defaultJobRetry = 3
 const defaultJobTimeout = 10 * time.Minute
 const defaultJobConcurrency = 10
 const defaultJobQueueSize = 100
+const DefaultRcloneConfig = "/etc/rclone.conf"
 
 //go:embed migrations/*
 var embeddedMigrations embed.FS
@@ -95,6 +101,14 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.Task) (*pb.Tas
 	s.triggerAssign()
 
 	return &pb.TaskResponse{TaskId: uint32(taskID)}, nil
+}
+
+func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empty) (*pb.RcloneConfig, error) {
+	data, err := os.ReadFile(DefaultRcloneConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read rclone config: %w", err)
+	}
+	return &pb.RcloneConfig{Config: string(data)}, nil
 }
 
 func (s *taskQueueServer) waitForAssignEvents() {
@@ -980,6 +994,51 @@ func (s *taskQueueServer) cleanupRegion(tx *sql.Tx, regionId uint32, regionName 
 	return nil
 }
 
+func generateJWT(userID uint32, username, secret string) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id":  userID,
+		"username": username,
+		"exp":      time.Now().Add(365 * 24 * time.Hour).Unix(), // ~ immortal
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+func CheckPassword(plaintext, hashed string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plaintext)) == nil
+}
+
+func (s *taskQueueServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
+	// Example: Basic username/password validation (replace this with proper DB lookup and hashing)
+	var userId uint32
+	var hashedPassword string
+
+	log.Printf("Login attempt for user %s", req.Username)
+	err := s.db.QueryRow(`SELECT user_id, password FROM scitq_user WHERE username = $1`, req.Username).Scan(&userId, &hashedPassword)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid credentials")
+	}
+
+	if !CheckPassword(req.Password, hashedPassword) {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid credentials")
+	}
+
+	// Generate token
+	tokenStr, err := generateJWT(userId, req.Username, s.cfg.Scitq.JwtSecret)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to generate token")
+	}
+
+	// Store token in the database
+	log.Printf("Storing token for user %d", userId)
+	_, err = s.db.Exec(`INSERT INTO scitq_user_session (user_id, session_id, expires_at) VALUES ($1, $2, now()+'365 days')`, userId, tokenStr)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to store token: %v", err)
+	}
+
+	return &pb.LoginResponse{Token: tokenStr}, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -1040,6 +1099,7 @@ func Serve(cfg config.Config) error {
 	}
 
 	log.Println("Server started successfully!")
+	checkAdminUser(db)
 
 	var creds credentials.TransportCredentials
 	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
@@ -1058,7 +1118,10 @@ func Serve(cfg config.Config) error {
 		}
 	}
 
-	grpcServer := grpc.NewServer(grpc.Creds(creds))
+	grpcServer := grpc.NewServer(
+		grpc.Creds(creds),
+		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
+	)
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
 	s.checkProviders()
 	s.startJobQueue()

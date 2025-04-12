@@ -161,3 +161,20 @@ CREATE TABLE IF NOT EXISTS job (
     modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
     progression SMALLINT DEFAULT 0
     );
+
+CREATE TABLE scitq_user (
+    user_id     SERIAL PRIMARY KEY,
+    username    TEXT UNIQUE NOT NULL,
+    password    TEXT NOT NULL, -- This will be a bcrypt hash
+    email       TEXT,
+    is_admin    BOOLEAN DEFAULT FALSE,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE scitq_user_session (
+    session_id TEXT PRIMARY KEY,
+    user_id    INTEGER REFERENCES scitq_user(user_id),
+    created_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP,
+    last_used  TIMESTAMP
+);

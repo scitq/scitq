@@ -4,6 +4,8 @@ package taskqueue;
 
 option go_package = "gen/taskqueuepb";
 
+import "google/protobuf/empty.proto";
+
 service TaskQueue {
     rpc SubmitTask(Task) returns (TaskResponse);
     rpc RegisterWorker(WorkerInfo) returns (WorkerId);
@@ -16,6 +18,8 @@ service TaskQueue {
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc DeleteWorker(WorkerId) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
+    rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
+    rpc Login(LoginRequest) returns (LoginResponse);
     }
 
 message TaskResponse {
@@ -146,4 +150,17 @@ message Flavor {
 
 message FlavorsList {
     repeated Flavor flavors = 1;
+}
+
+message RcloneConfig {
+    string config = 1;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
 }

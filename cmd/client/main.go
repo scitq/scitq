@@ -18,6 +18,7 @@ func main() {
 	serverAddr := flag.String("server", "localhost:50051", "gRPC server address")
 	concurrency := flag.Int("concurrency", 1, "Number of concurrent tasks")
 	store := flag.String("store", "/scratch", "Path to the store directory")
+	token := flag.String("token", "", "Token for authentication")
 
 	// Get the hostname
 	hostname, err := os.Hostname()
@@ -44,11 +45,11 @@ func main() {
 			dockerAuthentication = dockerCfg[1]
 		}
 
-		err := install.Run(dockerRegistry, dockerAuthentication, float32(*swapProportion), *serverAddr, *concurrency)
+		err := install.Run(dockerRegistry, dockerAuthentication, float32(*swapProportion), *serverAddr, *concurrency, *token)
 		if err != nil {
 			log.Fatalf("Could not perform install: %v", err)
 		}
 	}
 
-	client.Run(*serverAddr, *concurrency, *name, *store)
+	client.Run(*serverAddr, *concurrency, *name, *store, *token)
 }

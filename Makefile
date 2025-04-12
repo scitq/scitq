@@ -6,7 +6,7 @@ SRC_FETCH=./cmd/fetch
 
 BINARY_SERVER=$(BINARY_DIR)/scitq-server
 BINARY_CLIENT=$(BINARY_DIR)/scitq-client
-BINARY_CLI=$(BINARY_DIR)/scitq-cli
+BINARY_CLI=$(BINARY_DIR)/scitq
 BINARY_FETCH=$(BINARY_DIR)/scitq-fetch
 
 PLATFORMS=linux/amd64 darwin/amd64 windows/amd64
@@ -71,7 +71,7 @@ install: all
 install2: all
 	install -m 755 $(BINARY_SERVER) /usr/local/bin/scitq2-server
 	install -m 755 $(BINARY_CLIENT) /usr/local/bin/scitq2-client
-	install -m 755 $(BINARY_CLI) /usr/local/bin/scitq2-cli
+	install -m 755 $(BINARY_CLI) /usr/local/bin/scitq2
 	install -m 755 $(BINARY_FETCH) /usr/local/bin/scitq2-fetch
 
 

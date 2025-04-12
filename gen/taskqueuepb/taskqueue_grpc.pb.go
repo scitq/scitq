@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -30,6 +31,8 @@ const (
 	TaskQueue_CreateWorker_FullMethodName        = "/taskqueue.TaskQueue/CreateWorker"
 	TaskQueue_DeleteWorker_FullMethodName        = "/taskqueue.TaskQueue/DeleteWorker"
 	TaskQueue_ListFlavors_FullMethodName         = "/taskqueue.TaskQueue/ListFlavors"
+	TaskQueue_GetRcloneConfig_FullMethodName     = "/taskqueue.TaskQueue/GetRcloneConfig"
+	TaskQueue_Login_FullMethodName               = "/taskqueue.TaskQueue/Login"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -47,6 +50,8 @@ type TaskQueueClient interface {
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
 	DeleteWorker(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*Ack, error)
 	ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error)
+	GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneConfig, error)
+	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 }
 
 type taskQueueClient struct {
@@ -179,6 +184,26 @@ func (c *taskQueueClient) ListFlavors(ctx context.Context, in *ListFlavorsReques
 	return out, nil
 }
 
+func (c *taskQueueClient) GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RcloneConfig)
+	err := c.cc.Invoke(ctx, TaskQueue_GetRcloneConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LoginResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_Login_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -194,6 +219,8 @@ type TaskQueueServer interface {
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
 	DeleteWorker(context.Context, *WorkerId) (*Ack, error)
 	ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error)
+	GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error)
+	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -236,6 +263,12 @@ func (UnimplementedTaskQueueServer) DeleteWorker(context.Context, *WorkerId) (*A
 }
 func (UnimplementedTaskQueueServer) ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFlavors not implemented")
+}
+func (UnimplementedTaskQueueServer) GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRcloneConfig not implemented")
+}
+func (UnimplementedTaskQueueServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Login not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -438,6 +471,42 @@ func _TaskQueue_ListFlavors_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_GetRcloneConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetRcloneConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetRcloneConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetRcloneConfig(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).Login(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_Login_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).Login(ctx, req.(*LoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -480,6 +549,14 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFlavors",
 			Handler:    _TaskQueue_ListFlavors_Handler,
+		},
+		{
+			MethodName: "GetRcloneConfig",
+			Handler:    _TaskQueue_GetRcloneConfig_Handler,
+		},
+		{
+			MethodName: "Login",
+			Handler:    _TaskQueue_Login_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

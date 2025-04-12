@@ -60,6 +60,10 @@ type Attr struct {
 			Filter string `arg:"--filter" help:"Filter flavor by a filter string like 'cpu>=12:mem>=30'"`
 		} `arg:"subcommand:list" help:"List flavors"`
 	} `arg:"subcommand:flavor" help:"Find flavors"`
+
+	// Login commands
+	Login *struct {
+	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
 }
 
 type CLI struct {
@@ -257,8 +261,19 @@ func (c *CLI) WorkerDelete() error {
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
+	if c.Attr.Login != nil {
+		fmt.Print(createToken(c.Attr.Server))
+		return nil
+	}
+
 	// Establish gRPC connection
-	qc, err := lib.CreateClient(c.Attr.Server)
+	// Ensure token exists (interactive if needed)
+	token, err := getToken()
+
+	if err != nil {
+		log.Fatalf("Could not create client: %v", err)
+	}
+	qc, err := lib.CreateClient(c.Attr.Server, token)
 	if err != nil {
 		log.Fatalf("Could not connect to server: %v", err)
 	}

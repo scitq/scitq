@@ -178,7 +178,7 @@ func checkSwap(swapProportion float32) error {
 	return err
 }
 
-func checkService(dockerRegistry, dockerAuthentication string, swapProportion float32, serverAddr string, concurrency int) error {
+func checkService(dockerRegistry, dockerAuthentication string, swapProportion float32, serverAddr string, concurrency int, token string) error {
 
 	if fileNotExist("/etc/systemd/system/scitq-client.service") {
 		err := writeFile("/etc/systemd/system/scitq-client.service", fmt.Sprintf(`[Unit]
@@ -188,10 +188,10 @@ After=multi-user.target
 [Service]
 Environment=PATH=/usr/bin:/usr/local/bin:/usr/sbin
 Type=simple
-ExecStart=/usr/local/bin/scitq-client -server %s -install -docker "%s:%s" -swap "%f" -concurrency %d
+ExecStart=/usr/local/bin/scitq-client -server %s -install -docker "%s:%s" -swap "%f" -concurrency %d -token %s
 
 [Install]
-WantedBy=multi-user.target`, serverAddr, dockerRegistry, dockerAuthentication, swapProportion, concurrency), false)
+WantedBy=multi-user.target`, serverAddr, dockerRegistry, dockerAuthentication, swapProportion, concurrency, token), false)
 		if err != nil {
 			return fmt.Errorf("could not create service %w", err)
 		}
@@ -207,7 +207,15 @@ WantedBy=multi-user.target`, serverAddr, dockerRegistry, dockerAuthentication, s
 
 }
 
-func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32, serverAddress string, concurrency int) error {
+func InstallRcloneConfig(rcloneConfig, rcloneConfigPath string) error {
+	var err error
+	if fileNotExist(rcloneConfigPath) {
+		err = writeFile(rcloneConfigPath, rcloneConfig, false)
+	}
+	return fmt.Errorf("could not create rclone config %w", err)
+}
+
+func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32, serverAddress string, concurrency int, token string) error {
 	err := checkScratch()
 	if err == nil {
 		err = checkDocker(dockerRegistry, dockerAuthentication)
@@ -216,7 +224,7 @@ func Run(dockerRegistry string, dockerAuthentication string, swapProportion floa
 		err = checkSwap(swapProportion)
 	}
 	if err == nil {
-		checkService(dockerRegistry, dockerAuthentication, swapProportion, serverAddress, concurrency)
+		err = checkService(dockerRegistry, dockerAuthentication, swapProportion, serverAddress, concurrency, token)
 	}
 
 	return err

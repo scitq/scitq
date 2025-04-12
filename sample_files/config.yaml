@@ -1,6 +1,8 @@
 scitq:
   port: 50051
   log_level: "info"
+  worker_token: "changeMeIamUnsecure123"
+  jwt_secret: "weAreOnAMissionFromGod"
 providers:
   azure:
     primary:

@@ -88,15 +88,37 @@ CGO_ENABLED=0 go build -o cli/bin/scitq-cli cli/main.go
 ## install on linux
 
 ```sh
+apt install make postgreql
 wget https://go.dev/dl/go1.24.0.linux-amd64.tar.gz
 rm -rf /usr/local/go && tar -C /usr/local -xzf go1.24.0.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 echo !! >> /etc/profile.d/ZZZ-locale-functions.sh
 cd scitq2
-make install2
+make install
 sudo -u postgres createuser scitq_user -d -P
 psql -h localhost -U scitq_user template1
 # CREATE DATABASE scitq2;
+
+cat <<EOF >/etc/systemd/system/scitq.service
+[Unit]
+Description=scitq
+After=multi-user.target
+
+[Service]
+Type=simple
+Restart=on-failure
+Environment=HOME=/root
+ExecStart=/usr/local/bin/scitq-server -config /etc/scitq.yaml
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable scitq
+ssh-keygen
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa
+systemctl start scitq
 
 ```
 

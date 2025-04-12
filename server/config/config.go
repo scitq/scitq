@@ -26,6 +26,8 @@ type Config struct {
 		DockerRegistry       string  `yaml:"docker_registry"`
 		DockerAuthentication string  `yaml:"docker_authentication"`
 		SwapProportion       float32 `yaml:"swap_proportion" default:"0.1"`
+		WorkerToken          string  `yaml:"worker_token"`
+		JwtSecret            string  `yaml:"jwt_secret"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`
