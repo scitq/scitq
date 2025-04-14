@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS worker (
     is_permanent BOOLEAN DEFAULT TRUE,
     hostname TEXT DEFAULT '',
     ipv4 inet,
-    ipv6 inet
+    ipv6 inet,
+    recyclable_scope CHAR(1) NOT NULL DEFAULT 'W' -- (G: Global, W: Workflow-only, T: Temporarily blocked, N: Never recyclable)
 );
 
 
