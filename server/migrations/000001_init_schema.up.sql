@@ -120,9 +120,7 @@ CREATE INDEX idx_task_worker ON task(worker_id);
 CREATE TABLE IF NOT EXISTS recruiter (
     step_id INT REFERENCES step(step_id),
     rank INT DEFAULT 1,
-    step_name TEXT DEFAULT '',
     timeout INT DEFAULT 0,
-    is_recycling BOOLEAN DEFAULT FALSE,
     worker_flavor TEXT NOT NULL,
     worker_provider TEXT DEFAULT '',
     worker_region TEXT DEFAULT '',
@@ -130,7 +128,6 @@ CREATE TABLE IF NOT EXISTS recruiter (
     worker_prefetch INT DEFAULT 0,
     maximum_worker INT DEFAULT 0,
     rounds INT DEFAULT 1,
-    is_active BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (step_id, rank)
 );
 

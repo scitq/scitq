@@ -35,20 +35,25 @@ type Config struct {
 	} `yaml:"providers"`
 }
 
+type Quota struct {
+	MaxCPU   int32   `yaml:"cpu"`
+	MaxMemGB float32 `yaml:"mem,omitempty"` // optional
+}
+
 type AzureConfig struct {
-	Name              string         `yaml:"-"`
-	DefaultRegion     string         `yaml:"default_region"`
-	SubscriptionID    string         `yaml:"subscription_id"`
-	ClientID          string         `yaml:"client_id"`
-	ClientSecret      string         `yaml:"client_secret"`
-	TenantID          string         `yaml:"tenant_id"`
-	UseSpot           bool           `yaml:"use_spot" default:"true"`
-	Username          string         `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
-	SSHPublicKey      string         `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
-	Image             AzureImage     `yaml:"image"`
-	Quotas            map[string]int `yaml:"quotas"` // Resource quotas
-	Regions           []string       `yaml:"regions"`
-	UpdatePeriodicity string         `yaml:"update_periodicity"` // Update periodicity in minutes
+	Name              string           `yaml:"-"`
+	DefaultRegion     string           `yaml:"default_region"`
+	SubscriptionID    string           `yaml:"subscription_id"`
+	ClientID          string           `yaml:"client_id"`
+	ClientSecret      string           `yaml:"client_secret"`
+	TenantID          string           `yaml:"tenant_id"`
+	UseSpot           bool             `yaml:"use_spot" default:"true"`
+	Username          string           `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
+	SSHPublicKey      string           `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
+	Image             AzureImage       `yaml:"image"`
+	Quotas            map[string]Quota `yaml:"quotas"` // key: region
+	Regions           []string         `yaml:"regions"`
+	UpdatePeriodicity string           `yaml:"update_periodicity"` // Update periodicity in minutes
 }
 
 type AzureImage struct {
@@ -69,7 +74,7 @@ type OpenstackConfig struct {
 	ImageID           string                 `yaml:"image_id"`
 	FlavorID          string                 `yaml:"flavor_id"`
 	NetworkID         string                 `yaml:"network_id"`
-	Quotas            map[string]int         `yaml:"quotas"` // Resource quotas
+	Quotas            map[string]Quota       `yaml:"quotas"` // key: region
 	Regions           []string               `yaml:"regions"`
 	Custom            map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
 	UpdatePeriodicity string                 `yaml:"update_periodicity"` // Update periodicity in minutes
@@ -78,7 +83,7 @@ type OpenstackConfig struct {
 type ProviderConfig interface {
 	GetRegions() []string
 	SetRegions([]string)
-	GetQuotas() map[string]int
+	GetQuotas() map[string]Quota
 	GetUpdatePeriodicity() time.Duration
 	GetName() string
 	SetName(string)
@@ -110,7 +115,7 @@ func (a *AzureConfig) SetRegions(r []string) {
 	a.Regions = r
 }
 
-func (a *AzureConfig) GetQuotas() map[string]int {
+func (a *AzureConfig) GetQuotas() map[string]Quota {
 	return a.Quotas
 }
 
@@ -138,7 +143,7 @@ func (o *OpenstackConfig) SetRegions(r []string) {
 	o.Regions = r
 }
 
-func (o *OpenstackConfig) GetQuotas() map[string]int {
+func (o *OpenstackConfig) GetQuotas() map[string]Quota {
 	return o.Quotas
 }
 

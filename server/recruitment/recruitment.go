@@ -1,110 +1,127 @@
 package recruitment
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 )
 
-// RecyclableScope matches DB values: 'G', 'W', 'T', 'N'
-type RecyclableScope string
-
-const (
-	RecyclableGlobal    RecyclableScope = "G"
-	RecyclableWorkflow  RecyclableScope = "W"
-	RecyclableTemporary RecyclableScope = "T"
-	RecyclableNever     RecyclableScope = "N"
-)
-
-type WorkerState struct {
-	ID               int
-	WorkflowID       int
-	StepID           int
-	Region           string
-	Provider         string
-	Concurrency      int
-	CurrentTaskCount int
-	Flavor           string
-	Status           rune // 'R', 'P', etc.
-
-	RecyclableScope RecyclableScope
-	LastPing        time.Time
-
-	// Derived at runtime
-	IsIdle               bool
-	IsCompatibleWithStep func(*StepDemand) bool
-	PartialIdleFraction  float64 // 0.0–1.0
+type RecruiterEntry struct {
+	StepID         int
+	Rank           int
+	TimeoutSeconds int
+	Flavor         string
+	Provider       string
+	Region         string
+	Concurrency    int
+	Prefetch       int
+	MaxWorkers     int
+	Rounds         int
+	LastAttempt    time.Time
 }
 
-type StepDemand struct {
-	StepID      int
-	WorkflowID  int
-	Region      string
-	Provider    string
-	Concurrency int
-
-	PendingTasks     int
-	AnticipatedTasks int // based on waiting tasks and running predecessors
-
-	// Workers that may be used for this step
-	AssignedWorkers          []*WorkerState // currently serving this step
-	CompatibleIdleWorkers    []*WorkerState // recyclable
-	CompatiblePartialWorkers []*WorkerState // partial-recyclable
+type RecruiterTracker struct {
+	lastSeen sync.Map // map[int]time.Time keyed by step_id
 }
 
-type RecruitmentContext struct {
-	StepsByID      map[int]*StepDemand
-	WorkersByID    map[int]*WorkerState
-	QuotaAvailable int
-	Now            time.Time
+func NewRecruiterTracker() *RecruiterTracker {
+	return &RecruiterTracker{lastSeen: sync.Map{}}
 }
 
-func (w *WorkerState) CanBeUsedFor(step *StepDemand) bool {
-	if w.RecyclableScope == RecyclableNever {
-		return false
+func (rt *RecruiterTracker) LastSeen(stepID int) (time.Time, bool) {
+	v, ok := rt.lastSeen.Load(stepID)
+	if !ok {
+		return time.Time{}, false
 	}
-	if w.RecyclableScope == RecyclableWorkflow && w.WorkflowID != step.WorkflowID {
-		return false
-	}
-	return w.Provider == step.Provider && w.Region == step.Region
+	return v.(time.Time), true
 }
 
-func IsWorkerCompatibleWithFilter(worker *WorkerState, filter string) (bool, error) {
-	tokens := strings.Split(filter, ":")
-	for _, token := range tokens {
-		if token == "" {
+func (rt *RecruiterTracker) UpdateSeen(stepID int) {
+	rt.lastSeen.Store(stepID, time.Now())
+}
+
+func RunRecruitmentLoop(ctx context.Context, db *sql.DB, tracker *RecruiterTracker) error {
+	q := `
+	WITH pending_by_step AS (
+		SELECT step_id, COUNT(*) AS pending_tasks
+		FROM task
+		WHERE status = 'P'
+		GROUP BY step_id
+	),
+	active_workers AS (
+		SELECT step_id, COUNT(*) AS active
+		FROM worker
+		WHERE status IN ('R','P')
+		GROUP BY step_id
+	)
+	SELECT r.step_id, r.rank, r.timeout, r.worker_flavor, r.worker_provider, r.worker_region,
+	       r.worker_concurrency, r.worker_prefetch, r.maximum_worker, r.rounds,
+	       COALESCE(p.pending_tasks, 0) as pending_tasks,
+	       COALESCE(a.active, 0) as active_workers
+	FROM recruiter r
+	JOIN step s ON r.step_id = s.step_id
+	LEFT JOIN pending_by_step p ON r.step_id = p.step_id
+	LEFT JOIN active_workers a ON r.step_id = a.step_id;
+	`
+
+	type rowData struct {
+		RecruiterEntry
+		PendingTasks  int
+		ActiveWorkers int
+	}
+
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return fmt.Errorf("failed to query recruiter table: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now()
+
+	for rows.Next() {
+		r := rowData{}
+		err := rows.Scan(&r.StepID, &r.Rank, &r.TimeoutSeconds, &r.Flavor, &r.Provider, &r.Region,
+			&r.Concurrency, &r.Prefetch, &r.MaxWorkers, &r.Rounds, &r.PendingTasks, &r.ActiveWorkers)
+		if err != nil {
+			return fmt.Errorf("failed to scan recruiter row: %w", err)
+		}
+
+		if r.PendingTasks == 0 || r.Rounds <= 0 || r.Concurrency <= 0 {
 			continue
 		}
 
-		matches := filterRegex.FindStringSubmatch(token)
-		if len(matches) == 0 {
-			return false, fmt.Errorf("invalid filter token: %s", token)
+		expected := r.PendingTasks / (r.Concurrency * r.Rounds)
+		if expected == 0 {
+			expected = 1
+		}
+		if r.MaxWorkers > 0 && expected > r.MaxWorkers {
+			expected = r.MaxWorkers
 		}
 
-		col := strings.ToLower(matches[1])
-		op := matches[2]
-		val := matches[3]
+		needed := expected - r.ActiveWorkers
 
-		if !evaluateWorkerCondition(worker, col, op, val) {
-			return false, nil
+		// Always attempt recycling logic here
+		fmt.Printf("Recycling check for step %d (%d pending tasks, %d active workers)\n", r.StepID, r.PendingTasks, r.ActiveWorkers)
+		// triggerRecycling(r.StepID)
+
+		if needed <= 0 {
+			continue
+		}
+
+		lastSeen, ok := tracker.LastSeen(r.StepID)
+		if !ok || now.Sub(lastSeen) >= time.Duration(r.TimeoutSeconds)*time.Second {
+			tracker.UpdateSeen(r.StepID)
+			for i := 0; i < needed; i++ {
+				fmt.Printf("Would create worker for step %d with flavor %s (%d/%d needed)\n",
+					r.StepID, r.Flavor, i+1, needed)
+				// enqueueCreateWorker(...)
+			}
+		} else {
+			fmt.Printf("Timeout not reached for step %d — skipping creation but recycling still active\n", r.StepID)
 		}
 	}
-	return true, nil
-}
 
-func evaluateWorkerCondition(worker *WorkerState, col, op, val string) bool {
-	switch col {
-	case "cpu":
-		v, _ := strconv.Atoi(val)
-		return compareInt(worker.CPU, op, v)
-	case "mem":
-		v, _ := strconv.ParseFloat(val, 64)
-		return compareFloat(worker.Mem, op, v)
-	case "has_gpu":
-		return worker.HasGPU
-	// Add more fields as needed
-	default:
-		return false
-	}
+	return nil
 }

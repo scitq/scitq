@@ -11,13 +11,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/gmtsciencedev/scitq2/server/protofilter"
 	"github.com/gmtsciencedev/scitq2/server/providers"
 	"github.com/gmtsciencedev/scitq2/server/providers/azure"
+	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	"github.com/golang-jwt/jwt"
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
@@ -58,6 +59,7 @@ type taskQueueServer struct {
 	providers     map[uint32]providers.Provider
 	semaphore     chan struct{} // Semaphore to limit concurrency
 	assignTrigger chan struct{}
+	rec           recruitment.RecruitmentContext
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -334,6 +336,10 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 }
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
+	return s.performWorkerCreation(req, false)
+}
+
+func (s *taskQueueServer) performWorkerCreation(req *pb.WorkerRequest, from_recruiter bool) (*pb.WorkerIds, error) {
 	var workerIDs []uint32
 	var jobs []Job
 
@@ -372,15 +378,16 @@ JOIN flavor f ON iq.flavor_id = f.flavor_id`,
 			tx.QueryRow("INSERT INTO job (worker_id,flavor_id,region_id,retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
 				workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
 			jobs = append(jobs, Job{
-				JobID:      jobID,
-				WorkerID:   workerID,
-				WorkerName: workerName,
-				ProviderID: providerId,
-				Region:     regionName,
-				Flavor:     flavorName,
-				Action:     'C',
-				Retry:      defaultJobRetry,
-				Timeout:    defaultJobTimeout,
+				JobID:         jobID,
+				WorkerID:      workerID,
+				WorkerName:    workerName,
+				ProviderID:    providerId,
+				Region:        regionName,
+				Flavor:        flavorName,
+				Action:        'C',
+				Retry:         defaultJobRetry,
+				Timeout:       defaultJobTimeout,
+				FromRecruiter: from_recruiter,
 			})
 
 			if err := tx.Commit(); err != nil {
@@ -627,124 +634,13 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	return &pb.WorkersList{Workers: workers}, nil
 }
 
-// New regex: operator and value are optional.
-var filterRegex = regexp.MustCompile(`^([a-zA-Z_]+)(?:\s*(>=|<=|>|<|==|=|~|is)\s*(\S+))?$`)
-
-// Maps for field types.
-var numericFields = map[string]bool{
-	"cpu":       true,
-	"mem":       true,
-	"disk":      true,
-	"bandwidth": true,
-	"gpumem":    true,
-	"eviction":  true,
-	"cost":      true,
-}
-var booleanFields = map[string]bool{
-	"has_gpu":         true,
-	"has_quick_disks": true,
-}
-
-// getColumnMapping returns the appropriate table alias and database column name.
-func getColumnMapping(col string) (dbColumn string) {
-	lcol := strings.ToLower(col)
-	switch lcol {
-	case "provider":
-		return "p.provider_name||'.'||p.config_name"
-	case "eviction", "cost":
-		return fmt.Sprintf("fr.%s", lcol)
-	case "region", "region_name":
-		return "r.region_name"
-	case "flavor", "flavor_name":
-		return "f.flavor_name"
-	default:
-		return fmt.Sprintf("f.%s", lcol)
-	}
-}
-
-// parseFilterToken converts a filter token into a SQL condition string.
-// For numeric and string fields, the operator and value are mandatory.
-// For boolean fields, they are optional. For strings, "~" is converted to a LIKE clause.
-func parseFilterToken(token string) (string, error) {
-	token = strings.TrimSpace(token)
-	matches := filterRegex.FindStringSubmatch(token)
-	if len(matches) == 0 {
-		return "", fmt.Errorf("invalid filter token: %s", token)
-	}
-	col := matches[1]
-	op := matches[2]
-	val := matches[3]
-	dbCol := getColumnMapping(col)
-	lowerCol := strings.ToLower(col)
-
-	if op == "is" {
-		if lowerCol == "region" && val == "default" {
-			return "r.is_default", nil
-		} else {
-			return "", fmt.Errorf("invalid 'is' operator for column %s and value %s", col, val)
-		}
-	}
-	// If operator/value are missing...
-	if op == "" || val == "" {
-		// For boolean fields, allow a token like "has_gpu"
-		if booleanFields[lowerCol] {
-			// Return a condition that simply checks the column
-			return dbCol, nil
-		}
-		return "", fmt.Errorf("missing operator or value for field %s", col)
-	}
-
-	// Normalize equality: "==" becomes "=".
-	if op == "==" {
-		op = "="
-	}
-
-	// Validate and construct condition based on field type.
-	if numericFields[lowerCol] {
-		if op == "~" {
-			return "", fmt.Errorf("invalid operator '~' for numeric field %s", col)
-		}
-		// For numeric fields, assume the value is numeric (no quotes)
-		return fmt.Sprintf("%s %s %s", dbCol, op, val), nil
-	} else if booleanFields[lowerCol] {
-		// For boolean fields, if operator is provided, only "=" is allowed.
-		if op != "=" {
-			return "", fmt.Errorf("invalid operator %s for boolean field %s", op, col)
-		}
-		// Return condition as "f.has_gpu = <val>"
-		return fmt.Sprintf("%s %s %s", lowerCol, op, val), nil
-	} else {
-		// For string fields, allow "~" (which converts to LIKE) or normal operators.
-		if op == "~" {
-			return fmt.Sprintf("%s LIKE '%s'", dbCol, val), nil
-		} else if op != "=" {
-			return "", fmt.Errorf("invalid operator %s for string field %s", op, col)
-		}
-		// For equality or other comparisons, ensure that the value is quoted.
-		if !(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
-			val = fmt.Sprintf("'%s'", val)
-		}
-		return fmt.Sprintf("%s %s %s", dbCol, op, val), nil
-	}
-}
-
 func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRequest) (*pb.FlavorsList, error) {
 	var flavors []*pb.Flavor
 
-	var conditions []string
-	if req.Filter != "" {
-		tokens := strings.Split(req.Filter, ":")
-		for _, token := range tokens {
-			token = strings.TrimSpace(token)
-			if token == "" {
-				continue
-			}
-			cond, err := parseFilterToken(token)
-			if err != nil {
-				return nil, fmt.Errorf("could not parse filter %s: %w", token, err)
-			}
-			conditions = append(conditions, cond)
-		}
+	conditions, err := protofilter.ParseProtofilter(req.Filter)
+	if err != nil {
+		log.Printf("⚠️ Failed to parse filter: %v", err)
+		return nil, fmt.Errorf("failed to parse filter: %w", err)
 	}
 
 	baseQuery := `
@@ -829,6 +725,54 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 	}
 
 	return &pb.FlavorsList{Flavors: flavors}, nil
+}
+
+// return flavor cpu, mem, disk, bandwidth, gpu, gpumem and provider
+func (s *taskQueueServer) getFlavorDetail(flavor string) (*pb.Flavor, error) {
+	var flavorDetail pb.Flavor
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	err = tx.QueryRow(`
+		SELECT
+		f.cpu,
+		f.mem,
+		f.disk,
+		f.bandwidth,
+		f.gpu,
+		f.gpumem,
+		f.has_gpu,
+		f.has_quick_disks,
+		p.provider_name||'.'||p.config_name as provider 
+		FROM flavor f
+		JOIN provider p ON p.provider_id = f.provider_id
+		WHERE f.flavor_name = $1`, flavor).Scan(
+		&flavorDetail.Cpu,
+		&flavorDetail.Mem,
+		&flavorDetail.Disk,
+		&flavorDetail.Bandwidth,
+		&flavorDetail.Gpu,
+		&flavorDetail.Gpumem,
+		&flavorDetail.HasGpu,
+		&flavorDetail.HasQuickDisks,
+		&flavorDetail.Provider,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("flavor %s not found", flavor)
+		}
+		return nil, fmt.Errorf("failed to fetch flavor %s: %w", flavor, err)
+	}
+	flavorDetail.FlavorName = flavor
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit flavor detail: %v", err)
+		return nil, fmt.Errorf("failed to commit flavor detail: %w", err)
+	}
+	return &flavorDetail, nil
 }
 
 func (s *taskQueueServer) checkProviders() error {
@@ -1248,6 +1192,10 @@ func Serve(cfg config.Config) error {
 		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
 	)
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+
+	// initialize the quota manager
+	s.rec = *recruitment.NewRecruitmentContext(&cfg)
+
 	s.checkProviders()
 	s.startJobQueue()
 	pb.RegisterTaskQueueServer(grpcServer, s)

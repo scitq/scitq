@@ -6,20 +6,22 @@ import (
 	"log"
 	"time"
 
+	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	_ "github.com/lib/pq" // PostgreSQL driver
 )
 
 // Job represents a task to be executed.
 type Job struct {
-	JobID      uint32
-	WorkerID   uint32
-	WorkerName string
-	ProviderID uint32
-	Region     string
-	Flavor     string
-	Action     rune // "C", "D", "R"
-	Retry      int
-	Timeout    time.Duration
+	JobID         uint32
+	WorkerID      uint32
+	WorkerName    string
+	ProviderID    uint32
+	Region        string
+	Flavor        string
+	Action        rune // "C", "D", "R"
+	Retry         int
+	Timeout       time.Duration
+	FromRecruiter bool
 }
 
 // Start initializes the job queue.
@@ -95,6 +97,14 @@ func (s *taskQueueServer) processJob(job Job) error {
 	// Implement job processing logic here (create, delete, restart)
 	switch job.Action {
 	case 'C': // Create
+		// Update the quota manager
+		worker, err := recruitment.GetWorkerState(job.WorkerID, s.db)
+		if err != nil {
+			log.Printf("⚠️ Failed to get flavor detail: %v", err)
+		} else {
+			s.rec.RegisterWorker(worker)
+		}
+		// Create the worker
 		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region)
 		if err != nil {
 			return fmt.Errorf("failed to create worker %s: %v", job.WorkerName, err)
@@ -104,10 +114,19 @@ func (s *taskQueueServer) processJob(job Job) error {
 			return fmt.Errorf("worker created but db update failed %s: %v", job.WorkerName, err)
 		}
 	case 'D': // Delete
+		// Delete the worker
 		err := s.providers[job.ProviderID].Delete(job.WorkerName)
 		if err != nil {
 			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
 		}
+		// Update the quota manager
+		worker, err := recruitment.GetWorkerState(job.WorkerID, s.db)
+		if err != nil {
+			log.Printf("⚠️ Failed to get flavor detail: %v", err)
+		} else {
+			s.rec.DeleteWorker(worker)
+		}
+		// Update the database
 		_, err = s.db.Exec("DELETE FROM worker WHERE worker_id=$1", job.WorkerID)
 		if err != nil {
 			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
