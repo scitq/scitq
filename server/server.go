@@ -59,7 +59,7 @@ type taskQueueServer struct {
 	providers     map[uint32]providers.Provider
 	semaphore     chan struct{} // Semaphore to limit concurrency
 	assignTrigger chan struct{}
-	rec           recruitment.RecruitmentContext
+	qm            recruitment.QuotaManager
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -336,10 +336,6 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 }
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
-	return s.performWorkerCreation(req, false)
-}
-
-func (s *taskQueueServer) performWorkerCreation(req *pb.WorkerRequest, from_recruiter bool) (*pb.WorkerIds, error) {
 	var workerIDs []uint32
 	var jobs []Job
 
@@ -358,17 +354,21 @@ func (s *taskQueueServer) performWorkerCreation(req *pb.WorkerRequest, from_recr
 			var providerId uint32
 			var regionName string
 			var flavorName string
+			var providerName string
+			var cpu int32
+			var mem float32
 			err := tx.QueryRow(`WITH insertquery AS (
   INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
   VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
   RETURNING worker_id,worker_name,region_id, flavor_id
 )
-SELECT iq.worker_id, iq.worker_name, r.provider_id, r.region_name, f.flavor_name
+SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem
 FROM insertquery iq
 JOIN region r ON iq.region_id = r.region_id
-JOIN flavor f ON iq.flavor_id = f.flavor_id`,
+JOIN flavor f ON iq.flavor_id = f.flavor_id
+JOIN provider p ON r.provider_id = p.provider_id`,
 				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
-				&workerID, &workerName, &providerId, &regionName, &flavorName)
+				&workerID, &workerName, &providerId, &providerName, &regionName, &flavorName, &cpu, &mem)
 			if err != nil {
 				return nil, fmt.Errorf("failed to register worker: %w", err)
 			}
@@ -377,17 +377,17 @@ JOIN flavor f ON iq.flavor_id = f.flavor_id`,
 			var jobID uint32
 			tx.QueryRow("INSERT INTO job (worker_id,flavor_id,region_id,retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
 				workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
+			s.qm.RegisterLaunch(regionName, providerName, cpu, mem)
 			jobs = append(jobs, Job{
-				JobID:         jobID,
-				WorkerID:      workerID,
-				WorkerName:    workerName,
-				ProviderID:    providerId,
-				Region:        regionName,
-				Flavor:        flavorName,
-				Action:        'C',
-				Retry:         defaultJobRetry,
-				Timeout:       defaultJobTimeout,
-				FromRecruiter: from_recruiter,
+				JobID:      jobID,
+				WorkerID:   workerID,
+				WorkerName: workerName,
+				ProviderID: providerId,
+				Region:     regionName,
+				Flavor:     flavorName,
+				Action:     'C',
+				Retry:      defaultJobRetry,
+				Timeout:    defaultJobTimeout,
 			})
 
 			if err := tx.Commit(); err != nil {
@@ -1194,7 +1194,7 @@ func Serve(cfg config.Config) error {
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
 
 	// initialize the quota manager
-	s.rec = *recruitment.NewRecruitmentContext(&cfg)
+	s.qm = *recruitment.NewQuotaManager(&cfg)
 
 	s.checkProviders()
 	s.startJobQueue()

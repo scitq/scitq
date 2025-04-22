@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	_ "github.com/lib/pq" // PostgreSQL driver
 )
 
@@ -97,13 +96,6 @@ func (s *taskQueueServer) processJob(job Job) error {
 	// Implement job processing logic here (create, delete, restart)
 	switch job.Action {
 	case 'C': // Create
-		// Update the quota manager
-		worker, err := recruitment.GetWorkerState(job.WorkerID, s.db)
-		if err != nil {
-			log.Printf("⚠️ Failed to get flavor detail: %v", err)
-		} else {
-			s.rec.RegisterWorker(worker)
-		}
 		// Create the worker
 		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region)
 		if err != nil {
@@ -119,18 +111,28 @@ func (s *taskQueueServer) processJob(job Job) error {
 		if err != nil {
 			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
 		}
-		// Update the quota manager
-		worker, err := recruitment.GetWorkerState(job.WorkerID, s.db)
-		if err != nil {
-			log.Printf("⚠️ Failed to get flavor detail: %v", err)
-		} else {
-			s.rec.DeleteWorker(worker)
-		}
+		// Update the worker state
 		// Update the database
-		_, err = s.db.Exec("DELETE FROM worker WHERE worker_id=$1", job.WorkerID)
+		var provider string
+		var cpu int32
+		var mem float32
+
+		err = s.db.QueryRow(`
+			DELETE FROM worker
+			USING flavor f, provider p
+			WHERE worker.worker_id = $1
+			  AND worker.flavor_id = f.flavor_id
+			  AND f.provider_id = p.provider_id
+			RETURNING p.provider_name || '.' || p.config_name AS provider,
+					  f.cpu,
+					  f.mem
+		`, job.WorkerID).Scan(&provider, &cpu, &mem)
+
 		if err != nil {
-			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
+			return fmt.Errorf("failed to delete worker %d with quota data: %v", job.WorkerID, err)
 		}
+		// Update quota manager
+		s.qm.RegisterDelete(job.Region, provider, cpu, mem)
 	case 'R': // Restart
 		return s.providers[job.ProviderID].Restart(job.WorkerName)
 	default:
