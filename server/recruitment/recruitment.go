@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,6 +43,40 @@ func (rt *RecruiterTracker) LastSeen(stepID int) (time.Time, bool) {
 func (rt *RecruiterTracker) UpdateSeen(stepID int) {
 	rt.lastSeen.Store(stepID, time.Now())
 }
+
+func updateWorkerStep(db *sql.DB, workerIDs []int, stepID, concurrency, prefetch int) int {
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to begin transaction: %v", err)
+		return 0
+	}
+	ids := make([]string, len(workerIDs))
+	for i, id := range workerIDs {
+		ids[i] = fmt.Sprintf("%d", id)
+	}
+	idList := fmt.Sprintf("(%s)", strings.Join(ids, ","))
+	q := fmt.Sprintf(`
+	UPDATE worker
+	SET step_id = $1, concurrency = $2, prefetch = $3
+	WHERE worker_id IN %s`, idList)
+	result, err := tx.Exec(q, stepID, concurrency, prefetch)
+	if err != nil {
+		log.Printf("⚠️ Failed to update workers: %v", err)
+		tx.Rollback()
+		return 0
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("⚠️ Failed to get rows affected: %v", err)
+		tx.Rollback()
+		return 0
+	}
+
+	tx.Commit()
+	return int(affected)
+}
+
+// 		err = s.db.QueryRow("SELECT provider FROM worker WHERE worker_id=$1", job.WorkerID).Scan(&provider)
 
 type WorkerCreator interface {
 	CreateWorker(flavor, provider, region string, concurrency, prefetch int) error
@@ -139,12 +175,10 @@ func RunRecruitmentLoop(ctx context.Context, db *sql.DB, tracker *RecruiterTrack
 		fmt.Printf("Recycling check for step %d (%d pending tasks, %d active workers, %d recyclable workers)\n",
 			r.StepID, r.PendingTasks, r.ActiveWorkers, r.RecyclableWorkers)
 		if len(r.RecyclableWorkerIDs) > 0 {
-			for _, wid := range r.RecyclableWorkerIDs {
-				fmt.Printf("Would recycle worker %d to step %d (new concurrency: %d)\n", wid, r.StepID, r.Concurrency)
-				// updateWorkerStep(wid, r.StepID, r.Concurrency, r.Prefetch)
-			}
+			updated := updateWorkerStep(db, r.RecyclableWorkerIDs, r.StepID, r.Concurrency, r.Prefetch)
+			log.Printf("Recycling %d workers for step %d\n", updated, r.StepID)
 			tracker.UpdateSeen(r.StepID)
-			needed -= len(r.RecyclableWorkerIDs)
+			needed -= updated
 		}
 
 		if needed <= 0 {
