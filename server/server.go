@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
@@ -60,6 +61,8 @@ type taskQueueServer struct {
 	semaphore     chan struct{} // Semaphore to limit concurrency
 	assignTrigger chan struct{}
 	qm            recruitment.QuotaManager
+
+	workerWeightMemory sync.Map // worker_id -> map[task_id]float64
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -120,14 +123,13 @@ func (s *taskQueueServer) waitForAssignEvents() {
 }
 
 func (s *taskQueueServer) assignPendingTasks() {
-
 	tx, err := s.db.Begin()
 	if err != nil {
 		log.Printf("⚠️ Failed to begin transaction: %v", err)
 		return
 	}
 
-	// **1️⃣ Count pending tasks**
+	// 1️⃣ Count pending tasks
 	var pendingTaskCount int
 	err = tx.QueryRow(`SELECT COUNT(*) FROM task WHERE status = 'P'`).Scan(&pendingTaskCount)
 	if err != nil {
@@ -135,77 +137,115 @@ func (s *taskQueueServer) assignPendingTasks() {
 		tx.Rollback()
 		return
 	}
-
-	// **🚨 If no pending tasks, skip this cycle**
 	if pendingTaskCount == 0 {
 		tx.Rollback()
 		return
 	}
 
-	// **2️⃣ Get workers & their assigned task count**
+	// 2️⃣ Fetch worker capacity and running tasks
 	rows, err := tx.Query(`
-			SELECT w.worker_id, w.concurrency+w.prefetch as assignable, COUNT(t.task_id) as assigned 
-			FROM worker w
-			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A', 'C', 'R')
-			GROUP BY w.worker_id, w.concurrency, w.prefetch
-		`)
+		SELECT w.worker_id, w.concurrency, w.prefetch, COUNT(t.task_id) as assigned
+		FROM worker w
+		LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A', 'C', 'R')
+		GROUP BY w.worker_id, w.concurrency, w.prefetch
+	`)
 	if err != nil {
 		log.Printf("⚠️ Failed to fetch workers: %v", err)
 		tx.Rollback()
 		return
 	}
 
-	workerSlots := make(map[uint32]int) // worker_id → available slots
+	type workerStatus struct {
+		TotalCapacity float64
+		UsedCapacity  float64
+	}
+	workerStatusMap := map[uint32]workerStatus{}
+
 	for rows.Next() {
 		var workerID uint32
-		var assignable, assigned int
-		if err := rows.Scan(&workerID, &assignable, &assigned); err != nil {
+		var concurrency, prefetch, assigned int
+		if err := rows.Scan(&workerID, &concurrency, &prefetch, &assigned); err != nil {
 			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
 		}
-		if assigned < assignable {
-			workerSlots[workerID] = assignable - assigned // Free slots
+
+		capacity := float64(concurrency + prefetch)
+		used := 0.0
+
+		if val, ok := s.workerWeightMemory.Load(int(workerID)); ok {
+			weightMap := val.(*sync.Map)
+			weightMap.Range(func(_, v any) bool {
+				used += v.(float64)
+				return true
+			})
+		} else {
+			used = float64(assigned)
+		}
+
+		if used < capacity {
+			workerStatusMap[workerID] = workerStatus{TotalCapacity: capacity, UsedCapacity: used}
 		}
 	}
 	rows.Close()
 
-	// **🚨 If no worker has available slots, skip this cycle**
-	if len(workerSlots) == 0 {
+	if len(workerStatusMap) == 0 {
 		tx.Rollback()
 		return
 	}
 
-	// **3️⃣ Assign tasks to workers with available slots**
-	for workerID, slots := range workerSlots {
+	// 3️⃣ Assign tasks
+	for workerID, status := range workerStatusMap {
 		if pendingTaskCount == 0 {
-			break // 🚀 Stop if no more tasks left
+			break
+		}
+		available := int(status.TotalCapacity - status.UsedCapacity)
+		tasksToAssign := min(available, pendingTaskCount)
+
+		rows, err := tx.Query(`
+			SELECT task_id FROM task
+			WHERE status = 'P'
+			ORDER BY created_at ASC
+			LIMIT $1
+		`, tasksToAssign)
+		if err != nil {
+			log.Printf("⚠️ Failed to fetch tasks for worker %d: %v", workerID, err)
+			continue
 		}
 
-		if slots > 0 {
-			// Assign only up to available pending tasks
-			tasksToAssign := min(slots, pendingTaskCount)
-
-			res, err := tx.Exec(`
-					UPDATE task 
-					SET status = 'A', worker_id = $1
-					WHERE task_id IN (
-						SELECT task_id FROM task WHERE status = 'P'
-						ORDER BY created_at ASC 
-						LIMIT $2
-					)
-				`, workerID, tasksToAssign)
-
-			if err != nil {
-				log.Printf("⚠️ Failed to assign tasks for worker %d: %v", workerID, err)
-			} else {
-				rowsAffected, _ := res.RowsAffected()
-				log.Printf("✅ Assigned %d tasks to worker %d", rowsAffected, workerID)
-				pendingTaskCount -= int(rowsAffected) // 🛑 Reduce remaining task count
+		var taskIDs []int
+		for rows.Next() {
+			var tid int
+			if err := rows.Scan(&tid); err == nil {
+				taskIDs = append(taskIDs, tid)
 			}
 		}
+		rows.Close()
+
+		if len(taskIDs) == 0 {
+			continue
+		}
+
+		_, err = tx.Exec(`
+			UPDATE task SET status = 'A', worker_id = $1
+			WHERE task_id = ANY($2)
+		`, workerID, pq.Array(taskIDs))
+
+		if err != nil {
+			log.Printf("⚠️ Failed to assign tasks to worker %d: %v", workerID, err)
+			continue
+		}
+
+		// Register weight 1.0 for newly assigned tasks
+		mapped, _ := s.workerWeightMemory.LoadOrStore(int(workerID), &sync.Map{})
+		weightMap := mapped.(*sync.Map)
+		for _, tid := range taskIDs {
+			weightMap.Store(tid, 1.0)
+		}
+
+		log.Printf("✅ Assigned %d tasks to worker %d", len(taskIDs), workerID)
+		pendingTaskCount -= len(taskIDs)
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit task assignment: %v", err)
 	}
@@ -548,20 +588,33 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 	}
 	defer rows.Close()
 
+	taskUpdateList := make(map[uint32]*pb.TaskUpdate)
+
 	for rows.Next() {
 		var task pb.Task
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
 			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &task.Status); err != nil {
-			log.Printf("Task decode error: %v", err)
+			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
 		task.Input = []string(input)
 		task.Resource = []string(resource)
 		if shell.Valid {
-			task.Shell = proto.String(shell.String) // uses *string
+			task.Shell = proto.String(shell.String)
 		}
 		tasks = append(tasks, &task)
+
+		// Add weight if available
+		if val, ok := s.workerWeightMemory.Load(int(req.WorkerId)); ok {
+			taskMap := val.(*sync.Map)
+			if weightVal, ok := taskMap.Load(task.TaskId); ok {
+				weight, ok := weightVal.(float32)
+				if ok {
+					taskUpdateList[*task.TaskId] = &pb.TaskUpdate{Weight: weight}
+				}
+			}
+		}
 	}
 
 	if err := rows.Err(); err != nil {
@@ -571,6 +624,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 	return &pb.TaskListAndOther{
 		Tasks:       tasks,
 		Concurrency: concurrency,
+		Updates:     &pb.TaskUpdateList{Updates: taskUpdateList},
 	}, nil
 }
 

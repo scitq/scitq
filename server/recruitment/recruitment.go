@@ -44,27 +44,73 @@ func (rt *RecruiterTracker) UpdateSeen(stepID int) {
 	rt.lastSeen.Store(stepID, time.Now())
 }
 
-func updateWorkerStep(db *sql.DB, workerIDs []int, stepID, concurrency, prefetch int) int {
+// recycle workers and update weight memory if needed
+func recycleWorkers(db *sql.DB, workerIDs []int, stepID, newConcurrency, prefetch int, weightMemory *sync.Map) int {
 	tx, err := db.Begin()
 	if err != nil {
 		log.Printf("⚠️ Failed to begin transaction: %v", err)
 		return 0
 	}
+
 	ids := make([]string, len(workerIDs))
+	tempWeightUpdates := make(map[int]*sync.Map) // worker_id → *sync.Map[task_id]float64
+
 	for i, id := range workerIDs {
 		ids[i] = fmt.Sprintf("%d", id)
+
+		var oldConcurrency int
+		err := tx.QueryRow("SELECT concurrency FROM worker WHERE worker_id = $1", id).Scan(&oldConcurrency)
+		if err != nil {
+			log.Printf("⚠️ Failed to get old concurrency for worker %d: %v", id, err)
+			continue
+		}
+
+		if oldConcurrency != newConcurrency {
+			scale := float64(newConcurrency) / float64(oldConcurrency)
+
+			var currentMap *sync.Map
+			if val, ok := weightMemory.Load(id); ok {
+				currentMap = val.(*sync.Map)
+				newMap := &sync.Map{}
+				currentMap.Range(func(key, value any) bool {
+					tid := key.(int)
+					weight := value.(float64)
+					newMap.Store(tid, weight*scale)
+					return true
+				})
+				tempWeightUpdates[id] = newMap
+			} else {
+				newMap := &sync.Map{}
+				rows, err := tx.Query("SELECT task_id FROM task WHERE worker_id = $1 AND status IN ('A','C','R','D','U')", id)
+				if err != nil {
+					log.Printf("⚠️ Failed to list tasks for worker %d: %v", id, err)
+					continue
+				}
+				for rows.Next() {
+					var tid int
+					if err := rows.Scan(&tid); err == nil {
+						newMap.Store(tid, scale)
+					}
+				}
+				rows.Close()
+				tempWeightUpdates[id] = newMap
+			}
+		}
 	}
+
 	idList := fmt.Sprintf("(%s)", strings.Join(ids, ","))
 	q := fmt.Sprintf(`
-	UPDATE worker
-	SET step_id = $1, concurrency = $2, prefetch = $3
-	WHERE worker_id IN %s`, idList)
-	result, err := tx.Exec(q, stepID, concurrency, prefetch)
+		UPDATE worker
+		SET step_id = $1, concurrency = $2, prefetch = $3
+		WHERE worker_id IN %s`, idList)
+
+	result, err := tx.Exec(q, stepID, newConcurrency, prefetch)
 	if err != nil {
 		log.Printf("⚠️ Failed to update workers: %v", err)
 		tx.Rollback()
 		return 0
 	}
+
 	affected, err := result.RowsAffected()
 	if err != nil {
 		log.Printf("⚠️ Failed to get rows affected: %v", err)
@@ -72,7 +118,15 @@ func updateWorkerStep(db *sql.DB, workerIDs []int, stepID, concurrency, prefetch
 		return 0
 	}
 
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Commit failed: %v", err)
+		return 0
+	}
+
+	for wid, m := range tempWeightUpdates {
+		weightMemory.Store(wid, m)
+	}
+
 	return int(affected)
 }
 
@@ -82,7 +136,7 @@ type WorkerCreator interface {
 	CreateWorker(flavor, provider, region string, concurrency, prefetch int) error
 }
 
-func RunRecruitmentLoop(ctx context.Context, db *sql.DB, tracker *RecruiterTracker, creator WorkerCreator, qm *QuotaManager) error {
+func RunRecruitmentLoop(ctx context.Context, db *sql.DB, tracker *RecruiterTracker, creator WorkerCreator, qm *QuotaManager, weightMemory *sync.Map) error {
 	q := `
 	WITH pending_by_step AS (
 		SELECT step_id, COUNT(*) AS pending_tasks
@@ -175,7 +229,7 @@ func RunRecruitmentLoop(ctx context.Context, db *sql.DB, tracker *RecruiterTrack
 		fmt.Printf("Recycling check for step %d (%d pending tasks, %d active workers, %d recyclable workers)\n",
 			r.StepID, r.PendingTasks, r.ActiveWorkers, r.RecyclableWorkers)
 		if len(r.RecyclableWorkerIDs) > 0 {
-			updated := updateWorkerStep(db, r.RecyclableWorkerIDs, r.StepID, r.Concurrency, r.Prefetch)
+			updated := recycleWorkers(db, r.RecyclableWorkerIDs, r.StepID, r.Concurrency, r.Prefetch, weightMemory)
 			log.Printf("Recycling %d workers for step %d\n", updated, r.StepID)
 			tracker.UpdateSeen(r.StepID)
 			needed -= updated
@@ -206,4 +260,21 @@ func RunRecruitmentLoop(ctx context.Context, db *sql.DB, tracker *RecruiterTrack
 	}
 
 	return nil
+}
+
+// StartRecruitmentLoop runs the recruitment loop every interval duration
+func StartRecruitmentLoop(ctx context.Context, db *sql.DB, tracker *RecruiterTracker, creator WorkerCreator, qm *QuotaManager, weightMemory *sync.Map, interval time.Duration) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Recruitment loop stopped")
+				return
+			case <-time.After(interval):
+				if err := RunRecruitmentLoop(ctx, db, tracker, creator, qm, weightMemory); err != nil {
+					log.Printf("⚠️ Recruitment loop error: %v", err)
+				}
+			}
+		}
+	}()
 }

@@ -80,9 +80,18 @@ message WorkersList {
 message ListWorkersRequest {
 }
 
+message TaskUpdate {
+    float weight = 1; 
+}
+
+message TaskUpdateList {
+    map<uint32, TaskUpdate> updates = 1; // optional — can be empty
+}
+
 message TaskListAndOther {
     repeated Task tasks = 1;
     uint32 concurrency = 2;
+    TaskUpdateList updates = 3;
 }
 
 message TaskStatusUpdate {
