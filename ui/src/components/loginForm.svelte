@@ -24,7 +24,7 @@
   </script>
   
   <div class="login-form-container">
-    <h1 class="login-form-title">Connexion</h1>
+    <h1 class="login-form-title">Connection</h1>
   
     <div class="login-form-group">
       <label for="email" class="login-form-label">Email</label>
@@ -32,16 +32,16 @@
     </div>
   
     <div class="login-form-group">
-      <label for="password" class="login-form-label">Mot de passe</label>
+      <label for="password" class="login-form-label">Password</label>
       <input id="password" type="password" class="login-form-input" bind:value={password} />
     </div>
   
     <button class="login-form-button" on:click={handleLogin} disabled={isLoading}>
-      {isLoading ? "Chargement..." : "Connexion"}
+      {isLoading ? "Loading..." : "Log In"}
     </button>
   
     <div class="login-form-footer">
-      <a href="#" class="login-form-forgot">Mot de passe oublié ?</a>
+      <a href="#" class="login-form-forgot">Forgot Password ?</a>
     </div>
   
     {#if message}

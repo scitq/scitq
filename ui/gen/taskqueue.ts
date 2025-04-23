@@ -288,9 +288,42 @@ export interface WorkerRequest {
      */
     prefetch: number;
     /**
-     * @generated from protobuf field: uint32 step_id = 7;
+     * @generated from protobuf field: optional uint32 step_id = 7;
      */
-    stepId: number;
+    stepId?: number;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerUpdateRequest
+ */
+export interface WorkerUpdateRequest {
+    /**
+     * @generated from protobuf field: uint32 worker_id = 1;
+     */
+    workerId: number;
+    /**
+     * @generated from protobuf field: optional uint32 provider_id = 2;
+     */
+    providerId?: number;
+    /**
+     * @generated from protobuf field: optional uint32 flavor_id = 3;
+     */
+    flavorId?: number;
+    /**
+     * @generated from protobuf field: optional uint32 region_id = 4;
+     */
+    regionId?: number;
+    /**
+     * @generated from protobuf field: optional uint32 concurrency = 5;
+     */
+    concurrency?: number;
+    /**
+     * @generated from protobuf field: optional uint32 prefetch = 6;
+     */
+    prefetch?: number;
+    /**
+     * @generated from protobuf field: optional uint32 step_id = 7;
+     */
+    stepId?: number;
 }
 /**
  * @generated from protobuf message taskqueue.ListFlavorsRequest
@@ -1428,7 +1461,7 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
             { no: 4, name: "number", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 5, name: "concurrency", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 6, name: "prefetch", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
-            { no: 7, name: "step_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 7, name: "step_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerRequest>): WorkerRequest {
@@ -1439,7 +1472,6 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
         message.number = 0;
         message.concurrency = 0;
         message.prefetch = 0;
-        message.stepId = 0;
         if (value !== undefined)
             reflectionMergePartial<WorkerRequest>(this, message, value);
         return message;
@@ -1467,7 +1499,7 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
                 case /* uint32 prefetch */ 6:
                     message.prefetch = reader.uint32();
                     break;
-                case /* uint32 step_id */ 7:
+                case /* optional uint32 step_id */ 7:
                     message.stepId = reader.uint32();
                     break;
                 default:
@@ -1500,8 +1532,8 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
         /* uint32 prefetch = 6; */
         if (message.prefetch !== 0)
             writer.tag(6, WireType.Varint).uint32(message.prefetch);
-        /* uint32 step_id = 7; */
-        if (message.stepId !== 0)
+        /* optional uint32 step_id = 7; */
+        if (message.stepId !== undefined)
             writer.tag(7, WireType.Varint).uint32(message.stepId);
         let u = options.writeUnknownFields;
         if (u !== false)
@@ -1513,6 +1545,95 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
  * @generated MessageType for protobuf message taskqueue.WorkerRequest
  */
 export const WorkerRequest = new WorkerRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
+    constructor() {
+        super("taskqueue.WorkerUpdateRequest", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "provider_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "flavor_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "region_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 5, name: "concurrency", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 6, name: "prefetch", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 7, name: "step_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerUpdateRequest>): WorkerUpdateRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<WorkerUpdateRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerUpdateRequest): WorkerUpdateRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 worker_id */ 1:
+                    message.workerId = reader.uint32();
+                    break;
+                case /* optional uint32 provider_id */ 2:
+                    message.providerId = reader.uint32();
+                    break;
+                case /* optional uint32 flavor_id */ 3:
+                    message.flavorId = reader.uint32();
+                    break;
+                case /* optional uint32 region_id */ 4:
+                    message.regionId = reader.uint32();
+                    break;
+                case /* optional uint32 concurrency */ 5:
+                    message.concurrency = reader.uint32();
+                    break;
+                case /* optional uint32 prefetch */ 6:
+                    message.prefetch = reader.uint32();
+                    break;
+                case /* optional uint32 step_id */ 7:
+                    message.stepId = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerUpdateRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 worker_id = 1; */
+        if (message.workerId !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.workerId);
+        /* optional uint32 provider_id = 2; */
+        if (message.providerId !== undefined)
+            writer.tag(2, WireType.Varint).uint32(message.providerId);
+        /* optional uint32 flavor_id = 3; */
+        if (message.flavorId !== undefined)
+            writer.tag(3, WireType.Varint).uint32(message.flavorId);
+        /* optional uint32 region_id = 4; */
+        if (message.regionId !== undefined)
+            writer.tag(4, WireType.Varint).uint32(message.regionId);
+        /* optional uint32 concurrency = 5; */
+        if (message.concurrency !== undefined)
+            writer.tag(5, WireType.Varint).uint32(message.concurrency);
+        /* optional uint32 prefetch = 6; */
+        if (message.prefetch !== undefined)
+            writer.tag(6, WireType.Varint).uint32(message.prefetch);
+        /* optional uint32 step_id = 7; */
+        if (message.stepId !== undefined)
+            writer.tag(7, WireType.Varint).uint32(message.stepId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerUpdateRequest
+ */
+export const WorkerUpdateRequest = new WorkerUpdateRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListFlavorsRequest$Type extends MessageType<ListFlavorsRequest> {
     constructor() {
@@ -2241,6 +2362,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListWorkers", options: {}, I: ListWorkersRequest, O: WorkersList },
     { name: "CreateWorker", options: {}, I: WorkerRequest, O: WorkerIds },
     { name: "DeleteWorker", options: {}, I: WorkerId, O: Ack },
+    { name: "UpdateWorker", options: {}, I: WorkerUpdateRequest, O: Ack },
     { name: "ListFlavors", options: {}, I: ListFlavorsRequest, O: FlavorsList },
     { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneConfig },
     { name: "Login", options: {}, I: LoginRequest, O: LoginResponse },

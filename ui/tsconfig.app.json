@@ -14,7 +14,7 @@
   },
   "include": [
     "src",
-    "gen/*"
+    "gen"
   ],
   "exclude": [
     "node_modules",

@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as grpcWeb from 'grpc-web';
   import { onMount } from 'svelte';
-  import { getWorkers, updateWorkerConfig } from '../lib/api';
+  import { delWorker, getWorkers, updateWorkerConfig } from '../lib/api';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser } from 'lucide-svelte';
   import '../styles/worker.css';
 
@@ -16,10 +16,7 @@
     const newValue = Math.max(0, worker[field] + delta);
     worker[field] = newValue;
 
-    await updateWorkerConfig(worker.workerId, {
-      concurrency: worker.concurrency,
-      prefetch: worker.prefetch,
-    });
+    await updateWorkerConfig(worker.workerId, worker.concurrency, worker.prefetch);
     console.log(worker);
   };
 </script>
@@ -84,7 +81,16 @@
               <button><PauseCircle /></button>
               <button><Eraser /></button>
               <button><RefreshCw /></button>
-              <button><Trash /></button>
+              <button on:click={() => {
+                console.log('Worker ID:', worker.workerId);  // Log pour vérifier l'ID
+                if (worker.workerId) {
+                  delWorker({ workerId: worker.workerId });  // Passe un objet avec workerId
+                } else {
+                  console.error('Invalid Worker ID');
+                }
+              }}>
+                <Trash />
+              </button>
             </td>
           </tr>
         {/each}

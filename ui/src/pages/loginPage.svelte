@@ -22,11 +22,6 @@
             <span>GMT SCIENCE</span>
             <img src="{logo}" alt="Logo" class="login-page-logo" />
         </div>
-    </div>
-
-    <script>
-        import LoginForm from '../components/LoginForm.svelte';
-    </script>
-      
+    </div>      
       <LoginForm />
 </div>

@@ -402,6 +402,76 @@ JOIN flavor f ON iq.flavor_id = f.flavor_id`,
 	return &pb.WorkerIds{WorkerIds: workerIDs}, nil
 }
 
+
+func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdateRequest) (*pb.Ack, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := "UPDATE worker SET "
+	args := []interface{}{}
+	sets := []string{}
+
+	i := 1
+
+	if req.ProviderId != nil {
+		sets = append(sets, fmt.Sprintf("provider_id=$%d", i))
+		args = append(args, req.GetProviderId())
+		i++
+	}
+	if req.FlavorId != nil {
+		sets = append(sets, fmt.Sprintf("flavor_id=$%d", i))
+		args = append(args, req.GetFlavorId())
+		i++
+	}
+	if req.RegionId != nil {
+		sets = append(sets, fmt.Sprintf("region_id=$%d", i))
+		args = append(args, req.GetRegionId())
+		i++
+	}
+	if req.Concurrency != nil {
+		sets = append(sets, fmt.Sprintf("concurrency=$%d", i))
+		args = append(args, req.GetConcurrency())
+		i++
+	}
+	if req.Prefetch != nil {
+		sets = append(sets, fmt.Sprintf("prefetch=$%d", i))
+		args = append(args, req.GetPrefetch())
+		i++
+	}
+	if req.StepId != nil {
+		sets = append(sets, fmt.Sprintf("step_id=$%d", i))
+		args = append(args, req.GetStepId())
+		i++
+	}
+
+	if len(sets) == 0 {
+		return &pb.Ack{Success: false}, fmt.Errorf("no fields provided to update")
+	}
+
+	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d", i)
+	args = append(args, req.GetWorkerId())
+
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		log.Printf("⚠️ Failed to execute update: %v", err)
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit transaction: %v", err)
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	s.triggerAssign()
+	return &pb.Ack{Success: true}, nil
+}
+
+
+
 func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*pb.Ack, error) {
 	var job Job
 

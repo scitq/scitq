@@ -96,7 +96,7 @@ button:focus-visible {
   flex: 1;
   overflow-x: auto;
   transition: all 0.3s ease;
-  padding: 1rem;
+  padding: 0 1rem 1rem 1rem;
 }
 
 /* Quand la sidebar est cachée, on étend le contenu principal */

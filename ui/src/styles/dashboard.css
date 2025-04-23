@@ -164,3 +164,29 @@
     border-radius: 4px;
     transition: all 0.3s ease;
 }
+
+/* La div qui contient les sections "job" et "add worker" */
+.bottom-div {
+  display: flex;
+  justify-content: space-between; /* Espace entre les deux sections */
+  align-items: center; /* Centrer verticalement */
+  background-color: #f4f4f4; /* Couleur de fond de la div */
+  border-radius: 8px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Style pour la section "Job Section" à gauche */
+.job-section {
+  flex: 1; /* Cela donne une largeur égale avec l'autre section */
+  background-color: #e0e0e0;
+  padding: 10px;
+  text-align: center;
+  border-radius: 8px;
+}
+
+/* Style pour la section "Add Worker" à droite */
+.add-worker-section {
+  background-color: #d0d0d0;
+  padding: 10px;
+  border-radius: 8px;
+}

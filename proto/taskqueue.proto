@@ -17,6 +17,7 @@ service TaskQueue {
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc DeleteWorker(WorkerId) returns (Ack);
+    rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
     rpc Login(LoginRequest) returns (LoginResponse);
@@ -123,7 +124,17 @@ message WorkerRequest {
     uint32 number = 4;
     uint32 concurrency = 5;
     uint32 prefetch = 6;
-    uint32 step_id = 7;
+    optional uint32 step_id = 7;
+}
+
+message WorkerUpdateRequest {
+    uint32 worker_id = 1;
+    optional uint32 provider_id = 2;
+    optional uint32 flavor_id = 3;
+    optional uint32 region_id = 4;
+    optional uint32 concurrency = 5;
+    optional uint32 prefetch = 6;
+    optional uint32 step_id = 7;
 }
 
 message ListFlavorsRequest {

@@ -1,6 +1,7 @@
 <script lang="ts">
     export let toggleSidebar: () => void;  // Fonction venant de App.svelte
     import WorkerCompo from '../components/workerCompo.svelte'
+    import CreateForm from '../components/createForm.svelte'
     import '../styles/dashboard.css'
   </script>
   
@@ -19,5 +20,17 @@
     <div class="worker-section">
       <WorkerCompo />
     </div>
+
+    <div class="bottom-div">
+
+      <div class="job-section">
+        <p>Historique des jobs</p>
+      </div>
+      
+      <div class="add-worker-section">
+        <CreateForm />
+      </div>
+    </div>
   </div>
+
   
