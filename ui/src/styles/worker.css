@@ -1,0 +1,75 @@
+/* Tableau de base */
+table {
+    width: auto;
+    min-width: 100%;
+    border-collapse: collapse;
+    color: black;
+  }
+  
+  table, th, td {
+    font-size: 0.85rem;
+  }
+  
+  .table-wrapper {
+    max-width: 100%;
+    margin: auto;
+    overflow-x: auto;
+  }
+  
+  th, td {
+    padding: 0.1rem 0.5rem;
+    border: 1px solid #333;
+    text-align: center;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  
+  th {
+    background-color: grey;
+    color: black;
+  }
+  
+  tr:nth-child(even) {
+    background-color: #f2f2f2; /* Un léger gris clair pour les lignes paires */
+  }
+  
+  /* Style pour les boutons d'action */
+  .actions button {
+    font-size: 0.75rem; /* Taille de texte plus petite */
+    background: #192245;
+    border: 1px solid #444;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.3s, transform 0.2s; /* Transition pour les effets */
+  }
+  
+  /* Changement de fond au survol */
+  .actions button:hover {
+    background: #333;
+    transform: scale(1.1); /* Agrandissement léger au survol */
+  }
+  
+  /* Redimensionner les icônes pour les rendre plus petites */
+  .actions button svg {
+    width: 14px; /* Icônes plus petites */
+    height: 14px;
+    color: white;
+    transition: color 0.2s; /* Transition pour la couleur de l'icône */
+  }
+  
+  /* Changer la couleur de l'icône au survol */
+  .actions button:hover svg {
+    color: #ffeb3b; /* Jaune doré pour l'icône au survol */
+  }
+  
+  /* Ajout de style pour les éléments cliquables (comme les noms de worker) */
+  .clickable {
+    cursor: pointer;
+    text-decoration: underline;
+    color: #4ea6ff;
+  }
+  
+  .clickable:hover {
+    color: #82cfff;
+  }

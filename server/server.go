@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
+	"github.com/improbable-eng/grpc-web/go/grpcweb"
 
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/golang-migrate/migrate/v4"
@@ -1247,22 +1249,78 @@ func Serve(cfg config.Config) error {
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
 	)
-	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
-	s.checkProviders()
-	s.startJobQueue()
-	pb.RegisterTaskQueueServer(grpcServer, s)
 
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
-	if err != nil {
-		return fmt.Errorf("failed to listen: %v", err)
+
+	go func() error {
+		db, err := sql.Open("pgx", cfg.Scitq.DBURL)
+		if err != nil {
+			return fmt.Errorf("failed to initialize database: %w", err)
+		}
+		defer db.Close()
+
+		s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+		s.checkProviders()
+		s.startJobQueue()
+		pb.RegisterTaskQueueServer(grpcServer, s)
+
+		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
+		if err != nil {
+			return fmt.Errorf("failed to listen: %v", err)
+		}
+	
+
+		// **Trigger task assignment**
+		s.triggerAssign()
+
+		log.Println("Server listening on port 50051...")
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("failed to serve: %v", err)
+		}
+		return nil
+	}()
+
+	grpcWebServer := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(origin string) bool {
+		log.Printf("CORS check: origin = %s", origin)
+		return origin == "http://localhost:5173"
+	}))
+
+	// Logging handler
+	loggedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		log.Printf("Received request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+
+		// === Ajout des headers CORS ===
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, x-grpc-web, x-user-agent, grpc-timeout, Authorization")
+
+
+		// === Gérer les requêtes préflight OPTIONS ===
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if grpcWebServer.IsGrpcWebRequest(r) || grpcWebServer.IsAcceptableGrpcCorsRequest(r) {
+			grpcWebServer.ServeHTTP(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+
+		duration := time.Since(start)
+		log.Printf("Handled request: %s %s in %v", r.Method, r.URL.Path, duration)
+	})
+
+	// HTTP server
+	httpServer := http.Server{
+		Addr:    ":8081",
+		Handler: loggedHandler,
 	}
 
-	// **Trigger task assignment**
-	s.triggerAssign()
-
-	log.Println("Server listening on port 50051...")
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+	log.Println("gRPC-Web HTTP server listening on :8081")
+	if err := httpServer.ListenAndServe(); err != nil {
+		log.Fatalf("HTTP server failed: %v", err)
 	}
 
 	return nil
