@@ -609,7 +609,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 		if val, ok := s.workerWeightMemory.Load(int(req.WorkerId)); ok {
 			taskMap := val.(*sync.Map)
 			if weightVal, ok := taskMap.Load(task.TaskId); ok {
-				weight, ok := weightVal.(float32)
+				weight, ok := weightVal.(float64)
 				if ok {
 					taskUpdateList[*task.TaskId] = &pb.TaskUpdate{Weight: weight}
 				}

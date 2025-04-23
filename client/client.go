@@ -20,12 +20,6 @@ import (
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
-// optionalInt32 converts an int to a pointer (*int32).
-func optionalInt32(v int) *uint32 {
-	i := uint32(v)
-	return &i
-}
-
 // the client is divided in several loops to accomplish its tasks:
 // - the main loop (essentially this file)
 //
@@ -50,7 +44,7 @@ func logMessage(msg string, client pb.TaskQueueClient, taskID uint32) {
 type WorkerConfig struct {
 	WorkerId    uint32
 	ServerAddr  string
-	Concurrency int
+	Concurrency uint32
 	Name        string
 	Store       string
 	Token       string
@@ -61,7 +55,7 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := client.RegisterWorker(ctx, &pb.WorkerInfo{Name: w.Name, Concurrency: optionalInt32(w.Concurrency)})
+	res, err := client.RegisterWorker(ctx, &pb.WorkerInfo{Name: w.Name, Concurrency: &w.Concurrency})
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)
 	} else {
@@ -193,29 +187,44 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 }
 
 // fetchTasks requests new tasks from the server.
-func (w *WorkerConfig) fetchTasks(client pb.TaskQueueClient, id uint32, sem *utils.ResizableSemaphore) []*pb.Task {
+func (w *WorkerConfig) fetchTasks(
+	client pb.TaskQueueClient,
+	id uint32,
+	sem *utils.ResizableSemaphore,
+	taskWeights *sync.Map,
+) []*pb.Task {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := client.PingAndTakeNewTasks(ctx, &pb.WorkerId{WorkerId: uint32(id)})
+	res, err := client.PingAndTakeNewTasks(ctx, &pb.WorkerId{WorkerId: id})
 	if err != nil {
 		log.Printf("⚠️ Error fetching tasks: %v", err)
 		return nil
 	}
-	newConcurrency := int(res.Concurrency)
-	if newConcurrency != w.Concurrency {
-		log.Printf("Resizing concurrency from %d to %d", w.Concurrency, newConcurrency)
-		sem.Resize(newConcurrency)
-		w.Concurrency = newConcurrency
+
+	if res.Concurrency != uint32(w.Concurrency) {
+		log.Printf("Resizing concurrency from %d to %d", w.Concurrency, res.Concurrency)
+		sem.Resize(float64(res.Concurrency))
+		w.Concurrency = res.Concurrency
 	}
+
+	// Apply task weights if any
+	updates := make(map[uint32]float64)
+	for taskID, update := range res.Updates.Updates {
+		taskWeights.Store(taskID, update.Weight)
+		updates[taskID] = update.Weight
+	}
+	sem.ResizeTasks(updates)
+
 	return res.Tasks
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager) {
+func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map) {
 	store := dm.Store
+
 	for {
-		tasks := config.fetchTasks(client, config.WorkerId, sem)
+		tasks := config.fetchTasks(client, config.WorkerId, sem, taskWeights)
 		if len(tasks) == 0 {
 			log.Printf("No tasks available, retrying in 5 seconds...")
 			time.Sleep(5 * time.Second) // No tasks, wait before retrying
@@ -237,29 +246,51 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.Resiz
 	}
 }
 
-func excuterThread(exexQueue chan *pb.Task, client pb.TaskQueueClient, sem *utils.ResizableSemaphore, store string, dm *DownloadManager, um *UploadManager) {
-	// WaitGroup to synchronize goroutines
+func excuterThread(
+	exexQueue chan *pb.Task,
+	client pb.TaskQueueClient,
+	sem *utils.ResizableSemaphore,
+	store string,
+	dm *DownloadManager,
+	um *UploadManager,
+	taskWeights *sync.Map,
+) {
 	var wg sync.WaitGroup
 
 	for task := range exexQueue {
 		wg.Add(1)
 		log.Printf("Received task %d with status: %v", task.TaskId, task.Status)
-		sem.Acquire(context.Background()) // Block if max concurrency is reached
 
-		go func(t *pb.Task) {
+		// Get task weight or default to 1.0
+		weight := 1.0
+		if w, ok := taskWeights.Load(*task.TaskId); ok {
+			weight = w.(float64)
+		}
+
+		go func(t *pb.Task, w float64) {
+			if err := sem.AcquireWithWeight(context.Background(), w, *t.TaskId); err != nil {
+				log.Printf("❌ Failed to acquire semaphore for task %d: %v", t.TaskId, err)
+				wg.Done()
+				return
+			}
+
 			executeTask(client, t, &wg, store, dm)
-			sem.Release()           // Release semaphore slot after task completion
-			um.EnqueueTaskOutput(t) // Enqueue task output for upload
-		}(task)
+
+			sem.ReleaseTask(*t.TaskId) // always release same weight
+			um.EnqueueTaskOutput(t)
+
+			// Clean up memory if task is done
+			taskWeights.Delete(*t.TaskId)
+
+		}(task, weight)
 	}
-	//wg.Wait() // Ensure all tasks finish before fetching new ones
-	//time.Sleep(1 * time.Second)
 }
 
 // / client launcher
-func Run(serverAddr string, concurrency int, name, store, token string) error {
+func Run(serverAddr string, concurrency uint32, name, store, token string) error {
 
 	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token}
+	taskWeights := &sync.Map{}
 
 	// Establish connection to the server
 	qclient, err := lib.CreateClient(config.ServerAddr, config.Token)
@@ -278,7 +309,7 @@ func Run(serverAddr string, concurrency int, name, store, token string) error {
 	}
 
 	config.registerWorker(qclient.Client)
-	sem := utils.NewResizableSemaphore(config.Concurrency)
+	sem := utils.NewResizableSemaphore(float64(config.Concurrency))
 
 	//TODO: we need to add somehow an error state (or we could update the task status in the task with the error notably in case download fails)
 
@@ -289,9 +320,9 @@ func Run(serverAddr string, concurrency int, name, store, token string) error {
 	um := RunUploader(store, qclient.Client)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, sem, store, dm, um)
+	go excuterThread(dm.ExecQueue, qclient.Client, sem, store, dm, um, taskWeights)
 
 	// Start processing tasks
-	go workerLoop(qclient.Client, config, sem, dm)
+	go workerLoop(qclient.Client, config, sem, dm, taskWeights)
 	select {} // Block forever
 }

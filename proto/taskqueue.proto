@@ -81,7 +81,7 @@ message ListWorkersRequest {
 }
 
 message TaskUpdate {
-    float weight = 1; 
+    double weight = 1; 
 }
 
 message TaskUpdateList {

@@ -524,7 +524,7 @@ func (*ListWorkersRequest) Descriptor() ([]byte, []int) {
 
 type TaskUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Weight        float32                `protobuf:"fixed32,1,opt,name=weight,proto3" json:"weight,omitempty"`
+	Weight        float64                `protobuf:"fixed64,1,opt,name=weight,proto3" json:"weight,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -559,7 +559,7 @@ func (*TaskUpdate) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *TaskUpdate) GetWeight() float32 {
+func (x *TaskUpdate) GetWeight() float64 {
 	if x != nil {
 		return x.Weight
 	}
@@ -1844,7 +1844,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x12ListWorkersRequest\"$\n" +
 	"\n" +
 	"TaskUpdate\x12\x16\n" +
-	"\x06weight\x18\x01 \x01(\x02R\x06weight\"\xa5\x01\n" +
+	"\x06weight\x18\x01 \x01(\x01R\x06weight\"\xa5\x01\n" +
 	"\x0eTaskUpdateList\x12@\n" +
 	"\aupdates\x18\x01 \x03(\v2&.taskqueue.TaskUpdateList.UpdatesEntryR\aupdates\x1aQ\n" +
 	"\fUpdatesEntry\x12\x10\n" +
