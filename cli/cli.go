@@ -88,6 +88,28 @@ type Attr struct {
 		} `arg:"subcommand:change-password" help:"Change your password"`
 	} `arg:"subcommand:user" help:"User management"`
 
+	Recruiter *struct {
+		List *struct {
+			StepId uint32 `arg:"--step-id" help:"Step ID to filter"`
+		} `arg:"subcommand:list" help:"List all recruiters"`
+		Create *struct {
+			StepId      uint32 `arg:"--step-id,required" help:"Step ID"`
+			Rank        int    `arg:"--rank" default:"1" help:"Recruiter rank"`
+			Flavor      string `arg:"--flavor,required" help:"Worker flavor"`
+			Provider    string `arg:"--provider,required" help:"Worker provider in the form providerName.configName like azure.primary"`
+			Region      string `arg:"--region" help:"Worker region, default to provider default region"`
+			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
+			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
+			MaxWorkers  int    `arg:"--max-workers" help:"Maximum number of workers"`
+			Rounds      int    `arg:"--rounds" help:"Number of rounds"`
+			Timeout     int    `arg:"--timeout" help:"Timeout in seconds"`
+		} `arg:"subcommand:create" help:"Create a new recruiter"`
+		Delete *struct {
+			StepId uint32 `arg:"--step-id,required" help:"Step ID to delete"`
+			Rank   int    `arg:"--rank,required" help:"Recruiter rank to delete"`
+		} `arg:"subcommand:delete" help:"Delete a recruiter"`
+	} `arg:"subcommand:recruiter" help:"Recruiter management"`
+
 	// Login commands
 	Login *struct {
 	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
@@ -388,6 +410,71 @@ func CreateUser(client pb.TaskQueueClient, user *pb.CreateUserRequest) error {
 	return nil
 }
 
+func (c *CLI) RecruiterList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.RecruiterFilter{}
+	if c.Attr.Recruiter.List.StepId != 0 {
+		req.StepId = &c.Attr.Recruiter.List.StepId
+	}
+
+	res, err := c.QC.Client.ListRecruiters(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error fetching recruiters: %w", err)
+	}
+
+	fmt.Println("🏗️ Recruiter List:")
+	for _, r := range res.Recruiters {
+		fmt.Printf("Step %d | Rank %d | %s @ %s/%s | Concurrency=%d Prefetch=%d Max=%d Round=%d Timeout=%d\n",
+			r.StepId, r.Rank, r.Flavor, r.Provider, r.Region, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Round, r.Timeout)
+	}
+	return nil
+}
+
+func (c *CLI) RecruiterCreate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.Recruiter{
+		StepId:      c.Attr.Recruiter.Create.StepId,
+		Rank:        uint32(c.Attr.Recruiter.Create.Rank),
+		Flavor:      c.Attr.Recruiter.Create.Flavor,
+		Provider:    c.Attr.Recruiter.Create.Provider,
+		Region:      c.Attr.Recruiter.Create.Region,
+		Concurrency: uint32(c.Attr.Recruiter.Create.Concurrency),
+		Prefetch:    uint32(c.Attr.Recruiter.Create.Prefetch),
+		MaxWorkers:  uint32(c.Attr.Recruiter.Create.MaxWorkers),
+		Round:       uint32(c.Attr.Recruiter.Create.Rounds),
+		Timeout:     uint32(c.Attr.Recruiter.Create.Timeout),
+	}
+
+	_, err := c.QC.Client.CreateRecruiter(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error creating recruiter: %w", err)
+	}
+	fmt.Println("✅ Recruiter created successfully")
+	return nil
+}
+
+func (c *CLI) RecruiterDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.RecruiterId{
+		StepId: c.Attr.Recruiter.Delete.StepId,
+		Rank:   uint32(c.Attr.Recruiter.Delete.Rank),
+	}
+
+	_, err := c.QC.Client.DeleteRecruiter(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error deleting recruiter: %w", err)
+	}
+
+	fmt.Printf("✅ Recruiter step_id=%d rank=%d deleted\n", req.StepId, req.Rank)
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -473,6 +560,17 @@ func Run(c CLI) error {
 			err = CreateUser(c.QC.Client, user)
 		case c.Attr.User.ChangePassword != nil:
 			err = ChangePassword(c.Attr.Server, c.Attr.User.ChangePassword.Username)
+		}
+	case c.Attr.Recruiter != nil:
+		switch {
+		case c.Attr.Recruiter.List != nil:
+			return c.RecruiterList()
+		case c.Attr.Recruiter.Create != nil:
+			return c.RecruiterCreate()
+		case c.Attr.Recruiter.Delete != nil:
+			return c.RecruiterDelete()
+		default:
+			return fmt.Errorf("no recruiter subcommand specified")
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

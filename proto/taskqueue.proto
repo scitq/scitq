@@ -25,7 +25,11 @@ service TaskQueue {
     rpc DeleteUser(UserId) returns (Ack);
     rpc UpdateUser(User) returns (Ack);
     rpc ChangePassword(ChangePasswordRequest) returns (Ack);
-    }
+    rpc ListRecruiters(RecruiterFilter) returns (RecruiterList);
+    rpc CreateRecruiter(Recruiter) returns (Ack);
+    rpc UpdateRecruiter(RecruiterUpdate) returns (Ack);
+    rpc DeleteRecruiter(RecruiterId) returns (Ack);
+    }   
 
 message TaskResponse {
     uint32 task_id = 1;
@@ -206,3 +210,44 @@ message ChangePasswordRequest {
   string old_password = 2;
   string new_password = 3;
 }
+
+message RecruiterFilter {
+    optional uint32 step_id = 1;
+}
+
+message RecruiterId {
+    uint32 step_id = 1;
+    uint32 rank = 2;
+}
+
+message Recruiter {
+    uint32 step_id = 1;
+    uint32 rank = 2;
+    string flavor = 3;
+    string provider = 4;
+    string region = 5;
+    uint32 concurrency = 6;
+    uint32 prefetch = 7;
+    uint32 max_workers = 8;
+    uint32 round = 9;
+    uint32 timeout = 10;
+}
+
+message RecruiterUpdate {
+  uint32 step_id = 1;
+  uint32 rank = 2;
+  optional string flavor = 3;
+  optional string provider = 4;
+  optional string region = 5;
+  optional uint32 concurrency = 6;
+  optional uint32 prefetch = 7;
+  optional uint32 max_workers = 8;
+  optional uint32 round = 9;
+  optional uint32 timeout = 10;
+}
+
+
+message RecruiterList {
+    repeated Recruiter recruiters = 1;
+}
+

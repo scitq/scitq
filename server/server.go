@@ -18,7 +18,7 @@ import (
 	"github.com/gmtsciencedev/scitq2/server/config"
 	"github.com/gmtsciencedev/scitq2/server/protofilter"
 	"github.com/gmtsciencedev/scitq2/server/providers"
-	"github.com/gmtsciencedev/scitq2/server/providers/azure"
+
 	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	"github.com/golang-jwt/jwt"
 	"github.com/lib/pq"
@@ -119,143 +119,6 @@ func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empt
 func (s *taskQueueServer) waitForAssignEvents() {
 	for range s.assignTrigger {
 		s.assignPendingTasks() // this logic is your current assignTasksLoop(), minus the loop and sleep
-	}
-}
-
-func (s *taskQueueServer) assignPendingTasks() {
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to begin transaction: %v", err)
-		return
-	}
-
-	// 1️⃣ Count pending tasks
-	var pendingTaskCount int
-	err = tx.QueryRow(`SELECT COUNT(*) FROM task WHERE status = 'P'`).Scan(&pendingTaskCount)
-	if err != nil {
-		log.Printf("⚠️ Failed to count pending tasks: %v", err)
-		tx.Rollback()
-		return
-	}
-	if pendingTaskCount == 0 {
-		tx.Rollback()
-		return
-	}
-
-	// 2️⃣ Fetch worker capacity and running tasks
-	rows, err := tx.Query(`
-		SELECT w.worker_id, w.concurrency, w.prefetch, COUNT(t.task_id) as assigned
-		FROM worker w
-		LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A', 'C', 'R')
-		GROUP BY w.worker_id, w.concurrency, w.prefetch
-	`)
-	if err != nil {
-		log.Printf("⚠️ Failed to fetch workers: %v", err)
-		tx.Rollback()
-		return
-	}
-
-	type workerStatus struct {
-		TotalCapacity float64
-		UsedCapacity  float64
-	}
-	workerStatusMap := map[uint32]workerStatus{}
-
-	for rows.Next() {
-		var workerID uint32
-		var concurrency, prefetch, assigned int
-		if err := rows.Scan(&workerID, &concurrency, &prefetch, &assigned); err != nil {
-			log.Printf("⚠️ Failed to scan worker row: %v", err)
-			continue
-		}
-
-		capacity := float64(concurrency + prefetch)
-		used := 0.0
-
-		if val, ok := s.workerWeightMemory.Load(int(workerID)); ok {
-			weightMap := val.(*sync.Map)
-			weightMap.Range(func(_, v any) bool {
-				used += v.(float64)
-				return true
-			})
-		} else {
-			used = float64(assigned)
-		}
-
-		if used < capacity {
-			workerStatusMap[workerID] = workerStatus{TotalCapacity: capacity, UsedCapacity: used}
-		}
-	}
-	rows.Close()
-
-	if len(workerStatusMap) == 0 {
-		tx.Rollback()
-		return
-	}
-
-	// 3️⃣ Assign tasks
-	for workerID, status := range workerStatusMap {
-		if pendingTaskCount == 0 {
-			break
-		}
-		available := int(status.TotalCapacity - status.UsedCapacity)
-		tasksToAssign := min(available, pendingTaskCount)
-
-		rows, err := tx.Query(`
-			SELECT task_id FROM task
-			WHERE status = 'P'
-			ORDER BY created_at ASC
-			LIMIT $1
-		`, tasksToAssign)
-		if err != nil {
-			log.Printf("⚠️ Failed to fetch tasks for worker %d: %v", workerID, err)
-			continue
-		}
-
-		var taskIDs []int
-		for rows.Next() {
-			var tid int
-			if err := rows.Scan(&tid); err == nil {
-				taskIDs = append(taskIDs, tid)
-			}
-		}
-		rows.Close()
-
-		if len(taskIDs) == 0 {
-			continue
-		}
-
-		_, err = tx.Exec(`
-			UPDATE task SET status = 'A', worker_id = $1
-			WHERE task_id = ANY($2)
-		`, workerID, pq.Array(taskIDs))
-
-		if err != nil {
-			log.Printf("⚠️ Failed to assign tasks to worker %d: %v", workerID, err)
-			continue
-		}
-
-		// Register weight 1.0 for newly assigned tasks
-		mapped, _ := s.workerWeightMemory.LoadOrStore(int(workerID), &sync.Map{})
-		weightMap := mapped.(*sync.Map)
-		for _, tid := range taskIDs {
-			weightMap.Store(tid, 1.0)
-		}
-
-		log.Printf("✅ Assigned %d tasks to worker %d", len(taskIDs), workerID)
-		pendingTaskCount -= len(taskIDs)
-	}
-
-	if err := tx.Commit(); err != nil {
-		log.Printf("⚠️ Failed to commit task assignment: %v", err)
-	}
-}
-
-func (s *taskQueueServer) triggerAssign() {
-	select {
-	case s.assignTrigger <- struct{}{}:
-	default:
-		// Already triggered, no need to push again
 	}
 }
 
@@ -781,217 +644,6 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 	return &pb.FlavorsList{Flavors: flavors}, nil
 }
 
-// return flavor cpu, mem, disk, bandwidth, gpu, gpumem and provider
-func (s *taskQueueServer) getFlavorDetail(flavor string) (*pb.Flavor, error) {
-	var flavorDetail pb.Flavor
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to start transaction: %v", err)
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback()
-	err = tx.QueryRow(`
-		SELECT
-		f.cpu,
-		f.mem,
-		f.disk,
-		f.bandwidth,
-		f.gpu,
-		f.gpumem,
-		f.has_gpu,
-		f.has_quick_disks,
-		p.provider_name||'.'||p.config_name as provider 
-		FROM flavor f
-		JOIN provider p ON p.provider_id = f.provider_id
-		WHERE f.flavor_name = $1`, flavor).Scan(
-		&flavorDetail.Cpu,
-		&flavorDetail.Mem,
-		&flavorDetail.Disk,
-		&flavorDetail.Bandwidth,
-		&flavorDetail.Gpu,
-		&flavorDetail.Gpumem,
-		&flavorDetail.HasGpu,
-		&flavorDetail.HasQuickDisks,
-		&flavorDetail.Provider,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("flavor %s not found", flavor)
-		}
-		return nil, fmt.Errorf("failed to fetch flavor %s: %w", flavor, err)
-	}
-	flavorDetail.FlavorName = flavor
-
-	if err := tx.Commit(); err != nil {
-		log.Printf("⚠️ Failed to commit flavor detail: %v", err)
-		return nil, fmt.Errorf("failed to commit flavor detail: %w", err)
-	}
-	return &flavorDetail, nil
-}
-
-func (s *taskQueueServer) checkProviders() error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to start transaction: %v", err)
-		return fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// First scanning for known providers
-	rows, err := tx.Query(`SELECT provider_id, provider_name, config_name FROM provider ORDER BY provider_id`)
-	if err != nil {
-		log.Printf("⚠️ Failed to list providers: %v", err)
-		return fmt.Errorf("failed to list providers: %w", err)
-	}
-	defer rows.Close()
-
-	// ✅ Store rows into memory before processing (to avoid querying while iterating)
-	type ProviderInfo struct {
-		ProviderID   uint32
-		ProviderName string
-		ConfigName   string
-	}
-	var providers []ProviderInfo
-
-	for rows.Next() {
-		var p ProviderInfo
-		if err := rows.Scan(&p.ProviderID, &p.ProviderName, &p.ConfigName); err != nil {
-			log.Printf("⚠️ Failed to scan provider: %v", err)
-			continue
-		}
-		providers = append(providers, p)
-	}
-	rows.Close() // ✅ Ensure rows are fully processed before executing new queries
-
-	// ✅ Now process each provider safely
-	mappedConfig := make(map[string]map[string]bool)
-	for _, p := range providers {
-		switch p.ProviderName {
-		case "azure":
-			for paramConfigName, config := range s.cfg.Providers.Azure {
-				if p.ConfigName == paramConfigName {
-					provider := azure.New(*config, s.cfg)
-					s.providers[p.ProviderID] = provider
-					if mappedConfig[p.ProviderName] == nil {
-						mappedConfig[p.ProviderName] = make(map[string]bool)
-					}
-					mappedConfig[p.ProviderName][p.ConfigName] = true
-
-					// ✅ Now it's safe to sync regions inside this loop
-					if err := s.syncRegions(tx, p.ProviderID, config.Regions, config.DefaultRegion); err != nil {
-						log.Printf("⚠️ Failed to sync regions for provider %s: %v", p.ConfigName, err)
-					}
-				}
-				log.Printf("Azure provider %s: %v", p.ProviderName, paramConfigName)
-			}
-		default:
-			return fmt.Errorf("unknown provider %s", p.ProviderName)
-		}
-	}
-
-	// Then adding new providers
-	for configName, config := range s.cfg.Providers.Azure {
-		if _, ok := mappedConfig["azure"][configName]; !ok {
-			var providerId uint32
-			log.Printf("Adding Azure provider %s: %v", "azure", configName)
-			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
-				"azure", configName).Scan(&providerId)
-			if err != nil {
-				log.Printf("⚠️ Failed to add provider: %v", err)
-				continue
-			}
-			provider := azure.New(*config, s.cfg)
-			s.providers[providerId] = provider
-
-			// Manage regions for this newly created provider
-			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {
-				return fmt.Errorf("failed to sync regions for new provider %s: %w", configName, err)
-			}
-		}
-	}
-
-	for provider, config := range s.cfg.Providers.Openstack {
-		return fmt.Errorf("openstack provider unsupported yet %s: %v", provider, config)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
-}
-
-func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredRegions []string, defaultRegion string) error {
-	log.Printf("🔄 Syncing regions for provider %d : %v", providerId, configuredRegions)
-	// Track existing regions
-	existingRegions := make(map[string]uint32)
-	defaultRegions := make(map[string]bool)
-	rows, err := tx.Query(`SELECT region_id, region_name, is_default FROM region WHERE provider_id = $1`, providerId)
-	if err != nil {
-		log.Printf("⚠️ Failed to list regions for provider %d: %v", providerId, err)
-		return fmt.Errorf("failed to list regions: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var regionId uint32
-		var regionName string
-		var isDefault bool
-		if err := rows.Scan(&regionId, &regionName, &isDefault); err != nil {
-			log.Printf("⚠️ Failed to scan region: %v", err)
-			continue
-		}
-		existingRegions[regionName] = regionId
-		defaultRegions[regionName] = isDefault
-	}
-
-	// Track configured regions
-	configuredRegionSet := make(map[string]bool)
-	for _, region := range configuredRegions {
-		configuredRegionSet[region] = true
-		if _, exists := existingRegions[region]; !exists {
-			// Insert missing region
-			_, err := tx.Exec(`INSERT INTO region (provider_id, region_name, is_default) VALUES ($1, $2, $3)`, providerId, region, region == defaultRegion)
-			if err != nil {
-				log.Printf("⚠️ Failed to insert region %s: %v", region, err)
-				return fmt.Errorf("failed to insert region %s: %w", region, err)
-			}
-			log.Printf("✅ Added new region %s for provider %d", region, providerId)
-		}
-	}
-
-	// Remove regions that are in DB but not in config
-	for region, regionId := range existingRegions {
-		if !configuredRegionSet[region] {
-			if err := s.cleanupRegion(tx, regionId, region, providerId); err != nil {
-				return err
-			}
-		} else if defaultRegions[region] != (region == defaultRegion) {
-			log.Printf("Updating region %s", region)
-			_, err = tx.Exec(`UPDATE region SET is_default=$3 WHERE provider_id=$1 AND region_name=$2`, providerId, region, region == defaultRegion)
-			if err != nil {
-				log.Printf("⚠️ Failed to update region %s: %v", region, err)
-				return fmt.Errorf("failed to update region %s: %w", region, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (s *taskQueueServer) cleanupRegion(tx *sql.Tx, regionId uint32, regionName string, providerId uint32) error {
-	log.Printf("🛑 Removing region %s (ID: %d) for provider %d", regionName, regionId, providerId)
-
-	_, err := tx.Exec(`DELETE FROM region WHERE region_id = $1`, regionId)
-	if err != nil {
-		log.Printf("⚠️ Failed to delete region %s: %v", regionName, err)
-		return fmt.Errorf("failed to delete region %s: %w", regionName, err)
-	}
-
-	log.Printf("✅ Successfully deleted region %s (ID: %d)", regionName, regionId)
-	return nil
-}
-
 func generateJWT(userID uint32, username, secret string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  userID,
@@ -1159,6 +811,144 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update password: %w", err)
 	}
 
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
+	query := `SELECT r.step_id, r.rank, r.flavor, p.provider_name || '.' || p.provider_config, rg.region_name,
+		r.concurrency, r.prefetch, r.max_workers, r.round, r.timeout
+		FROM recruiter r
+		JOIN region rg ON r.region_id = rg.region_id
+		JOIN provider p ON r.provider_id = p.provider_id`
+
+	args := []interface{}{}
+	if req.StepId != nil {
+		query += " WHERE r.step_id = $1"
+		args = append(args, *req.StepId)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recruiters: %w", err)
+	}
+	defer rows.Close()
+
+	var recruiters []*pb.Recruiter
+	for rows.Next() {
+		var recruiter pb.Recruiter
+		if err := rows.Scan(
+			&recruiter.StepId, &recruiter.Rank, &recruiter.Flavor, &recruiter.Provider, &recruiter.Region,
+			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Round, &recruiter.Timeout); err != nil {
+			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
+		}
+		recruiters = append(recruiters, &recruiter)
+	}
+
+	return &pb.RecruiterList{Recruiters: recruiters}, nil
+}
+
+func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
+	// Parse provider like "aws.default" into name and config
+	parts := strings.SplitN(req.Provider, ".", 2)
+	if len(parts) != 2 {
+		return &pb.Ack{Success: false}, fmt.Errorf("invalid provider format: expected 'name.config', got %q", req.Provider)
+	}
+	providerName := parts[0]
+	providerConfig := parts[1]
+
+	// Insert with embedded subqueries for provider_id and region_id
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO recruiter (
+			step_id, rank, flavor, provider_id, region_id,
+			concurrency, prefetch, max_workers, round, timeout
+		) VALUES (
+			$1, $2, $3,
+			(SELECT provider_id FROM provider WHERE provider_name = $4 AND provider_config = $5),
+			(SELECT region_id FROM region WHERE region_name = $6),
+			$7, $8, $9, $10, $11
+		)
+	`,
+		req.StepId, req.Rank, req.Flavor,
+		providerName, providerConfig,
+		req.Region,
+		req.Concurrency, req.Prefetch, req.MaxWorkers, req.Round, req.Timeout,
+	)
+
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to insert recruiter: %w", err)
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.RecruiterId) (*pb.Ack, error) {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM recruiter
+		WHERE step_id = $1 AND rank = $2
+	`, req.StepId, req.Rank)
+
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete recruiter: %w", err)
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.RecruiterUpdate) (*pb.Ack, error) {
+	// Base of the update query
+	q := "UPDATE recruiter SET "
+	args := []any{}
+	clauses := []string{}
+
+	if req.Flavor != nil {
+		clauses = append(clauses, fmt.Sprintf("flavor = $%d", len(args)+1))
+		args = append(args, *req.Flavor)
+	}
+	if req.Provider != nil {
+		parts := strings.SplitN(*req.Provider, ".", 2)
+		if len(parts) != 2 {
+			return &pb.Ack{Success: false}, fmt.Errorf("invalid provider format: expected 'name.config'")
+		}
+		clauses = append(clauses, fmt.Sprintf("provider_id = (SELECT provider_id FROM provider WHERE provider_name = $%d AND provider_config = $%d)", len(args)+1, len(args)+2))
+		args = append(args, parts[0], parts[1])
+	}
+	if req.Region != nil {
+		clauses = append(clauses, fmt.Sprintf("region_id = (SELECT region_id FROM region WHERE region_name = $%d)", len(args)+1))
+		args = append(args, *req.Region)
+	}
+	if req.Concurrency != nil {
+		clauses = append(clauses, fmt.Sprintf("concurrency = $%d", len(args)+1))
+		args = append(args, *req.Concurrency)
+	}
+	if req.Prefetch != nil {
+		clauses = append(clauses, fmt.Sprintf("prefetch = $%d", len(args)+1))
+		args = append(args, *req.Prefetch)
+	}
+	if req.MaxWorkers != nil {
+		clauses = append(clauses, fmt.Sprintf("max_workers = $%d", len(args)+1))
+		args = append(args, *req.MaxWorkers)
+	}
+	if req.Round != nil {
+		clauses = append(clauses, fmt.Sprintf("round = $%d", len(args)+1))
+		args = append(args, *req.Round)
+	}
+	if req.Timeout != nil {
+		clauses = append(clauses, fmt.Sprintf("timeout = $%d", len(args)+1))
+		args = append(args, *req.Timeout)
+	}
+
+	if len(clauses) == 0 {
+		return &pb.Ack{Success: false}, fmt.Errorf("no fields to update")
+	}
+
+	// Finalize query with WHERE clause
+	q += strings.Join(clauses, ", ") + fmt.Sprintf(" WHERE step_id = $%d AND rank = $%d", len(args)+1, len(args)+2)
+	args = append(args, req.StepId, req.Rank)
+
+	_, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update recruiter: %w", err)
+	}
 	return &pb.Ack{Success: true}, nil
 }
 

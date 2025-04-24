@@ -1780,6 +1780,378 @@ func (x *ChangePasswordRequest) GetNewPassword() string {
 	return ""
 }
 
+type RecruiterFilter struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StepId        *uint32                `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecruiterFilter) Reset() {
+	*x = RecruiterFilter{}
+	mi := &file_taskqueue_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecruiterFilter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecruiterFilter) ProtoMessage() {}
+
+func (x *RecruiterFilter) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecruiterFilter.ProtoReflect.Descriptor instead.
+func (*RecruiterFilter) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *RecruiterFilter) GetStepId() uint32 {
+	if x != nil && x.StepId != nil {
+		return *x.StepId
+	}
+	return 0
+}
+
+type RecruiterId struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecruiterId) Reset() {
+	*x = RecruiterId{}
+	mi := &file_taskqueue_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecruiterId) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecruiterId) ProtoMessage() {}
+
+func (x *RecruiterId) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecruiterId.ProtoReflect.Descriptor instead.
+func (*RecruiterId) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *RecruiterId) GetStepId() uint32 {
+	if x != nil {
+		return x.StepId
+	}
+	return 0
+}
+
+func (x *RecruiterId) GetRank() uint32 {
+	if x != nil {
+		return x.Rank
+	}
+	return 0
+}
+
+type Recruiter struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
+	Flavor        string                 `protobuf:"bytes,3,opt,name=flavor,proto3" json:"flavor,omitempty"`
+	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
+	Region        string                 `protobuf:"bytes,5,opt,name=region,proto3" json:"region,omitempty"`
+	Concurrency   uint32                 `protobuf:"varint,6,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Prefetch      uint32                 `protobuf:"varint,7,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
+	MaxWorkers    uint32                 `protobuf:"varint,8,opt,name=max_workers,json=maxWorkers,proto3" json:"max_workers,omitempty"`
+	Round         uint32                 `protobuf:"varint,9,opt,name=round,proto3" json:"round,omitempty"`
+	Timeout       uint32                 `protobuf:"varint,10,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Recruiter) Reset() {
+	*x = Recruiter{}
+	mi := &file_taskqueue_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Recruiter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Recruiter) ProtoMessage() {}
+
+func (x *Recruiter) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Recruiter.ProtoReflect.Descriptor instead.
+func (*Recruiter) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *Recruiter) GetStepId() uint32 {
+	if x != nil {
+		return x.StepId
+	}
+	return 0
+}
+
+func (x *Recruiter) GetRank() uint32 {
+	if x != nil {
+		return x.Rank
+	}
+	return 0
+}
+
+func (x *Recruiter) GetFlavor() string {
+	if x != nil {
+		return x.Flavor
+	}
+	return ""
+}
+
+func (x *Recruiter) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *Recruiter) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *Recruiter) GetConcurrency() uint32 {
+	if x != nil {
+		return x.Concurrency
+	}
+	return 0
+}
+
+func (x *Recruiter) GetPrefetch() uint32 {
+	if x != nil {
+		return x.Prefetch
+	}
+	return 0
+}
+
+func (x *Recruiter) GetMaxWorkers() uint32 {
+	if x != nil {
+		return x.MaxWorkers
+	}
+	return 0
+}
+
+func (x *Recruiter) GetRound() uint32 {
+	if x != nil {
+		return x.Round
+	}
+	return 0
+}
+
+func (x *Recruiter) GetTimeout() uint32 {
+	if x != nil {
+		return x.Timeout
+	}
+	return 0
+}
+
+type RecruiterUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
+	Flavor        *string                `protobuf:"bytes,3,opt,name=flavor,proto3,oneof" json:"flavor,omitempty"`
+	Provider      *string                `protobuf:"bytes,4,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
+	Region        *string                `protobuf:"bytes,5,opt,name=region,proto3,oneof" json:"region,omitempty"`
+	Concurrency   *uint32                `protobuf:"varint,6,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
+	Prefetch      *uint32                `protobuf:"varint,7,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
+	MaxWorkers    *uint32                `protobuf:"varint,8,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
+	Round         *uint32                `protobuf:"varint,9,opt,name=round,proto3,oneof" json:"round,omitempty"`
+	Timeout       *uint32                `protobuf:"varint,10,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecruiterUpdate) Reset() {
+	*x = RecruiterUpdate{}
+	mi := &file_taskqueue_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecruiterUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecruiterUpdate) ProtoMessage() {}
+
+func (x *RecruiterUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecruiterUpdate.ProtoReflect.Descriptor instead.
+func (*RecruiterUpdate) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *RecruiterUpdate) GetStepId() uint32 {
+	if x != nil {
+		return x.StepId
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetRank() uint32 {
+	if x != nil {
+		return x.Rank
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetFlavor() string {
+	if x != nil && x.Flavor != nil {
+		return *x.Flavor
+	}
+	return ""
+}
+
+func (x *RecruiterUpdate) GetProvider() string {
+	if x != nil && x.Provider != nil {
+		return *x.Provider
+	}
+	return ""
+}
+
+func (x *RecruiterUpdate) GetRegion() string {
+	if x != nil && x.Region != nil {
+		return *x.Region
+	}
+	return ""
+}
+
+func (x *RecruiterUpdate) GetConcurrency() uint32 {
+	if x != nil && x.Concurrency != nil {
+		return *x.Concurrency
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetPrefetch() uint32 {
+	if x != nil && x.Prefetch != nil {
+		return *x.Prefetch
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetMaxWorkers() uint32 {
+	if x != nil && x.MaxWorkers != nil {
+		return *x.MaxWorkers
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetRound() uint32 {
+	if x != nil && x.Round != nil {
+		return *x.Round
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetTimeout() uint32 {
+	if x != nil && x.Timeout != nil {
+		return *x.Timeout
+	}
+	return 0
+}
+
+type RecruiterList struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Recruiters    []*Recruiter           `protobuf:"bytes,1,rep,name=recruiters,proto3" json:"recruiters,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecruiterList) Reset() {
+	*x = RecruiterList{}
+	mi := &file_taskqueue_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecruiterList) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecruiterList) ProtoMessage() {}
+
+func (x *RecruiterList) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecruiterList.ProtoReflect.Descriptor instead.
+func (*RecruiterList) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *RecruiterList) GetRecruiters() []*Recruiter {
+	if x != nil {
+		return x.Recruiters
+	}
+	return nil
+}
+
 var File_taskqueue_proto protoreflect.FileDescriptor
 
 const file_taskqueue_proto_rawDesc = "" +
@@ -1935,7 +2307,54 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x15ChangePasswordRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12!\n" +
 	"\fold_password\x18\x02 \x01(\tR\voldPassword\x12!\n" +
-	"\fnew_password\x18\x03 \x01(\tR\vnewPassword2\xd7\b\n" +
+	"\fnew_password\x18\x03 \x01(\tR\vnewPassword\";\n" +
+	"\x0fRecruiterFilter\x12\x1c\n" +
+	"\astep_id\x18\x01 \x01(\rH\x00R\x06stepId\x88\x01\x01B\n" +
+	"\n" +
+	"\b_step_id\":\n" +
+	"\vRecruiterId\x12\x17\n" +
+	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
+	"\x04rank\x18\x02 \x01(\rR\x04rank\"\x93\x02\n" +
+	"\tRecruiter\x12\x17\n" +
+	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
+	"\x04rank\x18\x02 \x01(\rR\x04rank\x12\x16\n" +
+	"\x06flavor\x18\x03 \x01(\tR\x06flavor\x12\x1a\n" +
+	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x16\n" +
+	"\x06region\x18\x05 \x01(\tR\x06region\x12 \n" +
+	"\vconcurrency\x18\x06 \x01(\rR\vconcurrency\x12\x1a\n" +
+	"\bprefetch\x18\a \x01(\rR\bprefetch\x12\x1f\n" +
+	"\vmax_workers\x18\b \x01(\rR\n" +
+	"maxWorkers\x12\x14\n" +
+	"\x05round\x18\t \x01(\rR\x05round\x12\x18\n" +
+	"\atimeout\x18\n" +
+	" \x01(\rR\atimeout\"\xa7\x03\n" +
+	"\x0fRecruiterUpdate\x12\x17\n" +
+	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
+	"\x04rank\x18\x02 \x01(\rR\x04rank\x12\x1b\n" +
+	"\x06flavor\x18\x03 \x01(\tH\x00R\x06flavor\x88\x01\x01\x12\x1f\n" +
+	"\bprovider\x18\x04 \x01(\tH\x01R\bprovider\x88\x01\x01\x12\x1b\n" +
+	"\x06region\x18\x05 \x01(\tH\x02R\x06region\x88\x01\x01\x12%\n" +
+	"\vconcurrency\x18\x06 \x01(\rH\x03R\vconcurrency\x88\x01\x01\x12\x1f\n" +
+	"\bprefetch\x18\a \x01(\rH\x04R\bprefetch\x88\x01\x01\x12$\n" +
+	"\vmax_workers\x18\b \x01(\rH\x05R\n" +
+	"maxWorkers\x88\x01\x01\x12\x19\n" +
+	"\x05round\x18\t \x01(\rH\x06R\x05round\x88\x01\x01\x12\x1d\n" +
+	"\atimeout\x18\n" +
+	" \x01(\rH\aR\atimeout\x88\x01\x01B\t\n" +
+	"\a_flavorB\v\n" +
+	"\t_providerB\t\n" +
+	"\a_regionB\x0e\n" +
+	"\f_concurrencyB\v\n" +
+	"\t_prefetchB\x0e\n" +
+	"\f_max_workersB\b\n" +
+	"\x06_roundB\n" +
+	"\n" +
+	"\b_timeout\"E\n" +
+	"\rRecruiterList\x124\n" +
+	"\n" +
+	"recruiters\x18\x01 \x03(\v2\x14.taskqueue.RecruiterR\n" +
+	"recruiters2\xd2\n" +
+	"\n" +
 	"\tTaskQueue\x126\n" +
 	"\n" +
 	"SubmitTask\x12\x0f.taskqueue.Task\x1a\x17.taskqueue.TaskResponse\x12<\n" +
@@ -1958,7 +2377,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"DeleteUser\x12\x11.taskqueue.UserId\x1a\x0e.taskqueue.Ack\x12-\n" +
 	"\n" +
 	"UpdateUser\x12\x0f.taskqueue.User\x1a\x0e.taskqueue.Ack\x12B\n" +
-	"\x0eChangePassword\x12 .taskqueue.ChangePasswordRequest\x1a\x0e.taskqueue.AckB\x11Z\x0fgen/taskqueuepbb\x06proto3"
+	"\x0eChangePassword\x12 .taskqueue.ChangePasswordRequest\x1a\x0e.taskqueue.Ack\x12F\n" +
+	"\x0eListRecruiters\x12\x1a.taskqueue.RecruiterFilter\x1a\x18.taskqueue.RecruiterList\x127\n" +
+	"\x0fCreateRecruiter\x12\x14.taskqueue.Recruiter\x1a\x0e.taskqueue.Ack\x12=\n" +
+	"\x0fUpdateRecruiter\x12\x1a.taskqueue.RecruiterUpdate\x1a\x0e.taskqueue.Ack\x129\n" +
+	"\x0fDeleteRecruiter\x12\x16.taskqueue.RecruiterId\x1a\x0e.taskqueue.AckB\x11Z\x0fgen/taskqueuepbb\x06proto3"
 
 var (
 	file_taskqueue_proto_rawDescOnce sync.Once
@@ -1972,7 +2395,7 @@ func file_taskqueue_proto_rawDescGZIP() []byte {
 	return file_taskqueue_proto_rawDescData
 }
 
-var file_taskqueue_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_taskqueue_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_taskqueue_proto_goTypes = []any{
 	(*TaskResponse)(nil),          // 0: taskqueue.TaskResponse
 	(*WorkerInfo)(nil),            // 1: taskqueue.WorkerInfo
@@ -2003,59 +2426,73 @@ var file_taskqueue_proto_goTypes = []any{
 	(*User)(nil),                  // 26: taskqueue.User
 	(*UsersList)(nil),             // 27: taskqueue.UsersList
 	(*ChangePasswordRequest)(nil), // 28: taskqueue.ChangePasswordRequest
-	nil,                           // 29: taskqueue.TaskUpdateList.UpdatesEntry
-	(*emptypb.Empty)(nil),         // 30: google.protobuf.Empty
+	(*RecruiterFilter)(nil),       // 29: taskqueue.RecruiterFilter
+	(*RecruiterId)(nil),           // 30: taskqueue.RecruiterId
+	(*Recruiter)(nil),             // 31: taskqueue.Recruiter
+	(*RecruiterUpdate)(nil),       // 32: taskqueue.RecruiterUpdate
+	(*RecruiterList)(nil),         // 33: taskqueue.RecruiterList
+	nil,                           // 34: taskqueue.TaskUpdateList.UpdatesEntry
+	(*emptypb.Empty)(nil),         // 35: google.protobuf.Empty
 }
 var file_taskqueue_proto_depIdxs = []int32{
 	2,  // 0: taskqueue.TaskList.tasks:type_name -> taskqueue.Task
 	4,  // 1: taskqueue.WorkersList.workers:type_name -> taskqueue.Worker
-	29, // 2: taskqueue.TaskUpdateList.updates:type_name -> taskqueue.TaskUpdateList.UpdatesEntry
+	34, // 2: taskqueue.TaskUpdateList.updates:type_name -> taskqueue.TaskUpdateList.UpdatesEntry
 	2,  // 3: taskqueue.TaskListAndOther.tasks:type_name -> taskqueue.Task
 	8,  // 4: taskqueue.TaskListAndOther.updates:type_name -> taskqueue.TaskUpdateList
 	19, // 5: taskqueue.FlavorsList.flavors:type_name -> taskqueue.Flavor
 	26, // 6: taskqueue.UsersList.users:type_name -> taskqueue.User
-	7,  // 7: taskqueue.TaskUpdateList.UpdatesEntry.value:type_name -> taskqueue.TaskUpdate
-	2,  // 8: taskqueue.TaskQueue.SubmitTask:input_type -> taskqueue.Task
-	1,  // 9: taskqueue.TaskQueue.RegisterWorker:input_type -> taskqueue.WorkerInfo
-	13, // 10: taskqueue.TaskQueue.PingAndTakeNewTasks:input_type -> taskqueue.WorkerId
-	10, // 11: taskqueue.TaskQueue.UpdateTaskStatus:input_type -> taskqueue.TaskStatusUpdate
-	11, // 12: taskqueue.TaskQueue.SendTaskLogs:input_type -> taskqueue.TaskLog
-	12, // 13: taskqueue.TaskQueue.StreamTaskLogs:input_type -> taskqueue.TaskId
-	16, // 14: taskqueue.TaskQueue.ListTasks:input_type -> taskqueue.ListTasksRequest
-	6,  // 15: taskqueue.TaskQueue.ListWorkers:input_type -> taskqueue.ListWorkersRequest
-	17, // 16: taskqueue.TaskQueue.CreateWorker:input_type -> taskqueue.WorkerRequest
-	13, // 17: taskqueue.TaskQueue.DeleteWorker:input_type -> taskqueue.WorkerId
-	18, // 18: taskqueue.TaskQueue.ListFlavors:input_type -> taskqueue.ListFlavorsRequest
-	30, // 19: taskqueue.TaskQueue.GetRcloneConfig:input_type -> google.protobuf.Empty
-	22, // 20: taskqueue.TaskQueue.Login:input_type -> taskqueue.LoginRequest
-	24, // 21: taskqueue.TaskQueue.CreateUser:input_type -> taskqueue.CreateUserRequest
-	30, // 22: taskqueue.TaskQueue.ListUsers:input_type -> google.protobuf.Empty
-	25, // 23: taskqueue.TaskQueue.DeleteUser:input_type -> taskqueue.UserId
-	26, // 24: taskqueue.TaskQueue.UpdateUser:input_type -> taskqueue.User
-	28, // 25: taskqueue.TaskQueue.ChangePassword:input_type -> taskqueue.ChangePasswordRequest
-	0,  // 26: taskqueue.TaskQueue.SubmitTask:output_type -> taskqueue.TaskResponse
-	13, // 27: taskqueue.TaskQueue.RegisterWorker:output_type -> taskqueue.WorkerId
-	9,  // 28: taskqueue.TaskQueue.PingAndTakeNewTasks:output_type -> taskqueue.TaskListAndOther
-	15, // 29: taskqueue.TaskQueue.UpdateTaskStatus:output_type -> taskqueue.Ack
-	15, // 30: taskqueue.TaskQueue.SendTaskLogs:output_type -> taskqueue.Ack
-	11, // 31: taskqueue.TaskQueue.StreamTaskLogs:output_type -> taskqueue.TaskLog
-	3,  // 32: taskqueue.TaskQueue.ListTasks:output_type -> taskqueue.TaskList
-	5,  // 33: taskqueue.TaskQueue.ListWorkers:output_type -> taskqueue.WorkersList
-	14, // 34: taskqueue.TaskQueue.CreateWorker:output_type -> taskqueue.WorkerIds
-	15, // 35: taskqueue.TaskQueue.DeleteWorker:output_type -> taskqueue.Ack
-	20, // 36: taskqueue.TaskQueue.ListFlavors:output_type -> taskqueue.FlavorsList
-	21, // 37: taskqueue.TaskQueue.GetRcloneConfig:output_type -> taskqueue.RcloneConfig
-	23, // 38: taskqueue.TaskQueue.Login:output_type -> taskqueue.LoginResponse
-	15, // 39: taskqueue.TaskQueue.CreateUser:output_type -> taskqueue.Ack
-	27, // 40: taskqueue.TaskQueue.ListUsers:output_type -> taskqueue.UsersList
-	15, // 41: taskqueue.TaskQueue.DeleteUser:output_type -> taskqueue.Ack
-	15, // 42: taskqueue.TaskQueue.UpdateUser:output_type -> taskqueue.Ack
-	15, // 43: taskqueue.TaskQueue.ChangePassword:output_type -> taskqueue.Ack
-	26, // [26:44] is the sub-list for method output_type
-	8,  // [8:26] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	31, // 7: taskqueue.RecruiterList.recruiters:type_name -> taskqueue.Recruiter
+	7,  // 8: taskqueue.TaskUpdateList.UpdatesEntry.value:type_name -> taskqueue.TaskUpdate
+	2,  // 9: taskqueue.TaskQueue.SubmitTask:input_type -> taskqueue.Task
+	1,  // 10: taskqueue.TaskQueue.RegisterWorker:input_type -> taskqueue.WorkerInfo
+	13, // 11: taskqueue.TaskQueue.PingAndTakeNewTasks:input_type -> taskqueue.WorkerId
+	10, // 12: taskqueue.TaskQueue.UpdateTaskStatus:input_type -> taskqueue.TaskStatusUpdate
+	11, // 13: taskqueue.TaskQueue.SendTaskLogs:input_type -> taskqueue.TaskLog
+	12, // 14: taskqueue.TaskQueue.StreamTaskLogs:input_type -> taskqueue.TaskId
+	16, // 15: taskqueue.TaskQueue.ListTasks:input_type -> taskqueue.ListTasksRequest
+	6,  // 16: taskqueue.TaskQueue.ListWorkers:input_type -> taskqueue.ListWorkersRequest
+	17, // 17: taskqueue.TaskQueue.CreateWorker:input_type -> taskqueue.WorkerRequest
+	13, // 18: taskqueue.TaskQueue.DeleteWorker:input_type -> taskqueue.WorkerId
+	18, // 19: taskqueue.TaskQueue.ListFlavors:input_type -> taskqueue.ListFlavorsRequest
+	35, // 20: taskqueue.TaskQueue.GetRcloneConfig:input_type -> google.protobuf.Empty
+	22, // 21: taskqueue.TaskQueue.Login:input_type -> taskqueue.LoginRequest
+	24, // 22: taskqueue.TaskQueue.CreateUser:input_type -> taskqueue.CreateUserRequest
+	35, // 23: taskqueue.TaskQueue.ListUsers:input_type -> google.protobuf.Empty
+	25, // 24: taskqueue.TaskQueue.DeleteUser:input_type -> taskqueue.UserId
+	26, // 25: taskqueue.TaskQueue.UpdateUser:input_type -> taskqueue.User
+	28, // 26: taskqueue.TaskQueue.ChangePassword:input_type -> taskqueue.ChangePasswordRequest
+	29, // 27: taskqueue.TaskQueue.ListRecruiters:input_type -> taskqueue.RecruiterFilter
+	31, // 28: taskqueue.TaskQueue.CreateRecruiter:input_type -> taskqueue.Recruiter
+	32, // 29: taskqueue.TaskQueue.UpdateRecruiter:input_type -> taskqueue.RecruiterUpdate
+	30, // 30: taskqueue.TaskQueue.DeleteRecruiter:input_type -> taskqueue.RecruiterId
+	0,  // 31: taskqueue.TaskQueue.SubmitTask:output_type -> taskqueue.TaskResponse
+	13, // 32: taskqueue.TaskQueue.RegisterWorker:output_type -> taskqueue.WorkerId
+	9,  // 33: taskqueue.TaskQueue.PingAndTakeNewTasks:output_type -> taskqueue.TaskListAndOther
+	15, // 34: taskqueue.TaskQueue.UpdateTaskStatus:output_type -> taskqueue.Ack
+	15, // 35: taskqueue.TaskQueue.SendTaskLogs:output_type -> taskqueue.Ack
+	11, // 36: taskqueue.TaskQueue.StreamTaskLogs:output_type -> taskqueue.TaskLog
+	3,  // 37: taskqueue.TaskQueue.ListTasks:output_type -> taskqueue.TaskList
+	5,  // 38: taskqueue.TaskQueue.ListWorkers:output_type -> taskqueue.WorkersList
+	14, // 39: taskqueue.TaskQueue.CreateWorker:output_type -> taskqueue.WorkerIds
+	15, // 40: taskqueue.TaskQueue.DeleteWorker:output_type -> taskqueue.Ack
+	20, // 41: taskqueue.TaskQueue.ListFlavors:output_type -> taskqueue.FlavorsList
+	21, // 42: taskqueue.TaskQueue.GetRcloneConfig:output_type -> taskqueue.RcloneConfig
+	23, // 43: taskqueue.TaskQueue.Login:output_type -> taskqueue.LoginResponse
+	15, // 44: taskqueue.TaskQueue.CreateUser:output_type -> taskqueue.Ack
+	27, // 45: taskqueue.TaskQueue.ListUsers:output_type -> taskqueue.UsersList
+	15, // 46: taskqueue.TaskQueue.DeleteUser:output_type -> taskqueue.Ack
+	15, // 47: taskqueue.TaskQueue.UpdateUser:output_type -> taskqueue.Ack
+	15, // 48: taskqueue.TaskQueue.ChangePassword:output_type -> taskqueue.Ack
+	33, // 49: taskqueue.TaskQueue.ListRecruiters:output_type -> taskqueue.RecruiterList
+	15, // 50: taskqueue.TaskQueue.CreateRecruiter:output_type -> taskqueue.Ack
+	15, // 51: taskqueue.TaskQueue.UpdateRecruiter:output_type -> taskqueue.Ack
+	15, // 52: taskqueue.TaskQueue.DeleteRecruiter:output_type -> taskqueue.Ack
+	31, // [31:53] is the sub-list for method output_type
+	9,  // [9:31] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_taskqueue_proto_init() }
@@ -2067,13 +2504,15 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[2].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[16].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[26].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[29].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[32].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taskqueue_proto_rawDesc), len(file_taskqueue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

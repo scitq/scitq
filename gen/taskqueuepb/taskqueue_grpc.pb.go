@@ -38,6 +38,10 @@ const (
 	TaskQueue_DeleteUser_FullMethodName          = "/taskqueue.TaskQueue/DeleteUser"
 	TaskQueue_UpdateUser_FullMethodName          = "/taskqueue.TaskQueue/UpdateUser"
 	TaskQueue_ChangePassword_FullMethodName      = "/taskqueue.TaskQueue/ChangePassword"
+	TaskQueue_ListRecruiters_FullMethodName      = "/taskqueue.TaskQueue/ListRecruiters"
+	TaskQueue_CreateRecruiter_FullMethodName     = "/taskqueue.TaskQueue/CreateRecruiter"
+	TaskQueue_UpdateRecruiter_FullMethodName     = "/taskqueue.TaskQueue/UpdateRecruiter"
+	TaskQueue_DeleteRecruiter_FullMethodName     = "/taskqueue.TaskQueue/DeleteRecruiter"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -62,6 +66,10 @@ type TaskQueueClient interface {
 	DeleteUser(ctx context.Context, in *UserId, opts ...grpc.CallOption) (*Ack, error)
 	UpdateUser(ctx context.Context, in *User, opts ...grpc.CallOption) (*Ack, error)
 	ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*Ack, error)
+	ListRecruiters(ctx context.Context, in *RecruiterFilter, opts ...grpc.CallOption) (*RecruiterList, error)
+	CreateRecruiter(ctx context.Context, in *Recruiter, opts ...grpc.CallOption) (*Ack, error)
+	UpdateRecruiter(ctx context.Context, in *RecruiterUpdate, opts ...grpc.CallOption) (*Ack, error)
+	DeleteRecruiter(ctx context.Context, in *RecruiterId, opts ...grpc.CallOption) (*Ack, error)
 }
 
 type taskQueueClient struct {
@@ -264,6 +272,46 @@ func (c *taskQueueClient) ChangePassword(ctx context.Context, in *ChangePassword
 	return out, nil
 }
 
+func (c *taskQueueClient) ListRecruiters(ctx context.Context, in *RecruiterFilter, opts ...grpc.CallOption) (*RecruiterList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecruiterList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListRecruiters_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) CreateRecruiter(ctx context.Context, in *Recruiter, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_CreateRecruiter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) UpdateRecruiter(ctx context.Context, in *RecruiterUpdate, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_UpdateRecruiter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) DeleteRecruiter(ctx context.Context, in *RecruiterId, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_DeleteRecruiter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -286,6 +334,10 @@ type TaskQueueServer interface {
 	DeleteUser(context.Context, *UserId) (*Ack, error)
 	UpdateUser(context.Context, *User) (*Ack, error)
 	ChangePassword(context.Context, *ChangePasswordRequest) (*Ack, error)
+	ListRecruiters(context.Context, *RecruiterFilter) (*RecruiterList, error)
+	CreateRecruiter(context.Context, *Recruiter) (*Ack, error)
+	UpdateRecruiter(context.Context, *RecruiterUpdate) (*Ack, error)
+	DeleteRecruiter(context.Context, *RecruiterId) (*Ack, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -349,6 +401,18 @@ func (UnimplementedTaskQueueServer) UpdateUser(context.Context, *User) (*Ack, er
 }
 func (UnimplementedTaskQueueServer) ChangePassword(context.Context, *ChangePasswordRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ChangePassword not implemented")
+}
+func (UnimplementedTaskQueueServer) ListRecruiters(context.Context, *RecruiterFilter) (*RecruiterList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRecruiters not implemented")
+}
+func (UnimplementedTaskQueueServer) CreateRecruiter(context.Context, *Recruiter) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateRecruiter not implemented")
+}
+func (UnimplementedTaskQueueServer) UpdateRecruiter(context.Context, *RecruiterUpdate) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateRecruiter not implemented")
+}
+func (UnimplementedTaskQueueServer) DeleteRecruiter(context.Context, *RecruiterId) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteRecruiter not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -677,6 +741,78 @@ func _TaskQueue_ChangePassword_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ListRecruiters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecruiterFilter)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListRecruiters(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListRecruiters_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListRecruiters(ctx, req.(*RecruiterFilter))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_CreateRecruiter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Recruiter)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).CreateRecruiter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_CreateRecruiter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).CreateRecruiter(ctx, req.(*Recruiter))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_UpdateRecruiter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecruiterUpdate)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).UpdateRecruiter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_UpdateRecruiter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).UpdateRecruiter(ctx, req.(*RecruiterUpdate))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_DeleteRecruiter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecruiterId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DeleteRecruiter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DeleteRecruiter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DeleteRecruiter(ctx, req.(*RecruiterId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -747,6 +883,22 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ChangePassword",
 			Handler:    _TaskQueue_ChangePassword_Handler,
+		},
+		{
+			MethodName: "ListRecruiters",
+			Handler:    _TaskQueue_ListRecruiters_Handler,
+		},
+		{
+			MethodName: "CreateRecruiter",
+			Handler:    _TaskQueue_CreateRecruiter_Handler,
+		},
+		{
+			MethodName: "UpdateRecruiter",
+			Handler:    _TaskQueue_UpdateRecruiter_Handler,
+		},
+		{
+			MethodName: "DeleteRecruiter",
+			Handler:    _TaskQueue_DeleteRecruiter_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
