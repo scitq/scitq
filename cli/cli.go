@@ -110,6 +110,36 @@ type Attr struct {
 		} `arg:"subcommand:delete" help:"Delete a recruiter"`
 	} `arg:"subcommand:recruiter" help:"Recruiter management"`
 
+	// Workflow commands
+	Workflow *struct {
+		List *struct {
+			NameLike string `arg:"--name-like" help:"Filter workflows by name"`
+		} `arg:"subcommand:list" help:"List workflows"`
+		Create *struct {
+			Name           string `arg:"--name,required" help:"Workflow name"`
+			RunStrategy    string `arg:"--run-strategy" help:"Run strategy (B/T/D/Z)"`
+			MaximumWorkers uint32 `arg:"--maximum-workers" help:"Maximum number of workers"`
+		} `arg:"subcommand:create" help:"Create a new workflow"`
+		Delete *struct {
+			WorkflowId uint32 `arg:"--id,required" help:"Workflow ID to delete"`
+		} `arg:"subcommand:delete" help:"Delete a workflow"`
+	} `arg:"subcommand:workflow" help:"Manage workflows"`
+
+	// Step commands
+	Step *struct {
+		List *struct {
+			WorkflowId uint32 `arg:"--workflow-id,required" help:"Workflow ID to list steps for"`
+		} `arg:"subcommand:list" help:"List steps for a workflow"`
+		Create *struct {
+			WorkflowId   uint32 `arg:"--workflow-id" help:"Workflow ID"`
+			WorkflowName string `arg:"--workflow-name" help:"Workflow name (alternative to ID)"`
+			Name         string `arg:"--name,required" help:"Step name"`
+		} `arg:"subcommand:create" help:"Create a step"`
+		Delete *struct {
+			StepId uint32 `arg:"--id,required" help:"Step ID to delete"`
+		} `arg:"subcommand:delete" help:"Delete a step"`
+	} `arg:"subcommand:step" help:"Manage steps"`
+
 	// Login commands
 	Login *struct {
 	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
@@ -426,8 +456,8 @@ func (c *CLI) RecruiterList() error {
 
 	fmt.Println("🏗️ Recruiter List:")
 	for _, r := range res.Recruiters {
-		fmt.Printf("Step %d | Rank %d | %s @ %s/%s | Concurrency=%d Prefetch=%d Max=%d Round=%d Timeout=%d\n",
-			r.StepId, r.Rank, r.Flavor, r.Provider, r.Region, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Round, r.Timeout)
+		fmt.Printf("Step %d | Rank %d | %s @ %s/%s | Concurrency=%d Prefetch=%d Max=%d Rounds=%d Timeout=%d\n",
+			r.StepId, r.Rank, r.Flavor, r.Provider, r.Region, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Rounds, r.Timeout)
 	}
 	return nil
 }
@@ -445,7 +475,7 @@ func (c *CLI) RecruiterCreate() error {
 		Concurrency: uint32(c.Attr.Recruiter.Create.Concurrency),
 		Prefetch:    uint32(c.Attr.Recruiter.Create.Prefetch),
 		MaxWorkers:  uint32(c.Attr.Recruiter.Create.MaxWorkers),
-		Round:       uint32(c.Attr.Recruiter.Create.Rounds),
+		Rounds:      uint32(c.Attr.Recruiter.Create.Rounds),
 		Timeout:     uint32(c.Attr.Recruiter.Create.Timeout),
 	}
 
@@ -472,6 +502,98 @@ func (c *CLI) RecruiterDelete() error {
 	}
 
 	fmt.Printf("✅ Recruiter step_id=%d rank=%d deleted\n", req.StepId, req.Rank)
+	return nil
+}
+
+func (c *CLI) WorkflowList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	res, err := c.QC.Client.ListWorkflows(ctx, &pb.WorkflowFilter{})
+	if err != nil {
+		return fmt.Errorf("failed to list workflows: %w", err)
+	}
+
+	fmt.Println("📘 Workflow List:")
+	for _, w := range res.Workflows {
+		fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: %d\n",
+			w.WorkflowId, w.Name, w.RunStrategy, w.MaximumWorkers)
+	}
+	return nil
+}
+
+func (c *CLI) WorkflowCreate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.WorkflowRequest{
+		Name:           c.Attr.Workflow.Create.Name,
+		RunStrategy:    &c.Attr.Workflow.Create.RunStrategy,
+		MaximumWorkers: &c.Attr.Workflow.Create.MaximumWorkers,
+	}
+	res, err := c.QC.Client.CreateWorkflow(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to create workflow: %w", err)
+	}
+	fmt.Printf("✅ Created workflow with ID %d\n", res.WorkflowId)
+	return nil
+}
+
+func (c *CLI) WorkflowDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.DeleteWorkflow(ctx, &pb.WorkflowId{WorkflowId: c.Attr.Workflow.Delete.WorkflowId})
+	if err != nil {
+		return fmt.Errorf("failed to delete workflow: %w", err)
+	}
+	fmt.Println("🗑️ Workflow deleted")
+	return nil
+}
+
+func (c *CLI) StepList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	res, err := c.QC.Client.ListSteps(ctx, &pb.WorkflowId{WorkflowId: c.Attr.Step.List.WorkflowId})
+	if err != nil {
+		return fmt.Errorf("failed to list steps: %w", err)
+	}
+
+	fmt.Printf("🪜 Steps in Workflow %d:\n", c.Attr.Step.List.WorkflowId)
+	for _, s := range res.Steps {
+		fmt.Printf("🔹 Step ID: %d | Name: %s\n", s.StepId, s.Name)
+	}
+	return nil
+}
+
+func (c *CLI) StepCreate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.StepRequest{
+		Name:         c.Attr.Step.Create.Name,
+		WorkflowName: &c.Attr.Step.Create.WorkflowName,
+		WorkflowId:   &c.Attr.Step.Create.WorkflowId,
+	}
+
+	res, err := c.QC.Client.CreateStep(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to create step: %w", err)
+	}
+	fmt.Printf("✅ Created step with ID %d\n", res.StepId)
+	return nil
+}
+
+func (c *CLI) StepDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.DeleteStep(ctx, &pb.StepId{StepId: c.Attr.Step.Delete.StepId})
+	if err != nil {
+		return fmt.Errorf("failed to delete step: %w", err)
+	}
+	fmt.Println("🗑️ Step deleted")
 	return nil
 }
 
@@ -571,6 +693,24 @@ func Run(c CLI) error {
 			return c.RecruiterDelete()
 		default:
 			return fmt.Errorf("no recruiter subcommand specified")
+		}
+	case c.Attr.Workflow != nil:
+		switch {
+		case c.Attr.Workflow.List != nil:
+			err = c.WorkflowList()
+		case c.Attr.Workflow.Create != nil:
+			err = c.WorkflowCreate()
+		case c.Attr.Workflow.Delete != nil:
+			err = c.WorkflowDelete()
+		}
+	case c.Attr.Step != nil:
+		switch {
+		case c.Attr.Step.List != nil:
+			err = c.StepList()
+		case c.Attr.Step.Create != nil:
+			err = c.StepCreate()
+		case c.Attr.Step.Delete != nil:
+			err = c.StepDelete()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

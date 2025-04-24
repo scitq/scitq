@@ -42,6 +42,12 @@ const (
 	TaskQueue_CreateRecruiter_FullMethodName     = "/taskqueue.TaskQueue/CreateRecruiter"
 	TaskQueue_UpdateRecruiter_FullMethodName     = "/taskqueue.TaskQueue/UpdateRecruiter"
 	TaskQueue_DeleteRecruiter_FullMethodName     = "/taskqueue.TaskQueue/DeleteRecruiter"
+	TaskQueue_ListWorkflows_FullMethodName       = "/taskqueue.TaskQueue/ListWorkflows"
+	TaskQueue_CreateWorkflow_FullMethodName      = "/taskqueue.TaskQueue/CreateWorkflow"
+	TaskQueue_DeleteWorkflow_FullMethodName      = "/taskqueue.TaskQueue/DeleteWorkflow"
+	TaskQueue_ListSteps_FullMethodName           = "/taskqueue.TaskQueue/ListSteps"
+	TaskQueue_CreateStep_FullMethodName          = "/taskqueue.TaskQueue/CreateStep"
+	TaskQueue_DeleteStep_FullMethodName          = "/taskqueue.TaskQueue/DeleteStep"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -70,6 +76,12 @@ type TaskQueueClient interface {
 	CreateRecruiter(ctx context.Context, in *Recruiter, opts ...grpc.CallOption) (*Ack, error)
 	UpdateRecruiter(ctx context.Context, in *RecruiterUpdate, opts ...grpc.CallOption) (*Ack, error)
 	DeleteRecruiter(ctx context.Context, in *RecruiterId, opts ...grpc.CallOption) (*Ack, error)
+	ListWorkflows(ctx context.Context, in *WorkflowFilter, opts ...grpc.CallOption) (*WorkflowList, error)
+	CreateWorkflow(ctx context.Context, in *WorkflowRequest, opts ...grpc.CallOption) (*WorkflowId, error)
+	DeleteWorkflow(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*Ack, error)
+	ListSteps(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*StepList, error)
+	CreateStep(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepId, error)
+	DeleteStep(ctx context.Context, in *StepId, opts ...grpc.CallOption) (*Ack, error)
 }
 
 type taskQueueClient struct {
@@ -312,6 +324,66 @@ func (c *taskQueueClient) DeleteRecruiter(ctx context.Context, in *RecruiterId, 
 	return out, nil
 }
 
+func (c *taskQueueClient) ListWorkflows(ctx context.Context, in *WorkflowFilter, opts ...grpc.CallOption) (*WorkflowList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) CreateWorkflow(ctx context.Context, in *WorkflowRequest, opts ...grpc.CallOption) (*WorkflowId, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowId)
+	err := c.cc.Invoke(ctx, TaskQueue_CreateWorkflow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) DeleteWorkflow(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_DeleteWorkflow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ListSteps(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*StepList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StepList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListSteps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) CreateStep(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepId, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StepId)
+	err := c.cc.Invoke(ctx, TaskQueue_CreateStep_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) DeleteStep(ctx context.Context, in *StepId, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_DeleteStep_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -338,6 +410,12 @@ type TaskQueueServer interface {
 	CreateRecruiter(context.Context, *Recruiter) (*Ack, error)
 	UpdateRecruiter(context.Context, *RecruiterUpdate) (*Ack, error)
 	DeleteRecruiter(context.Context, *RecruiterId) (*Ack, error)
+	ListWorkflows(context.Context, *WorkflowFilter) (*WorkflowList, error)
+	CreateWorkflow(context.Context, *WorkflowRequest) (*WorkflowId, error)
+	DeleteWorkflow(context.Context, *WorkflowId) (*Ack, error)
+	ListSteps(context.Context, *WorkflowId) (*StepList, error)
+	CreateStep(context.Context, *StepRequest) (*StepId, error)
+	DeleteStep(context.Context, *StepId) (*Ack, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -413,6 +491,24 @@ func (UnimplementedTaskQueueServer) UpdateRecruiter(context.Context, *RecruiterU
 }
 func (UnimplementedTaskQueueServer) DeleteRecruiter(context.Context, *RecruiterId) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteRecruiter not implemented")
+}
+func (UnimplementedTaskQueueServer) ListWorkflows(context.Context, *WorkflowFilter) (*WorkflowList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflows not implemented")
+}
+func (UnimplementedTaskQueueServer) CreateWorkflow(context.Context, *WorkflowRequest) (*WorkflowId, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateWorkflow not implemented")
+}
+func (UnimplementedTaskQueueServer) DeleteWorkflow(context.Context, *WorkflowId) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorkflow not implemented")
+}
+func (UnimplementedTaskQueueServer) ListSteps(context.Context, *WorkflowId) (*StepList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSteps not implemented")
+}
+func (UnimplementedTaskQueueServer) CreateStep(context.Context, *StepRequest) (*StepId, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateStep not implemented")
+}
+func (UnimplementedTaskQueueServer) DeleteStep(context.Context, *StepId) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteStep not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -813,6 +909,114 @@ func _TaskQueue_DeleteRecruiter_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ListWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowFilter)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListWorkflows(ctx, req.(*WorkflowFilter))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_CreateWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).CreateWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_CreateWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).CreateWorkflow(ctx, req.(*WorkflowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_DeleteWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DeleteWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DeleteWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DeleteWorkflow(ctx, req.(*WorkflowId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ListSteps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListSteps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListSteps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListSteps(ctx, req.(*WorkflowId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_CreateStep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).CreateStep(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_CreateStep_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).CreateStep(ctx, req.(*StepRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_DeleteStep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DeleteStep(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DeleteStep_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DeleteStep(ctx, req.(*StepId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -899,6 +1103,30 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteRecruiter",
 			Handler:    _TaskQueue_DeleteRecruiter_Handler,
+		},
+		{
+			MethodName: "ListWorkflows",
+			Handler:    _TaskQueue_ListWorkflows_Handler,
+		},
+		{
+			MethodName: "CreateWorkflow",
+			Handler:    _TaskQueue_CreateWorkflow_Handler,
+		},
+		{
+			MethodName: "DeleteWorkflow",
+			Handler:    _TaskQueue_DeleteWorkflow_Handler,
+		},
+		{
+			MethodName: "ListSteps",
+			Handler:    _TaskQueue_ListSteps_Handler,
+		},
+		{
+			MethodName: "CreateStep",
+			Handler:    _TaskQueue_CreateStep_Handler,
+		},
+		{
+			MethodName: "DeleteStep",
+			Handler:    _TaskQueue_DeleteStep_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

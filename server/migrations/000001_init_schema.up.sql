@@ -2,9 +2,9 @@
 -- Workflow Table
 CREATE TABLE IF NOT EXISTS workflow (
     workflow_id SERIAL PRIMARY KEY,
-    workflow_name TEXT NOT NULL,
+    workflow_name TEXT NOT NULL UNIQUE,
     run_strategy CHAR(1) NOT NULL DEFAULT 'B',  -- (B: Batch wise execution, T: Thread wise execution - follow thread logic, D: Debug execution, Z: suspended execution)
-    maximum_worker INT DEFAULT 0
+    maximum_workers INT DEFAULT 0
 );
 
 -- Step Table
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS recruiter (
     worker_region TEXT DEFAULT '',
     worker_concurrency INT DEFAULT 1,
     worker_prefetch INT DEFAULT 0,
-    maximum_worker INT DEFAULT 0,
+    maximum_workers INT DEFAULT 0,
     rounds INT DEFAULT 1,
     PRIMARY KEY (step_id, rank)
 );

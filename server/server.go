@@ -815,15 +815,14 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 }
 
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
-	query := `SELECT r.step_id, r.rank, r.flavor, p.provider_name || '.' || p.provider_config, rg.region_name,
-		r.concurrency, r.prefetch, r.max_workers, r.round, r.timeout
-		FROM recruiter r
-		JOIN region rg ON r.region_id = rg.region_id
-		JOIN provider p ON r.provider_id = p.provider_id`
+	query := `SELECT step_id, rank, worker_flavor, worker_provider, worker_region,
+		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
+		FROM recruiter
+		ORDER BY step_id, rank`
 
 	args := []interface{}{}
 	if req.StepId != nil {
-		query += " WHERE r.step_id = $1"
+		query += " WHERE step_id = $1"
 		args = append(args, *req.StepId)
 	}
 
@@ -838,7 +837,7 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 		var recruiter pb.Recruiter
 		if err := rows.Scan(
 			&recruiter.StepId, &recruiter.Rank, &recruiter.Flavor, &recruiter.Provider, &recruiter.Region,
-			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Round, &recruiter.Timeout); err != nil {
+			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Rounds, &recruiter.Timeout); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
 		recruiters = append(recruiters, &recruiter)
@@ -848,30 +847,21 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 }
 
 func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
-	// Parse provider like "aws.default" into name and config
-	parts := strings.SplitN(req.Provider, ".", 2)
-	if len(parts) != 2 {
-		return &pb.Ack{Success: false}, fmt.Errorf("invalid provider format: expected 'name.config', got %q", req.Provider)
-	}
-	providerName := parts[0]
-	providerConfig := parts[1]
 
 	// Insert with embedded subqueries for provider_id and region_id
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO recruiter (
-			step_id, rank, flavor, provider_id, region_id,
-			concurrency, prefetch, max_workers, round, timeout
+			step_id, rank, worker_flavor, worker_provider, worker_region,
+			worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
 		) VALUES (
-			$1, $2, $3,
-			(SELECT provider_id FROM provider WHERE provider_name = $4 AND provider_config = $5),
-			(SELECT region_id FROM region WHERE region_name = $6),
-			$7, $8, $9, $10, $11
+			$1, $2, $3, $4,
+			$5, $6, $7, $8, $9, $10
 		)
 	`,
 		req.StepId, req.Rank, req.Flavor,
-		providerName, providerConfig,
+		req.Provider,
 		req.Region,
-		req.Concurrency, req.Prefetch, req.MaxWorkers, req.Round, req.Timeout,
+		req.Concurrency, req.Prefetch, req.MaxWorkers, req.Rounds, req.Timeout,
 	)
 
 	if err != nil {
@@ -905,32 +895,28 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 		args = append(args, *req.Flavor)
 	}
 	if req.Provider != nil {
-		parts := strings.SplitN(*req.Provider, ".", 2)
-		if len(parts) != 2 {
-			return &pb.Ack{Success: false}, fmt.Errorf("invalid provider format: expected 'name.config'")
-		}
-		clauses = append(clauses, fmt.Sprintf("provider_id = (SELECT provider_id FROM provider WHERE provider_name = $%d AND provider_config = $%d)", len(args)+1, len(args)+2))
-		args = append(args, parts[0], parts[1])
+		clauses = append(clauses, fmt.Sprintf("worker_provider = $%d", len(args)+1))
+		args = append(args, *req.Provider)
 	}
 	if req.Region != nil {
-		clauses = append(clauses, fmt.Sprintf("region_id = (SELECT region_id FROM region WHERE region_name = $%d)", len(args)+1))
+		clauses = append(clauses, fmt.Sprintf("worker_region = $%d", len(args)+1))
 		args = append(args, *req.Region)
 	}
 	if req.Concurrency != nil {
-		clauses = append(clauses, fmt.Sprintf("concurrency = $%d", len(args)+1))
+		clauses = append(clauses, fmt.Sprintf("worker_concurrency = $%d", len(args)+1))
 		args = append(args, *req.Concurrency)
 	}
 	if req.Prefetch != nil {
-		clauses = append(clauses, fmt.Sprintf("prefetch = $%d", len(args)+1))
+		clauses = append(clauses, fmt.Sprintf("worker_prefetch = $%d", len(args)+1))
 		args = append(args, *req.Prefetch)
 	}
 	if req.MaxWorkers != nil {
-		clauses = append(clauses, fmt.Sprintf("max_workers = $%d", len(args)+1))
+		clauses = append(clauses, fmt.Sprintf("maximum_workers = $%d", len(args)+1))
 		args = append(args, *req.MaxWorkers)
 	}
-	if req.Round != nil {
-		clauses = append(clauses, fmt.Sprintf("round = $%d", len(args)+1))
-		args = append(args, *req.Round)
+	if req.Rounds != nil {
+		clauses = append(clauses, fmt.Sprintf("rounds = $%d", len(args)+1))
+		args = append(args, *req.Rounds)
 	}
 	if req.Timeout != nil {
 		clauses = append(clauses, fmt.Sprintf("timeout = $%d", len(args)+1))
@@ -948,6 +934,115 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update recruiter: %w", err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
+	query := `SELECT workflow_id, workflow_name, run_strategy, maximum_workers FROM workflow`
+	if req.NameLike != nil {
+		query += " WHERE workflow_name ILIKE $1"
+	}
+
+	rows, err := s.db.Query(query, req.GetNameLike())
+	if err != nil {
+		return nil, fmt.Errorf("failed to query workflows: %w", err)
+	}
+	defer rows.Close()
+
+	var workflows []*pb.Workflow
+	for rows.Next() {
+		var wf pb.Workflow
+		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
+			return nil, fmt.Errorf("failed to scan workflow: %w", err)
+		}
+		workflows = append(workflows, &wf)
+	}
+	return &pb.WorkflowList{Workflows: workflows}, nil
+}
+
+func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRequest) (*pb.WorkflowId, error) {
+	if req.Name == "" {
+		return nil, fmt.Errorf("workflow name is required")
+	}
+
+	var workflowID uint32
+	err := s.db.QueryRow(`
+		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers)
+		VALUES ($1, COALESCE($2, 'B'), COALESCE(NULLIF($3, ''), NULL))
+		RETURNING workflow_id
+	`, req.Name, req.RunStrategy, req.MaximumWorkers).Scan(&workflowID)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert workflow: %w", err)
+	}
+
+	return &pb.WorkflowId{WorkflowId: workflowID}, nil
+}
+
+func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId) (*pb.Ack, error) {
+	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) ListSteps(ctx context.Context, req *pb.WorkflowId) (*pb.StepList, error) {
+	rows, err := s.db.Query(`SELECT step_id, workflow_name, step_name FROM step s 
+		JOIN workflow w ON w.workflow_id=s.workflow_id WHERE s.workflow_id = $1`, req.WorkflowId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query steps: %w", err)
+	}
+	defer rows.Close()
+
+	var steps []*pb.Step
+	for rows.Next() {
+		var st pb.Step
+		if err := rows.Scan(&st.StepId, &st.WorkflowName, &st.Name); err != nil {
+			return nil, fmt.Errorf("failed to scan step: %w", err)
+		}
+		steps = append(steps, &st)
+	}
+	return &pb.StepList{Steps: steps}, nil
+}
+
+func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (*pb.StepId, error) {
+	if req.Name == "" {
+		return nil, fmt.Errorf("step name is required")
+	}
+
+	if req.WorkflowId != nil {
+		var stepID uint32
+		err := s.db.QueryRow(`
+			INSERT INTO step (step_name, workflow_id)
+			VALUES ($1, $2)
+			RETURNING step_id
+		`, req.Name, *req.WorkflowId).Scan(&stepID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert step: %w", err)
+		}
+		return &pb.StepId{StepId: stepID}, nil
+	} else if req.WorkflowName != nil {
+		var stepID uint32
+		err := s.db.QueryRow(`
+			INSERT INTO step (step_name, workflow_id)
+			SELECT $1, workflow_id FROM workflow WHERE workflow_name = $2
+			RETURNING step_id
+		`, req.Name, *req.WorkflowName).Scan(&stepID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert step with workflow name: %w", err)
+		}
+		return &pb.StepId{StepId: stepID}, nil
+	}
+
+	return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
+}
+
+func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.Ack, error) {
+	_, err := s.db.Exec(`DELETE FROM step WHERE step_id = $1`, req.StepId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete step: %w", err)
 	}
 	return &pb.Ack{Success: true}, nil
 }

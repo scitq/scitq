@@ -29,7 +29,13 @@ service TaskQueue {
     rpc CreateRecruiter(Recruiter) returns (Ack);
     rpc UpdateRecruiter(RecruiterUpdate) returns (Ack);
     rpc DeleteRecruiter(RecruiterId) returns (Ack);
-    }   
+    rpc ListWorkflows(WorkflowFilter) returns (WorkflowList);
+    rpc CreateWorkflow(WorkflowRequest) returns (WorkflowId);
+    rpc DeleteWorkflow(WorkflowId) returns (Ack);
+    rpc ListSteps(WorkflowId) returns (StepList);
+    rpc CreateStep(StepRequest) returns (StepId);
+    rpc DeleteStep(StepId) returns (Ack);
+}   
 
 message TaskResponse {
     uint32 task_id = 1;
@@ -229,7 +235,7 @@ message Recruiter {
     uint32 concurrency = 6;
     uint32 prefetch = 7;
     uint32 max_workers = 8;
-    uint32 round = 9;
+    uint32 rounds = 9;
     uint32 timeout = 10;
 }
 
@@ -242,12 +248,52 @@ message RecruiterUpdate {
   optional uint32 concurrency = 6;
   optional uint32 prefetch = 7;
   optional uint32 max_workers = 8;
-  optional uint32 round = 9;
+  optional uint32 rounds = 9;
   optional uint32 timeout = 10;
 }
-
 
 message RecruiterList {
     repeated Recruiter recruiters = 1;
 }
 
+message WorkflowFilter {
+    optional string name_like = 1;
+}
+
+message WorkflowId {
+    uint32 workflow_id = 1;
+}
+
+message Workflow {
+    uint32 workflow_id = 1;
+    string name = 2;
+    string run_strategy = 4;
+    uint32 maximum_workers = 5;
+}
+message WorkflowRequest {
+    string name = 1;
+    optional string run_strategy = 2;
+    optional uint32 maximum_workers = 3;
+}
+
+message WorkflowList {
+    repeated Workflow workflows = 1;
+}
+
+message StepId {
+    uint32 step_id = 1;
+}
+message Step {
+    uint32 step_id = 1;
+    string workflow_name = 2;
+    uint32 workflow_id = 3;
+    string name = 4;
+}
+message StepRequest {
+    optional string workflow_name = 1;
+    optional uint32 workflow_id = 2;
+    string name = 3;
+}
+message StepList {
+    repeated Step steps = 1;
+}
