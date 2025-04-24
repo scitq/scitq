@@ -117,7 +117,7 @@ type Attr struct {
 		} `arg:"subcommand:list" help:"List workflows"`
 		Create *struct {
 			Name           string `arg:"--name,required" help:"Workflow name"`
-			RunStrategy    string `arg:"--run-strategy" help:"Run strategy (B/T/D/Z)"`
+			RunStrategy    string `arg:"--run-strategy" help:"Run strategy (one letter B/T/D or Z, defaulting to B): \n\t(B)atch wise, e.g. workers do all tasks of a certain step (default)\n\t(T)hread wise, e.g. workers focus on going as far as possible in the workflow for each entry point\n\t(D)ebug\n\t(Z)suspended"`
 			MaximumWorkers uint32 `arg:"--maximum-workers" help:"Maximum number of workers"`
 		} `arg:"subcommand:create" help:"Create a new workflow"`
 		Delete *struct {
@@ -509,7 +509,12 @@ func (c *CLI) WorkflowList() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	res, err := c.QC.Client.ListWorkflows(ctx, &pb.WorkflowFilter{})
+	req := &pb.WorkflowFilter{NameLike: nil}
+	if c.Attr.Workflow.List.NameLike != "" {
+		req.NameLike = &c.Attr.Workflow.List.NameLike
+	}
+
+	res, err := c.QC.Client.ListWorkflows(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to list workflows: %w", err)
 	}

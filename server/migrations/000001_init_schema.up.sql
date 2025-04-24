@@ -12,8 +12,10 @@ CREATE TABLE IF NOT EXISTS step (
     step_id SERIAL PRIMARY KEY,
     step_name TEXT NOT NULL,
     workflow_id INT REFERENCES workflow(workflow_id) ON DELETE CASCADE,
-    stats JSONB DEFAULT '{}'
+    stats JSONB DEFAULT '{}',
+    CONSTRAINT step_name_unique UNIQUE (step_name, workflow_id)
 );
+
 
 
 -- Provider Table

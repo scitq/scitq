@@ -940,11 +940,14 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
 	query := `SELECT workflow_id, workflow_name, run_strategy, maximum_workers FROM workflow`
+	var rows *sql.Rows
+	var err error
 	if req.NameLike != nil {
-		query += " WHERE workflow_name ILIKE $1"
+		rows, err = s.db.Query(query+" WHERE workflow_name ILIKE $1", req.NameLike)
+	} else {
+		rows, err = s.db.Query(query)
 	}
 
-	rows, err := s.db.Query(query, req.GetNameLike())
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workflows: %w", err)
 	}
@@ -966,10 +969,15 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 		return nil, fmt.Errorf("workflow name is required")
 	}
 
+	if req.RunStrategy == nil || *req.RunStrategy == "" {
+		defaultRunStrategy := "B"
+		req.RunStrategy = &defaultRunStrategy
+	}
+
 	var workflowID uint32
 	err := s.db.QueryRow(`
 		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers)
-		VALUES ($1, COALESCE($2, 'B'), COALESCE(NULLIF($3, ''), NULL))
+		VALUES ($1, $2, $3)
 		RETURNING workflow_id
 	`, req.Name, req.RunStrategy, req.MaximumWorkers).Scan(&workflowID)
 
@@ -1012,7 +1020,7 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 		return nil, fmt.Errorf("step name is required")
 	}
 
-	if req.WorkflowId != nil {
+	if req.WorkflowId != nil && *req.WorkflowId != 0 {
 		var stepID uint32
 		err := s.db.QueryRow(`
 			INSERT INTO step (step_name, workflow_id)
@@ -1020,18 +1028,25 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 			RETURNING step_id
 		`, req.Name, *req.WorkflowId).Scan(&stepID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to insert step: %w", err)
+			return nil, fmt.Errorf("failed to insert step with workflow id %d: %w", *req.WorkflowId, err)
 		}
 		return &pb.StepId{StepId: stepID}, nil
+
 	} else if req.WorkflowName != nil {
 		var stepID uint32
 		err := s.db.QueryRow(`
+			WITH wf AS (
+				SELECT w.workflow_id FROM workflow w WHERE w.workflow_name = $1
+			)
 			INSERT INTO step (step_name, workflow_id)
-			SELECT $1, workflow_id FROM workflow WHERE workflow_name = $2
+			SELECT $2, wf.workflow_id FROM wf
 			RETURNING step_id
-		`, req.Name, *req.WorkflowName).Scan(&stepID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert step with workflow name: %w", err)
+		`, *req.WorkflowName, req.Name).Scan(&stepID)
+
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("workflow with name %q not found", *req.WorkflowName)
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to query workflow %q: %w", *req.WorkflowName, err)
 		}
 		return &pb.StepId{StepId: stepID}, nil
 	}
