@@ -1880,14 +1880,12 @@ type Recruiter struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
 	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
-	Flavor        string                 `protobuf:"bytes,3,opt,name=flavor,proto3" json:"flavor,omitempty"`
-	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
-	Region        string                 `protobuf:"bytes,5,opt,name=region,proto3" json:"region,omitempty"`
-	Concurrency   uint32                 `protobuf:"varint,6,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
-	Prefetch      uint32                 `protobuf:"varint,7,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
-	MaxWorkers    uint32                 `protobuf:"varint,8,opt,name=max_workers,json=maxWorkers,proto3" json:"max_workers,omitempty"`
-	Rounds        uint32                 `protobuf:"varint,9,opt,name=rounds,proto3" json:"rounds,omitempty"`
-	Timeout       uint32                 `protobuf:"varint,10,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Protofilter   string                 `protobuf:"bytes,3,opt,name=protofilter,proto3" json:"protofilter,omitempty"`
+	Concurrency   uint32                 `protobuf:"varint,4,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Prefetch      uint32                 `protobuf:"varint,5,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
+	MaxWorkers    uint32                 `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3" json:"max_workers,omitempty"`
+	Rounds        uint32                 `protobuf:"varint,7,opt,name=rounds,proto3" json:"rounds,omitempty"`
+	Timeout       uint32                 `protobuf:"varint,8,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1936,23 +1934,9 @@ func (x *Recruiter) GetRank() uint32 {
 	return 0
 }
 
-func (x *Recruiter) GetFlavor() string {
+func (x *Recruiter) GetProtofilter() string {
 	if x != nil {
-		return x.Flavor
-	}
-	return ""
-}
-
-func (x *Recruiter) GetProvider() string {
-	if x != nil {
-		return x.Provider
-	}
-	return ""
-}
-
-func (x *Recruiter) GetRegion() string {
-	if x != nil {
-		return x.Region
+		return x.Protofilter
 	}
 	return ""
 }
@@ -1996,14 +1980,12 @@ type RecruiterUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
 	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
-	Flavor        *string                `protobuf:"bytes,3,opt,name=flavor,proto3,oneof" json:"flavor,omitempty"`
-	Provider      *string                `protobuf:"bytes,4,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
-	Region        *string                `protobuf:"bytes,5,opt,name=region,proto3,oneof" json:"region,omitempty"`
-	Concurrency   *uint32                `protobuf:"varint,6,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
-	Prefetch      *uint32                `protobuf:"varint,7,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
-	MaxWorkers    *uint32                `protobuf:"varint,8,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
-	Rounds        *uint32                `protobuf:"varint,9,opt,name=rounds,proto3,oneof" json:"rounds,omitempty"`
-	Timeout       *uint32                `protobuf:"varint,10,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
+	Protofilter   *string                `protobuf:"bytes,3,opt,name=protofilter,proto3,oneof" json:"protofilter,omitempty"`
+	Concurrency   *uint32                `protobuf:"varint,4,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
+	Prefetch      *uint32                `protobuf:"varint,5,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
+	MaxWorkers    *uint32                `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
+	Rounds        *uint32                `protobuf:"varint,7,opt,name=rounds,proto3,oneof" json:"rounds,omitempty"`
+	Timeout       *uint32                `protobuf:"varint,8,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2052,23 +2034,9 @@ func (x *RecruiterUpdate) GetRank() uint32 {
 	return 0
 }
 
-func (x *RecruiterUpdate) GetFlavor() string {
-	if x != nil && x.Flavor != nil {
-		return *x.Flavor
-	}
-	return ""
-}
-
-func (x *RecruiterUpdate) GetProvider() string {
-	if x != nil && x.Provider != nil {
-		return *x.Provider
-	}
-	return ""
-}
-
-func (x *RecruiterUpdate) GetRegion() string {
-	if x != nil && x.Region != nil {
-		return *x.Region
+func (x *RecruiterUpdate) GetProtofilter() string {
+	if x != nil && x.Protofilter != nil {
+		return *x.Protofilter
 	}
 	return ""
 }
@@ -2790,36 +2758,28 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_step_id\":\n" +
 	"\vRecruiterId\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\rR\x04rank\"\x95\x02\n" +
+	"\x04rank\x18\x02 \x01(\rR\x04rank\"\xeb\x01\n" +
 	"\tRecruiter\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\rR\x04rank\x12\x16\n" +
-	"\x06flavor\x18\x03 \x01(\tR\x06flavor\x12\x1a\n" +
-	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x16\n" +
-	"\x06region\x18\x05 \x01(\tR\x06region\x12 \n" +
-	"\vconcurrency\x18\x06 \x01(\rR\vconcurrency\x12\x1a\n" +
-	"\bprefetch\x18\a \x01(\rR\bprefetch\x12\x1f\n" +
-	"\vmax_workers\x18\b \x01(\rR\n" +
+	"\x04rank\x18\x02 \x01(\rR\x04rank\x12 \n" +
+	"\vprotofilter\x18\x03 \x01(\tR\vprotofilter\x12 \n" +
+	"\vconcurrency\x18\x04 \x01(\rR\vconcurrency\x12\x1a\n" +
+	"\bprefetch\x18\x05 \x01(\rR\bprefetch\x12\x1f\n" +
+	"\vmax_workers\x18\x06 \x01(\rR\n" +
 	"maxWorkers\x12\x16\n" +
-	"\x06rounds\x18\t \x01(\rR\x06rounds\x12\x18\n" +
-	"\atimeout\x18\n" +
-	" \x01(\rR\atimeout\"\xaa\x03\n" +
+	"\x06rounds\x18\a \x01(\rR\x06rounds\x12\x18\n" +
+	"\atimeout\x18\b \x01(\rR\atimeout\"\xe3\x02\n" +
 	"\x0fRecruiterUpdate\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\rR\x04rank\x12\x1b\n" +
-	"\x06flavor\x18\x03 \x01(\tH\x00R\x06flavor\x88\x01\x01\x12\x1f\n" +
-	"\bprovider\x18\x04 \x01(\tH\x01R\bprovider\x88\x01\x01\x12\x1b\n" +
-	"\x06region\x18\x05 \x01(\tH\x02R\x06region\x88\x01\x01\x12%\n" +
-	"\vconcurrency\x18\x06 \x01(\rH\x03R\vconcurrency\x88\x01\x01\x12\x1f\n" +
-	"\bprefetch\x18\a \x01(\rH\x04R\bprefetch\x88\x01\x01\x12$\n" +
-	"\vmax_workers\x18\b \x01(\rH\x05R\n" +
+	"\x04rank\x18\x02 \x01(\rR\x04rank\x12%\n" +
+	"\vprotofilter\x18\x03 \x01(\tH\x00R\vprotofilter\x88\x01\x01\x12%\n" +
+	"\vconcurrency\x18\x04 \x01(\rH\x01R\vconcurrency\x88\x01\x01\x12\x1f\n" +
+	"\bprefetch\x18\x05 \x01(\rH\x02R\bprefetch\x88\x01\x01\x12$\n" +
+	"\vmax_workers\x18\x06 \x01(\rH\x03R\n" +
 	"maxWorkers\x88\x01\x01\x12\x1b\n" +
-	"\x06rounds\x18\t \x01(\rH\x06R\x06rounds\x88\x01\x01\x12\x1d\n" +
-	"\atimeout\x18\n" +
-	" \x01(\rH\aR\atimeout\x88\x01\x01B\t\n" +
-	"\a_flavorB\v\n" +
-	"\t_providerB\t\n" +
-	"\a_regionB\x0e\n" +
+	"\x06rounds\x18\a \x01(\rH\x04R\x06rounds\x88\x01\x01\x12\x1d\n" +
+	"\atimeout\x18\b \x01(\rH\x05R\atimeout\x88\x01\x01B\x0e\n" +
+	"\f_protofilterB\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
 	"\f_max_workersB\t\n" +

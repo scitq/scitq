@@ -229,27 +229,23 @@ message RecruiterId {
 message Recruiter {
     uint32 step_id = 1;
     uint32 rank = 2;
-    string flavor = 3;
-    string provider = 4;
-    string region = 5;
-    uint32 concurrency = 6;
-    uint32 prefetch = 7;
-    uint32 max_workers = 8;
-    uint32 rounds = 9;
-    uint32 timeout = 10;
+    string protofilter = 3;
+    uint32 concurrency = 4;
+    uint32 prefetch = 5;
+    uint32 max_workers = 6;
+    uint32 rounds = 7;
+    uint32 timeout = 8;
 }
 
 message RecruiterUpdate {
   uint32 step_id = 1;
   uint32 rank = 2;
-  optional string flavor = 3;
-  optional string provider = 4;
-  optional string region = 5;
-  optional uint32 concurrency = 6;
-  optional uint32 prefetch = 7;
-  optional uint32 max_workers = 8;
-  optional uint32 rounds = 9;
-  optional uint32 timeout = 10;
+  optional string protofilter = 3;
+  optional uint32 concurrency = 4;
+  optional uint32 prefetch = 5;
+  optional uint32 max_workers = 6;
+  optional uint32 rounds = 7;
+  optional uint32 timeout = 8;
 }
 
 message RecruiterList {

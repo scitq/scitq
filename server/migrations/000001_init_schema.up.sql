@@ -123,9 +123,7 @@ CREATE TABLE IF NOT EXISTS recruiter (
     step_id INT REFERENCES step(step_id),
     rank INT DEFAULT 1,
     timeout INT DEFAULT 0,
-    worker_flavor TEXT NOT NULL,
-    worker_provider TEXT DEFAULT '',
-    worker_region TEXT DEFAULT '',
+    protofilter TEXT NOT NULL
     worker_concurrency INT DEFAULT 1,
     worker_prefetch INT DEFAULT 0,
     maximum_workers INT DEFAULT 0,
@@ -177,4 +175,9 @@ CREATE TABLE scitq_user_session (
     created_at TIMESTAMP DEFAULT NOW(),
     expires_at TIMESTAMP,
     last_used  TIMESTAMP
+);
+
+CREATE TABLE memory_store (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL
 );

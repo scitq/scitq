@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/gmtsciencedev/scitq2/server/memory"
 	"github.com/gmtsciencedev/scitq2/server/protofilter"
 	"github.com/gmtsciencedev/scitq2/server/providers"
 
@@ -62,18 +63,24 @@ type taskQueueServer struct {
 	assignTrigger chan struct{}
 	qm            recruitment.QuotaManager
 
-	workerWeightMemory sync.Map // worker_id -> map[task_id]float64
+	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
+	workerWeightMemory, err := memory.LoadWeightMemory(context.Background(), db, "weight_memory")
+	if err != nil {
+		log.Printf("⚠️ Creating a new weight memory")
+		workerWeightMemory = &sync.Map{}
+	}
 	s := &taskQueueServer{
-		db:            db,
-		cfg:           cfg,
-		logRoot:       logRoot,
-		jobQueue:      make(chan Job, defaultJobQueueSize),
-		semaphore:     make(chan struct{}, defaultJobConcurrency),
-		providers:     make(map[uint32]providers.Provider),
-		assignTrigger: make(chan struct{}, 1), // buffered, avoids blocking
+		db:                 db,
+		cfg:                cfg,
+		logRoot:            logRoot,
+		jobQueue:           make(chan Job, defaultJobQueueSize),
+		semaphore:          make(chan struct{}, defaultJobConcurrency),
+		providers:          make(map[uint32]providers.Provider),
+		assignTrigger:      make(chan struct{}, 1), // buffered, avoids blocking
+		workerWeightMemory: workerWeightMemory,
 	}
 	//go s.assignTasksLoop()
 	go s.waitForAssignEvents()
@@ -815,7 +822,7 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 }
 
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
-	query := `SELECT step_id, rank, worker_flavor, worker_provider, worker_region,
+	query := `SELECT step_id, rank, protofilter,
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
 		FROM recruiter
 		ORDER BY step_id, rank`
@@ -836,7 +843,7 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 	for rows.Next() {
 		var recruiter pb.Recruiter
 		if err := rows.Scan(
-			&recruiter.StepId, &recruiter.Rank, &recruiter.Flavor, &recruiter.Provider, &recruiter.Region,
+			&recruiter.StepId, &recruiter.Rank, &recruiter.Protofilter,
 			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Rounds, &recruiter.Timeout); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
@@ -851,16 +858,14 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 	// Insert with embedded subqueries for provider_id and region_id
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO recruiter (
-			step_id, rank, worker_flavor, worker_provider, worker_region,
+			step_id, rank, protofilter,
 			worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, $6, $7, $8, $9, $10
 		)
 	`,
-		req.StepId, req.Rank, req.Flavor,
-		req.Provider,
-		req.Region,
+		req.StepId, req.Rank, req.Protofilter,
 		req.Concurrency, req.Prefetch, req.MaxWorkers, req.Rounds, req.Timeout,
 	)
 
@@ -890,17 +895,9 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	args := []any{}
 	clauses := []string{}
 
-	if req.Flavor != nil {
-		clauses = append(clauses, fmt.Sprintf("flavor = $%d", len(args)+1))
-		args = append(args, *req.Flavor)
-	}
-	if req.Provider != nil {
-		clauses = append(clauses, fmt.Sprintf("worker_provider = $%d", len(args)+1))
-		args = append(args, *req.Provider)
-	}
-	if req.Region != nil {
-		clauses = append(clauses, fmt.Sprintf("worker_region = $%d", len(args)+1))
-		args = append(args, *req.Region)
+	if req.Protofilter != nil {
+		clauses = append(clauses, fmt.Sprintf("protofilter = $%d", len(args)+1))
+		args = append(args, *req.Protofilter)
 	}
 	if req.Concurrency != nil {
 		clauses = append(clauses, fmt.Sprintf("worker_concurrency = $%d", len(args)+1))
@@ -1149,6 +1146,7 @@ func Serve(cfg config.Config) error {
 
 	// initialize the quota manager
 	s.qm = *recruitment.NewQuotaManager(&cfg)
+	recruitment.StartRecruiterLoop(context.Background(), s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
 
 	s.checkProviders()
 	s.startJobQueue()

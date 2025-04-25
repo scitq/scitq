@@ -95,9 +95,7 @@ type Attr struct {
 		Create *struct {
 			StepId      uint32 `arg:"--step-id,required" help:"Step ID"`
 			Rank        int    `arg:"--rank" default:"1" help:"Recruiter rank"`
-			Flavor      string `arg:"--flavor,required" help:"Worker flavor"`
-			Provider    string `arg:"--provider,required" help:"Worker provider in the form providerName.configName like azure.primary"`
-			Region      string `arg:"--region" help:"Worker region, default to provider default region"`
+			Protofilter string `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
 			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
 			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
 			MaxWorkers  int    `arg:"--max-workers" help:"Maximum number of workers"`
@@ -456,8 +454,8 @@ func (c *CLI) RecruiterList() error {
 
 	fmt.Println("🏗️ Recruiter List:")
 	for _, r := range res.Recruiters {
-		fmt.Printf("Step %d | Rank %d | %s @ %s/%s | Concurrency=%d Prefetch=%d Max=%d Rounds=%d Timeout=%d\n",
-			r.StepId, r.Rank, r.Flavor, r.Provider, r.Region, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Rounds, r.Timeout)
+		fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Max=%d Rounds=%d Timeout=%d\n",
+			r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Rounds, r.Timeout)
 	}
 	return nil
 }
@@ -469,9 +467,7 @@ func (c *CLI) RecruiterCreate() error {
 	req := &pb.Recruiter{
 		StepId:      c.Attr.Recruiter.Create.StepId,
 		Rank:        uint32(c.Attr.Recruiter.Create.Rank),
-		Flavor:      c.Attr.Recruiter.Create.Flavor,
-		Provider:    c.Attr.Recruiter.Create.Provider,
-		Region:      c.Attr.Recruiter.Create.Region,
+		Protofilter: c.Attr.Recruiter.Create.Protofilter,
 		Concurrency: uint32(c.Attr.Recruiter.Create.Concurrency),
 		Prefetch:    uint32(c.Attr.Recruiter.Create.Prefetch),
 		MaxWorkers:  uint32(c.Attr.Recruiter.Create.MaxWorkers),
