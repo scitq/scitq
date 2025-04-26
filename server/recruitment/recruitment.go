@@ -67,9 +67,10 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
         LEFT JOIN
             worker w ON w.step_id = r.step_id
         GROUP BY
-            r.step_id, r.rank, r.timeout, r.worker_flavor, r.worker_provider,
-            r.worker_region, r.worker_concurrency, r.worker_prefetch,
-            r.maximum_workers, r.rounds
+            r.step_id, r.rank, r.timeout, r.protofilter,
+            r.worker_concurrency, r.worker_prefetch,
+            r.maximum_workers, r.rounds,
+			wf.maximum_workers, wf.workflow_id
         HAVING
             COUNT(t.task_id) > 0 AND
             COUNT(w.worker_id) < CEIL(COUNT(t.task_id) * 1.0 / (MAX(r.worker_concurrency) * MAX(r.rounds)))
