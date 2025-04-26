@@ -69,7 +69,7 @@ type taskQueueServer struct {
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
 	workerWeightMemory, err := memory.LoadWeightMemory(context.Background(), db, "weight_memory")
 	if err != nil {
-		log.Printf("⚠️ Creating a new weight memory")
+		log.Printf("⚠️ Creating a new weight memory: %v", err)
 		workerWeightMemory = &sync.Map{}
 	}
 	s := &taskQueueServer{

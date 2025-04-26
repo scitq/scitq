@@ -81,7 +81,7 @@ func deserializeWeightMemory(m map[int]map[int]float64) *sync.Map {
 
 func LoadWeightMemory(ctx context.Context, db *sql.DB, key string) (*sync.Map, error) {
 	var swm map[int]map[int]float64
-	err := LoadMemory(ctx, db, key, swm)
+	err := LoadMemory(ctx, db, key, &swm)
 	if err != nil {
 		return nil, fmt.Errorf("failed loading weight memory key %q: %w", key, err)
 	}
