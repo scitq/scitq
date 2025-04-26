@@ -147,6 +147,8 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 type RecruiterFlavorRegion struct {
 	FlavorID int
 	RegionID int
+	Cpu      int32
+	Memory   float32
 }
 
 func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[RecruiterKey][]RecruiterFlavorRegion, map[int]RegionInfo, error) {
@@ -179,18 +181,20 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 				r.region_id,
 				r.region_name,
 				p.provider_name||'.'||p.config_name as provider,
-				p.provider_id
+				p.provider_id,
+				f.cpu,
+				f.mem,
+				fr.cost
 			FROM flavor f
 			JOIN flavor_region fr ON f.flavor_id = fr.flavor_id
 			JOIN region r ON fr.region_id = r.region_id
 			JOIN provider p ON p.provider_id = f.provider_id
             WHERE %s
-			ORDER BY fr.cost
         `, p.Key.StepID, p.Key.Rank, p.Condition))
 		log.Printf("Recruiter SQL part for step_id %d, rank %d: %s", p.Key.StepID, p.Key.Rank, unionQueries[len(unionQueries)-1])
 	}
 
-	finalQuery := strings.Join(unionQueries, " UNION ALL ")
+	finalQuery := strings.Join(unionQueries, " UNION ALL ") + " ORDER BY cost"
 
 	rows, err := db.Query(finalQuery)
 	if err != nil {
@@ -203,9 +207,12 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 
 	for rows.Next() {
 		var stepID, rank, flavorID, regionID, providerID int
+		var cpu int32
+		var mem float32
+		var cost float32
 		var regionName string
 		var provider string
-		if err := rows.Scan(&stepID, &rank, &flavorID, &regionID, &regionName, &provider, &providerID); err != nil {
+		if err := rows.Scan(&stepID, &rank, &flavorID, &regionID, &regionName, &provider, &providerID, &cpu, &mem, &cost); err != nil {
 			return nil, nil, err
 		}
 		key := RecruiterKey{StepID: stepID, Rank: rank}
@@ -456,8 +463,7 @@ func deployWorkers(
 	stepID int,
 	concurrency int,
 	prefetch int,
-	allowedFlavorIDs []int,
-	allowedRegionIDs []int,
+	flavorRegionList []RecruiterFlavorRegion,
 	regionInfoMap map[int]RegionInfo,
 	howMany int,
 	workflowCounterMemory *WorkflowCounter,
@@ -470,28 +476,23 @@ func deployWorkers(
 
 	for i := 0; i < howMany; i++ {
 		found := false
-		var selectedFlavorID, selectedRegionID int
+		var selected RecruiterFlavorRegion
 		var regionInfo RegionInfo
 
-		// Try flavors/regions cautiously
-		for _, flavorID := range allowedFlavorIDs {
-			for _, regionID := range allowedRegionIDs {
-				ri, ok := regionInfoMap[regionID]
-				if !ok {
-					log.Printf("⚠️ Unknown region_id %d", regionID)
-					continue
-				}
-
-				if qm.CanLaunch(ri.Name, ri.Provider, int32(concurrency), float32(prefetch)) {
-					selectedFlavorID = flavorID
-					selectedRegionID = regionID
-					regionInfo = ri
-					found = true
-					break
-				}
+		for _, fr := range flavorRegionList {
+			ri, ok := regionInfoMap[fr.RegionID]
+			if !ok {
+				log.Printf("⚠️ Unknown region_id %d", fr.RegionID)
+				continue
 			}
-			if found {
+
+			if qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
+				selected = fr
+				regionInfo = ri
+				found = true
 				break
+			} else {
+				log.Printf("⚠️ Quota exhausted for flavor %d region %d", fr.FlavorID, fr.RegionID)
 			}
 		}
 
@@ -505,24 +506,23 @@ func deployWorkers(
 			return deployed, nil
 		}
 
-		// Actually create the worker
 		_, err := creator.CreateWorker(ctx, &pb.WorkerRequest{
-			FlavorId:    uint32(selectedFlavorID),
+			FlavorId:    uint32(selected.FlavorID),
 			ProviderId:  uint32(regionInfo.ProviderID),
-			RegionId:    uint32(selectedRegionID),
+			RegionId:    uint32(selected.RegionID),
 			StepId:      uint32(stepID),
 			Number:      1,
 			Concurrency: uint32(concurrency),
 			Prefetch:    uint32(prefetch),
 		})
 		if err != nil {
-			log.Printf("⚠️ Failed to create worker (flavor %d region %d): %v", selectedFlavorID, selectedRegionID, err)
+			log.Printf("⚠️ Failed to create worker (flavor %d region %d): %v", selected.FlavorID, selected.RegionID, err)
 			return deployed, err
 		}
-		log.Printf("✅ Deployed worker: step=%d flavor=%d region=%d provider=%s", stepID, selectedFlavorID, selectedRegionID, regionInfo.Provider)
+
+		log.Printf("✅ Deployed worker: step=%d flavor=%d region=%d provider=%s", stepID, selected.FlavorID, selected.RegionID, regionInfo.Provider)
 		workflowCounterMemory.Counter++
 
-		// Update QuotaManager accounting only if creation succeeded
 		qm.RegisterLaunch(regionInfo.Name, regionInfo.Provider, int32(concurrency), float32(prefetch))
 
 		deployed++
@@ -620,8 +620,6 @@ func RecruiterCycle(
 		}
 
 		// Try deploying if still needed
-		allowedFlavorIDs := keys(recruiterFlavorIDs)
-		allowedRegionIDs := keys(recruiterRegionIDs)
 		wfc := workflowCounterMemory[recruiter.WorkflowID]
 
 		deployed, err := deployWorkers(
@@ -631,8 +629,7 @@ func RecruiterCycle(
 			recruiter.StepID,
 			recruiter.WorkerConcurrency,
 			recruiter.WorkerPrefetch,
-			allowedFlavorIDs,
-			allowedRegionIDs,
+			flavorRegionList,
 			regionInfoMap,
 			needed,
 			&wfc,

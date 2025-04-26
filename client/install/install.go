@@ -21,40 +21,48 @@ func checkScratch() error {
 		return err
 	}
 	if nvme > 0 {
-		log.Printf("NVMe disks found, looking for MD array")
-		command := "mdadm --examine --scan "
-		for i := range nvme {
-			command += fmt.Sprintf("| grep nvme%dn1 ", i)
-		}
-		command += "|wc -l"
-
-		hasMdArray, err := countCommand(command)
+		mountnvme, err := countCommand("mount|grep -E nvme.n1|wc -l")
 		if err != nil {
 			return err
 		}
-		if hasMdArray == 0 {
-			command = fmt.Sprintf("mdadm --create /dev/md456 --level=0 --raid-devices=%d ", nvme)
+		if mountnvme > 0 {
+			log.Printf("NVMe disks already mounted, giving up")
+		} else {
+			log.Printf("NVMe disks found and unmounted, looking for MD array")
+			command := "mdadm --examine --scan "
 			for i := range nvme {
-				command += fmt.Sprintf("/dev/nvme%dn1 ", i)
+				command += fmt.Sprintf("| grep nvme%dn1 ", i)
 			}
-			err = executeCommands(3, command)
-			if err != nil {
-				return err
-			}
-			err = executeCommands(3, "mdadm --detail --scan > /etc/mdadm/mdadm.conf", "mkfs.ext4 /dev/md456", "tune2fs -m 0 /dev/md456")
-			if err != nil {
-				return err
-			}
-		}
+			command += "|wc -l"
 
-		mdArrayIsMounted, err := countCommand("findmnt -n /dev/md456 |wc -l")
-		if err != nil {
-			return err
-		}
-		if mdArrayIsMounted == 0 {
-			err = executeCommands(3, "mount /dev/md456 /scratch")
+			hasMdArray, err := countCommand(command)
 			if err != nil {
 				return err
+			}
+			if hasMdArray == 0 {
+				command = fmt.Sprintf("mdadm --create /dev/md127 --force --level=0 --raid-devices=%d ", nvme)
+				for i := range nvme {
+					command += fmt.Sprintf("/dev/nvme%dn1 ", i)
+				}
+				err = executeCommands(3, command)
+				if err != nil {
+					return err
+				}
+				err = executeCommands(3, "mdadm --detail --scan > /etc/mdadm/mdadm.conf", "mkfs.ext4 /dev/md127", "tune2fs -m 0 /dev/md127")
+				if err != nil {
+					return err
+				}
+			}
+
+			mdArrayIsMounted, err := countCommand("findmnt -n /dev/md127 |wc -l")
+			if err != nil {
+				return err
+			}
+			if mdArrayIsMounted == 0 {
+				err = executeCommands(3, "mount /dev/md127 /scratch")
+				if err != nil {
+					return err
+				}
 			}
 		}
 	} else {

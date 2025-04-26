@@ -456,8 +456,13 @@ func (c *CLI) RecruiterList() error {
 
 	fmt.Println("🏗️ Recruiter List:")
 	for _, r := range res.Recruiters {
-		fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Max=%d Rounds=%d Timeout=%d\n",
-			r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Rounds, r.Timeout)
+		if r.MaxWorkers != nil {
+			fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Max=%d Rounds=%d Timeout=%d Maximum Workers=%d\n",
+				r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Rounds, r.Timeout, *r.MaxWorkers)
+		} else {
+			fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Rounds=%d Timeout=%d Maximum Workers=unlimited\n",
+				r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.Rounds, r.Timeout)
+		}
 	}
 	return nil
 }
@@ -519,8 +524,13 @@ func (c *CLI) WorkflowList() error {
 
 	fmt.Println("📘 Workflow List:")
 	for _, w := range res.Workflows {
-		fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: %d\n",
-			w.WorkflowId, w.Name, w.RunStrategy, w.MaximumWorkers)
+		if w.MaximumWorkers != nil {
+			fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: %d\n",
+				w.WorkflowId, w.Name, w.RunStrategy, *w.MaximumWorkers)
+		} else {
+			fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: unlimited\n",
+				w.WorkflowId, w.Name, w.RunStrategy)
+		}
 	}
 	return nil
 }

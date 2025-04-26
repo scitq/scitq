@@ -861,20 +861,35 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 }
 
 func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
-
+	var err error
 	// Insert with embedded subqueries for provider_id and region_id
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO recruiter (
-			step_id, rank, protofilter,
-			worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
-		) VALUES (
-			$1, $2, $3,
-			$4, $5, $6, $7, $8
+	if req.MaxWorkers == nil {
+		_, err = s.db.ExecContext(ctx, `
+			INSERT INTO recruiter (
+				step_id, rank, protofilter,
+				worker_concurrency, worker_prefetch, rounds, timeout
+			) VALUES (
+				$1, $2, $3,
+				$4, $5, $6, $7
+			)
+		`,
+			req.StepId, req.Rank, req.Protofilter,
+			req.Concurrency, req.Prefetch, req.Rounds, req.Timeout,
 		)
-	`,
-		req.StepId, req.Rank, req.Protofilter,
-		req.Concurrency, req.Prefetch, req.MaxWorkers, req.Rounds, req.Timeout,
-	)
+	} else {
+		_, err = s.db.ExecContext(ctx, `
+			INSERT INTO recruiter (
+				step_id, rank, protofilter,
+				worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
+			) VALUES (
+				$1, $2, $3,
+				$4, $5, $6, $7, $8
+			)
+		`,
+			req.StepId, req.Rank, req.Protofilter,
+			req.Concurrency, req.Prefetch, *req.MaxWorkers, req.Rounds, req.Timeout,
+		)
+	}
 
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to insert recruiter: %w", err)
@@ -979,11 +994,20 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 	}
 
 	var workflowID uint32
-	err := s.db.QueryRow(`
+	var err error
+	if req.MaximumWorkers == nil {
+		err = s.db.QueryRow(`
+			INSERT INTO workflow (workflow_name, run_strategy)
+			VALUES ($1, $2)
+			RETURNING workflow_id
+		`, req.Name, req.RunStrategy).Scan(&workflowID)
+	} else {
+		err = s.db.QueryRow(`
 		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers)
 		VALUES ($1, $2, $3)
 		RETURNING workflow_id
-	`, req.Name, req.RunStrategy, req.MaximumWorkers).Scan(&workflowID)
+	`, req.Name, req.RunStrategy, *req.MaximumWorkers).Scan(&workflowID)
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert workflow: %w", err)
