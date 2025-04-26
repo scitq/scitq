@@ -28,6 +28,7 @@ type Attr struct {
 			Input     []string `arg:"--input,separate" help:"Input values for the task (can be repeated)"`
 			Resource  []string `arg:"--resource,separate" help:"Input values for the task (can be repeated)"`
 			Output    string   `arg:"--output,separate" help:"Output folder where results are copied for the task"`
+			StepId    *uint32  `arg:"--step-id" help:"Step ID if task is affected to a step"`
 		} `arg:"subcommand:create" help:"Create a new task"`
 
 		List *struct {
@@ -93,14 +94,14 @@ type Attr struct {
 			StepId uint32 `arg:"--step-id" help:"Step ID to filter"`
 		} `arg:"subcommand:list" help:"List all recruiters"`
 		Create *struct {
-			StepId      uint32 `arg:"--step-id,required" help:"Step ID"`
-			Rank        int    `arg:"--rank" default:"1" help:"Recruiter rank"`
-			Protofilter string `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
-			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
-			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
-			MaxWorkers  int    `arg:"--max-workers" help:"Maximum number of workers"`
-			Rounds      int    `arg:"--rounds" help:"Number of rounds"`
-			Timeout     int    `arg:"--timeout" help:"Timeout in seconds"`
+			StepId      uint32  `arg:"--step-id,required" help:"Step ID"`
+			Rank        uint32  `arg:"--rank" default:"1" help:"Recruiter rank"`
+			Protofilter string  `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
+			Concurrency uint32  `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
+			Prefetch    uint32  `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
+			MaxWorkers  *uint32 `arg:"--max-workers" help:"Maximum number of workers"`
+			Rounds      int     `arg:"--rounds" help:"Number of rounds"`
+			Timeout     int     `arg:"--timeout" default:"10" help:"Timeout in seconds"`
 		} `arg:"subcommand:create" help:"Create a new recruiter"`
 		Delete *struct {
 			StepId uint32 `arg:"--step-id,required" help:"Step ID to delete"`
@@ -114,9 +115,9 @@ type Attr struct {
 			NameLike string `arg:"--name-like" help:"Filter workflows by name"`
 		} `arg:"subcommand:list" help:"List workflows"`
 		Create *struct {
-			Name           string `arg:"--name,required" help:"Workflow name"`
-			RunStrategy    string `arg:"--run-strategy" help:"Run strategy (one letter B/T/D or Z, defaulting to B): \n\t(B)atch wise, e.g. workers do all tasks of a certain step (default)\n\t(T)hread wise, e.g. workers focus on going as far as possible in the workflow for each entry point\n\t(D)ebug\n\t(Z)suspended"`
-			MaximumWorkers uint32 `arg:"--maximum-workers" help:"Maximum number of workers"`
+			Name           string  `arg:"--name,required" help:"Workflow name"`
+			RunStrategy    string  `arg:"--run-strategy" help:"Run strategy (one letter B/T/D or Z, defaulting to B): \n\t(B)atch wise, e.g. workers do all tasks of a certain step (default)\n\t(T)hread wise, e.g. workers focus on going as far as possible in the workflow for each entry point\n\t(D)ebug\n\t(Z)suspended"`
+			MaximumWorkers *uint32 `arg:"--maximum-workers" help:"Maximum number of workers"`
 		} `arg:"subcommand:create" help:"Create a new workflow"`
 		Delete *struct {
 			WorkflowId uint32 `arg:"--id,required" help:"Workflow ID to delete"`
@@ -165,6 +166,7 @@ func (c *CLI) TaskCreate() error {
 		Input:     c.Attr.Task.Create.Input,
 		Resource:  c.Attr.Task.Create.Resource,
 		Output:    &c.Attr.Task.Create.Output,
+		StepId:    c.Attr.Task.Create.StepId,
 	}
 	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {
@@ -466,11 +468,11 @@ func (c *CLI) RecruiterCreate() error {
 
 	req := &pb.Recruiter{
 		StepId:      c.Attr.Recruiter.Create.StepId,
-		Rank:        uint32(c.Attr.Recruiter.Create.Rank),
+		Rank:        c.Attr.Recruiter.Create.Rank,
 		Protofilter: c.Attr.Recruiter.Create.Protofilter,
-		Concurrency: uint32(c.Attr.Recruiter.Create.Concurrency),
-		Prefetch:    uint32(c.Attr.Recruiter.Create.Prefetch),
-		MaxWorkers:  uint32(c.Attr.Recruiter.Create.MaxWorkers),
+		Concurrency: c.Attr.Recruiter.Create.Concurrency,
+		Prefetch:    c.Attr.Recruiter.Create.Prefetch,
+		MaxWorkers:  c.Attr.Recruiter.Create.MaxWorkers,
 		Rounds:      uint32(c.Attr.Recruiter.Create.Rounds),
 		Timeout:     uint32(c.Attr.Recruiter.Create.Timeout),
 	}
@@ -530,7 +532,7 @@ func (c *CLI) WorkflowCreate() error {
 	req := &pb.WorkflowRequest{
 		Name:           c.Attr.Workflow.Create.Name,
 		RunStrategy:    &c.Attr.Workflow.Create.RunStrategy,
-		MaximumWorkers: &c.Attr.Workflow.Create.MaximumWorkers,
+		MaximumWorkers: c.Attr.Workflow.Create.MaximumWorkers,
 	}
 	res, err := c.QC.Client.CreateWorkflow(ctx, req)
 	if err != nil {

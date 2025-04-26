@@ -280,7 +280,14 @@ JOIN provider p ON r.provider_id = p.provider_id`,
 				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
 				&workerID, &workerName, &providerId, &providerName, &regionName, &flavorName, &cpu, &mem)
 			if err != nil {
-				return nil, fmt.Errorf("failed to register worker: %w", err)
+				return nil, fmt.Errorf(
+					"failed to register worker [step:%d,concurrency:%d,flavor:%d,region:%d]: %w",
+					req.StepId,
+					req.Concurrency,
+					req.FlavorId,
+					req.RegionId,
+					err,
+				)
 			}
 			workerIDs = append(workerIDs, workerID)
 
@@ -861,8 +868,8 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			step_id, rank, protofilter,
 			worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
 		) VALUES (
-			$1, $2, $3, $4,
-			$5, $6, $7, $8, $9, $10
+			$1, $2, $3,
+			$4, $5, $6, $7, $8
 		)
 	`,
 		req.StepId, req.Rank, req.Protofilter,

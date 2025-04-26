@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"log"
 	"sync"
 
@@ -29,7 +30,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 	// 2️⃣ Fetch worker capacity and running tasks
 	rows, err := tx.Query(`
-		SELECT w.worker_id, w.concurrency, w.prefetch, COUNT(t.task_id) as assigned
+		SELECT w.worker_id, w.step_id, w.concurrency, w.prefetch, COUNT(t.task_id) as assigned
 		FROM worker w
 		LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A', 'C', 'R')
 		GROUP BY w.worker_id, w.concurrency, w.prefetch
@@ -43,13 +44,15 @@ func (s *taskQueueServer) assignPendingTasks() {
 	type workerStatus struct {
 		TotalCapacity float64
 		UsedCapacity  float64
+		StepID        *uint32
 	}
 	workerStatusMap := map[uint32]workerStatus{}
 
 	for rows.Next() {
 		var workerID uint32
+		var stepID *uint32
 		var concurrency, prefetch, assigned int
-		if err := rows.Scan(&workerID, &concurrency, &prefetch, &assigned); err != nil {
+		if err := rows.Scan(&workerID, &stepID, &concurrency, &prefetch, &assigned); err != nil {
 			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
 		}
@@ -68,7 +71,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 		}
 
 		if used < capacity {
-			workerStatusMap[workerID] = workerStatus{TotalCapacity: capacity, UsedCapacity: used}
+			workerStatusMap[workerID] = workerStatus{TotalCapacity: capacity, UsedCapacity: used, StepID: stepID}
 		}
 	}
 	rows.Close()
@@ -86,12 +89,24 @@ func (s *taskQueueServer) assignPendingTasks() {
 		available := int(status.TotalCapacity - status.UsedCapacity)
 		tasksToAssign := min(available, pendingTaskCount)
 
-		rows, err := tx.Query(`
-			SELECT task_id FROM task
-			WHERE status = 'P'
-			ORDER BY created_at ASC
-			LIMIT $1
-		`, tasksToAssign)
+		var rows *sql.Rows
+		var err error
+		if status.StepID != nil {
+			rows, err = tx.Query(`
+				SELECT task_id FROM task
+				WHERE status = 'P' AND step_id = $1
+				ORDER BY created_at ASC
+				LIMIT $2
+			`, *status.StepID, tasksToAssign)
+		} else {
+			rows, err = tx.Query(`
+				SELECT task_id FROM task
+				WHERE status = 'P' AND step_id IS NULL
+				ORDER BY created_at ASC
+				LIMIT $1
+			`, tasksToAssign)
+		}
+
 		if err != nil {
 			log.Printf("⚠️ Failed to fetch tasks for worker %d: %v", workerID, err)
 			continue

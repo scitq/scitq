@@ -232,7 +232,7 @@ message Recruiter {
     string protofilter = 3;
     uint32 concurrency = 4;
     uint32 prefetch = 5;
-    uint32 max_workers = 6;
+    optional uint32 max_workers = 6;
     uint32 rounds = 7;
     uint32 timeout = 8;
 }
@@ -264,7 +264,7 @@ message Workflow {
     uint32 workflow_id = 1;
     string name = 2;
     string run_strategy = 4;
-    uint32 maximum_workers = 5;
+    optional uint32 maximum_workers = 5;
 }
 message WorkflowRequest {
     string name = 1;

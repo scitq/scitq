@@ -1883,7 +1883,7 @@ type Recruiter struct {
 	Protofilter   string                 `protobuf:"bytes,3,opt,name=protofilter,proto3" json:"protofilter,omitempty"`
 	Concurrency   uint32                 `protobuf:"varint,4,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
 	Prefetch      uint32                 `protobuf:"varint,5,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
-	MaxWorkers    uint32                 `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3" json:"max_workers,omitempty"`
+	MaxWorkers    *uint32                `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
 	Rounds        uint32                 `protobuf:"varint,7,opt,name=rounds,proto3" json:"rounds,omitempty"`
 	Timeout       uint32                 `protobuf:"varint,8,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1956,8 +1956,8 @@ func (x *Recruiter) GetPrefetch() uint32 {
 }
 
 func (x *Recruiter) GetMaxWorkers() uint32 {
-	if x != nil {
-		return x.MaxWorkers
+	if x != nil && x.MaxWorkers != nil {
+		return *x.MaxWorkers
 	}
 	return 0
 }
@@ -2213,7 +2213,7 @@ type Workflow struct {
 	WorkflowId     uint32                 `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	RunStrategy    string                 `protobuf:"bytes,4,opt,name=run_strategy,json=runStrategy,proto3" json:"run_strategy,omitempty"`
-	MaximumWorkers uint32                 `protobuf:"varint,5,opt,name=maximum_workers,json=maximumWorkers,proto3" json:"maximum_workers,omitempty"`
+	MaximumWorkers *uint32                `protobuf:"varint,5,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2270,8 +2270,8 @@ func (x *Workflow) GetRunStrategy() string {
 }
 
 func (x *Workflow) GetMaximumWorkers() uint32 {
-	if x != nil {
-		return x.MaximumWorkers
+	if x != nil && x.MaximumWorkers != nil {
+		return *x.MaximumWorkers
 	}
 	return 0
 }
@@ -2758,17 +2758,18 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_step_id\":\n" +
 	"\vRecruiterId\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\rR\x04rank\"\xeb\x01\n" +
+	"\x04rank\x18\x02 \x01(\rR\x04rank\"\x80\x02\n" +
 	"\tRecruiter\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\rR\x04rank\x12 \n" +
 	"\vprotofilter\x18\x03 \x01(\tR\vprotofilter\x12 \n" +
 	"\vconcurrency\x18\x04 \x01(\rR\vconcurrency\x12\x1a\n" +
-	"\bprefetch\x18\x05 \x01(\rR\bprefetch\x12\x1f\n" +
-	"\vmax_workers\x18\x06 \x01(\rR\n" +
-	"maxWorkers\x12\x16\n" +
+	"\bprefetch\x18\x05 \x01(\rR\bprefetch\x12$\n" +
+	"\vmax_workers\x18\x06 \x01(\rH\x00R\n" +
+	"maxWorkers\x88\x01\x01\x12\x16\n" +
 	"\x06rounds\x18\a \x01(\rR\x06rounds\x12\x18\n" +
-	"\atimeout\x18\b \x01(\rR\atimeout\"\xe3\x02\n" +
+	"\atimeout\x18\b \x01(\rR\atimeoutB\x0e\n" +
+	"\f_max_workers\"\xe3\x02\n" +
 	"\x0fRecruiterUpdate\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\rR\x04rank\x12%\n" +
@@ -2797,13 +2798,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"WorkflowId\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\rR\n" +
-	"workflowId\"\x8b\x01\n" +
+	"workflowId\"\xa4\x01\n" +
 	"\bWorkflow\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\rR\n" +
 	"workflowId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
-	"\frun_strategy\x18\x04 \x01(\tR\vrunStrategy\x12'\n" +
-	"\x0fmaximum_workers\x18\x05 \x01(\rR\x0emaximumWorkers\"\xa0\x01\n" +
+	"\frun_strategy\x18\x04 \x01(\tR\vrunStrategy\x12,\n" +
+	"\x0fmaximum_workers\x18\x05 \x01(\rH\x00R\x0emaximumWorkers\x88\x01\x01B\x12\n" +
+	"\x10_maximum_workers\"\xa0\x01\n" +
 	"\x0fWorkflowRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12&\n" +
 	"\frun_strategy\x18\x02 \x01(\tH\x00R\vrunStrategy\x88\x01\x01\x12,\n" +
@@ -3010,8 +3012,10 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[16].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[26].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[29].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[31].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[32].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[34].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[36].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[37].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[41].OneofWrappers = []any{}
 	type x struct{}

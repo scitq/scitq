@@ -28,7 +28,7 @@ type Config struct {
 		SwapProportion       float32 `yaml:"swap_proportion" default:"0.1"`
 		WorkerToken          string  `yaml:"worker_token"`
 		JwtSecret            string  `yaml:"jwt_secret"`
-		RecruitmentInterval  int     `yaml:"recruiter_interval" default:"60"`
+		RecruitmentInterval  int     `yaml:"recruiter_interval" default:"15"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`

@@ -32,7 +32,7 @@ type Recruiter struct {
 	Protofilter       string
 	WorkerConcurrency int
 	WorkerPrefetch    int
-	MaximumWorkers    int
+	MaximumWorkers    *int
 	Rounds            int
 	PendingTasks      int
 	ActiveWorkers     int
@@ -85,7 +85,7 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 	defer rows.Close()
 
 	var results []Recruiter
-	var workflow_maximum_workers int
+	var workflow_maximum_workers *int
 	for rows.Next() {
 		var r Recruiter
 		err := rows.Scan(
@@ -106,7 +106,9 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			return nil, err
 		}
 		neededTotal := (r.PendingTasks + (r.WorkerConcurrency * r.Rounds) - 1) / (r.WorkerConcurrency * r.Rounds)
-		neededTotal = min(neededTotal, r.MaximumWorkers)
+		if r.MaximumWorkers != nil {
+			neededTotal = min(neededTotal, *r.MaximumWorkers)
+		}
 		r.NeededWorkers = neededTotal - r.ActiveWorkers
 		if r.NeededWorkers < 0 {
 			r.NeededWorkers = 0
@@ -185,6 +187,7 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
             WHERE %s
 			ORDER BY fr.cost
         `, p.Key.StepID, p.Key.Rank, p.Condition))
+		log.Printf("Recruiter SQL part for step_id %d, rank %d: %s", p.Key.StepID, p.Key.Rank, unionQueries[len(unionQueries)-1])
 	}
 
 	finalQuery := strings.Join(unionQueries, " UNION ALL ")
@@ -494,18 +497,20 @@ func deployWorkers(
 
 		if !found {
 			log.Printf("⚠️ Quota exhausted or no flavor/region available for step %d", stepID)
-			break
+			return deployed, nil
 		}
 
-		if workflowCounterMemory.Counter >= workflowCounterMemory.Maximum {
+		if workflowCounterMemory.Maximum != nil && workflowCounterMemory.Counter >= *workflowCounterMemory.Maximum {
 			log.Printf("⚠️ Workflow has reached maximum workers for step %d, giving up", stepID)
-			break
+			return deployed, nil
 		}
 
 		// Actually create the worker
 		_, err := creator.CreateWorker(ctx, &pb.WorkerRequest{
 			FlavorId:    uint32(selectedFlavorID),
 			ProviderId:  uint32(regionInfo.ProviderID),
+			RegionId:    uint32(selectedRegionID),
+			StepId:      uint32(stepID),
 			Number:      1,
 			Concurrency: uint32(concurrency),
 			Prefetch:    uint32(prefetch),
@@ -656,7 +661,7 @@ func keys(m map[int]struct{}) []int {
 
 type WorkflowCounter struct {
 	Counter int
-	Maximum int
+	Maximum *int
 }
 
 // StartRecruitmentLoop runs the recruitment loop every interval duration
