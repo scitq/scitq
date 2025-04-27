@@ -159,7 +159,7 @@ func (c *CLI) TaskCreate() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	req := &pb.Task{
+	req := &pb.TaskRequest{
 		Command:   c.Attr.Task.Create.Command,
 		Container: c.Attr.Task.Create.Container,
 		Shell:     &c.Attr.Task.Create.Shell,

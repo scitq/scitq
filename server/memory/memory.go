@@ -50,24 +50,24 @@ func SaveMemory(ctx context.Context, db *sql.DB, key string, src any) error {
 	return nil
 }
 
-func serializeWeightMemory(m *sync.Map) map[int]map[int]float64 {
-	out := make(map[int]map[int]float64)
+func serializeWeightMemory(m *sync.Map) map[uint32]map[uint32]float64 {
+	out := make(map[uint32]map[uint32]float64)
 	m.Range(func(workerID, tasksAny any) bool {
 		tasks := tasksAny.(*sync.Map)
-		taskMap := make(map[int]float64)
+		taskMap := make(map[uint32]float64)
 		tasks.Range(func(taskIDAny, weightAny any) bool {
-			taskID := taskIDAny.(int)
+			taskID := taskIDAny.(uint32)
 			weight := weightAny.(float64)
 			taskMap[taskID] = weight
 			return true
 		})
-		out[workerID.(int)] = taskMap
+		out[workerID.(uint32)] = taskMap
 		return true
 	})
 	return out
 }
 
-func deserializeWeightMemory(m map[int]map[int]float64) *sync.Map {
+func deserializeWeightMemory(m map[uint32]map[uint32]float64) *sync.Map {
 	out := &sync.Map{}
 	for workerID, tasks := range m {
 		taskSync := &sync.Map{}
@@ -80,7 +80,7 @@ func deserializeWeightMemory(m map[int]map[int]float64) *sync.Map {
 }
 
 func LoadWeightMemory(ctx context.Context, db *sql.DB, key string) (*sync.Map, error) {
-	var swm map[int]map[int]float64
+	var swm map[uint32]map[uint32]float64
 	err := LoadMemory(ctx, db, key, &swm)
 	if err != nil {
 		return nil, fmt.Errorf("failed loading weight memory key %q: %w", key, err)

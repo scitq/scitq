@@ -205,17 +205,17 @@ func (dm *DownloadManager) ProcessDownloads() {
 
 // handleNewTask enqueues necessary downloads.
 func (dm *DownloadManager) handleNewTask(task *pb.Task) {
-	log.Printf("📝 Processing new task %d for downloads", *task.TaskId)
+	log.Printf("📝 Processing new task %d for downloads", task.TaskId)
 	numFiles := 0
 
 	// Queue input files
 	for _, input := range task.Input {
 		ft := &FileTransfer{
-			TaskId:     *task.TaskId,
+			TaskId:     task.TaskId,
 			Task:       task,
 			FileType:   InputFile,
 			SourcePath: input,
-			TargetPath: fmt.Sprintf("%s/tasks/%d/input/", dm.Store, *task.TaskId),
+			TargetPath: fmt.Sprintf("%s/tasks/%d/input/", dm.Store, task.TaskId),
 		}
 		go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
 		numFiles++
@@ -280,7 +280,7 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 		} else {
 			dm.ResourceDownloads[resource] = []*pb.Task{task}
 			ft := &FileTransfer{
-				TaskId:     *task.TaskId,
+				TaskId:     task.TaskId,
 				Task:       task,
 				FileType:   ResourceFile,
 				SourcePath: resource,
@@ -300,7 +300,7 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 		} else {
 			dm.ResourceDownloads[container] = []*pb.Task{task}
 			ft := &FileTransfer{
-				TaskId:     *task.TaskId,
+				TaskId:     task.TaskId,
 				Task:       task,
 				FileType:   DockerImage,
 				SourcePath: container,
@@ -311,12 +311,12 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 	}
 
 	// Track total downloads needed
-	dm.TaskDownloads[*task.TaskId] = numFiles
+	dm.TaskDownloads[task.TaskId] = numFiles
 	if numFiles == 0 {
-		log.Printf("🚀 Task %d ready for execution", *task.TaskId)
+		log.Printf("🚀 Task %d ready for execution", task.TaskId)
 		dm.ExecQueue <- task
 	} else {
-		log.Printf("📝 Task %d waiting for %d files", *task.TaskId, numFiles)
+		log.Printf("📝 Task %d waiting for %d files", task.TaskId, numFiles)
 	}
 }
 
@@ -350,11 +350,11 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 		{
 			if tasks, exists := dm.ResourceDownloads[fm.SourcePath]; exists {
 				for _, task := range tasks {
-					if count, ok := dm.TaskDownloads[*task.TaskId]; ok {
-						dm.TaskDownloads[*task.TaskId] = count - 1
+					if count, ok := dm.TaskDownloads[task.TaskId]; ok {
+						dm.TaskDownloads[task.TaskId] = count - 1
 						if count <= 1 {
-							delete(dm.TaskDownloads, *task.TaskId)
-							log.Printf("🚀 Task %d ready for execution", *task.TaskId)
+							delete(dm.TaskDownloads, task.TaskId)
+							log.Printf("🚀 Task %d ready for execution", task.TaskId)
 							dm.ExecQueue <- task
 						} else {
 							log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)

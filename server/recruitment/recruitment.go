@@ -44,38 +44,39 @@ type Recruiter struct {
 func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[int]WorkflowCounter) ([]Recruiter, error) {
 	const query = `
         SELECT
-            r.step_id,
-            r.rank,
-            r.timeout,
-            r.protofilter,
-            r.worker_concurrency,
-            r.worker_prefetch,
-            r.maximum_workers,
-            r.rounds,
+			r.step_id,
+			r.rank,
+			r.timeout,
+			r.protofilter,
+			r.worker_concurrency,
+			r.worker_prefetch,
+			r.maximum_workers,
+			r.rounds,
 			wf.maximum_workers,
 			wf.workflow_id,
-            COUNT(t.task_id) AS pending_tasks,
-            COUNT(w.worker_id) AS active_workers
-        FROM
-            recruiter r
-        JOIN
-            task t ON t.step_id = r.step_id AND t.status = 'P'
+			COUNT(t.task_id) AS pending_tasks,
+			COUNT(DISTINCT w.worker_id) AS active_workers
+		FROM
+			recruiter r
 		JOIN
-		    step s ON s.step_id = r.step_id
+			task t ON t.step_id = r.step_id AND t.status = 'P'
+		JOIN
+			step s ON s.step_id = r.step_id
 		JOIN
 			workflow wf ON wf.workflow_id = s.workflow_id
-        LEFT JOIN
-            worker w ON w.step_id = r.step_id
-        GROUP BY
-            r.step_id, r.rank, r.timeout, r.protofilter,
-            r.worker_concurrency, r.worker_prefetch,
-            r.maximum_workers, r.rounds,
+		LEFT JOIN
+			worker w ON w.step_id = r.step_id
+		GROUP BY
+			r.step_id, r.rank, r.timeout, r.protofilter,
+			r.worker_concurrency, r.worker_prefetch,
+			r.maximum_workers, r.rounds,
 			wf.maximum_workers, wf.workflow_id
-        HAVING
-            COUNT(t.task_id) > 0 AND
-            COUNT(w.worker_id) < CEIL(COUNT(t.task_id) * 1.0 / (MAX(r.worker_concurrency) * MAX(r.rounds)))
-        ORDER BY
-            r.step_id, r.rank
+		HAVING
+			COUNT(t.task_id) > 0
+			AND
+			COUNT(DISTINCT w.worker_id) < CEIL(COUNT(t.task_id) * 1.0 / (r.worker_concurrency * r.rounds))
+		ORDER BY
+			r.step_id, r.rank
     `
 
 	rows, err := db.Query(query)
@@ -191,7 +192,7 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 			JOIN provider p ON p.provider_id = f.provider_id
             WHERE %s
         `, p.Key.StepID, p.Key.Rank, p.Condition))
-		log.Printf("Recruiter SQL part for step_id %d, rank %d: %s", p.Key.StepID, p.Key.Rank, unionQueries[len(unionQueries)-1])
+		//log.Printf("Recruiter SQL part for step_id %d, rank %d: %s", p.Key.StepID, p.Key.Rank, unionQueries[len(unionQueries)-1])
 	}
 
 	finalQuery := strings.Join(unionQueries, " UNION ALL ") + " ORDER BY cost"
@@ -661,6 +662,51 @@ type WorkflowCounter struct {
 	Maximum *int
 }
 
+func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[int]WorkflowCounter) error {
+	// Step 1: Load live worker counts per workflow
+	log.Printf("ℹ️ Adjusting workflow counters")
+	rows, err := db.Query(`
+        SELECT
+            wf.workflow_id,
+            COUNT(w.worker_id) AS worker_count
+        FROM
+			workflow wf
+		LEFT JOIN
+            step s ON wf.workflow_id = s.workflow_id
+		LEFT JOIN
+            worker w ON w.step_id = s.step_id
+        GROUP BY
+            wf.workflow_id
+    `)
+	if err != nil {
+		return fmt.Errorf("failed to query live workers per workflow: %w", err)
+	}
+	defer rows.Close()
+
+	// Step 2: Scan and adjust
+	for rows.Next() {
+		var workflowID int
+		var liveCount int
+		if err := rows.Scan(&workflowID, &liveCount); err != nil {
+			return fmt.Errorf("failed to scan workflow worker count: %w", err)
+		}
+
+		mem, exists := workflowCounterMemory[workflowID]
+		if !exists {
+			// We didn't recruit for this workflow yet, ignore
+			continue
+		}
+
+		if liveCount < mem.Counter {
+			log.Printf("⚠️ Workflow %d live workers (%d) < memory counter (%d), adjusting", workflowID, liveCount, mem.Counter)
+			mem.Counter = liveCount
+			workflowCounterMemory[workflowID] = mem
+		}
+	}
+
+	return nil
+}
+
 // StartRecruitmentLoop runs the recruitment loop every interval duration
 func StartRecruiterLoop(
 	ctx context.Context,
@@ -693,7 +739,12 @@ func StartRecruiterLoop(
 				return
 
 			case now := <-ticker.C:
-				err := RecruiterCycle(ctx, db, qm, creator, recruiterTimers, weightMemory, workflowCounterMemory, now)
+				err := AdjustWorkflowCounters(db, workflowCounterMemory)
+				if err != nil {
+					log.Printf("⚠️ Could not adjust workflow counters: %v", err)
+				}
+
+				err = RecruiterCycle(ctx, db, qm, creator, recruiterTimers, weightMemory, workflowCounterMemory, now)
 				if err != nil {
 					log.Printf("⚠️ Recruiter cycle failed: %v", err)
 				}

@@ -15,6 +15,7 @@ type Config struct {
 	Scitq struct {
 		Port                 int     `yaml:"port" default:"50051"`
 		DBURL                string  `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
+		MaxDBConcurrency     int     `yaml:"max_db_concurrency" default:"50"`
 		LogLevel             string  `yaml:"log_level" default:"info"`
 		LogRoot              string  `yaml:"log_root" default:"log"`
 		ClientBinaryPath     string  `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`

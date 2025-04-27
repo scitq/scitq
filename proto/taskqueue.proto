@@ -7,7 +7,7 @@ option go_package = "gen/taskqueuepb";
 import "google/protobuf/empty.proto";
 
 service TaskQueue {
-    rpc SubmitTask(Task) returns (TaskResponse);
+    rpc SubmitTask(TaskRequest) returns (TaskResponse);
     rpc RegisterWorker(WorkerInfo) returns (WorkerId);
     rpc PingAndTakeNewTasks(WorkerId) returns (TaskListAndOther);
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
@@ -46,8 +46,26 @@ message WorkerInfo {
     optional uint32 concurrency = 2;
 }
 
+message TaskRequest {
+    string command = 1;
+    optional string shell = 2;
+    string container = 3;
+    optional string container_options = 4;
+    optional uint32 step_id = 5;
+    repeated string input = 6;
+    repeated string resource = 7;
+    optional string output = 8;
+    optional uint32 retry = 9;
+    optional bool is_final  = 10;
+    optional bool uses_cache  = 11;
+    optional float download_timeout  = 12;
+    optional float running_timeout  = 13;
+    optional float upload_timeout  = 14;
+    string status = 15;
+}
+
 message Task {
-    optional uint32 task_id = 1;
+    uint32 task_id = 1;
     string command = 2;
     optional string shell = 3;
     string container = 4;
@@ -102,6 +120,7 @@ message TaskListAndOther {
     repeated Task tasks = 1;
     uint32 concurrency = 2;
     TaskUpdateList updates = 3;
+    repeated uint32 active_tasks = 4;
 }
 
 message TaskStatusUpdate {

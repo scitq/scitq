@@ -60,10 +60,11 @@ type taskQueueServer struct {
 	//jobWG     sync.WaitGroup
 	providers     map[uint32]providers.Provider
 	semaphore     chan struct{} // Semaphore to limit concurrency
-	assignTrigger chan struct{}
+	assignTrigger uint32
 	qm            recruitment.QuotaManager
 
-	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
+	workerWeightMemory *sync.Map     // worker_id -> map[task_id]float64
+	serverLimiter      chan struct{} // limit concurrent connections to db
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -79,15 +80,34 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		jobQueue:           make(chan Job, defaultJobQueueSize),
 		semaphore:          make(chan struct{}, defaultJobConcurrency),
 		providers:          make(map[uint32]providers.Provider),
-		assignTrigger:      make(chan struct{}, 1), // buffered, avoids blocking
+		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
+		serverLimiter:      make(chan struct{}, cfg.Scitq.MaxDBConcurrency),
 	}
 	//go s.assignTasksLoop()
 	go s.waitForAssignEvents()
 	return s
 }
 
-func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.Task) (*pb.TaskResponse, error) {
+// DB creation limiting helper functions
+func (s *taskQueueServer) acquireDB() {
+	log.Printf("🏁 Trying to acquire DB slot: %d/%d", len(s.serverLimiter), cap(s.serverLimiter))
+	load := len(s.serverLimiter)
+	limit := cap(s.serverLimiter)
+
+	if limit > 0 && load*100/limit >= 90 {
+		log.Printf("⚠️ DB load high: %d/%d (%.0f%%)", load, limit, 100*float64(load)/float64(limit))
+	}
+
+	s.serverLimiter <- struct{}{}
+}
+
+func (s *taskQueueServer) releaseDB() {
+	<-s.serverLimiter
+}
+
+func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
+	s.acquireDB()
 	var taskID int
 	err := s.db.QueryRow(
 		`INSERT INTO task (command, shell, container, container_options, step_id, 
@@ -103,6 +123,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.Task) (*pb.Tas
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 	).Scan(&taskID)
+	s.releaseDB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
 	}
@@ -123,21 +144,9 @@ func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empt
 	return &pb.RcloneConfig{Config: string(data)}, nil
 }
 
-func (s *taskQueueServer) waitForAssignEvents() {
-	for range s.assignTrigger {
-		s.assignPendingTasks() // this logic is your current assignTasksLoop(), minus the loop and sleep
-	}
-}
-
-// **Helper function to get the minimum of two integers**
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	_, err := s.db.Exec("UPDATE task SET status = $1 WHERE task_id = $2", req.NewStatus, req.TaskId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
@@ -156,6 +165,8 @@ func getLogPath(taskID uint32, logType string, logRoot string) string {
 }
 
 func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) error {
+	s.acquireDB()
+	defer s.releaseDB()
 	for {
 		logEntry, err := stream.Recv()
 		if err != nil {
@@ -175,6 +186,8 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 }
 
 func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsServer) error {
+	s.acquireDB()
+	defer s.releaseDB()
 	logPath := getLogPath(req.TaskId, "stdout", s.logRoot)
 	file, err := os.Open(logPath)
 	if err != nil {
@@ -190,6 +203,8 @@ func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_Str
 }
 
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var workerID uint32
 
 	tx, err := s.db.Begin()
@@ -246,6 +261,8 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 }
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var workerIDs []uint32
 	var jobs []Job
 
@@ -325,6 +342,8 @@ JOIN provider p ON r.provider_id = p.provider_id`,
 }
 
 func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var job Job
 
 	tx, err := s.db.Begin()
@@ -386,6 +405,8 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 }
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var tasks []*pb.Task
 	var rows *sql.Rows
 	var err error
@@ -434,14 +455,19 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 }
 
 func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.WorkerId) (*pb.TaskListAndOther, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var (
-		tasks       []*pb.Task
-		concurrency uint32
-		input       pq.StringArray
-		resource    pq.StringArray
-		shell       sql.NullString
+		tasks          []*pb.Task
+		concurrency    uint32
+		input          pq.StringArray
+		resource       pq.StringArray
+		shell          sql.NullString
+		taskUpdateList = make(map[uint32]*pb.TaskUpdate)
+		activeTaskIDs  []uint32
 	)
 
+	// 1️⃣ Fetch concurrency
 	err := s.db.QueryRow(`
 		SELECT concurrency FROM worker WHERE worker_id = $1
 	`, req.WorkerId).Scan(&concurrency)
@@ -452,26 +478,29 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 		return nil, fmt.Errorf("failed to fetch worker concurrency for worker %d: %w", req.WorkerId, err)
 	}
 
+	// 2️⃣ Fetch tasks (assigned and running)
 	rows, err := s.db.Query(`
 		SELECT task_id, command, shell, container, container_options,
-			input, resource, output, retry, is_final, uses_cache, 
-			download_timeout, running_timeout, upload_timeout,  
+			input, resource, output, retry, is_final, uses_cache,
+			download_timeout, running_timeout, upload_timeout,
 			status
 		FROM task
-		WHERE worker_id = $1 AND status = 'A' AND coalesce(task.step_id,0)=coalesce((SELECT step_id FROM worker WHERE worker_id=$1),0)
+		WHERE worker_id = $1
+		  AND COALESCE(step_id, 0) = COALESCE((SELECT step_id FROM worker WHERE worker_id = $1), 0)
+		  AND status IN ('A', 'C', 'D', 'R', 'U', 'V')
 	`, req.WorkerId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch assigned tasks: %w", err)
+		return nil, fmt.Errorf("failed to fetch assigned/running tasks: %w", err)
 	}
 	defer rows.Close()
 
-	taskUpdateList := make(map[uint32]*pb.TaskUpdate)
-
 	for rows.Next() {
 		var task pb.Task
+		var status string
+
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &task.Status); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
@@ -480,15 +509,22 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 		if shell.Valid {
 			task.Shell = proto.String(shell.String)
 		}
-		tasks = append(tasks, &task)
 
-		// Add weight if available
+		if status == "A" {
+			// Only send full task if assignable
+			tasks = append(tasks, &task)
+		} else {
+			// Just track active running task IDs
+			activeTaskIDs = append(activeTaskIDs, task.TaskId)
+		}
+
+		// Add weight if available (for both assigned and active tasks)
 		if val, ok := s.workerWeightMemory.Load(int(req.WorkerId)); ok {
 			taskMap := val.(*sync.Map)
 			if weightVal, ok := taskMap.Load(task.TaskId); ok {
 				weight, ok := weightVal.(float64)
 				if ok {
-					taskUpdateList[*task.TaskId] = &pb.TaskUpdate{Weight: weight}
+					taskUpdateList[task.TaskId] = &pb.TaskUpdate{Weight: weight}
 				}
 			}
 		}
@@ -498,14 +534,42 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 		return nil, fmt.Errorf("error iterating through tasks: %w", err)
 	}
 
+	// Clean up the worker's weight memory
+	if val, ok := s.workerWeightMemory.Load(int(req.WorkerId)); ok {
+		taskMap := val.(*sync.Map)
+		activeSet := make(map[uint32]struct{}, len(activeTaskIDs))
+		for _, id := range activeTaskIDs {
+			activeSet[id] = struct{}{}
+		}
+		for _, task := range tasks {
+			activeSet[task.TaskId] = struct{}{}
+		}
+
+		var toDelete []uint32
+		taskMap.Range(func(taskIDRaw, _ any) bool {
+			taskID := taskIDRaw.(uint32)
+			if _, stillActive := activeSet[taskID]; !stillActive {
+				toDelete = append(toDelete, taskID)
+			}
+			return true
+		})
+		for _, taskID := range toDelete {
+			taskMap.Delete(taskID)
+			log.Printf("⚠️ Worker %d: cleaned task %d from weight memory (no longer active)", req.WorkerId, taskID)
+		}
+	}
+
 	return &pb.TaskListAndOther{
 		Tasks:       tasks,
+		ActiveTasks: activeTaskIDs,
 		Concurrency: concurrency,
 		Updates:     &pb.TaskUpdateList{Updates: taskUpdateList},
 	}, nil
 }
 
 func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*pb.WorkersList, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var workers []*pb.Worker
 	var rows *sql.Rows
 	var err error
@@ -566,6 +630,8 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 }
 
 func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRequest) (*pb.FlavorsList, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var flavors []*pb.Flavor
 
 	conditions, err := protofilter.ParseProtofilter(req.Filter)
@@ -673,6 +739,8 @@ func CheckPassword(plaintext, hashed string) bool {
 }
 
 func (s *taskQueueServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	// Example: Basic username/password validation (replace this with proper DB lookup and hashing)
 	var userId uint32
 	var hashedPassword string
@@ -704,6 +772,8 @@ func (s *taskQueueServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 }
 
 func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	if !IsAdmin(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
 	}
@@ -726,6 +796,8 @@ func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequ
 }
 
 func (s *taskQueueServer) ListUsers(ctx context.Context, _ *emptypb.Empty) (*pb.UsersList, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	rows, err := s.db.Query("SELECT user_id, username, email, is_admin FROM scitq_user")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query users: %w", err)
@@ -745,6 +817,8 @@ func (s *taskQueueServer) ListUsers(ctx context.Context, _ *emptypb.Empty) (*pb.
 }
 
 func (s *taskQueueServer) DeleteUser(ctx context.Context, req *pb.UserId) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	if !IsAdmin(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
 	}
@@ -767,6 +841,8 @@ func joinWithComma(fields []string) string {
 }
 
 func (s *taskQueueServer) UpdateUser(ctx context.Context, req *pb.User) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 
 	if !IsAdmin(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
@@ -829,6 +905,8 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 }
 
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	query := `SELECT step_id, rank, protofilter,
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
 		FROM recruiter
@@ -861,6 +939,8 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 }
 
 func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	var err error
 	// Insert with embedded subqueries for provider_id and region_id
 	if req.MaxWorkers == nil {
@@ -899,6 +979,8 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.RecruiterId) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM recruiter
 		WHERE step_id = $1 AND rank = $2
@@ -912,6 +994,8 @@ func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.RecruiterUpdate) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	// Base of the update query
 	q := "UPDATE recruiter SET "
 	args := []any{}
@@ -958,6 +1042,8 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	query := `SELECT workflow_id, workflow_name, run_strategy, maximum_workers FROM workflow`
 	var rows *sql.Rows
 	var err error
@@ -984,6 +1070,8 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 }
 
 func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRequest) (*pb.WorkflowId, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	if req.Name == "" {
 		return nil, fmt.Errorf("workflow name is required")
 	}
@@ -1017,6 +1105,8 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 }
 
 func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
@@ -1025,6 +1115,8 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 }
 
 func (s *taskQueueServer) ListSteps(ctx context.Context, req *pb.WorkflowId) (*pb.StepList, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	rows, err := s.db.Query(`SELECT step_id, workflow_name, step_name FROM step s 
 		JOIN workflow w ON w.workflow_id=s.workflow_id WHERE s.workflow_id = $1`, req.WorkflowId)
 	if err != nil {
@@ -1044,6 +1136,8 @@ func (s *taskQueueServer) ListSteps(ctx context.Context, req *pb.WorkflowId) (*p
 }
 
 func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (*pb.StepId, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	if req.Name == "" {
 		return nil, fmt.Errorf("step name is required")
 	}
@@ -1083,6 +1177,8 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 }
 
 func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.Ack, error) {
+	s.acquireDB()
+	defer s.releaseDB()
 	_, err := s.db.Exec(`DELETE FROM step WHERE step_id = $1`, req.StepId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete step: %w", err)
@@ -1143,6 +1239,24 @@ func Serve(cfg config.Config) error {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(cfg.Scitq.MaxDBConcurrency * 2)
+	db.SetMaxIdleConns(cfg.Scitq.MaxDBConcurrency * 2)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			stats := db.Stats()
+			log.Printf("🔎 DB connections - Open: %d, InUse: %d, Idle: %d, WaitCount: %d, WaitDuration: %s",
+				stats.OpenConnections,
+				stats.InUse,
+				stats.Idle,
+				stats.WaitCount,
+				stats.WaitDuration,
+			)
+		}
+	}()
 
 	// Apply migrations on startup
 	if err := applyMigrations(db); err != nil {
@@ -1172,6 +1286,7 @@ func Serve(cfg config.Config) error {
 	grpcServer := grpc.NewServer(
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
+		grpc.MaxConcurrentStreams(uint32(cfg.Scitq.MaxDBConcurrency)),
 	)
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
 
