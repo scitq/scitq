@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -30,6 +31,9 @@ type Config struct {
 		WorkerToken          string  `yaml:"worker_token"`
 		JwtSecret            string  `yaml:"jwt_secret"`
 		RecruitmentInterval  int     `yaml:"recruiter_interval" default:"15"`
+		IdleTimeout          int     `yaml:"idle_timeout" default:"300"`
+		NewWorkerIdleTimeout int     `yaml:"new_worker_idle_timeout" default:"900"`
+		OfflineTimeout       int     `yaml:"offline_timeout" default:"30"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`
@@ -80,6 +84,23 @@ type OpenstackConfig struct {
 	Regions           []string               `yaml:"regions"`
 	Custom            map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
 	UpdatePeriodicity string                 `yaml:"update_periodicity"` // Update periodicity in minutes
+}
+
+func (c *Config) Validate() error {
+	if c.Scitq.DBURL == "" {
+		return fmt.Errorf("scitq.db_url must be provided")
+	}
+	if c.Scitq.Port == 0 {
+		return fmt.Errorf("scitq.port must be provided and non-zero")
+	}
+	if c.Scitq.JwtSecret == "" {
+		return fmt.Errorf("scitq.jwt_secret must be provided")
+	}
+	if c.Scitq.WorkerToken == "" {
+		return fmt.Errorf("switq.worker_token must be provided")
+	}
+	// You can add more rules as needed
+	return nil
 }
 
 type ProviderConfig interface {

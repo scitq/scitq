@@ -120,6 +120,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 	workerCapacityRows, err := tx.Query(`
 		SELECT worker_id, step_id, concurrency, prefetch
 		FROM worker
+		WHERE status='R'
 	`)
 	if err != nil {
 		log.Printf("⚠️ Failed to fetch workers: %v", err)

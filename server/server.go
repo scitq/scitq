@@ -19,6 +19,7 @@ import (
 	"github.com/gmtsciencedev/scitq2/server/memory"
 	"github.com/gmtsciencedev/scitq2/server/protofilter"
 	"github.com/gmtsciencedev/scitq2/server/providers"
+	"github.com/gmtsciencedev/scitq2/server/watchdog"
 
 	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	"github.com/golang-jwt/jwt"
@@ -62,7 +63,9 @@ type taskQueueServer struct {
 	semaphore     chan struct{} // Semaphore to limit concurrency
 	assignTrigger uint32
 	qm            recruitment.QuotaManager
+	watchdog      *watchdog.Watchdog
 
+	stopWatchdog       chan struct{}
 	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
 }
 
@@ -81,9 +84,34 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		providers:          make(map[uint32]providers.Provider),
 		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
+		stopWatchdog:       make(chan struct{}),
 	}
 	//go s.assignTasksLoop()
 	go s.waitForAssignEvents()
+
+	s.watchdog = watchdog.NewWatchdog(
+		time.Duration(cfg.Scitq.IdleTimeout)*time.Second,
+		time.Duration(cfg.Scitq.NewWorkerIdleTimeout)*time.Second,
+		time.Duration(cfg.Scitq.OfflineTimeout)*time.Second,
+		10*time.Second, // ticker interval
+		func(workerID uint32, newStatus string) error {
+			_, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: workerID, Status: newStatus})
+			return err
+		}, // callback
+		func(workerID uint32) error {
+			_, err := s.DeleteWorker(context.Background(), &pb.WorkerId{WorkerId: workerID})
+			return err
+		}, // callback
+	)
+
+	workers, err := FetchWorkersForWatchdog(context.Background(), s.db)
+	if err != nil {
+		log.Printf("⚠️ Failed to rebuild watchdog memory: %v", err)
+	}
+	s.watchdog.RebuildFromWorkers(workers)
+
+	go s.watchdog.Run(s.stopWatchdog)
+
 	return s
 }
 
@@ -124,9 +152,34 @@ func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empt
 }
 
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
-	_, err := s.db.Exec("UPDATE task SET status = $1 WHERE task_id = $2", req.NewStatus, req.TaskId)
+	var workerID sql.NullInt32
+	err := s.db.QueryRowContext(ctx, `
+        UPDATE task
+        SET status = $1
+        WHERE task_id = $2
+        RETURNING worker_id
+    `, req.NewStatus, req.TaskId).Scan(&workerID)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
+	}
+
+	switch req.NewStatus {
+	case "C":
+		{
+			if !workerID.Valid {
+				log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
+			} else {
+				s.watchdog.TaskAccepted(uint32(workerID.Int32))
+			}
+		}
+	case "S", "F":
+		{
+			if !workerID.Valid {
+				log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
+			} else {
+				s.watchdog.TaskFinished(uint32(workerID.Int32))
+			}
+		}
 	}
 
 	// **Trigger task assignment**
@@ -177,6 +230,7 @@ func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_Str
 
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
 	var workerID uint32
+	var isPermanent bool
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -186,7 +240,7 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	defer tx.Rollback()
 
 	// **Check if worker already exists**
-	err = tx.QueryRow(`SELECT worker_id FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID)
+	err = tx.QueryRow(`SELECT worker_id,is_permanent FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID, &isPermanent)
 	if err == sql.ErrNoRows {
 		// **Worker doesn't exist, create a new worker ID**
 		err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, status, last_ping) VALUES ($1, $2, 'R', NOW()) RETURNING worker_id`,
@@ -225,10 +279,66 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		return nil, fmt.Errorf("failed to commit worker registration: %w", err)
 	}
 
+	s.watchdog.WorkerRegistered(workerID, isPermanent)
+
 	// **Trigger task assignment**
 	s.triggerAssign()
 
 	return &pb.WorkerId{WorkerId: workerID}, nil
+}
+
+// FetchWorkersForWatchdog reads workers and builds WorkerInfo list
+func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.WorkerInfo, error) {
+	// Example: adapt fields if needed
+	rows, err := db.QueryContext(ctx, `
+        SELECT w.worker_id, w.status, w.is_permanent, 
+               COALESCE(t.active_tasks, 0) as active_tasks, 
+               (SELECT MAX(t2.modified_at) FROM task t2 where t2.worker_id=w.worker_id AND t2.status in ('F','S')) as last_not_idle
+        FROM worker w
+        LEFT JOIN (
+            SELECT worker_id, COUNT(*) as active_tasks
+            FROM task
+            WHERE status IN ('C', 'R') -- Accepted or Running
+            GROUP BY worker_id
+        ) t ON w.worker_id = t.worker_id
+    `)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch workers: %w", err)
+	}
+	defer rows.Close()
+
+	var workers []watchdog.WorkerInfo
+
+	for rows.Next() {
+		var workerID uint32
+		var status string
+		var isPermanent bool
+		var activeTasks int
+		var lastNotIdle *time.Time
+		var lastNotIdleProxy sql.NullTime
+
+		err := rows.Scan(&workerID, &status, &isPermanent, &activeTasks, &lastNotIdleProxy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan worker row: %w", err)
+		}
+		if lastNotIdleProxy.Valid {
+			lastNotIdle = &lastNotIdleProxy.Time
+		}
+
+		workers = append(workers, watchdog.WorkerInfo{
+			WorkerID:    workerID,
+			Status:      status,
+			IsPermanent: isPermanent,
+			ActiveTasks: activeTasks,
+			LastNotIdle: lastNotIdle,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over worker rows: %w", err)
+	}
+
+	return workers, nil
 }
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
@@ -368,6 +478,14 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to commit worker deletion: %w", err)
 	}
 
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) WorkerUpdateStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
+	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2", req.Status, req.WorkerId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker status: %w", err)
+	}
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -521,6 +639,8 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 			log.Printf("⚠️ Worker %d: cleaned task %d from weight memory (no longer active)", req.WorkerId, taskID)
 		}
 	}
+
+	s.watchdog.WorkerPinged(req.WorkerId)
 
 	return &pb.TaskListAndOther{
 		Tasks:       tasks,
@@ -1161,7 +1281,15 @@ func LoadEmbeddedCertificates() (tls.Certificate, error) {
 	return serverCert, err
 }
 
+func (s *taskQueueServer) Shutdown() {
+	close(s.stopWatchdog)
+	// Other cleanup if needed later
+}
+
 func Serve(cfg config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 	db, err := sql.Open("pgx", cfg.Scitq.DBURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
@@ -1217,6 +1345,7 @@ func Serve(cfg config.Config) error {
 		grpc.MaxConcurrentStreams(uint32(cfg.Scitq.MaxDBConcurrency)),
 	)
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+	defer s.Shutdown()
 
 	// initialize the quota manager
 	s.qm = *recruitment.NewQuotaManager(&cfg)
