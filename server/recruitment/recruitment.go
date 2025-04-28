@@ -239,6 +239,7 @@ type RecyclableWorker struct {
 	WorkerID    uint32
 	FlavorID    uint32
 	RegionID    uint32
+	StepID      *uint32
 	Concurrency int
 	Running     int
 }
@@ -247,48 +248,39 @@ func FindRecyclableWorkers(
 	db *sql.DB,
 	allAllowedFlavorIDs []uint32,
 	allAllowedRegionIDs []uint32,
-	recruiterStepIDs []uint32,
 ) ([]RecyclableWorker, error) {
-	if len(allAllowedFlavorIDs) == 0 || len(allAllowedRegionIDs) == 0 || len(recruiterStepIDs) == 0 {
+	if len(allAllowedFlavorIDs) == 0 {
+		log.Printf("No compatible flavors available to recycle")
+		return nil, nil
+	}
+	if len(allAllowedRegionIDs) == 0 {
+		log.Printf("No available region found to recycle")
 		return nil, nil
 	}
 
 	const query = `
-		WITH recruiter_steps AS (
-		SELECT unnest($3::int[]) AS recruiter_step_id
-		),
-		worker_running_tasks AS (
 		SELECT
 			w.worker_id,
 			w.flavor_id,
 			w.region_id,
-			w.concurrency,
 			w.step_id,
-			COUNT(t.task_id) FILTER (WHERE t.status = 'R') AS running_tasks,
-			COUNT(t.task_id) FILTER (WHERE t.status IN ('P', 'A')) AS blocked_tasks
+			w.concurrency,
+			COUNT(t.task_id) FILTER (WHERE t.status = 'R') AS running_tasks
 		FROM
 			worker w
 		LEFT JOIN
 			task t ON t.worker_id = w.worker_id
+		WHERE
+			w.flavor_id = ANY($1)
+			AND w.region_id = ANY($2)
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id
-		)
-		SELECT DISTINCT
-		wrt.worker_id, wrt.flavor_id, wrt.region_id, wrt.concurrency, wrt.running_tasks
-		FROM
-		worker_running_tasks wrt
-		JOIN
-		recruiter_steps rs
-		ON
-		wrt.step_id IS NULL OR wrt.step_id != rs.recruiter_step_id
-		WHERE
-		wrt.running_tasks < wrt.concurrency
-		AND wrt.blocked_tasks = 0
-		AND wrt.flavor_id = ANY($1)
-		AND wrt.region_id = ANY($2)
+		HAVING
+			COUNT(t.task_id) FILTER (WHERE t.status = 'R') < w.concurrency
+			AND COUNT(t.task_id) FILTER (WHERE t.status IN ('P', 'A')) = 0
     `
-
-	rows, err := db.Query(query, pq.Array(allAllowedFlavorIDs), pq.Array(allAllowedRegionIDs), pq.Array(recruiterStepIDs))
+	log.Printf("Trying to find with Flavors %v| Regions %v", allAllowedFlavorIDs, allAllowedRegionIDs)
+	rows, err := db.Query(query, pq.Array(allAllowedFlavorIDs), pq.Array(allAllowedRegionIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -297,14 +289,20 @@ func FindRecyclableWorkers(
 	var workers []RecyclableWorker
 	for rows.Next() {
 		var w RecyclableWorker
+		var stepIDproxy sql.NullInt32
 		if err := rows.Scan(
 			&w.WorkerID,
 			&w.FlavorID,
 			&w.RegionID,
+			&stepIDproxy,
 			&w.Concurrency,
 			&w.Running,
 		); err != nil {
 			return nil, err
+		}
+		if stepIDproxy.Valid {
+			s := uint32(stepIDproxy.Int32)
+			w.StepID = &s
 		}
 		workers = append(workers, w)
 	}
@@ -398,6 +396,7 @@ func recycleWorkers(
 	}
 
 	if len(ids) == 0 {
+		log.Printf("⚠️ No compatible recyclable workers were found.")
 		tx.Rollback()
 		return 0
 	}
@@ -440,6 +439,7 @@ func selectWorkersForRecruiter(
 	flavorIDs map[uint32]struct{},
 	regionIDs map[uint32]struct{},
 	needed int,
+	recruiterStepID uint32,
 ) []uint32 {
 	selected := make([]uint32, 0, needed)
 	for _, w := range recyclable {
@@ -447,6 +447,9 @@ func selectWorkersForRecruiter(
 			continue
 		}
 		if _, ok := regionIDs[w.RegionID]; !ok {
+			continue
+		}
+		if w.StepID != nil && *w.StepID == recruiterStepID {
 			continue
 		}
 		selected = append(selected, w.WorkerID)
@@ -542,21 +545,6 @@ func deployWorkers(
 	return deployed, nil
 }
 
-func extractRecruiterStepIDs(recruiterTimers map[RecruiterKey]RecruiterState) []uint32 {
-	stepIDSet := make(map[uint32]struct{}) // to deduplicate StepIDs
-
-	for key := range recruiterTimers {
-		stepIDSet[key.StepID] = struct{}{}
-	}
-
-	stepIDs := make([]uint32, 0, len(stepIDSet))
-	for id := range stepIDSet {
-		stepIDs = append(stepIDs, id)
-	}
-
-	return stepIDs
-}
-
 func RecruiterCycle(
 	ctx context.Context,
 	db *sql.DB,
@@ -592,11 +580,12 @@ func RecruiterCycle(
 		}
 	}
 
-	recruiterStepIDs := extractRecruiterStepIDs(recruiterTimers)
-
-	recyclableWorkers, err := FindRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs), recruiterStepIDs)
+	recyclableWorkers, err := FindRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs))
 	if err != nil {
 		return fmt.Errorf("failed to find recyclable workers: %w", err)
+	}
+	if len(recyclableWorkers) == 0 {
+		log.Printf("No recyclable workers")
 	}
 
 	recyclableMap := make(map[uint32]RecyclableWorker)
@@ -627,7 +616,7 @@ func RecruiterCycle(
 		}
 
 		// Try recycling first
-		selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, needed)
+		selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, needed, recruiter.StepID)
 		if len(selectedWorkerIDs) > 0 {
 			affected := recycleWorkers(
 				db,
@@ -641,9 +630,15 @@ func RecruiterCycle(
 			)
 			needed -= affected
 			log.Printf("♻️ Recycled %d workers for step=%d (still need %d)", affected, recruiter.StepID, needed)
+		} else {
+			log.Printf("No recyclable workers compatible with recruiter %d for step %d", recruiter.Rank, recruiter.StepID)
 		}
 
-		if needed <= 0 || !recruiter.TimeoutPassed {
+		if needed <= 0 {
+			continue
+		}
+		if !recruiter.TimeoutPassed {
+			log.Printf("Timeout not ellapsed, deploy is not allowed yet")
 			continue
 		}
 
