@@ -17,7 +17,7 @@ import (
 )
 
 type RecruiterKey struct {
-	StepID int
+	StepID uint32
 	Rank   int
 }
 
@@ -26,7 +26,7 @@ type RecruiterState struct {
 }
 
 type Recruiter struct {
-	StepID            int
+	StepID            uint32
 	Rank              int
 	TimeoutSeconds    int
 	Protofilter       string
@@ -37,11 +37,11 @@ type Recruiter struct {
 	PendingTasks      int
 	ActiveWorkers     int
 	NeededWorkers     int
-	WorkflowID        int
+	WorkflowID        uint32
 	TimeoutPassed     bool // <- new field
 }
 
-func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[int]WorkflowCounter) ([]Recruiter, error) {
+func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[uint32]WorkflowCounter) ([]Recruiter, error) {
 	const query = `
         SELECT
 			r.step_id,
@@ -146,13 +146,13 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 }
 
 type RecruiterFlavorRegion struct {
-	FlavorID int
-	RegionID int
+	FlavorID uint32
+	RegionID uint32
 	Cpu      int32
 	Memory   float32
 }
 
-func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[RecruiterKey][]RecruiterFlavorRegion, map[int]RegionInfo, error) {
+func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[RecruiterKey][]RecruiterFlavorRegion, map[uint32]RegionInfo, error) {
 	type recruiterSQLPart struct {
 		Key       RecruiterKey
 		Condition string
@@ -204,10 +204,11 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 	defer rows.Close()
 
 	mapping := make(map[RecruiterKey][]RecruiterFlavorRegion)
-	regionInfoMap := make(map[int]RegionInfo)
+	regionInfoMap := make(map[uint32]RegionInfo)
 
 	for rows.Next() {
-		var stepID, rank, flavorID, regionID, providerID int
+		var stepID, flavorID, regionID, providerID uint32
+		var rank int
 		var cpu int32
 		var mem float32
 		var cost float32
@@ -235,50 +236,59 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 }
 
 type RecyclableWorker struct {
-	WorkerID    int
-	FlavorID    int
-	RegionID    int
+	WorkerID    uint32
+	FlavorID    uint32
+	RegionID    uint32
 	Concurrency int
 	Running     int
 }
 
 func FindRecyclableWorkers(
 	db *sql.DB,
-	allAllowedFlavorIDs []int,
-	allAllowedRegionIDs []int,
+	allAllowedFlavorIDs []uint32,
+	allAllowedRegionIDs []uint32,
+	recruiterStepIDs []uint32,
 ) ([]RecyclableWorker, error) {
-	if len(allAllowedFlavorIDs) == 0 || len(allAllowedRegionIDs) == 0 {
+	if len(allAllowedFlavorIDs) == 0 || len(allAllowedRegionIDs) == 0 || len(recruiterStepIDs) == 0 {
 		return nil, nil
 	}
 
 	const query = `
-        WITH worker_running_tasks AS (
-            SELECT
-                w.worker_id,
-                w.flavor_id,
-                w.region_id,
-                w.concurrency,
-                COUNT(t.task_id) FILTER (WHERE t.status = 'R') AS running_tasks,
-                COUNT(t.task_id) FILTER (WHERE t.status = 'P' OR t.status = 'A') AS blocked_tasks
-            FROM
-                worker w
-            LEFT JOIN
-                task t ON t.worker_id = w.worker_id
-            GROUP BY
-                w.worker_id, w.flavor_id, w.region_id, w.concurrency
-        )
-        SELECT
-            worker_id, flavor_id, region_id, concurrency, running_tasks
-        FROM
-            worker_running_tasks
-        WHERE
-            running_tasks < concurrency
-            AND blocked_tasks = 0
-            AND flavor_id = ANY($1)
-            AND region_id = ANY($2)
+		WITH recruiter_steps AS (
+		SELECT unnest($3::int[]) AS recruiter_step_id
+		),
+		worker_running_tasks AS (
+		SELECT
+			w.worker_id,
+			w.flavor_id,
+			w.region_id,
+			w.concurrency,
+			w.step_id,
+			COUNT(t.task_id) FILTER (WHERE t.status = 'R') AS running_tasks,
+			COUNT(t.task_id) FILTER (WHERE t.status IN ('P', 'A')) AS blocked_tasks
+		FROM
+			worker w
+		LEFT JOIN
+			task t ON t.worker_id = w.worker_id
+		GROUP BY
+			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id
+		)
+		SELECT DISTINCT
+		wrt.worker_id, wrt.flavor_id, wrt.region_id, wrt.concurrency, wrt.running_tasks
+		FROM
+		worker_running_tasks wrt
+		JOIN
+		recruiter_steps rs
+		ON
+		wrt.step_id IS NULL OR wrt.step_id != rs.recruiter_step_id
+		WHERE
+		wrt.running_tasks < wrt.concurrency
+		AND wrt.blocked_tasks = 0
+		AND wrt.flavor_id = ANY($1)
+		AND wrt.region_id = ANY($2)
     `
 
-	rows, err := db.Query(query, pq.Array(allAllowedFlavorIDs), pq.Array(allAllowedRegionIDs))
+	rows, err := db.Query(query, pq.Array(allAllowedFlavorIDs), pq.Array(allAllowedRegionIDs), pq.Array(recruiterStepIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +312,7 @@ func FindRecyclableWorkers(
 	return workers, rows.Err()
 }
 
-func containsInt(slice []int, val int) bool {
+func containsInt(slice []uint32, val uint32) bool {
 	for _, item := range slice {
 		if item == val {
 			return true
@@ -315,11 +325,11 @@ func containsInt(slice []int, val int) bool {
 func recycleWorkers(
 	db *sql.DB,
 	recyclableWorkers []RecyclableWorker, // <- directly what FindRecyclableWorkers returns
-	workerIDs []int,
-	stepID int,
+	workerIDs []uint32,
+	stepID uint32,
 	newConcurrency int,
 	prefetch int,
-	allowedFlavorIDs []int,
+	allowedFlavorIDs []uint32,
 	weightMemory *sync.Map,
 ) int {
 	tx, err := db.Begin()
@@ -329,9 +339,9 @@ func recycleWorkers(
 	}
 
 	ids := make([]string, 0, len(workerIDs))
-	tempWeightUpdates := make(map[int]*sync.Map) // worker_id → *sync.Map[task_id]float64
+	tempWeightUpdates := make(map[uint32]*sync.Map) // worker_id → *sync.Map[task_id]float64
 
-	recyclableMap := make(map[int]RecyclableWorker)
+	recyclableMap := make(map[uint32]RecyclableWorker)
 	for _, w := range recyclableWorkers {
 		recyclableMap[w.WorkerID] = w
 	}
@@ -358,7 +368,7 @@ func recycleWorkers(
 				currentMap = val.(*sync.Map)
 				newMap := &sync.Map{}
 				currentMap.Range(func(key, value any) bool {
-					tid := key.(int)
+					tid := key.(uint32)
 					weight := value.(float64)
 					newMap.Store(tid, weight*scale)
 					return true
@@ -427,11 +437,11 @@ func recycleWorkers(
 
 func selectWorkersForRecruiter(
 	recyclable []RecyclableWorker,
-	flavorIDs map[int]struct{},
-	regionIDs map[int]struct{},
+	flavorIDs map[uint32]struct{},
+	regionIDs map[uint32]struct{},
 	needed int,
-) []int {
-	selected := make([]int, 0, needed)
+) []uint32 {
+	selected := make([]uint32, 0, needed)
 	for _, w := range recyclable {
 		if _, ok := flavorIDs[w.FlavorID]; !ok {
 			continue
@@ -454,18 +464,18 @@ type WorkerCreator interface {
 type RegionInfo struct {
 	Name       string
 	Provider   string
-	ProviderID int
+	ProviderID uint32
 }
 
 func deployWorkers(
 	ctx context.Context,
 	qm *QuotaManager,
 	creator WorkerCreator,
-	stepID int,
+	stepID uint32,
 	concurrency int,
 	prefetch int,
 	flavorRegionList []RecruiterFlavorRegion,
-	regionInfoMap map[int]RegionInfo,
+	regionInfoMap map[uint32]RegionInfo,
 	howMany int,
 	workflowCounterMemory *WorkflowCounter,
 ) (int, error) {
@@ -532,6 +542,21 @@ func deployWorkers(
 	return deployed, nil
 }
 
+func extractRecruiterStepIDs(recruiterTimers map[RecruiterKey]RecruiterState) []uint32 {
+	stepIDSet := make(map[uint32]struct{}) // to deduplicate StepIDs
+
+	for key := range recruiterTimers {
+		stepIDSet[key.StepID] = struct{}{}
+	}
+
+	stepIDs := make([]uint32, 0, len(stepIDSet))
+	for id := range stepIDSet {
+		stepIDs = append(stepIDs, id)
+	}
+
+	return stepIDs
+}
+
 func RecruiterCycle(
 	ctx context.Context,
 	db *sql.DB,
@@ -539,7 +564,7 @@ func RecruiterCycle(
 	creator WorkerCreator,
 	recruiterTimers map[RecruiterKey]RecruiterState,
 	weightMemory *sync.Map,
-	workflowCounterMemory map[int]WorkflowCounter,
+	workflowCounterMemory map[uint32]WorkflowCounter,
 	now time.Time,
 ) error {
 	recruiters, err := ListActiveRecruiters(db, now, recruiterTimers, workflowCounterMemory)
@@ -558,8 +583,8 @@ func RecruiterCycle(
 	}
 
 	// Aggregate all allowed flavor_ids and region_ids across all recruiters
-	allFlavorIDs := make(map[int]struct{})
-	allRegionIDs := make(map[int]struct{})
+	allFlavorIDs := make(map[uint32]struct{})
+	allRegionIDs := make(map[uint32]struct{})
 	for _, frList := range recruiterFlavorRegionMap {
 		for _, fr := range frList {
 			allFlavorIDs[fr.FlavorID] = struct{}{}
@@ -567,12 +592,14 @@ func RecruiterCycle(
 		}
 	}
 
-	recyclableWorkers, err := FindRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs))
+	recruiterStepIDs := extractRecruiterStepIDs(recruiterTimers)
+
+	recyclableWorkers, err := FindRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs), recruiterStepIDs)
 	if err != nil {
 		return fmt.Errorf("failed to find recyclable workers: %w", err)
 	}
 
-	recyclableMap := make(map[int]RecyclableWorker)
+	recyclableMap := make(map[uint32]RecyclableWorker)
 	for _, w := range recyclableWorkers {
 		recyclableMap[w.WorkerID] = w
 	}
@@ -587,8 +614,8 @@ func RecruiterCycle(
 		}
 
 		// Build recruiter-specific allowed flavor/region sets
-		recruiterFlavorIDs := make(map[int]struct{})
-		recruiterRegionIDs := make(map[int]struct{})
+		recruiterFlavorIDs := make(map[uint32]struct{})
+		recruiterRegionIDs := make(map[uint32]struct{})
 		for _, fr := range flavorRegionList {
 			recruiterFlavorIDs[fr.FlavorID] = struct{}{}
 			recruiterRegionIDs[fr.RegionID] = struct{}{}
@@ -649,8 +676,8 @@ func RecruiterCycle(
 	return nil
 }
 
-func keys(m map[int]struct{}) []int {
-	out := make([]int, 0, len(m))
+func keys(m map[uint32]struct{}) []uint32 {
+	out := make([]uint32, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
@@ -662,7 +689,7 @@ type WorkflowCounter struct {
 	Maximum *int
 }
 
-func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[int]WorkflowCounter) error {
+func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[uint32]WorkflowCounter) error {
 	// Step 1: Load live worker counts per workflow
 	log.Printf("ℹ️ Adjusting workflow counters")
 	rows, err := db.Query(`
@@ -685,7 +712,7 @@ func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[int]WorkflowCo
 
 	// Step 2: Scan and adjust
 	for rows.Next() {
-		var workflowID int
+		var workflowID uint32
 		var liveCount int
 		if err := rows.Scan(&workflowID, &liveCount); err != nil {
 			return fmt.Errorf("failed to scan workflow worker count: %w", err)
@@ -723,11 +750,11 @@ func StartRecruiterLoop(
 			log.Println("✅ Recruiter loop fully stopped")
 		}()
 
-		var workflowCounterMemory map[int]WorkflowCounter
+		var workflowCounterMemory map[uint32]WorkflowCounter
 		err := memory.LoadMemory(ctx, db, "workflow_counters", &workflowCounterMemory)
 		if err != nil {
 			log.Printf("ℹ️ No existing workflow_counters memory found, starting fresh")
-			workflowCounterMemory = make(map[int]WorkflowCounter)
+			workflowCounterMemory = make(map[uint32]WorkflowCounter)
 		}
 
 		recruiterTimers := make(map[RecruiterKey]RecruiterState)

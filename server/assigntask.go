@@ -1,7 +1,10 @@
 package server
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,9 +15,7 @@ const DefaultAssignTrigger uint32 = 500 // 5 sec
 
 func (s *taskQueueServer) waitForAssignEvents() {
 	for {
-		log.Printf("⚡ Before assignPendingTasks")
 		s.assignPendingTasks()
-		log.Printf("⚡ After assignPendingTasks")
 
 		for counter := uint32(0); counter <= s.assignTrigger; counter++ {
 			time.Sleep(10 * time.Millisecond)
@@ -29,13 +30,11 @@ func (s *taskQueueServer) triggerAssign() {
 }
 
 func (s *taskQueueServer) assignPendingTasks() {
-	log.Printf("TX1: starting transaction")
 	tx, err := s.db.Begin()
 	if err != nil {
 		log.Printf("⚠️ Failed to begin transaction: %v", err)
 		return
 	}
-	log.Printf("TX2: Transaction started")
 	defer tx.Rollback()
 
 	// 1️⃣ Count pending tasks
@@ -48,7 +47,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 	if pendingTaskCount == 0 {
 		return
 	}
-	log.Printf("TX3: Got pending task number")
 
 	// 2️⃣ Fetch actual assigned tasks
 	workerTaskRows, err := tx.Query(`
@@ -73,7 +71,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 		}
 	}
 	workerTaskRows.Close()
-	log.Printf("TX4: Got pending task list for all workers")
 
 	// 3️⃣ Reconcile weight memory
 	s.workerWeightMemory.Range(func(workerIDRaw, taskMapRaw any) bool {
@@ -86,7 +83,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 			if _, exists := dbTaskPresent[taskID]; !exists {
 				// Task disappeared from DB -> remove from memory
 				taskMap.Delete(taskID)
-				log.Printf("⚠️ Task %d removed from worker %d memory (not found in DB)", taskID, workerID)
+				// log.Printf("⚠️ Task %d removed from worker %d memory (not found in DB)", taskID, workerID)
 			}
 			return true
 		})
@@ -103,7 +100,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 		return true
 	})
-	log.Printf("TX5: fix weight memory")
 
 	// Add missing tasks into memory
 	for workerID, taskIDs := range dbAssignments {
@@ -119,7 +115,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 			}
 		}
 	}
-	log.Printf("TX6: new tasks added in weight memory")
 
 	// 4️⃣ Fetch workers and their capacities
 	workerCapacityRows, err := tx.Query(`
@@ -139,7 +134,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 
 	workerStatusMap := map[uint32]workerStatus{}
-	totalAvailableSlots := 0
 
 	for workerCapacityRows.Next() {
 		var workerID uint32
@@ -167,29 +161,51 @@ func (s *taskQueueServer) assignPendingTasks() {
 				UsedCapacity:  used,
 				StepID:        stepID,
 			}
-			totalAvailableSlots += int(capacity - used)
 		}
 	}
 	workerCapacityRows.Close()
-	log.Printf("TX7: worker capacity acquired")
 
 	if len(workerStatusMap) == 0 {
 		return
 	}
 
+	stepSlots := map[uint32]int{} // step_id -> available slots
+	for _, status := range workerStatusMap {
+		if status.StepID != nil {
+			stepSlots[*status.StepID] += int(status.TotalCapacity - status.UsedCapacity)
+		}
+	}
+
+	if len(stepSlots) == 0 {
+		log.Printf("No steps with worker with capacity to take new tasks")
+		return
+	}
+
 	// Fetch pending tasks (was // 5️⃣ Assign new pending tasks)
-	taskRows, err := tx.Query(`
-		SELECT task_id, step_id
-		FROM task
-		WHERE status = 'P'
-		ORDER BY created_at ASC
-		LIMIT $1
-	`, totalAvailableSlots)
+	queryParts := []string{}
+	args := []interface{}{}
+	argIndex := 1
+
+	for stepID, slots := range stepSlots {
+		part := fmt.Sprintf(`
+			(SELECT task_id, step_id
+			FROM task
+			WHERE status = 'P' AND step_id = $%d
+			ORDER BY created_at
+			LIMIT %d)
+		`, argIndex, slots)
+		queryParts = append(queryParts, part)
+		args = append(args, stepID)
+		argIndex++
+	}
+
+	finalQuery := strings.Join(queryParts, "\nUNION ALL\n")
+
+	taskRows, err := tx.Query(finalQuery, args...)
 	if err != nil {
 		log.Printf("\u26a0\ufe0f Failed to fetch pending tasks: %v", err)
 		return
 	}
-	log.Printf("TX7b: Query to fetch task passed")
 
 	type taskCandidate struct {
 		taskID uint32
@@ -199,13 +215,18 @@ func (s *taskQueueServer) assignPendingTasks() {
 	for taskRows.Next() {
 		var tid uint32
 		var stepID *uint32
-		if err := taskRows.Scan(&tid, &stepID); err == nil {
+		var stepIDproxy sql.NullInt32
+		if err := taskRows.Scan(&tid, &stepIDproxy); err == nil {
+			if stepIDproxy.Valid {
+				s := uint32(stepIDproxy.Int32)
+				stepID = &s
+			} else {
+				stepID = nil
+			}
 			candidates = append(candidates, taskCandidate{taskID: tid, stepID: stepID})
 		}
 	}
 	taskRows.Close()
-
-	log.Printf("TX7c: Got %d pending tasks", len(candidates))
 
 	// Assign tasks in memory
 	assignments := make(map[uint32][]uint32) // workerID -> list of taskID
@@ -222,8 +243,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 			}
 		}
 	}
-
-	log.Printf("TX8: new tasks selected")
 
 	// Perform DB update
 	for workerID, taskIDs := range assignments {
@@ -246,8 +265,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 		}
 		log.Printf("\u2705 Assigned %d tasks to worker %d", len(taskIDs), workerID)
 	}
-
-	log.Printf("TX9: worker updated")
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit task assignment: %v", err)
