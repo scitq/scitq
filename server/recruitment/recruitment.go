@@ -118,8 +118,10 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 		key := RecruiterKey{StepID: r.StepID, Rank: r.Rank}
 		state, seen := recruiterTimers[key]
 		if !seen {
-			// First time seeing this recruiter, but don't set LastTrigger yet.
-			r.TimeoutPassed = true
+			// we set it to now
+			state.LastTrigger = now
+			r.TimeoutPassed = false
+			recruiterTimers[key] = state
 		} else {
 			timeout := time.Duration(r.TimeoutSeconds) * time.Second
 			r.TimeoutPassed = now.Sub(state.LastTrigger) >= timeout
@@ -271,8 +273,8 @@ func FindRecyclableWorkers(
 		LEFT JOIN
 			task t ON t.worker_id = w.worker_id
 		WHERE
-			w.flavor_id = ANY($1)
-			AND w.region_id = ANY($2)
+			w.flavor_id = ANY($1::int[])
+			AND w.region_id = ANY($2::int[])
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id
 		HAVING
@@ -584,7 +586,9 @@ func RecruiterCycle(
 	if err != nil {
 		return fmt.Errorf("failed to find recyclable workers: %w", err)
 	}
-	if len(recyclableWorkers) == 0 {
+
+	hasRecyclableWorkers := len(recyclableWorkers) > 0
+	if !hasRecyclableWorkers {
 		log.Printf("No recyclable workers")
 	}
 
@@ -615,23 +619,25 @@ func RecruiterCycle(
 			continue
 		}
 
-		// Try recycling first
-		selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, needed, recruiter.StepID)
-		if len(selectedWorkerIDs) > 0 {
-			affected := recycleWorkers(
-				db,
-				recyclableWorkers,
-				selectedWorkerIDs,
-				recruiter.StepID,
-				recruiter.WorkerConcurrency,
-				recruiter.WorkerPrefetch,
-				keys(recruiterFlavorIDs),
-				weightMemory,
-			)
-			needed -= affected
-			log.Printf("♻️ Recycled %d workers for step=%d (still need %d)", affected, recruiter.StepID, needed)
-		} else {
-			log.Printf("No recyclable workers compatible with recruiter %d for step %d", recruiter.Rank, recruiter.StepID)
+		if hasRecyclableWorkers {
+			// Try recycling first
+			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, needed, recruiter.StepID)
+			if len(selectedWorkerIDs) > 0 {
+				affected := recycleWorkers(
+					db,
+					recyclableWorkers,
+					selectedWorkerIDs,
+					recruiter.StepID,
+					recruiter.WorkerConcurrency,
+					recruiter.WorkerPrefetch,
+					keys(recruiterFlavorIDs),
+					weightMemory,
+				)
+				needed -= affected
+				log.Printf("♻️ Recycled %d workers for step=%d (still need %d)", affected, recruiter.StepID, needed)
+			} else {
+				log.Printf("No recyclable workers compatible with recruiter %d for step %d", recruiter.Rank, recruiter.StepID)
+			}
 		}
 
 		if needed <= 0 {
