@@ -7,15 +7,16 @@ option go_package = "gen/taskqueuepb";
 import "google/protobuf/empty.proto";
 
 service TaskQueue {
-    rpc SubmitTask(Task) returns (TaskResponse);
+    rpc SubmitTask(TaskRequest) returns (TaskResponse);
     rpc RegisterWorker(WorkerInfo) returns (WorkerId);
-    rpc PingAndTakeNewTasks(WorkerId) returns (TaskListAndOther);
+    rpc PingAndTakeNewTasks(PingAndGetNewTasksRequest) returns (TaskListAndOther);
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
     rpc SendTaskLogs(stream TaskLog) returns (Ack);
     rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
     rpc ListTasks (ListTasksRequest) returns (TaskList);
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
+    rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
     rpc DeleteWorker(WorkerId) returns (Ack);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
     rpc ListJobs (ListJobsRequest) returns (JobsList);
@@ -27,7 +28,18 @@ service TaskQueue {
     rpc DeleteUser(UserId) returns (Ack);
     rpc UpdateUser(User) returns (Ack);
     rpc ChangePassword(ChangePasswordRequest) returns (Ack);
-    }
+    rpc ListRecruiters(RecruiterFilter) returns (RecruiterList);
+    rpc CreateRecruiter(Recruiter) returns (Ack);
+    rpc UpdateRecruiter(RecruiterUpdate) returns (Ack);
+    rpc DeleteRecruiter(RecruiterId) returns (Ack);
+    rpc ListWorkflows(WorkflowFilter) returns (WorkflowList);
+    rpc CreateWorkflow(WorkflowRequest) returns (WorkflowId);
+    rpc DeleteWorkflow(WorkflowId) returns (Ack);
+    rpc ListSteps(WorkflowId) returns (StepList);
+    rpc CreateStep(StepRequest) returns (StepId);
+    rpc DeleteStep(StepId) returns (Ack);
+    rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
+}   
 
 message TaskResponse {
     uint32 task_id = 1;
@@ -38,8 +50,26 @@ message WorkerInfo {
     optional uint32 concurrency = 2;
 }
 
+message TaskRequest {
+    string command = 1;
+    optional string shell = 2;
+    string container = 3;
+    optional string container_options = 4;
+    optional uint32 step_id = 5;
+    repeated string input = 6;
+    repeated string resource = 7;
+    optional string output = 8;
+    optional uint32 retry = 9;
+    optional bool is_final  = 10;
+    optional bool uses_cache  = 11;
+    optional float download_timeout  = 12;
+    optional float running_timeout  = 13;
+    optional float upload_timeout  = 14;
+    string status = 15;
+}
+
 message Task {
-    optional uint32 task_id = 1;
+    uint32 task_id = 1;
     string command = 2;
     optional string shell = 3;
     string container = 4;
@@ -82,9 +112,19 @@ message WorkersList {
 message ListWorkersRequest {
 }
 
+message TaskUpdate {
+    double weight = 1; 
+}
+
+message TaskUpdateList {
+    map<uint32, TaskUpdate> updates = 1; // optional — can be empty
+}
+
 message TaskListAndOther {
     repeated Task tasks = 1;
     uint32 concurrency = 2;
+    TaskUpdateList updates = 3;
+    repeated uint32 active_tasks = 4;
 }
 
 message TaskStatusUpdate {
@@ -108,6 +148,11 @@ message WorkerId {
 
 message WorkerIds {
     repeated uint32 worker_ids = 1;
+}
+
+message PingAndGetNewTasksRequest {
+    uint32 worker_id = 1;
+    WorkerStats stats = 2; // Optional
 }
 
 message Ack {
@@ -136,6 +181,11 @@ message WorkerUpdateRequest {
     optional uint32 concurrency = 5;
     optional uint32 prefetch = 6;
     optional uint32 step_id = 7;
+}
+
+message WorkerStatus {
+    uint32 worker_id =1;
+    string status =2;
 }
 
 message ListFlavorsRequest {
@@ -228,4 +278,120 @@ message ChangePasswordRequest {
     string username = 1;
   string old_password = 2;
   string new_password = 3;
+}
+
+message RecruiterFilter {
+    optional uint32 step_id = 1;
+}
+
+message RecruiterId {
+    uint32 step_id = 1;
+    uint32 rank = 2;
+}
+
+message Recruiter {
+    uint32 step_id = 1;
+    uint32 rank = 2;
+    string protofilter = 3;
+    uint32 concurrency = 4;
+    uint32 prefetch = 5;
+    optional uint32 max_workers = 6;
+    uint32 rounds = 7;
+    uint32 timeout = 8;
+}
+
+message RecruiterUpdate {
+  uint32 step_id = 1;
+  uint32 rank = 2;
+  optional string protofilter = 3;
+  optional uint32 concurrency = 4;
+  optional uint32 prefetch = 5;
+  optional uint32 max_workers = 6;
+  optional uint32 rounds = 7;
+  optional uint32 timeout = 8;
+}
+
+message RecruiterList {
+    repeated Recruiter recruiters = 1;
+}
+
+message WorkflowFilter {
+    optional string name_like = 1;
+}
+
+message WorkflowId {
+    uint32 workflow_id = 1;
+}
+
+message Workflow {
+    uint32 workflow_id = 1;
+    string name = 2;
+    string run_strategy = 4;
+    optional uint32 maximum_workers = 5;
+}
+message WorkflowRequest {
+    string name = 1;
+    optional string run_strategy = 2;
+    optional uint32 maximum_workers = 3;
+}
+
+message WorkflowList {
+    repeated Workflow workflows = 1;
+}
+
+message StepId {
+    uint32 step_id = 1;
+}
+message Step {
+    uint32 step_id = 1;
+    string workflow_name = 2;
+    uint32 workflow_id = 3;
+    string name = 4;
+}
+message StepRequest {
+    optional string workflow_name = 1;
+    optional uint32 workflow_id = 2;
+    string name = 3;
+}
+message StepList {
+    repeated Step steps = 1;
+}
+
+message WorkerStats {
+    float cpu_usage_percent = 1;      // 0-100, float
+    float mem_usage_percent = 2;      // 0-100, float
+    float load_1min = 3;               // e.g., 0.58, float
+    float iowait_percent = 4;       // 0-100 float 
+
+    repeated DiskUsage disks = 5;      // Per-disk usage
+
+    DiskIOStats disk_io = 6;            // Global disk IO (aggregated)
+    NetIOStats net_io = 7;              // Global network IO (aggregated)
+}
+
+message DiskUsage {
+    string device_name = 1;            // E.g., "/dev/sda1"
+    float usage_percent = 2;            // 0-100, float
+}
+
+message DiskIOStats {
+    int64 read_bytes_total = 1;        // Total bytes read
+    int64 write_bytes_total = 2;       // Total bytes written
+    float read_bytes_rate = 3;          // Bytes per second
+    float write_bytes_rate = 4;         // Bytes per second
+}
+
+message NetIOStats {
+    int64 recv_bytes_total = 1;        // Total bytes received
+    int64 sent_bytes_total = 2;         // Total bytes sent
+    float recv_bytes_rate = 3;          // Bytes per second
+    float sent_bytes_rate = 4;          // Bytes per second
+}
+
+message GetWorkerStatsRequest {
+    repeated uint32 worker_ids = 1;
+}
+
+message GetWorkerStatsResponse {
+    map<uint32, WorkerStats> worker_stats = 1;
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -15,6 +16,7 @@ type Config struct {
 	Scitq struct {
 		Port                 int     `yaml:"port" default:"50051"`
 		DBURL                string  `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
+		MaxDBConcurrency     int     `yaml:"max_db_concurrency" default:"50"`
 		LogLevel             string  `yaml:"log_level" default:"info"`
 		LogRoot              string  `yaml:"log_root" default:"log"`
 		ClientBinaryPath     string  `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
@@ -28,6 +30,10 @@ type Config struct {
 		SwapProportion       float32 `yaml:"swap_proportion" default:"0.1"`
 		WorkerToken          string  `yaml:"worker_token"`
 		JwtSecret            string  `yaml:"jwt_secret"`
+		RecruitmentInterval  int     `yaml:"recruiter_interval" default:"15"`
+		IdleTimeout          int     `yaml:"idle_timeout" default:"300"`
+		NewWorkerIdleTimeout int     `yaml:"new_worker_idle_timeout" default:"900"`
+		OfflineTimeout       int     `yaml:"offline_timeout" default:"30"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`
@@ -35,20 +41,25 @@ type Config struct {
 	} `yaml:"providers"`
 }
 
+type Quota struct {
+	MaxCPU   int32   `yaml:"cpu"`
+	MaxMemGB float32 `yaml:"mem,omitempty"` // optional
+}
+
 type AzureConfig struct {
-	Name              string         `yaml:"-"`
-	DefaultRegion     string         `yaml:"default_region"`
-	SubscriptionID    string         `yaml:"subscription_id"`
-	ClientID          string         `yaml:"client_id"`
-	ClientSecret      string         `yaml:"client_secret"`
-	TenantID          string         `yaml:"tenant_id"`
-	UseSpot           bool           `yaml:"use_spot" default:"true"`
-	Username          string         `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
-	SSHPublicKey      string         `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
-	Image             AzureImage     `yaml:"image"`
-	Quotas            map[string]int `yaml:"quotas"` // Resource quotas
-	Regions           []string       `yaml:"regions"`
-	UpdatePeriodicity string         `yaml:"update_periodicity"` // Update periodicity in minutes
+	Name              string           `yaml:"-"`
+	DefaultRegion     string           `yaml:"default_region"`
+	SubscriptionID    string           `yaml:"subscription_id"`
+	ClientID          string           `yaml:"client_id"`
+	ClientSecret      string           `yaml:"client_secret"`
+	TenantID          string           `yaml:"tenant_id"`
+	UseSpot           bool             `yaml:"use_spot" default:"true"`
+	Username          string           `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
+	SSHPublicKey      string           `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
+	Image             AzureImage       `yaml:"image"`
+	Quotas            map[string]Quota `yaml:"quotas"` // key: region
+	Regions           []string         `yaml:"regions"`
+	UpdatePeriodicity string           `yaml:"update_periodicity"` // Update periodicity in minutes
 }
 
 type AzureImage struct {
@@ -69,16 +80,33 @@ type OpenstackConfig struct {
 	ImageID           string                 `yaml:"image_id"`
 	FlavorID          string                 `yaml:"flavor_id"`
 	NetworkID         string                 `yaml:"network_id"`
-	Quotas            map[string]int         `yaml:"quotas"` // Resource quotas
+	Quotas            map[string]Quota       `yaml:"quotas"` // key: region
 	Regions           []string               `yaml:"regions"`
 	Custom            map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
 	UpdatePeriodicity string                 `yaml:"update_periodicity"` // Update periodicity in minutes
 }
 
+func (c *Config) Validate() error {
+	if c.Scitq.DBURL == "" {
+		return fmt.Errorf("scitq.db_url must be provided")
+	}
+	if c.Scitq.Port == 0 {
+		return fmt.Errorf("scitq.port must be provided and non-zero")
+	}
+	if c.Scitq.JwtSecret == "" {
+		return fmt.Errorf("scitq.jwt_secret must be provided")
+	}
+	if c.Scitq.WorkerToken == "" {
+		return fmt.Errorf("switq.worker_token must be provided")
+	}
+	// You can add more rules as needed
+	return nil
+}
+
 type ProviderConfig interface {
 	GetRegions() []string
 	SetRegions([]string)
-	GetQuotas() map[string]int
+	GetQuotas() map[string]Quota
 	GetUpdatePeriodicity() time.Duration
 	GetName() string
 	SetName(string)
@@ -110,7 +138,7 @@ func (a *AzureConfig) SetRegions(r []string) {
 	a.Regions = r
 }
 
-func (a *AzureConfig) GetQuotas() map[string]int {
+func (a *AzureConfig) GetQuotas() map[string]Quota {
 	return a.Quotas
 }
 
@@ -138,7 +166,7 @@ func (o *OpenstackConfig) SetRegions(r []string) {
 	o.Regions = r
 }
 
-func (o *OpenstackConfig) GetQuotas() map[string]int {
+func (o *OpenstackConfig) GetQuotas() map[string]Quota {
 	return o.Quotas
 }
 

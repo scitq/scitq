@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -64,7 +65,7 @@ func NewUploadManager(store string, client pb.TaskQueueClient) *UploadManager {
 	}
 }
 
-func (um *UploadManager) StartUploadWorkers() {
+func (um *UploadManager) StartUploadWorkers(activeTasks *sync.Map) {
 	for i := 0; i < maxUploads; i++ {
 		go func() {
 			for file := range um.UploadQueue {
@@ -73,11 +74,11 @@ func (um *UploadManager) StartUploadWorkers() {
 		}()
 	}
 
-	go um.watchCompletions()
+	go um.watchCompletions(activeTasks)
 }
 
 func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
-	outputDir := filepath.Join(um.Store, "tasks", fmt.Sprint(*task.TaskId), "output")
+	outputDir := filepath.Join(um.Store, "tasks", fmt.Sprint(task.TaskId), "output")
 	count := 0
 	err := filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -100,17 +101,17 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 	if err != nil {
 		message := fmt.Sprintf("❌ Failed walking output directory: %v", err)
 		log.Print(message)
-		logMessage(message, um.Client, *task.TaskId)
+		logMessage(message, um.Client, task.TaskId)
 		task.Status = "F"
 		um.Completion <- task
 		return
 	}
 	if count == 0 {
-		log.Printf("⚠️ No files to upload for task %d", *task.TaskId)
+		log.Printf("⚠️ No files to upload for task %d", task.TaskId)
 		um.Completion <- task
 		return
 	}
-	um.pendingUploads.Set(*task.TaskId, count)
+	um.pendingUploads.Set(task.TaskId, count)
 }
 
 func (um *UploadManager) uploadFile(file *UploadFile) error {
@@ -128,18 +129,47 @@ func (um *UploadManager) uploadFile(file *UploadFile) error {
 		time.Sleep(uploadInterval)
 	}
 	log.Printf("❌ Failed to upload %s after %d attempts", file.SourcePath, uploadRetry)
-	logMessage(message, um.Client, *file.Task.TaskId)
+	logMessage(message, um.Client, file.Task.TaskId)
 	file.Task.Status = "F"
 	um.Completion <- file.Task
 	return err
 }
 
-func (um *UploadManager) watchCompletions() {
+func retryUpdateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
+	retries := 0
+	maxRetries := 1000
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
+			TaskId:    taskID,
+			NewStatus: status,
+		})
+		if err == nil {
+			log.Printf("✅ Task %d updated to status: %s", taskID, status)
+			return
+		}
+
+		retries++
+		log.Printf("⚠️ Failed to update task %d to %s (attempt %d): %v", taskID, status, retries, err)
+
+		if retries >= maxRetries {
+			log.Printf("❌ Gave up updating task %d after %d retries.", taskID, retries)
+			return
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 	for task := range um.Completion {
-		taskID := *task.TaskId
+		taskID := task.TaskId
 		if remaining, done := um.pendingUploads.Decrement(taskID); done {
 			log.Printf("📤 Upload completed for task %d, marking as %s", taskID, task.Status)
-			updateTaskStatus(um.Client, taskID, task.Status)
+			retryUpdateTaskStatus(um.Client, taskID, task.Status)
+			activeTasks.Delete(taskID)
 		} else {
 			log.Printf("📤 Remaining uploads for task %d: %d", taskID, remaining)
 		}
@@ -147,8 +177,8 @@ func (um *UploadManager) watchCompletions() {
 }
 
 // RunUploader starts upload workers and returns the manager.
-func RunUploader(store string, client pb.TaskQueueClient) *UploadManager {
+func RunUploader(store string, client pb.TaskQueueClient, activeTasks *sync.Map) *UploadManager {
 	um := NewUploadManager(store, client)
-	go um.StartUploadWorkers()
+	go um.StartUploadWorkers(activeTasks)
 	return um
 }

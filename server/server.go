@@ -12,17 +12,21 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/gmtsciencedev/scitq2/server/memory"
+	"github.com/gmtsciencedev/scitq2/server/protofilter"
 	"github.com/gmtsciencedev/scitq2/server/providers"
-	"github.com/gmtsciencedev/scitq2/server/providers/azure"
+	"github.com/gmtsciencedev/scitq2/server/watchdog"
+
+	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	"github.com/golang-jwt/jwt"
+	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
 
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/golang-migrate/migrate/v4"
@@ -59,25 +63,63 @@ type taskQueueServer struct {
 	//jobWG     sync.WaitGroup
 	providers     map[uint32]providers.Provider
 	semaphore     chan struct{} // Semaphore to limit concurrency
-	assignTrigger chan struct{}
+	assignTrigger uint32
+	qm            recruitment.QuotaManager
+	watchdog      *watchdog.Watchdog
+
+	stopWatchdog       chan struct{}
+	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
+	workerStats        *sync.Map
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
+	workerWeightMemory, err := memory.LoadWeightMemory(context.Background(), db, "weight_memory")
+	if err != nil {
+		log.Printf("⚠️ Creating a new weight memory: %v", err)
+		workerWeightMemory = &sync.Map{}
+	}
 	s := &taskQueueServer{
-		db:            db,
-		cfg:           cfg,
-		logRoot:       logRoot,
-		jobQueue:      make(chan Job, defaultJobQueueSize),
-		semaphore:     make(chan struct{}, defaultJobConcurrency),
-		providers:     make(map[uint32]providers.Provider),
-		assignTrigger: make(chan struct{}, 1), // buffered, avoids blocking
+		db:                 db,
+		cfg:                cfg,
+		logRoot:            logRoot,
+		jobQueue:           make(chan Job, defaultJobQueueSize),
+		semaphore:          make(chan struct{}, defaultJobConcurrency),
+		providers:          make(map[uint32]providers.Provider),
+		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
+		workerWeightMemory: workerWeightMemory,
+		stopWatchdog:       make(chan struct{}),
+		workerStats:        &sync.Map{},
 	}
 	//go s.assignTasksLoop()
 	go s.waitForAssignEvents()
+
+	s.watchdog = watchdog.NewWatchdog(
+		time.Duration(cfg.Scitq.IdleTimeout)*time.Second,
+		time.Duration(cfg.Scitq.NewWorkerIdleTimeout)*time.Second,
+		time.Duration(cfg.Scitq.OfflineTimeout)*time.Second,
+		10*time.Second, // ticker interval
+		func(workerID uint32, newStatus string) error {
+			_, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: workerID, Status: newStatus})
+			return err
+		}, // callback
+		func(workerID uint32) error {
+			_, err := s.DeleteWorker(context.Background(), &pb.WorkerId{WorkerId: workerID})
+			return err
+		}, // callback
+	)
+
+	workers, err := FetchWorkersForWatchdog(context.Background(), s.db)
+	if err != nil {
+		log.Printf("⚠️ Failed to rebuild watchdog memory: %v", err)
+	}
+	s.watchdog.RebuildFromWorkers(workers)
+
+	go s.watchdog.Run(s.stopWatchdog)
+
 	return s
 }
 
-func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.Task) (*pb.TaskResponse, error) {
+func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
 	var taskID int
 	err := s.db.QueryRow(
 		`INSERT INTO task (command, shell, container, container_options, step_id, 
@@ -113,124 +155,35 @@ func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empt
 	return &pb.RcloneConfig{Config: string(data)}, nil
 }
 
-func (s *taskQueueServer) waitForAssignEvents() {
-	for range s.assignTrigger {
-		s.assignPendingTasks() // this logic is your current assignTasksLoop(), minus the loop and sleep
-	}
-}
-
-func (s *taskQueueServer) assignPendingTasks() {
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to begin transaction: %v", err)
-		return
-	}
-
-	// **1️⃣ Count pending tasks**
-	var pendingTaskCount int
-	err = tx.QueryRow(`SELECT COUNT(*) FROM task WHERE status = 'P'`).Scan(&pendingTaskCount)
-	if err != nil {
-		log.Printf("⚠️ Failed to count pending tasks: %v", err)
-		tx.Rollback()
-		return
-	}
-
-	// **🚨 If no pending tasks, skip this cycle**
-	if pendingTaskCount == 0 {
-		tx.Rollback()
-		return
-	}
-
-	// **2️⃣ Get workers & their assigned task count**
-	rows, err := tx.Query(`
-			SELECT w.worker_id, w.concurrency+w.prefetch as assignable, COUNT(t.task_id) as assigned 
-			FROM worker w
-			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A', 'C', 'R')
-			GROUP BY w.worker_id, w.concurrency, w.prefetch
-		`)
-	if err != nil {
-		log.Printf("⚠️ Failed to fetch workers: %v", err)
-		tx.Rollback()
-		return
-	}
-
-	workerSlots := make(map[uint32]int) // worker_id → available slots
-	for rows.Next() {
-		var workerID uint32
-		var assignable, assigned int
-		if err := rows.Scan(&workerID, &assignable, &assigned); err != nil {
-			log.Printf("⚠️ Failed to scan worker row: %v", err)
-			continue
-		}
-		if assigned < assignable {
-			workerSlots[workerID] = assignable - assigned // Free slots
-		}
-	}
-	rows.Close()
-
-	// **🚨 If no worker has available slots, skip this cycle**
-	if len(workerSlots) == 0 {
-		tx.Rollback()
-		return
-	}
-
-	// **3️⃣ Assign tasks to workers with available slots**
-	for workerID, slots := range workerSlots {
-		if pendingTaskCount == 0 {
-			break // 🚀 Stop if no more tasks left
-		}
-
-		if slots > 0 {
-			// Assign only up to available pending tasks
-			tasksToAssign := min(slots, pendingTaskCount)
-
-			res, err := tx.Exec(`
-					UPDATE task 
-					SET status = 'A', worker_id = $1
-					WHERE task_id IN (
-						SELECT task_id FROM task WHERE status = 'P'
-						ORDER BY created_at ASC 
-						LIMIT $2
-					)
-				`, workerID, tasksToAssign)
-
-			if err != nil {
-				log.Printf("⚠️ Failed to assign tasks for worker %d: %v", workerID, err)
-			} else {
-				rowsAffected, _ := res.RowsAffected()
-				log.Printf("✅ Assigned %d tasks to worker %d", rowsAffected, workerID)
-				pendingTaskCount -= int(rowsAffected) // 🛑 Reduce remaining task count
-			}
-		}
-	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		log.Printf("⚠️ Failed to commit task assignment: %v", err)
-	}
-}
-
-func (s *taskQueueServer) triggerAssign() {
-	select {
-	case s.assignTrigger <- struct{}{}:
-	default:
-		// Already triggered, no need to push again
-	}
-}
-
-// **Helper function to get the minimum of two integers**
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
-	_, err := s.db.Exec("UPDATE task SET status = $1 WHERE task_id = $2", req.NewStatus, req.TaskId)
+	var workerID sql.NullInt32
+	err := s.db.QueryRowContext(ctx, `
+        UPDATE task
+        SET status = $1
+        WHERE task_id = $2
+        RETURNING worker_id
+    `, req.NewStatus, req.TaskId).Scan(&workerID)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
+	}
+
+	switch req.NewStatus {
+	case "C":
+		{
+			if !workerID.Valid {
+				log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
+			} else {
+				s.watchdog.TaskAccepted(uint32(workerID.Int32))
+			}
+		}
+	case "S", "F":
+		{
+			if !workerID.Valid {
+				log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
+			} else {
+				s.watchdog.TaskFinished(uint32(workerID.Int32))
+			}
+		}
 	}
 
 	// **Trigger task assignment**
@@ -281,6 +234,7 @@ func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_Str
 
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
 	var workerID uint32
+	var isPermanent bool
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -290,7 +244,7 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	defer tx.Rollback()
 
 	// **Check if worker already exists**
-	err = tx.QueryRow(`SELECT worker_id FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID)
+	err = tx.QueryRow(`SELECT worker_id,is_permanent FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID, &isPermanent)
 	if err == sql.ErrNoRows {
 		// **Worker doesn't exist, create a new worker ID**
 		err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, status, last_ping) VALUES ($1, $2, 'R', NOW()) RETURNING worker_id`,
@@ -329,10 +283,66 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		return nil, fmt.Errorf("failed to commit worker registration: %w", err)
 	}
 
+	s.watchdog.WorkerRegistered(workerID, isPermanent)
+
 	// **Trigger task assignment**
 	s.triggerAssign()
 
 	return &pb.WorkerId{WorkerId: workerID}, nil
+}
+
+// FetchWorkersForWatchdog reads workers and builds WorkerInfo list
+func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.WorkerInfo, error) {
+	// Example: adapt fields if needed
+	rows, err := db.QueryContext(ctx, `
+        SELECT w.worker_id, w.status, w.is_permanent, 
+               COALESCE(t.active_tasks, 0) as active_tasks, 
+               (SELECT MAX(t2.modified_at) FROM task t2 where t2.worker_id=w.worker_id AND t2.status in ('F','S')) as last_not_idle
+        FROM worker w
+        LEFT JOIN (
+            SELECT worker_id, COUNT(*) as active_tasks
+            FROM task
+            WHERE status IN ('C', 'R') -- Accepted or Running
+            GROUP BY worker_id
+        ) t ON w.worker_id = t.worker_id
+    `)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch workers: %w", err)
+	}
+	defer rows.Close()
+
+	var workers []watchdog.WorkerInfo
+
+	for rows.Next() {
+		var workerID uint32
+		var status string
+		var isPermanent bool
+		var activeTasks int
+		var lastNotIdle *time.Time
+		var lastNotIdleProxy sql.NullTime
+
+		err := rows.Scan(&workerID, &status, &isPermanent, &activeTasks, &lastNotIdleProxy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan worker row: %w", err)
+		}
+		if lastNotIdleProxy.Valid {
+			lastNotIdle = &lastNotIdleProxy.Time
+		}
+
+		workers = append(workers, watchdog.WorkerInfo{
+			WorkerID:    workerID,
+			Status:      status,
+			IsPermanent: isPermanent,
+			ActiveTasks: activeTasks,
+			LastNotIdle: lastNotIdle,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over worker rows: %w", err)
+	}
+
+	return workers, nil
 }
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
@@ -354,25 +364,37 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			var providerId uint32
 			var regionName string
 			var flavorName string
+			var providerName string
+			var cpu int32
+			var mem float32
 			err := tx.QueryRow(`WITH insertquery AS (
   INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
   VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
   RETURNING worker_id,worker_name,region_id, flavor_id
 )
-SELECT iq.worker_id, iq.worker_name, r.provider_id, r.region_name, f.flavor_name
+SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem
 FROM insertquery iq
 JOIN region r ON iq.region_id = r.region_id
-JOIN flavor f ON iq.flavor_id = f.flavor_id`,
+JOIN flavor f ON iq.flavor_id = f.flavor_id
+JOIN provider p ON r.provider_id = p.provider_id`,
 				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
-				&workerID, &workerName, &providerId, &regionName, &flavorName)
+				&workerID, &workerName, &providerId, &providerName, &regionName, &flavorName, &cpu, &mem)
 			if err != nil {
-				return nil, fmt.Errorf("failed to register worker: %w", err)
+				return nil, fmt.Errorf(
+					"failed to register worker [step:%d,concurrency:%d,flavor:%d,region:%d]: %w",
+					req.StepId,
+					req.Concurrency,
+					req.FlavorId,
+					req.RegionId,
+					err,
+				)
 			}
 			workerIDs = append(workerIDs, workerID)
 
 			var jobID uint32
 			tx.QueryRow("INSERT INTO job (worker_id,flavor_id,region_id,retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
 				workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
+			s.qm.RegisterLaunch(regionName, providerName, cpu, mem)
 			jobs = append(jobs, Job{
 				JobID:      jobID,
 				WorkerID:   workerID,
@@ -401,7 +423,6 @@ JOIN flavor f ON iq.flavor_id = f.flavor_id`,
 
 	return &pb.WorkerIds{WorkerIds: workerIDs}, nil
 }
-
 
 func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdateRequest) (*pb.Ack, error) {
 	tx, err := s.db.Begin()
@@ -469,8 +490,6 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 	s.triggerAssign()
 	return &pb.Ack{Success: true}, nil
 }
-
-
 
 func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*pb.Ack, error) {
 	var job Job
@@ -600,6 +619,13 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 	return &pb.JobsList{Jobs: jobs}, nil
 }
 
+func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
+	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2", req.Status, req.WorkerId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker status: %w", err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
 	var tasks []*pb.Task
@@ -649,15 +675,18 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	return &pb.TaskList{Tasks: tasks}, nil
 }
 
-func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.WorkerId) (*pb.TaskListAndOther, error) {
+func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingAndGetNewTasksRequest) (*pb.TaskListAndOther, error) {
 	var (
-		tasks       []*pb.Task
-		concurrency uint32
-		input       pq.StringArray
-		resource    pq.StringArray
-		shell       sql.NullString
+		tasks          []*pb.Task
+		concurrency    uint32
+		input          pq.StringArray
+		resource       pq.StringArray
+		shell          sql.NullString
+		taskUpdateList = make(map[uint32]*pb.TaskUpdate)
+		activeTaskIDs  []uint32
 	)
 
+	// 1️⃣ Fetch concurrency
 	err := s.db.QueryRow(`
 		SELECT concurrency FROM worker WHERE worker_id = $1
 	`, req.WorkerId).Scan(&concurrency)
@@ -668,42 +697,100 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 		return nil, fmt.Errorf("failed to fetch worker concurrency for worker %d: %w", req.WorkerId, err)
 	}
 
+	// 2️⃣ Fetch tasks (assigned and running)
 	rows, err := s.db.Query(`
 		SELECT task_id, command, shell, container, container_options,
-			input, resource, output, retry, is_final, uses_cache, 
-			download_timeout, running_timeout, upload_timeout,  
+			input, resource, output, retry, is_final, uses_cache,
+			download_timeout, running_timeout, upload_timeout,
 			status
 		FROM task
-		WHERE worker_id = $1 AND status = 'A' AND coalesce(task.step_id,0)=coalesce((SELECT step_id FROM worker WHERE worker_id=$1),0)
+		WHERE worker_id = $1
+		  AND COALESCE(step_id, 0) = COALESCE((SELECT step_id FROM worker WHERE worker_id = $1), 0)
+		  AND status IN ('A', 'C', 'D', 'R', 'U', 'V')
 	`, req.WorkerId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch assigned tasks: %w", err)
+		return nil, fmt.Errorf("failed to fetch assigned/running tasks: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var task pb.Task
+		var status string
+
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &task.Status); err != nil {
-			log.Printf("Task decode error: %v", err)
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status); err != nil {
+			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
 		task.Input = []string(input)
 		task.Resource = []string(resource)
 		if shell.Valid {
-			task.Shell = proto.String(shell.String) // uses *string
+			task.Shell = proto.String(shell.String)
 		}
-		tasks = append(tasks, &task)
+
+		if status == "A" {
+			// Only send full task if assignable
+			tasks = append(tasks, &task)
+		} else {
+			// Just track active running task IDs
+			activeTaskIDs = append(activeTaskIDs, task.TaskId)
+		}
+
+		// Add weight if available (for both assigned and active tasks)
+		if val, ok := s.workerWeightMemory.Load(req.WorkerId); ok {
+			taskMap := val.(*sync.Map)
+			if weightVal, ok := taskMap.Load(task.TaskId); ok {
+				weight, ok := weightVal.(float64)
+				if ok {
+					taskUpdateList[task.TaskId] = &pb.TaskUpdate{Weight: weight}
+				}
+			}
+		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating through tasks: %w", err)
 	}
 
+	// Clean up the worker's weight memory
+	if val, ok := s.workerWeightMemory.Load(req.WorkerId); ok {
+		taskMap := val.(*sync.Map)
+		activeSet := make(map[uint32]struct{}, len(activeTaskIDs))
+		for _, id := range activeTaskIDs {
+			activeSet[id] = struct{}{}
+		}
+		for _, task := range tasks {
+			activeSet[task.TaskId] = struct{}{}
+		}
+
+		var toDelete []uint32
+		taskMap.Range(func(taskIDRaw, _ any) bool {
+			taskID := taskIDRaw.(uint32)
+			if _, stillActive := activeSet[taskID]; !stillActive {
+				toDelete = append(toDelete, taskID)
+			}
+			return true
+		})
+		for _, taskID := range toDelete {
+			taskMap.Delete(taskID)
+			log.Printf("⚠️ Worker %d: cleaned task %d from weight memory (no longer active)", req.WorkerId, taskID)
+		}
+	}
+
+	s.watchdog.WorkerPinged(req.WorkerId)
+
+	if req.Stats != nil {
+		s.workerStats.Store(req.WorkerId, req.Stats)
+	} else {
+		log.Printf("⚠️ Worker %d did not send stats", req.WorkerId)
+	}
+
 	return &pb.TaskListAndOther{
 		Tasks:       tasks,
+		ActiveTasks: activeTaskIDs,
 		Concurrency: concurrency,
+		Updates:     &pb.TaskUpdateList{Updates: taskUpdateList},
 	}, nil
 }
 
@@ -767,124 +854,13 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	return &pb.WorkersList{Workers: workers}, nil
 }
 
-// New regex: operator and value are optional.
-var filterRegex = regexp.MustCompile(`^([a-zA-Z_]+)(?:\s*(>=|<=|>|<|==|=|~|is)\s*(\S+))?$`)
-
-// Maps for field types.
-var numericFields = map[string]bool{
-	"cpu":       true,
-	"mem":       true,
-	"disk":      true,
-	"bandwidth": true,
-	"gpumem":    true,
-	"eviction":  true,
-	"cost":      true,
-}
-var booleanFields = map[string]bool{
-	"has_gpu":         true,
-	"has_quick_disks": true,
-}
-
-// getColumnMapping returns the appropriate table alias and database column name.
-func getColumnMapping(col string) (dbColumn string) {
-	lcol := strings.ToLower(col)
-	switch lcol {
-	case "provider":
-		return "p.provider_name||'.'||p.config_name"
-	case "eviction", "cost":
-		return fmt.Sprintf("fr.%s", lcol)
-	case "region", "region_name":
-		return "r.region_name"
-	case "flavor", "flavor_name":
-		return "f.flavor_name"
-	default:
-		return fmt.Sprintf("f.%s", lcol)
-	}
-}
-
-// parseFilterToken converts a filter token into a SQL condition string.
-// For numeric and string fields, the operator and value are mandatory.
-// For boolean fields, they are optional. For strings, "~" is converted to a LIKE clause.
-func parseFilterToken(token string) (string, error) {
-	token = strings.TrimSpace(token)
-	matches := filterRegex.FindStringSubmatch(token)
-	if len(matches) == 0 {
-		return "", fmt.Errorf("invalid filter token: %s", token)
-	}
-	col := matches[1]
-	op := matches[2]
-	val := matches[3]
-	dbCol := getColumnMapping(col)
-	lowerCol := strings.ToLower(col)
-
-	if op == "is" {
-		if lowerCol == "region" && val == "default" {
-			return "r.is_default", nil
-		} else {
-			return "", fmt.Errorf("invalid 'is' operator for column %s and value %s", col, val)
-		}
-	}
-	// If operator/value are missing...
-	if op == "" || val == "" {
-		// For boolean fields, allow a token like "has_gpu"
-		if booleanFields[lowerCol] {
-			// Return a condition that simply checks the column
-			return dbCol, nil
-		}
-		return "", fmt.Errorf("missing operator or value for field %s", col)
-	}
-
-	// Normalize equality: "==" becomes "=".
-	if op == "==" {
-		op = "="
-	}
-
-	// Validate and construct condition based on field type.
-	if numericFields[lowerCol] {
-		if op == "~" {
-			return "", fmt.Errorf("invalid operator '~' for numeric field %s", col)
-		}
-		// For numeric fields, assume the value is numeric (no quotes)
-		return fmt.Sprintf("%s %s %s", dbCol, op, val), nil
-	} else if booleanFields[lowerCol] {
-		// For boolean fields, if operator is provided, only "=" is allowed.
-		if op != "=" {
-			return "", fmt.Errorf("invalid operator %s for boolean field %s", op, col)
-		}
-		// Return condition as "f.has_gpu = <val>"
-		return fmt.Sprintf("%s %s %s", lowerCol, op, val), nil
-	} else {
-		// For string fields, allow "~" (which converts to LIKE) or normal operators.
-		if op == "~" {
-			return fmt.Sprintf("%s LIKE '%s'", dbCol, val), nil
-		} else if op != "=" {
-			return "", fmt.Errorf("invalid operator %s for string field %s", op, col)
-		}
-		// For equality or other comparisons, ensure that the value is quoted.
-		if !(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
-			val = fmt.Sprintf("'%s'", val)
-		}
-		return fmt.Sprintf("%s %s %s", dbCol, op, val), nil
-	}
-}
-
 func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRequest) (*pb.FlavorsList, error) {
 	var flavors []*pb.Flavor
 
-	var conditions []string
-	if req.Filter != "" {
-		tokens := strings.Split(req.Filter, ":")
-		for _, token := range tokens {
-			token = strings.TrimSpace(token)
-			if token == "" {
-				continue
-			}
-			cond, err := parseFilterToken(token)
-			if err != nil {
-				return nil, fmt.Errorf("could not parse filter %s: %w", token, err)
-			}
-			conditions = append(conditions, cond)
-		}
+	conditions, err := protofilter.ParseProtofilter(req.Filter)
+	if err != nil {
+		log.Printf("⚠️ Failed to parse filter: %v", err)
+		return nil, fmt.Errorf("failed to parse filter: %w", err)
 	}
 
 	baseQuery := `
@@ -969,169 +945,6 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 	}
 
 	return &pb.FlavorsList{Flavors: flavors}, nil
-}
-
-func (s *taskQueueServer) checkProviders() error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to start transaction: %v", err)
-		return fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// First scanning for known providers
-	rows, err := tx.Query(`SELECT provider_id, provider_name, config_name FROM provider ORDER BY provider_id`)
-	if err != nil {
-		log.Printf("⚠️ Failed to list providers: %v", err)
-		return fmt.Errorf("failed to list providers: %w", err)
-	}
-	defer rows.Close()
-
-	// ✅ Store rows into memory before processing (to avoid querying while iterating)
-	type ProviderInfo struct {
-		ProviderID   uint32
-		ProviderName string
-		ConfigName   string
-	}
-	var providers []ProviderInfo
-
-	for rows.Next() {
-		var p ProviderInfo
-		if err := rows.Scan(&p.ProviderID, &p.ProviderName, &p.ConfigName); err != nil {
-			log.Printf("⚠️ Failed to scan provider: %v", err)
-			continue
-		}
-		providers = append(providers, p)
-	}
-	rows.Close() // ✅ Ensure rows are fully processed before executing new queries
-
-	// ✅ Now process each provider safely
-	mappedConfig := make(map[string]map[string]bool)
-	for _, p := range providers {
-		switch p.ProviderName {
-		case "azure":
-			for paramConfigName, config := range s.cfg.Providers.Azure {
-				if p.ConfigName == paramConfigName {
-					provider := azure.New(*config, s.cfg)
-					s.providers[p.ProviderID] = provider
-					if mappedConfig[p.ProviderName] == nil {
-						mappedConfig[p.ProviderName] = make(map[string]bool)
-					}
-					mappedConfig[p.ProviderName][p.ConfigName] = true
-
-					// ✅ Now it's safe to sync regions inside this loop
-					if err := s.syncRegions(tx, p.ProviderID, config.Regions, config.DefaultRegion); err != nil {
-						log.Printf("⚠️ Failed to sync regions for provider %s: %v", p.ConfigName, err)
-					}
-				}
-				log.Printf("Azure provider %s: %v", p.ProviderName, paramConfigName)
-			}
-		default:
-			return fmt.Errorf("unknown provider %s", p.ProviderName)
-		}
-	}
-
-	// Then adding new providers
-	for configName, config := range s.cfg.Providers.Azure {
-		if _, ok := mappedConfig["azure"][configName]; !ok {
-			var providerId uint32
-			log.Printf("Adding Azure provider %s: %v", "azure", configName)
-			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
-				"azure", configName).Scan(&providerId)
-			if err != nil {
-				log.Printf("⚠️ Failed to add provider: %v", err)
-				continue
-			}
-			provider := azure.New(*config, s.cfg)
-			s.providers[providerId] = provider
-
-			// Manage regions for this newly created provider
-			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {
-				return fmt.Errorf("failed to sync regions for new provider %s: %w", configName, err)
-			}
-		}
-	}
-
-	for provider, config := range s.cfg.Providers.Openstack {
-		return fmt.Errorf("openstack provider unsupported yet %s: %v", provider, config)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
-}
-
-func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredRegions []string, defaultRegion string) error {
-	log.Printf("🔄 Syncing regions for provider %d : %v", providerId, configuredRegions)
-	// Track existing regions
-	existingRegions := make(map[string]uint32)
-	defaultRegions := make(map[string]bool)
-	rows, err := tx.Query(`SELECT region_id, region_name, is_default FROM region WHERE provider_id = $1`, providerId)
-	if err != nil {
-		log.Printf("⚠️ Failed to list regions for provider %d: %v", providerId, err)
-		return fmt.Errorf("failed to list regions: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var regionId uint32
-		var regionName string
-		var isDefault bool
-		if err := rows.Scan(&regionId, &regionName, &isDefault); err != nil {
-			log.Printf("⚠️ Failed to scan region: %v", err)
-			continue
-		}
-		existingRegions[regionName] = regionId
-		defaultRegions[regionName] = isDefault
-	}
-
-	// Track configured regions
-	configuredRegionSet := make(map[string]bool)
-	for _, region := range configuredRegions {
-		configuredRegionSet[region] = true
-		if _, exists := existingRegions[region]; !exists {
-			// Insert missing region
-			_, err := tx.Exec(`INSERT INTO region (provider_id, region_name, is_default) VALUES ($1, $2, $3)`, providerId, region, region == defaultRegion)
-			if err != nil {
-				log.Printf("⚠️ Failed to insert region %s: %v", region, err)
-				return fmt.Errorf("failed to insert region %s: %w", region, err)
-			}
-			log.Printf("✅ Added new region %s for provider %d", region, providerId)
-		}
-	}
-
-	// Remove regions that are in DB but not in config
-	for region, regionId := range existingRegions {
-		if !configuredRegionSet[region] {
-			if err := s.cleanupRegion(tx, regionId, region, providerId); err != nil {
-				return err
-			}
-		} else if defaultRegions[region] != (region == defaultRegion) {
-			log.Printf("Updating region %s", region)
-			_, err = tx.Exec(`UPDATE region SET is_default=$3 WHERE provider_id=$1 AND region_name=$2`, providerId, region, region == defaultRegion)
-			if err != nil {
-				log.Printf("⚠️ Failed to update region %s: %v", region, err)
-				return fmt.Errorf("failed to update region %s: %w", region, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (s *taskQueueServer) cleanupRegion(tx *sql.Tx, regionId uint32, regionName string, providerId uint32) error {
-	log.Printf("🛑 Removing region %s (ID: %d) for provider %d", regionName, regionId, providerId)
-
-	_, err := tx.Exec(`DELETE FROM region WHERE region_id = $1`, regionId)
-	if err != nil {
-		log.Printf("⚠️ Failed to delete region %s: %v", regionName, err)
-		return fmt.Errorf("failed to delete region %s: %w", regionName, err)
-	}
-
-	log.Printf("✅ Successfully deleted region %s (ID: %d)", regionName, regionId)
-	return nil
 }
 
 func generateJWT(userID uint32, username, secret string) (string, error) {
@@ -1243,7 +1056,6 @@ func joinWithComma(fields []string) string {
 }
 
 func (s *taskQueueServer) UpdateUser(ctx context.Context, req *pb.User) (*pb.Ack, error) {
-
 	if !IsAdmin(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
 	}
@@ -1304,6 +1116,284 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 	return &pb.Ack{Success: true}, nil
 }
 
+func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
+	query := `SELECT step_id, rank, protofilter,
+		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
+		FROM recruiter
+		ORDER BY step_id, rank`
+
+	args := []interface{}{}
+	if req.StepId != nil {
+		query += " WHERE step_id = $1"
+		args = append(args, *req.StepId)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recruiters: %w", err)
+	}
+	defer rows.Close()
+
+	var recruiters []*pb.Recruiter
+	for rows.Next() {
+		var recruiter pb.Recruiter
+		if err := rows.Scan(
+			&recruiter.StepId, &recruiter.Rank, &recruiter.Protofilter,
+			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Rounds, &recruiter.Timeout); err != nil {
+			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
+		}
+		recruiters = append(recruiters, &recruiter)
+	}
+
+	return &pb.RecruiterList{Recruiters: recruiters}, nil
+}
+
+func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
+	var err error
+	// Insert with embedded subqueries for provider_id and region_id
+	if req.MaxWorkers == nil {
+		_, err = s.db.ExecContext(ctx, `
+			INSERT INTO recruiter (
+				step_id, rank, protofilter,
+				worker_concurrency, worker_prefetch, rounds, timeout
+			) VALUES (
+				$1, $2, $3,
+				$4, $5, $6, $7
+			)
+		`,
+			req.StepId, req.Rank, req.Protofilter,
+			req.Concurrency, req.Prefetch, req.Rounds, req.Timeout,
+		)
+	} else {
+		_, err = s.db.ExecContext(ctx, `
+			INSERT INTO recruiter (
+				step_id, rank, protofilter,
+				worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
+			) VALUES (
+				$1, $2, $3,
+				$4, $5, $6, $7, $8
+			)
+		`,
+			req.StepId, req.Rank, req.Protofilter,
+			req.Concurrency, req.Prefetch, *req.MaxWorkers, req.Rounds, req.Timeout,
+		)
+	}
+
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to insert recruiter: %w", err)
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.RecruiterId) (*pb.Ack, error) {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM recruiter
+		WHERE step_id = $1 AND rank = $2
+	`, req.StepId, req.Rank)
+
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete recruiter: %w", err)
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.RecruiterUpdate) (*pb.Ack, error) {
+	// Base of the update query
+	q := "UPDATE recruiter SET "
+	args := []any{}
+	clauses := []string{}
+
+	if req.Protofilter != nil {
+		clauses = append(clauses, fmt.Sprintf("protofilter = $%d", len(args)+1))
+		args = append(args, *req.Protofilter)
+	}
+	if req.Concurrency != nil {
+		clauses = append(clauses, fmt.Sprintf("worker_concurrency = $%d", len(args)+1))
+		args = append(args, *req.Concurrency)
+	}
+	if req.Prefetch != nil {
+		clauses = append(clauses, fmt.Sprintf("worker_prefetch = $%d", len(args)+1))
+		args = append(args, *req.Prefetch)
+	}
+	if req.MaxWorkers != nil {
+		clauses = append(clauses, fmt.Sprintf("maximum_workers = $%d", len(args)+1))
+		args = append(args, *req.MaxWorkers)
+	}
+	if req.Rounds != nil {
+		clauses = append(clauses, fmt.Sprintf("rounds = $%d", len(args)+1))
+		args = append(args, *req.Rounds)
+	}
+	if req.Timeout != nil {
+		clauses = append(clauses, fmt.Sprintf("timeout = $%d", len(args)+1))
+		args = append(args, *req.Timeout)
+	}
+
+	if len(clauses) == 0 {
+		return &pb.Ack{Success: false}, fmt.Errorf("no fields to update")
+	}
+
+	// Finalize query with WHERE clause
+	q += strings.Join(clauses, ", ") + fmt.Sprintf(" WHERE step_id = $%d AND rank = $%d", len(args)+1, len(args)+2)
+	args = append(args, req.StepId, req.Rank)
+
+	_, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update recruiter: %w", err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
+	query := `SELECT workflow_id, workflow_name, run_strategy, maximum_workers FROM workflow`
+	var rows *sql.Rows
+	var err error
+	if req.NameLike != nil {
+		rows, err = s.db.Query(query+" WHERE workflow_name ILIKE $1", req.NameLike)
+	} else {
+		rows, err = s.db.Query(query)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query workflows: %w", err)
+	}
+	defer rows.Close()
+
+	var workflows []*pb.Workflow
+	for rows.Next() {
+		var wf pb.Workflow
+		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
+			return nil, fmt.Errorf("failed to scan workflow: %w", err)
+		}
+		workflows = append(workflows, &wf)
+	}
+	return &pb.WorkflowList{Workflows: workflows}, nil
+}
+
+func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRequest) (*pb.WorkflowId, error) {
+	if req.Name == "" {
+		return nil, fmt.Errorf("workflow name is required")
+	}
+
+	if req.RunStrategy == nil || *req.RunStrategy == "" {
+		defaultRunStrategy := "B"
+		req.RunStrategy = &defaultRunStrategy
+	}
+
+	var workflowID uint32
+	var err error
+	if req.MaximumWorkers == nil {
+		err = s.db.QueryRow(`
+			INSERT INTO workflow (workflow_name, run_strategy)
+			VALUES ($1, $2)
+			RETURNING workflow_id
+		`, req.Name, req.RunStrategy).Scan(&workflowID)
+	} else {
+		err = s.db.QueryRow(`
+		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers)
+		VALUES ($1, $2, $3)
+		RETURNING workflow_id
+	`, req.Name, req.RunStrategy, *req.MaximumWorkers).Scan(&workflowID)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert workflow: %w", err)
+	}
+
+	return &pb.WorkflowId{WorkflowId: workflowID}, nil
+}
+
+func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId) (*pb.Ack, error) {
+	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) ListSteps(ctx context.Context, req *pb.WorkflowId) (*pb.StepList, error) {
+	rows, err := s.db.Query(`SELECT step_id, workflow_name, step_name FROM step s 
+		JOIN workflow w ON w.workflow_id=s.workflow_id WHERE s.workflow_id = $1`, req.WorkflowId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query steps: %w", err)
+	}
+	defer rows.Close()
+
+	var steps []*pb.Step
+	for rows.Next() {
+		var st pb.Step
+		if err := rows.Scan(&st.StepId, &st.WorkflowName, &st.Name); err != nil {
+			return nil, fmt.Errorf("failed to scan step: %w", err)
+		}
+		steps = append(steps, &st)
+	}
+	return &pb.StepList{Steps: steps}, nil
+}
+
+func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (*pb.StepId, error) {
+	if req.Name == "" {
+		return nil, fmt.Errorf("step name is required")
+	}
+
+	if req.WorkflowId != nil && *req.WorkflowId != 0 {
+		var stepID uint32
+		err := s.db.QueryRow(`
+			INSERT INTO step (step_name, workflow_id)
+			VALUES ($1, $2)
+			RETURNING step_id
+		`, req.Name, *req.WorkflowId).Scan(&stepID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert step with workflow id %d: %w", *req.WorkflowId, err)
+		}
+		return &pb.StepId{StepId: stepID}, nil
+
+	} else if req.WorkflowName != nil {
+		var stepID uint32
+		err := s.db.QueryRow(`
+			WITH wf AS (
+				SELECT w.workflow_id FROM workflow w WHERE w.workflow_name = $1
+			)
+			INSERT INTO step (step_name, workflow_id)
+			SELECT $2, wf.workflow_id FROM wf
+			RETURNING step_id
+		`, *req.WorkflowName, req.Name).Scan(&stepID)
+
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("workflow with name %q not found", *req.WorkflowName)
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to query workflow %q: %w", *req.WorkflowName, err)
+		}
+		return &pb.StepId{StepId: stepID}, nil
+	}
+
+	return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
+}
+
+func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.Ack, error) {
+	_, err := s.db.Exec(`DELETE FROM step WHERE step_id = $1`, req.StepId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete step: %w", err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) GetWorkerStats(ctx context.Context, req *pb.GetWorkerStatsRequest) (*pb.GetWorkerStatsResponse, error) {
+	resp := &pb.GetWorkerStatsResponse{
+		WorkerStats: make(map[uint32]*pb.WorkerStats),
+	}
+
+	for _, workerID := range req.WorkerIds {
+		if v, ok := s.workerStats.Load(workerID); ok {
+			if stats, ok := v.(*pb.WorkerStats); ok {
+				resp.WorkerStats[workerID] = stats
+			}
+		}
+	}
+
+	return resp, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -1351,12 +1441,38 @@ func LoadEmbeddedCertificates() (tls.Certificate, error) {
 	return serverCert, err
 }
 
+func (s *taskQueueServer) Shutdown() {
+	close(s.stopWatchdog)
+	// Other cleanup if needed later
+}
+
 func Serve(cfg config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 	db, err := sql.Open("pgx", cfg.Scitq.DBURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(cfg.Scitq.MaxDBConcurrency * 2)
+	db.SetMaxIdleConns(cfg.Scitq.MaxDBConcurrency * 2)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			stats := db.Stats()
+			log.Printf("🔎 DB connections - Open: %d, InUse: %d, Idle: %d, WaitCount: %d, WaitDuration: %s",
+				stats.OpenConnections,
+				stats.InUse,
+				stats.Idle,
+				stats.WaitCount,
+				stats.WaitDuration,
+			)
+		}
+	}()
 
 	// Apply migrations on startup
 	if err := applyMigrations(db); err != nil {
@@ -1386,8 +1502,8 @@ func Serve(cfg config.Config) error {
 	grpcServer := grpc.NewServer(
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
+		grpc.MaxConcurrentStreams(uint32(cfg.Scitq.MaxDBConcurrency)),
 	)
-
 
 	go func() error {
 		db, err := sql.Open("pgx", cfg.Scitq.DBURL)
@@ -1397,6 +1513,12 @@ func Serve(cfg config.Config) error {
 		defer db.Close()
 
 		s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+		defer s.Shutdown()
+
+		// initialize the quota manager
+		s.qm = *recruitment.NewQuotaManager(&cfg)
+		recruitment.StartRecruiterLoop(context.Background(), s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
+
 		s.checkProviders()
 		s.startJobQueue()
 		pb.RegisterTaskQueueServer(grpcServer, s)
@@ -1405,7 +1527,6 @@ func Serve(cfg config.Config) error {
 		if err != nil {
 			return fmt.Errorf("failed to listen: %v", err)
 		}
-	
 
 		// **Trigger task assignment**
 		s.triggerAssign()
@@ -1432,7 +1553,6 @@ func Serve(cfg config.Config) error {
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, x-grpc-web, x-user-agent, grpc-timeout, Authorization")
-
 
 		// === Gérer les requêtes préflight OPTIONS ===
 		if r.Method == http.MethodOptions {

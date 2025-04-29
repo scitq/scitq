@@ -3,6 +3,7 @@ package azure
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
@@ -182,11 +184,11 @@ func (ap *AzureProvider) Create(workerName, flavor, location string) (string, er
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f"`,
+  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s"`,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
 			ap.cfg.Scitq.DockerRegistry, ap.cfg.Scitq.DockerAuthentication,
-			ap.cfg.Scitq.SwapProportion)
+			ap.cfg.Scitq.SwapProportion, ap.cfg.Scitq.WorkerToken)
 		customData := base64.StdEncoding.EncodeToString([]byte(cloudInit))
 
 		// Create credential.
@@ -496,9 +498,21 @@ func (ap *AzureProvider) Delete(workerName string) error {
 	err = retry(func() error {
 		poller, err := vmClient.BeginDelete(ctx, rgName, vmName, nil)
 		if err != nil {
+			var respErr *azcore.ResponseError
+			if errors.As(err, &respErr) && respErr.StatusCode == 404 {
+				log.Printf("VM %s already deleted or not found, continuing: %v", vmName, respErr.Error())
+				return nil
+			}
 			return fmt.Errorf("failed to begin VM deletion: %w", err)
 		}
 		_, err = poller.PollUntilDone(ctx, nil)
+		if err != nil {
+			var respErr *azcore.ResponseError
+			if errors.As(err, &respErr) && respErr.StatusCode == 404 {
+				log.Printf("VM %s deletion polling got 404, assuming already gone: %v", vmName, respErr.Error())
+				return nil
+			}
+		}
 		return err
 	}, 3, 5*time.Second)
 	if err != nil {
@@ -518,9 +532,21 @@ func (ap *AzureProvider) Delete(workerName string) error {
 	err = retry(func() error {
 		rgPoller, err := rgClient.BeginDelete(ctx, rgName, nil)
 		if err != nil {
+			var respErr *azcore.ResponseError
+			if errors.As(err, &respErr) && respErr.StatusCode == 404 {
+				log.Printf("Resource group %s already deleted or not found, continuing: %v", rgName, respErr.Error())
+				return nil
+			}
 			return fmt.Errorf("failed to begin deletion of resource group: %w", err)
 		}
 		_, err = rgPoller.PollUntilDone(ctx, nil)
+		if err != nil {
+			var respErr *azcore.ResponseError
+			if errors.As(err, &respErr) && respErr.StatusCode == 404 {
+				log.Printf("Resource group %s deletion polling got 404, assuming already gone: %v", rgName, respErr.Error())
+				return nil
+			}
+		}
 		return err
 	}, 3, 5*time.Second)
 	if err != nil {

@@ -11,15 +11,16 @@ import (
 
 // Job represents a task to be executed.
 type Job struct {
-	JobID      uint32
-	WorkerID   uint32
-	WorkerName string
-	ProviderID uint32
-	Region     string
-	Flavor     string
-	Action     rune // "C", "D", "R"
-	Retry      int
-	Timeout    time.Duration
+	JobID         uint32
+	WorkerID      uint32
+	WorkerName    string
+	ProviderID    uint32
+	Region        string
+	Flavor        string
+	Action        rune // "C", "D", "R"
+	Retry         int
+	Timeout       time.Duration
+	FromRecruiter bool
 }
 
 // Start initializes the job queue.
@@ -95,6 +96,7 @@ func (s *taskQueueServer) processJob(job Job) error {
 	// Implement job processing logic here (create, delete, restart)
 	switch job.Action {
 	case 'C': // Create
+		// Create the worker
 		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region)
 		if err != nil {
 			return fmt.Errorf("failed to create worker %s: %v", job.WorkerName, err)
@@ -104,14 +106,35 @@ func (s *taskQueueServer) processJob(job Job) error {
 			return fmt.Errorf("worker created but db update failed %s: %v", job.WorkerName, err)
 		}
 	case 'D': // Delete
+		// Delete the worker
 		err := s.providers[job.ProviderID].Delete(job.WorkerName)
 		if err != nil {
 			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
 		}
-		_, err = s.db.Exec("DELETE FROM worker WHERE worker_id=$1", job.WorkerID)
+		// Update the worker state
+		// Update the database
+		var provider string
+		var cpu int32
+		var mem float32
+
+		err = s.db.QueryRow(`
+			DELETE FROM worker
+			USING flavor f, provider p
+			WHERE worker.worker_id = $1
+			  AND worker.flavor_id = f.flavor_id
+			  AND f.provider_id = p.provider_id
+			RETURNING p.provider_name || '.' || p.config_name AS provider,
+					  f.cpu,
+					  f.mem
+		`, job.WorkerID).Scan(&provider, &cpu, &mem)
+
 		if err != nil {
-			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
+			return fmt.Errorf("failed to delete worker %d with quota data: %v", job.WorkerID, err)
 		}
+		// Update quota manager
+		s.qm.RegisterDelete(job.Region, provider, cpu, mem)
+		// Update watchdog
+		s.watchdog.WorkerDeleted(job.WorkerID)
 	case 'R': // Restart
 		return s.providers[job.ProviderID].Restart(job.WorkerName)
 	default:

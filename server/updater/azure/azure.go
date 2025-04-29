@@ -103,7 +103,7 @@ type Azure struct {
 	// ComputeClient        *armcompute.VirtualMachineSizesClient
 	// ResourceGraphClient  *armresourcegraph.Client
 	Regions          []string
-	Quotas           map[string]int
+	Quotas           map[string]config.Quota
 	FlavorMetricsMap map[string]*updater.FlavorMetrics // key: "flavor|region"
 }
 
