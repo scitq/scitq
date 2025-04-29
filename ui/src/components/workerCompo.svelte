@@ -1,9 +1,10 @@
 <script lang="ts">
   import * as grpcWeb from 'grpc-web';
   import { onMount } from 'svelte';
-  import { delWorker, getWorkers, updateWorkerConfig } from '../lib/api';
+  import { delWorker, getWorkers, updateWorkerConfig, getStatusClass, getStatusText } from '../lib/api';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser } from 'lucide-svelte';
   import '../styles/worker.css';
+  import '../styles/jobsCompo.css';
 
   let workers: Worker[] = [];
 
@@ -11,6 +12,7 @@
     workers = await getWorkers();
   });
 
+  // Function to update concurrency or prefetch values
   const updateValue = async (worker, field: 'concurrency' | 'prefetch', delta: number) => {
     console.log(worker);
     const newValue = Math.max(0, worker[field] + delta);
@@ -26,7 +28,7 @@
     <table>
       <thead>
         <tr>
-          <th>Nom</th>
+          <th>Name</th>
           <th>Batch</th>
           <th>Status</th>
           <th>Concurrency</th>
@@ -47,22 +49,25 @@
       <tbody>
         {#each workers as worker (worker.workerId)}
           <tr>
+            <!-- Worker name clickable to open task view -->
             <td class="clickable" on:click={() => goToTaskView(worker.name)}>{worker.name}</td>
             <td>{worker.batch}</td>
-            <td>{worker.status}</td>
-            
-            <!-- Concurrency editable -->
             <td>
-              <button class="small-btn" on:click={() => updateValue(worker, 'concurrency', -1)}>-</button>
-              {worker.concurrency}
-              <button class="small-btn" on:click={() => updateValue(worker, 'concurrency', 1)}>+</button>
+              <div class="status-pill {getStatusClass(worker.status)}" title={getStatusText(worker.status)}></div>
             </td>
 
-            <!-- Prefetch editable -->
+            <!-- Editable concurrency -->
             <td>
-              <button class="small-btn" on:click={() => updateValue(worker, 'prefetch', -1)}>-</button>
+              <button class="small-btn" data-testid={`decrease-concurrency-${worker.workerId}`} on:click={() => updateValue(worker, 'concurrency', -1)}>-</button>
+              {worker.concurrency}
+              <button class="small-btn" data-testid={`increase-concurrency-${worker.workerId}`} on:click={() => updateValue(worker, 'concurrency', 1)}>+</button>
+            </td>
+
+            <!-- Editable prefetch -->
+            <td>
+              <button class="small-btn" data-testid={`decrease-prefetch-${worker.workerId}`} on:click={() => updateValue(worker, 'prefetch', -1)}>-</button>
               {worker.prefetch}
-              <button class="small-btn" on:click={() => updateValue(worker, 'prefetch', 1)}>+</button>
+              <button class="small-btn" data-testid={`increase-prefetch-${worker.workerId}`} on:click={() => updateValue(worker, 'prefetch', 1)}>+</button>
             </td>
 
             <td>{worker.accepted}</td>
@@ -76,19 +81,20 @@
             <td>{worker.diskRW}</td>
             <td>{worker.netIO}</td>
 
+            <!-- Action buttons -->
             <td class="actions">
               <button><Edit /></button>
               <button><PauseCircle /></button>
               <button><Eraser /></button>
               <button><RefreshCw /></button>
               <button on:click={() => {
-                console.log('Worker ID:', worker.workerId);  // Log pour vérifier l'ID
+                console.log('Worker ID:', worker.workerId);
                 if (worker.workerId) {
-                  delWorker({ workerId: worker.workerId });  // Passe un objet avec workerId
+                  delWorker({ workerId: worker.workerId });
                 } else {
                   console.error('Invalid Worker ID');
                 }
-              }}>
+              }} data-testid={`delete-worker-${worker.workerId}`}>
                 <Trash />
               </button>
             </td>
@@ -98,5 +104,5 @@
     </table>
   </div>
 {:else}
-  <p>Aucun worker.</p>
+  <p class="p1-worker">No workers found.</p>
 {/if}

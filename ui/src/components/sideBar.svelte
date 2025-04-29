@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { Home, ListChecks, Package, Settings, Power, ChevronDown } from 'lucide-svelte'; // Icônes de Lucide
-    import logo from '../assets/icons/logoGMT.png';
-    import '../styles/dashboard.css'
+  import { Home, ListChecks, Package, Settings, Power, ChevronDown } from 'lucide-svelte';
+  import logo from '../assets/icons/logoGMT.png';
+  import '../styles/dashboard.css';
 
-    export let isSidebarVisible: boolean;
-    export let toggleSidebar: () => void;  
+  export let isSidebarVisible: boolean;
+  export let toggleSidebar: () => void;
 
-    let tasksOpen = false;
+  let tasksOpen = false;
 </script>
 
 <aside class={`sidebar`}>
@@ -16,49 +16,49 @@
   </div>
 
   <nav class="sidebar-nav">
-    <!-- Dashboard avec l'icône maison -->
+    <!-- Dashboard navigation -->
     <a class="nav-link" href="#">
       <Home class="icon" /> Dashboard
     </a>
 
     <div class="nav-section">
-        <!-- Bouton au lieu de div pour accessibilité -->
-        <button
-          class="nav-link dropdown"
-          aria-expanded={tasksOpen}
-          aria-controls="task-submenu"
-          on:click={() => (tasksOpen = !tasksOpen)}
-        >
-          <div class="left">
-            <ListChecks class="icon" />
-            Tasks
-          </div>
-          <ChevronDown class="chevron" />
-        </button>
-      
-        {#if tasksOpen}
-          <div class="submenu" id="task-submenu">
-            <a href="#">Pending</a>
-            <a href="#">Assigned</a>
-            <a href="#">Accepted</a>
-            <a href="#">Running</a>
-            <a href="#">Failed</a>
-            <a href="#">Succeeded</a>
-          </div>
-        {/if}
-      </div>
+      <!-- Toggle for the task submenu -->
+      <button
+        class="nav-link dropdown"
+        aria-expanded={tasksOpen}
+        aria-controls="task-submenu"
+        on:click={() => (tasksOpen = !tasksOpen)}
+      >
+        <div class="left">
+          <ListChecks class="icon" />
+          Tasks
+        </div>
+        <ChevronDown class="chevron" />
+      </button>
 
-    <!-- Batch avec l'icône de paquet -->
+      {#if tasksOpen}
+        <div class="submenu" id="task-submenu">
+          <a href="#">Pending</a>
+          <a href="#">Assigned</a>
+          <a href="#">Accepted</a>
+          <a href="#">Running</a>
+          <a href="#">Failed</a>
+          <a href="#">Succeeded</a>
+        </div>
+      {/if}
+    </div>
+
+    <!-- Batch navigation -->
     <a class="nav-link" href="#">
       <Package class="icon" /> Batch
     </a>
 
-    <!-- Settings avec l'icône de rouage -->
+    <!-- Settings navigation -->
     <a class="nav-link" href="#">
       <Settings class="icon" /> Settings
     </a>
 
-    <!-- Log out avec l'icône de Power -->
+    <!-- Log out navigation -->
     <a class="nav-link logout" href="#">
       <Power class="icon" /> Log out
     </a>

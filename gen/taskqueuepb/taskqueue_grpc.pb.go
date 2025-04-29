@@ -31,6 +31,7 @@ const (
 	TaskQueue_CreateWorker_FullMethodName        = "/taskqueue.TaskQueue/CreateWorker"
 	TaskQueue_DeleteWorker_FullMethodName        = "/taskqueue.TaskQueue/DeleteWorker"
 	TaskQueue_UpdateWorker_FullMethodName        = "/taskqueue.TaskQueue/UpdateWorker"
+	TaskQueue_ListJobs_FullMethodName            = "/taskqueue.TaskQueue/ListJobs"
 	TaskQueue_ListFlavors_FullMethodName         = "/taskqueue.TaskQueue/ListFlavors"
 	TaskQueue_GetRcloneConfig_FullMethodName     = "/taskqueue.TaskQueue/GetRcloneConfig"
 	TaskQueue_Login_FullMethodName               = "/taskqueue.TaskQueue/Login"
@@ -56,6 +57,7 @@ type TaskQueueClient interface {
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
 	DeleteWorker(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*Ack, error)
 	UpdateWorker(ctx context.Context, in *WorkerUpdateRequest, opts ...grpc.CallOption) (*Ack, error)
+	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*JobsList, error)
 	ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error)
 	GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneConfig, error)
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
@@ -196,6 +198,16 @@ func (c *taskQueueClient) UpdateWorker(ctx context.Context, in *WorkerUpdateRequ
 	return out, nil
 }
 
+func (c *taskQueueClient) ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*JobsList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JobsList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListJobs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FlavorsList)
@@ -291,6 +303,7 @@ type TaskQueueServer interface {
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
 	DeleteWorker(context.Context, *WorkerId) (*Ack, error)
 	UpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error)
+	ListJobs(context.Context, *ListJobsRequest) (*JobsList, error)
 	ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error)
 	GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error)
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
@@ -341,6 +354,9 @@ func (UnimplementedTaskQueueServer) DeleteWorker(context.Context, *WorkerId) (*A
 }
 func (UnimplementedTaskQueueServer) UpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateWorker not implemented")
+}
+func (UnimplementedTaskQueueServer) ListJobs(context.Context, *ListJobsRequest) (*JobsList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListJobs not implemented")
 }
 func (UnimplementedTaskQueueServer) ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFlavors not implemented")
@@ -567,6 +583,24 @@ func _TaskQueue_UpdateWorker_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ListJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListJobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListJobs(ctx, req.(*ListJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_ListFlavors_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListFlavorsRequest)
 	if err := dec(in); err != nil {
@@ -753,6 +787,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateWorker",
 			Handler:    _TaskQueue_UpdateWorker_Handler,
+		},
+		{
+			MethodName: "ListJobs",
+			Handler:    _TaskQueue_ListJobs_Handler,
 		},
 		{
 			MethodName: "ListFlavors",

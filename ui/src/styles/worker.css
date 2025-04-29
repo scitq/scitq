@@ -1,75 +1,97 @@
-/* Tableau de base */
+/* === Basic Table Styles === */
+
+/* Basic table styles */
 table {
-    width: auto;
-    min-width: 100%;
-    border-collapse: collapse;
-    color: black;
-  }
-  
-  table, th, td {
-    font-size: 0.85rem;
-  }
-  
-  .table-wrapper {
-    max-width: 100%;
-    margin: auto;
-    overflow-x: auto;
-  }
-  
-  th, td {
-    padding: 0.1rem 0.5rem;
-    border: 1px solid #333;
-    text-align: center;
-    vertical-align: middle;
-    white-space: nowrap;
-  }
-  
-  th {
-    background-color: grey;
-    color: black;
-  }
-  
-  tr:nth-child(even) {
-    background-color: #f2f2f2; /* Un léger gris clair pour les lignes paires */
-  }
-  
-  /* Style pour les boutons d'action */
-  .actions button {
-    font-size: 0.75rem; /* Taille de texte plus petite */
-    background: #192245;
-    border: 1px solid #444;
-    color: white;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.3s, transform 0.2s; /* Transition pour les effets */
-  }
-  
-  /* Changement de fond au survol */
-  .actions button:hover {
-    background: #333;
-    transform: scale(1.1); /* Agrandissement léger au survol */
-  }
-  
-  /* Redimensionner les icônes pour les rendre plus petites */
-  .actions button svg {
-    width: 14px; /* Icônes plus petites */
-    height: 14px;
-    color: white;
-    transition: color 0.2s; /* Transition pour la couleur de l'icône */
-  }
-  
-  /* Changer la couleur de l'icône au survol */
-  .actions button:hover svg {
-    color: #ffeb3b; /* Jaune doré pour l'icône au survol */
-  }
-  
-  /* Ajout de style pour les éléments cliquables (comme les noms de worker) */
-  .clickable {
-    cursor: pointer;
-    text-decoration: underline;
-    color: #4ea6ff;
-  }
-  
-  .clickable:hover {
-    color: #82cfff;
-  }
+  width: auto; /* Width is set to auto */
+  min-width: 100%; /* Ensure the table takes up at least 100% of the available width */
+  border-collapse: collapse; /* Collapse borders between table cells */
+  color: black; /* Text color inside the table */
+}
+
+/* Font size for table, header cells, and data cells */
+table, th, td {
+  font-size: 0.85rem; /* Font size set to 0.85rem */
+}
+
+/* Wrapper for the table */
+.table-wrapper {
+  max-width: 100%; /* Maximum width is 100% of the parent container */
+  margin: auto; /* Center the table horizontally */
+  overflow-x: auto; /* Allow horizontal scrolling if the table overflows */
+}
+
+/* Table header and data cell styles */
+th, td {
+  padding: 0.1rem 0.5rem; /* Padding inside table cells */
+  border: 1px solid #333; /* Border color for cells */
+  text-align: center; /* Center text horizontally */
+  vertical-align: middle; /* Vertically align content in the center */
+  white-space: nowrap; /* Prevent text from wrapping to the next line */
+}
+
+/* Table header specific styles */
+th {
+  background-color: grey; /* Background color for the header */
+  color: black; /* Text color for the header */
+}
+
+/* Alternating row colors */
+tr:nth-child(even) {
+  background-color: #f2f2f2; /* Light gray background for even rows */
+}
+
+/* === Action Buttons Styles === */
+
+/* Style for action buttons */
+.actions button {
+  font-size: 0.75rem; /* Smaller font size */
+  background: #192245; /* Dark blue background */
+  border: 1px solid #444; /* Border color for the button */
+  color: white; /* White text color */
+  border-radius: 4px; /* Rounded corners */
+  cursor: pointer; /* Pointer cursor to indicate clickable button */
+  box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.5); /* Soft shadow around the button */
+  transition: background 0.3s, transform 0.2s; /* Transition effect for background and transform */
+}
+
+/* Hover effect for buttons */
+.actions button:hover {
+  background: #333; /* Darker background on hover */
+  transform: scale(1.1); /* Slightly enlarge the button on hover */
+}
+
+/* === Icon Inside Buttons === */
+
+/* Style for the SVG icon inside buttons */
+.actions button svg {
+  width: 14px; /* Smaller icon size */
+  height: 14px; /* Icon height */
+  color: white; /* Icon color is white */
+  transition: color 0.2s; /* Smooth transition for icon color */
+}
+
+/* Hover effect for the icon inside the button */
+.actions button:hover svg {
+  color: #ffeb3b; /* Yellow color for the icon on hover */
+}
+
+/* === Clickable Text Styles === */
+
+/* Styling for clickable text (usually links or interactive text) */
+.clickable {
+  cursor: pointer; /* Pointer cursor to indicate it's clickable */
+  text-decoration: underline; /* Underline text */
+  color: #4ea6ff; /* Light blue text color */
+}
+
+/* Hover effect for clickable text */
+.clickable:hover {
+  color: #82cfff; /* Lighter blue color on hover */
+}
+
+/* === Worker Table Alignment === */
+
+/* Center align the worker's text */
+.p1-worker {
+  text-align: center; /* Center text horizontally */
+}

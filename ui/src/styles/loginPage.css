@@ -1,55 +1,67 @@
+/* === Page Wrapper Styles === */
+
+/* Main wrapper for the page that covers the entire viewport height */
 .page-wrapper {
-    position: relative;
-    min-height: 100vh;
-    background-image: url('../assets/images/login.jpg');
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
-    height: 100vh;
-    width: 100%;
-    overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 0; /* facultatif si tu veux 0 espace */
+    position: relative; /* Relative positioning to position child elements absolutely */
+    min-height: 100vh; /* Minimum height of 100% of the viewport */
+    background-image: url('../assets/images/login.jpg'); /* Background image */
+    background-size: cover; /* Cover the entire area with the background image */
+    background-position: center; /* Center the background image */
+    background-repeat: no-repeat; /* No repetition of the background image */
+    display: flex; /* Flexbox to align child elements */
+    flex-direction: column; /* Align items vertically */
+    align-items: center; /* Center items horizontally */
+    justify-content: center; /* Center items vertically */
+    padding: 2rem; /* Padding around the content */
+    height: 100vh; /* Full viewport height */
+    width: 100%; /* Full width */
+    overflow: hidden; /* Prevent content overflow */
+    padding: 0; /* Optional: remove default padding */
 }
 
+/* === Header for the Login Page === */
+
+/* Header containing the logo and text on the right */
 .header_login {
-    position: absolute;
-    top: 1rem;
-    left: 1rem;
-    right: 1rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    color: white;
-    font-weight: bold;
-    font-size: 1.2rem;
-    z-index: 10;
+    position: absolute; /* Absolute positioning relative to the parent (page-wrapper) */
+    top: 1rem; /* Margin from the top */
+    left: 1rem; /* Margin from the left */
+    right: 1rem; /* Margin from the right */
+    display: flex; /* Flexbox to arrange elements in a row */
+    justify-content: space-between; /* Space between the left and right elements */
+    align-items: center; /* Vertically align elements */
+    color: white; /* White text */
+    font-weight: bold; /* Bold text */
+    font-size: 1.2rem; /* Font size of 1.2rem */
+    z-index: 10; /* Ensures the header stays above other elements */
 }
 
+/* === Top-Right Section Styles === */
+
+/* Container for text and logo in the top-right corner */
 .top-right {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    display: flex; /* Flexbox for aligning elements */
+    align-items: center; /* Vertically align items */
+    gap: 0.5rem; /* Space between text and logo */
 }
 
-.login-page-logo {
-    height: 40px;
-    width: auto;
-  }
+/* === Logo Styles === */
 
+/* Size for the logo on the login page */
+.login-page-logo {
+    height: 40px; /* Height of the logo */
+    width: auto; /* Auto width to maintain aspect ratio */
+}
+
+/* === Login Container Styles === */
+
+/* Container for the login form */
 .login-container {
-    max-width: 400px;
-    width: 100%;
-    background: white;
-    border-radius: 8px;
-    padding: 2rem;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-    z-index: 5;
+    max-width: 400px; /* Maximum width of the container */
+    width: 100%; /* Full width of its parent */
+    background: white; /* White background */
+    border-radius: 8px; /* Rounded corners */
+    padding: 2rem; /* Padding around the form */
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2); /* Soft shadow for depth */
+    z-index: 5; /* Ensures the container stays above other elements */
 }

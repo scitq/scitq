@@ -1,105 +1,137 @@
+/* === Root Styles === */
+
+/* Root element default styles */
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif; /* Default font stack */
+  line-height: 1.5; /* Line height for text */
+  font-weight: 400; /* Normal font weight */
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  color-scheme: light dark; /* Define color scheme preference (light/dark) */
+  color: rgba(255, 255, 255, 0.87); /* Text color */
+  background-color: #242424; /* Dark background color */
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none; /* Disable font synthesis (italics, etc.) */
+  text-rendering: optimizeLegibility; /* Optimize text rendering for better legibility */
+  -webkit-font-smoothing: antialiased; /* Smooth fonts for Webkit browsers */
+  -moz-osx-font-smoothing: grayscale; /* Smooth fonts for Firefox on macOS */
 }
 
+/* === Link Styles === */
+
+/* Style for links */
 a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+  font-weight: 500; /* Medium font weight for links */
+  color: #646cff; /* Blue color for links */
+  text-decoration: inherit; /* Remove underline */
 }
+
+/* Hover state for links */
 a:hover {
-  color: #535bf2;
+  color: #535bf2; /* Darker blue when hovering over links */
 }
 
+/* === Login Page Styles === */
+
+/* Body styles for login page */
 .body-login {
-  margin: 0;
-  padding: 0;
-  font-family: Arial, sans-serif;
-  background: url('/path/to/background.jpg') no-repeat center center fixed;
-  background-size: cover;
+  margin: 0; /* Remove default margin */
+  padding: 0; /* Remove default padding */
+  font-family: Arial, sans-serif; /* Use Arial font */
+  background: url('/path/to/background.jpg') no-repeat center center fixed; /* Set background image */
+  background-size: cover; /* Ensure the background image covers the entire page */
 }
 
+/* === Dashboard Page Styles === */
+
+/* Body styles for dashboard page */
 .body-dashboard {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+  margin: 0; /* Remove default margin */
+  display: flex; /* Use flexbox for layout */
+  place-items: center; /* Center content vertically and horizontally */
+  min-width: 320px; /* Set a minimum width */
+  min-height: 100vh; /* Set a minimum height of 100% of the viewport height */
 }
 
+/* Header styles */
 h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+  font-size: 3.2em; /* Set a large font size */
+  line-height: 1.1; /* Adjust line height */
+  text-align: center; /* Center align text */
 }
 
+/* Card component styling */
 .card {
-  padding: 2em;
+  padding: 2em; /* Add padding around card content */
 }
 
+/* Full width and height for the app container */
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  text-align: center;
+  height: 100%; /* Full height */
+  width: 100%; /* Full width */
 }
 
+/* Button styles */
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
+  border-radius: 8px; /* Round corners for buttons */
+  border: 1px solid transparent; /* Transparent border by default */
+  font-size: 1em; /* Set font size for the button */
+  font-weight: 500; /* Medium font weight */
+  font-family: inherit; /* Inherit font family from parent */
+  background-color: #1a1a1a; /* Dark background color for buttons */
+  cursor: pointer; /* Change cursor to pointer on hover */
+  transition: border-color 0.25s; /* Smooth transition for border color */
 }
+
+/* Hover effect for buttons */
 button:hover {
-  border-color: #646cff;
+  border-color: #646cff; /* Change border color on hover */
 }
+
+/* Focus styles for buttons */
 button:focus,
 button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  outline: 4px auto -webkit-focus-ring-color; /* Add focus ring on focus */
 }
 
+/* === Light Mode Styles === */
+
+/* Adjust styles for light mode if the user prefers it */
 @media (prefers-color-scheme: light) {
   :root {
-    color: #213547;
-    background-color: #ffffff;
+    color: #213547; /* Dark text color in light mode */
+    background-color: #ffffff; /* White background for light mode */
   }
+  
+  /* Hover state for links in light mode */
   a:hover {
-    color: #747bff;
+    color: #747bff; /* Lighter blue for link hover in light mode */
   }
+  
+  /* Button background color for light mode */
   button {
-    background-color: #f9f9f9;
+    background-color: #f9f9f9; /* Light background color for buttons in light mode */
   }
 }
 
+/* === App Container Styles === */
 
+/* Main layout container styles */
 .app-container {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-  transition: all 0.3s ease; /* Animation de transition pour l'ensemble */
+  display: flex; /* Use flexbox layout */
+  height: 100vh; /* Full height */
+  overflow: hidden; /* Hide overflowing content */
+  transition: all 0.3s ease; /* Smooth transition for all properties */
 }
 
+/* Main content styles */
 .main-content {
-  flex: 1;
-  overflow-x: auto;
-  transition: all 0.3s ease;
-  padding: 0 1rem 1rem 1rem;
+  flex: 1; /* Make main content flexible */
+  overflow-x: auto; /* Allow horizontal scrolling */
+  transition: all 0.3s ease; /* Smooth transition for all properties */
+  padding: 0 1rem 1rem 1rem; /* Add padding to content */
 }
 
-/* Quand la sidebar est cachée, on étend le contenu principal */
+/* When sidebar is hidden, extend the main content */
 .sidebar-hidden .main-content {
-  margin-left: 0;  /* Laisse tout l’espace libre pour la fenêtre principale */
+  margin-left: 0; /* Remove left margin when sidebar is hidden */
 }

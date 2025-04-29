@@ -13,14 +13,18 @@
     "isolatedModules": false,
     "strict": true,
     "composite": true,
-    "noEmit": false
+    "noEmit": false,
+    "types": ["vitest/globals"]  // Ajouté ici pour inclure les types de Vitest
   },
   "include": [
     "src/**/*.svelte",
-    "gen"
+    "gen",
+    "lib",
+    "src/lib/api.ts",
+    "src"
+
   ],
   "exclude": [
-    "node_modules",
-    "src/**/*.d.ts"
+    "node_modules"
   ]
 }

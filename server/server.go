@@ -533,6 +533,74 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 	return &pb.Ack{Success: true}, nil
 }
 
+func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest) (*pb.JobsList, error) {
+	var jobs []*pb.Job
+
+	query := `
+		SELECT 
+			job_id,
+			status,
+			COALESCE(flavor_id, 0) AS flavor_id,
+			retry,
+			COALESCE(worker_id, 0) AS worker_id,
+			action,
+			created_at,
+			modified_at,
+			progression,
+			COALESCE(log, '')  -- pour éviter les NULL
+		FROM job
+		ORDER BY job_id;
+	`
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(query)
+	if err != nil {
+		log.Printf("⚠️ Failed to list jobs: %v", err)
+		return nil, fmt.Errorf("failed to list jobs: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var job pb.Job
+		err := rows.Scan(
+			&job.JobId,
+			&job.Status,
+			&job.FlavorId,
+			&job.Retry,
+			&job.WorkerId,
+			&job.Action,
+			&job.CreatedAt,
+			&job.ModifiedAt,
+			&job.Progression,
+			&job.Log,
+		)
+		if err != nil {
+			log.Printf("⚠️ Failed to scan job: %v", err)
+			continue
+		}
+		jobs = append(jobs, &job)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("⚠️ Error iterating jobs: %v", err)
+		return nil, fmt.Errorf("error iterating jobs: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit job listing: %v", err)
+		return nil, fmt.Errorf("failed to commit job listing: %w", err)
+	}
+
+	return &pb.JobsList{Jobs: jobs}, nil
+}
+
+
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
 	var tasks []*pb.Task
 	var rows *sql.Rows

@@ -18,6 +18,7 @@ service TaskQueue {
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc DeleteWorker(WorkerId) returns (Ack);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
+    rpc ListJobs (ListJobsRequest) returns (JobsList);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
     rpc Login(LoginRequest) returns (LoginResponse);
@@ -166,6 +167,26 @@ message Flavor {
 
 message FlavorsList {
     repeated Flavor flavors = 1;
+}
+
+message ListJobsRequest {
+}
+
+message Job {
+  uint32 job_id = 1;
+  string status = 2;         
+  uint32 flavor_id = 3;      
+  uint32 retry = 4;          
+  uint32 worker_id = 5;      
+  string action = 6;         
+  string created_at = 7;     
+  string modified_at = 8;    
+  uint32 progression = 9;    
+  string log = 10;
+}
+
+message JobsList {
+    repeated Job jobs = 1;
 }
 
 message RcloneConfig {

@@ -421,6 +421,65 @@ export interface FlavorsList {
     flavors: Flavor[];
 }
 /**
+ * @generated from protobuf message taskqueue.ListJobsRequest
+ */
+export interface ListJobsRequest {
+}
+/**
+ * @generated from protobuf message taskqueue.Job
+ */
+export interface Job {
+    /**
+     * @generated from protobuf field: uint32 job_id = 1;
+     */
+    jobId: number;
+    /**
+     * @generated from protobuf field: string status = 2;
+     */
+    status: string;
+    /**
+     * @generated from protobuf field: uint32 flavor_id = 3;
+     */
+    flavorId: number;
+    /**
+     * @generated from protobuf field: uint32 retry = 4;
+     */
+    retry: number;
+    /**
+     * @generated from protobuf field: uint32 worker_id = 5;
+     */
+    workerId: number;
+    /**
+     * @generated from protobuf field: string action = 6;
+     */
+    action: string;
+    /**
+     * @generated from protobuf field: string created_at = 7;
+     */
+    createdAt: string;
+    /**
+     * @generated from protobuf field: string modified_at = 8;
+     */
+    modifiedAt: string;
+    /**
+     * @generated from protobuf field: uint32 progression = 9;
+     */
+    progression: number;
+    /**
+     * @generated from protobuf field: string log = 10;
+     */
+    log: string;
+}
+/**
+ * @generated from protobuf message taskqueue.JobsList
+ */
+export interface JobsList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.Job jobs = 1;
+     */
+    jobs: Job[];
+}
+/**
  * @generated from protobuf message taskqueue.RcloneConfig
  */
 export interface RcloneConfig {
@@ -1904,6 +1963,210 @@ class FlavorsList$Type extends MessageType<FlavorsList> {
  */
 export const FlavorsList = new FlavorsList$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ListJobsRequest$Type extends MessageType<ListJobsRequest> {
+    constructor() {
+        super("taskqueue.ListJobsRequest", []);
+    }
+    create(value?: PartialMessage<ListJobsRequest>): ListJobsRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ListJobsRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListJobsRequest): ListJobsRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ListJobsRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ListJobsRequest
+ */
+export const ListJobsRequest = new ListJobsRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Job$Type extends MessageType<Job> {
+    constructor() {
+        super("taskqueue.Job", [
+            { no: 1, name: "job_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "flavor_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "retry", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 5, name: "worker_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 6, name: "action", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "created_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "modified_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "progression", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 10, name: "log", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Job>): Job {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.jobId = 0;
+        message.status = "";
+        message.flavorId = 0;
+        message.retry = 0;
+        message.workerId = 0;
+        message.action = "";
+        message.createdAt = "";
+        message.modifiedAt = "";
+        message.progression = 0;
+        message.log = "";
+        if (value !== undefined)
+            reflectionMergePartial<Job>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Job): Job {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 job_id */ 1:
+                    message.jobId = reader.uint32();
+                    break;
+                case /* string status */ 2:
+                    message.status = reader.string();
+                    break;
+                case /* uint32 flavor_id */ 3:
+                    message.flavorId = reader.uint32();
+                    break;
+                case /* uint32 retry */ 4:
+                    message.retry = reader.uint32();
+                    break;
+                case /* uint32 worker_id */ 5:
+                    message.workerId = reader.uint32();
+                    break;
+                case /* string action */ 6:
+                    message.action = reader.string();
+                    break;
+                case /* string created_at */ 7:
+                    message.createdAt = reader.string();
+                    break;
+                case /* string modified_at */ 8:
+                    message.modifiedAt = reader.string();
+                    break;
+                case /* uint32 progression */ 9:
+                    message.progression = reader.uint32();
+                    break;
+                case /* string log */ 10:
+                    message.log = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Job, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 job_id = 1; */
+        if (message.jobId !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.jobId);
+        /* string status = 2; */
+        if (message.status !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.status);
+        /* uint32 flavor_id = 3; */
+        if (message.flavorId !== 0)
+            writer.tag(3, WireType.Varint).uint32(message.flavorId);
+        /* uint32 retry = 4; */
+        if (message.retry !== 0)
+            writer.tag(4, WireType.Varint).uint32(message.retry);
+        /* uint32 worker_id = 5; */
+        if (message.workerId !== 0)
+            writer.tag(5, WireType.Varint).uint32(message.workerId);
+        /* string action = 6; */
+        if (message.action !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.action);
+        /* string created_at = 7; */
+        if (message.createdAt !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.createdAt);
+        /* string modified_at = 8; */
+        if (message.modifiedAt !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.modifiedAt);
+        /* uint32 progression = 9; */
+        if (message.progression !== 0)
+            writer.tag(9, WireType.Varint).uint32(message.progression);
+        /* string log = 10; */
+        if (message.log !== "")
+            writer.tag(10, WireType.LengthDelimited).string(message.log);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.Job
+ */
+export const Job = new Job$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JobsList$Type extends MessageType<JobsList> {
+    constructor() {
+        super("taskqueue.JobsList", [
+            { no: 1, name: "jobs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Job }
+        ]);
+    }
+    create(value?: PartialMessage<JobsList>): JobsList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.jobs = [];
+        if (value !== undefined)
+            reflectionMergePartial<JobsList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JobsList): JobsList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.Job jobs */ 1:
+                    message.jobs.push(Job.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JobsList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.Job jobs = 1; */
+        for (let i = 0; i < message.jobs.length; i++)
+            Job.internalBinaryWrite(message.jobs[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.JobsList
+ */
+export const JobsList = new JobsList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class RcloneConfig$Type extends MessageType<RcloneConfig> {
     constructor() {
         super("taskqueue.RcloneConfig", [
@@ -2363,6 +2626,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "CreateWorker", options: {}, I: WorkerRequest, O: WorkerIds },
     { name: "DeleteWorker", options: {}, I: WorkerId, O: Ack },
     { name: "UpdateWorker", options: {}, I: WorkerUpdateRequest, O: Ack },
+    { name: "ListJobs", options: {}, I: ListJobsRequest, O: JobsList },
     { name: "ListFlavors", options: {}, I: ListFlavorsRequest, O: FlavorsList },
     { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneConfig },
     { name: "Login", options: {}, I: LoginRequest, O: LoginResponse },
