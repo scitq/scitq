@@ -49,6 +49,7 @@ const (
 	TaskQueue_ListSteps_FullMethodName           = "/taskqueue.TaskQueue/ListSteps"
 	TaskQueue_CreateStep_FullMethodName          = "/taskqueue.TaskQueue/CreateStep"
 	TaskQueue_DeleteStep_FullMethodName          = "/taskqueue.TaskQueue/DeleteStep"
+	TaskQueue_GetWorkerStats_FullMethodName      = "/taskqueue.TaskQueue/GetWorkerStats"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -57,7 +58,7 @@ const (
 type TaskQueueClient interface {
 	SubmitTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	RegisterWorker(ctx context.Context, in *WorkerInfo, opts ...grpc.CallOption) (*WorkerId, error)
-	PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskListAndOther, error)
+	PingAndTakeNewTasks(ctx context.Context, in *PingAndGetNewTasksRequest, opts ...grpc.CallOption) (*TaskListAndOther, error)
 	UpdateTaskStatus(ctx context.Context, in *TaskStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
 	SendTaskLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TaskLog, Ack], error)
 	StreamTaskLogs(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
@@ -84,6 +85,7 @@ type TaskQueueClient interface {
 	ListSteps(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*StepList, error)
 	CreateStep(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepId, error)
 	DeleteStep(ctx context.Context, in *StepId, opts ...grpc.CallOption) (*Ack, error)
+	GetWorkerStats(ctx context.Context, in *GetWorkerStatsRequest, opts ...grpc.CallOption) (*GetWorkerStatsResponse, error)
 }
 
 type taskQueueClient struct {
@@ -114,7 +116,7 @@ func (c *taskQueueClient) RegisterWorker(ctx context.Context, in *WorkerInfo, op
 	return out, nil
 }
 
-func (c *taskQueueClient) PingAndTakeNewTasks(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*TaskListAndOther, error) {
+func (c *taskQueueClient) PingAndTakeNewTasks(ctx context.Context, in *PingAndGetNewTasksRequest, opts ...grpc.CallOption) (*TaskListAndOther, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskListAndOther)
 	err := c.cc.Invoke(ctx, TaskQueue_PingAndTakeNewTasks_FullMethodName, in, out, cOpts...)
@@ -396,13 +398,23 @@ func (c *taskQueueClient) DeleteStep(ctx context.Context, in *StepId, opts ...gr
 	return out, nil
 }
 
+func (c *taskQueueClient) GetWorkerStats(ctx context.Context, in *GetWorkerStatsRequest, opts ...grpc.CallOption) (*GetWorkerStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetWorkerStatsResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_GetWorkerStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
 type TaskQueueServer interface {
 	SubmitTask(context.Context, *TaskRequest) (*TaskResponse, error)
 	RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error)
-	PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskListAndOther, error)
+	PingAndTakeNewTasks(context.Context, *PingAndGetNewTasksRequest) (*TaskListAndOther, error)
 	UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error)
 	SendTaskLogs(grpc.ClientStreamingServer[TaskLog, Ack]) error
 	StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
@@ -429,6 +441,7 @@ type TaskQueueServer interface {
 	ListSteps(context.Context, *WorkflowId) (*StepList, error)
 	CreateStep(context.Context, *StepRequest) (*StepId, error)
 	DeleteStep(context.Context, *StepId) (*Ack, error)
+	GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -445,7 +458,7 @@ func (UnimplementedTaskQueueServer) SubmitTask(context.Context, *TaskRequest) (*
 func (UnimplementedTaskQueueServer) RegisterWorker(context.Context, *WorkerInfo) (*WorkerId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterWorker not implemented")
 }
-func (UnimplementedTaskQueueServer) PingAndTakeNewTasks(context.Context, *WorkerId) (*TaskListAndOther, error) {
+func (UnimplementedTaskQueueServer) PingAndTakeNewTasks(context.Context, *PingAndGetNewTasksRequest) (*TaskListAndOther, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PingAndTakeNewTasks not implemented")
 }
 func (UnimplementedTaskQueueServer) UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error) {
@@ -526,6 +539,9 @@ func (UnimplementedTaskQueueServer) CreateStep(context.Context, *StepRequest) (*
 func (UnimplementedTaskQueueServer) DeleteStep(context.Context, *StepId) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteStep not implemented")
 }
+func (UnimplementedTaskQueueServer) GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWorkerStats not implemented")
+}
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
 
@@ -584,7 +600,7 @@ func _TaskQueue_RegisterWorker_Handler(srv interface{}, ctx context.Context, dec
 }
 
 func _TaskQueue_PingAndTakeNewTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(WorkerId)
+	in := new(PingAndGetNewTasksRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -596,7 +612,7 @@ func _TaskQueue_PingAndTakeNewTasks_Handler(srv interface{}, ctx context.Context
 		FullMethod: TaskQueue_PingAndTakeNewTasks_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TaskQueueServer).PingAndTakeNewTasks(ctx, req.(*WorkerId))
+		return srv.(TaskQueueServer).PingAndTakeNewTasks(ctx, req.(*PingAndGetNewTasksRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1051,6 +1067,24 @@ func _TaskQueue_DeleteStep_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_GetWorkerStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWorkerStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetWorkerStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetWorkerStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetWorkerStats(ctx, req.(*GetWorkerStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1165,6 +1199,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteStep",
 			Handler:    _TaskQueue_DeleteStep_Handler,
+		},
+		{
+			MethodName: "GetWorkerStats",
+			Handler:    _TaskQueue_GetWorkerStats_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

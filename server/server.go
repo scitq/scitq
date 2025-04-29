@@ -67,6 +67,7 @@ type taskQueueServer struct {
 
 	stopWatchdog       chan struct{}
 	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
+	workerStats        *sync.Map
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -85,6 +86,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
 		stopWatchdog:       make(chan struct{}),
+		workerStats:        &sync.Map{},
 	}
 	//go s.assignTasksLoop()
 	go s.waitForAssignEvents()
@@ -537,7 +539,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	return &pb.TaskList{Tasks: tasks}, nil
 }
 
-func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.WorkerId) (*pb.TaskListAndOther, error) {
+func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingAndGetNewTasksRequest) (*pb.TaskListAndOther, error) {
 	var (
 		tasks          []*pb.Task
 		concurrency    uint32
@@ -641,6 +643,13 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.Worke
 	}
 
 	s.watchdog.WorkerPinged(req.WorkerId)
+
+	if req.Stats != nil {
+		s.workerStats.Store(req.WorkerId, req.Stats)
+		log.Printf("👀 Worker %d sending stats: %+v", req.WorkerId, req.Stats)
+	} else {
+		log.Printf("⚠️ Worker %d did not send stats", req.WorkerId)
+	}
 
 	return &pb.TaskListAndOther{
 		Tasks:       tasks,
@@ -1232,6 +1241,22 @@ func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.A
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete step: %w", err)
 	}
 	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) GetWorkerStats(ctx context.Context, req *pb.GetWorkerStatsRequest) (*pb.GetWorkerStatsResponse, error) {
+	resp := &pb.GetWorkerStatsResponse{
+		WorkerStats: make(map[uint32]*pb.WorkerStats),
+	}
+
+	for _, workerID := range req.WorkerIds {
+		if v, ok := s.workerStats.Load(workerID); ok {
+			if stats, ok := v.(*pb.WorkerStats); ok {
+				resp.WorkerStats[workerID] = stats
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 func applyMigrations(db *sql.DB) error {

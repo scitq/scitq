@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gmtsciencedev/scitq2/client/install"
+	"github.com/gmtsciencedev/scitq2/client/workerstats"
 	"github.com/gmtsciencedev/scitq2/fetch"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/gmtsciencedev/scitq2/lib"
@@ -198,7 +199,16 @@ func (w *WorkerConfig) fetchTasks(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := client.PingAndTakeNewTasks(ctx, &pb.WorkerId{WorkerId: id})
+	var query *pb.PingAndGetNewTasksRequest
+	ws, err := workerstats.CollectWorkerStats()
+	if err != nil {
+		log.Printf("⚠️ Error could not collect stats: %v", err)
+		query = &pb.PingAndGetNewTasksRequest{WorkerId: id}
+	} else {
+		query = &pb.PingAndGetNewTasksRequest{WorkerId: id, Stats: ws.ToProto()}
+	}
+
+	res, err := client.PingAndTakeNewTasks(ctx, query)
 	if err != nil {
 		log.Printf("⚠️ Error fetching tasks: %v", err)
 		return nil

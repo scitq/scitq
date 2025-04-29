@@ -9,7 +9,7 @@ import "google/protobuf/empty.proto";
 service TaskQueue {
     rpc SubmitTask(TaskRequest) returns (TaskResponse);
     rpc RegisterWorker(WorkerInfo) returns (WorkerId);
-    rpc PingAndTakeNewTasks(WorkerId) returns (TaskListAndOther);
+    rpc PingAndTakeNewTasks(PingAndGetNewTasksRequest) returns (TaskListAndOther);
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
     rpc SendTaskLogs(stream TaskLog) returns (Ack);
     rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
@@ -36,6 +36,7 @@ service TaskQueue {
     rpc ListSteps(WorkflowId) returns (StepList);
     rpc CreateStep(StepRequest) returns (StepId);
     rpc DeleteStep(StepId) returns (Ack);
+    rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
 }   
 
 message TaskResponse {
@@ -145,6 +146,11 @@ message WorkerId {
 
 message WorkerIds {
     repeated uint32 worker_ids = 1;
+}
+
+message PingAndGetNewTasksRequest {
+    uint32 worker_id = 1;
+    WorkerStats stats = 2; // Optional
 }
 
 message Ack {
@@ -317,4 +323,42 @@ message StepRequest {
 }
 message StepList {
     repeated Step steps = 1;
+}
+
+message WorkerStats {
+    float cpu_usage_percent = 1;      // 0-100, float
+    float mem_usage_percent = 2;      // 0-100, float
+    float load_1min = 3;               // e.g., 0.58, float
+
+    repeated DiskUsage disks = 4;      // Per-disk usage
+
+    DiskIOStats disk_io = 5;            // Global disk IO (aggregated)
+    NetIOStats net_io = 6;              // Global network IO (aggregated)
+}
+
+message DiskUsage {
+    string device_name = 1;            // E.g., "/dev/sda1"
+    float usage_percent = 2;            // 0-100, float
+}
+
+message DiskIOStats {
+    int64 read_bytes_total = 1;        // Total bytes read
+    int64 write_bytes_total = 2;       // Total bytes written
+    float read_bytes_rate = 3;          // Bytes per second
+    float write_bytes_rate = 4;         // Bytes per second
+}
+
+message NetIOStats {
+    int64 recv_bytes_total = 1;        // Total bytes received
+    int64 sent_bytes_total = 2;         // Total bytes sent
+    float recv_bytes_rate = 3;          // Bytes per second
+    float sent_bytes_rate = 4;          // Bytes per second
+}
+
+message GetWorkerStatsRequest {
+    repeated uint32 worker_ids = 1;
+}
+
+message GetWorkerStatsResponse {
+    map<uint32, WorkerStats> worker_stats = 1;
 }

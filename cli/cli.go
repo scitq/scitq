@@ -55,6 +55,9 @@ type Attr struct {
 		Delete *struct {
 			WorkerId int `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
 		} `arg:"subcommand:delete" help:"Delete a worker instance"`
+		Stats *struct {
+			WorkerIds []uint32 `arg:"--worker-id,separate,required" help:"Worker IDs to get stats for"`
+		} `arg:"subcommand:stats" help:"Fetch current stats for workers"`
 	} `arg:"subcommand:worker" help:"Manage workers"`
 
 	// Flavor commands
@@ -246,6 +249,42 @@ func (c *CLI) WorkerList() error {
 			worker.Provider,
 			worker.Region)
 	}
+	return nil
+}
+
+func (c *CLI) WorkerStats() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.GetWorkerStatsRequest{
+		WorkerIds: c.Attr.Worker.Stats.WorkerIds,
+	}
+	res, err := c.QC.Client.GetWorkerStats(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error fetching worker stats: %w", err)
+	}
+
+	fmt.Println("📈 Worker Stats:")
+	for workerID, stats := range res.WorkerStats {
+		fmt.Printf("Worker ID: %d\n", workerID)
+		fmt.Printf("  CPU:  %.2f%%\n", stats.CpuUsagePercent)
+		fmt.Printf("  MEM:  %.2f%%\n", stats.MemUsagePercent)
+		fmt.Printf("  Load (1 min): %.2f\n", stats.Load_1Min)
+
+		fmt.Println("  Disks:")
+		for _, d := range stats.Disks {
+			fmt.Printf("    %s: %.2f%% used\n", d.DeviceName, d.UsagePercent)
+		}
+
+		fmt.Println("  Disk IO:")
+		fmt.Printf("    Read:  %.2f B/s (total %d bytes)\n", stats.DiskIo.ReadBytesRate, stats.DiskIo.ReadBytesTotal)
+		fmt.Printf("    Write: %.2f B/s (total %d bytes)\n", stats.DiskIo.WriteBytesRate, stats.DiskIo.WriteBytesTotal)
+
+		fmt.Println("  Net IO:")
+		fmt.Printf("    Receive: %.2f B/s (total %d bytes)\n", stats.NetIo.RecvBytesRate, stats.NetIo.RecvBytesTotal)
+		fmt.Printf("    Send:    %.2f B/s (total %d bytes)\n", stats.NetIo.SentBytesRate, stats.NetIo.SentBytesTotal)
+	}
+
 	return nil
 }
 
@@ -653,6 +692,8 @@ func Run(c CLI) error {
 			err = c.WorkerDeploy()
 		case c.Attr.Worker.Delete != nil:
 			err = c.WorkerDelete()
+		case c.Attr.Worker.Stats != nil:
+			err = c.WorkerStats()
 		}
 	case c.Attr.Flavor != nil:
 		switch {
