@@ -133,6 +133,8 @@ func (s *taskQueueServer) processJob(job Job) error {
 		}
 		// Update quota manager
 		s.qm.RegisterDelete(job.Region, provider, cpu, mem)
+		// Update watchdog
+		s.watchdog.WorkerDeleted(job.WorkerID)
 	case 'R': // Restart
 		return s.providers[job.ProviderID].Restart(job.WorkerName)
 	default:

@@ -86,6 +86,18 @@ func (w *Watchdog) WorkerPinged(workerID uint32) {
 	}
 }
 
+// WorkerDeleted should be called when a worker is deleted from the database
+func (w *Watchdog) WorkerDeleted(workerID uint32) {
+	w.lastPing.Delete(workerID)
+	w.lastNotIdle.Delete(workerID)
+	w.lastStatus.Delete(workerID)
+	w.idleStatus.Delete(workerID)
+	w.activeTasks.Delete(workerID)
+	w.isPermanent.Delete(workerID)
+
+	log.Printf("[watchdog] cleaned up memory for deleted worker %d", workerID)
+}
+
 // Called when a worker accepts a task (Assigned ➔ Accepted)
 func (w *Watchdog) TaskAccepted(workerID uint32) {
 	w.activeTasksUpdate(workerID, +1)
@@ -138,7 +150,6 @@ func (w *Watchdog) checkOffline() {
 		elapsed := now.Sub(lastPing)
 
 		if elapsed > w.offlineTimeout {
-			log.Printf("[watchdog] worker %d is offline for %v", workerID, elapsed)
 
 			status, ok := w.lastStatus.Load(workerID)
 			if !ok {
@@ -156,6 +167,7 @@ func (w *Watchdog) checkOffline() {
 			default:
 				return true
 			}
+			log.Printf("[watchdog] worker %d is offline for %v", workerID, elapsed)
 			w.lastStatus.Store(workerID, newStatus)
 			err := w.updateWorker(workerID, newStatus)
 			if err != nil {
@@ -187,7 +199,7 @@ func (w *Watchdog) checkIdle() {
 		if v, ok := w.lastNotIdle.Load(workerID); ok {
 			lastActivity = v.(time.Time)
 		} else {
-			log.Printf("⚠️ [watchdog error] Worker %d missing lastAccepted, assuming very idle now", workerID)
+			log.Printf("⚠️ [watchdog error] Worker %d missing lastAccepted, assuming idle now", workerID)
 			lastActivity = time.Now() // fallback
 			w.lastNotIdle.Store(workerID, lastActivity)
 		}

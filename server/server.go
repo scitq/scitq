@@ -619,7 +619,7 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 	return &pb.JobsList{Jobs: jobs}, nil
 }
 
-func (s *taskQueueServer) WorkerUpdateStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
+func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
 	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2", req.Status, req.WorkerId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker status: %w", err)
