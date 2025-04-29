@@ -1,6 +1,7 @@
 import { callOptions } from './auth';
 import { getClient } from './grpcClient';
 import * as taskqueue from '../../gen/taskqueue';
+import type { TaskQueueClient } from '../../gen/taskqueue.client';
 
 /**
  * Function to log in a user.
@@ -35,6 +36,60 @@ export async function getWorkers(): Promise<taskqueue.Worker[]> {
     }
 }
 
+
+export async function getStats(workerIds: number[]): Promise<Record<number, taskqueue.WorkerStats>> {
+    try {
+        const client = getClient();
+        const request: taskqueue.GetWorkerStatsRequest = {
+            workerIds,
+        };
+        const workerStatsUnary = await client.getWorkerStats(request, callOptions);
+        
+        // Retrieve the map of workerStats from the response
+        const statsMap = workerStatsUnary.response?.workerStats ?? {};
+
+        // Convert statsMap to a more useful format: an object where each workerId is a key
+        const workerStatsMap = workerIds.reduce((map, workerId) => {
+            // Associate each workerId with the corresponding stats
+            if (statsMap[workerId]) {
+                map[workerId] = statsMap[workerId];
+            } else {
+                // If no stats are found for a workerId, optionally set default values
+                map[workerId] = {} as taskqueue.WorkerStats;
+            }
+            return map;
+        }, {} as Record<number, taskqueue.WorkerStats>);
+
+        console.log(workerStatsMap); // Log to verify the structure
+        return workerStatsMap;
+    } catch (error) {
+        console.error("Error while retrieving Stats:", error);
+        return {};  // In case of error, return an empty object
+    }
+}
+
+export function formatBytesPair(a: number | bigint, b: number | bigint, decimals = 1): string {
+    // Safe conversion to number
+    a = typeof a === 'bigint' ? Number(a) : a;
+    b = typeof b === 'bigint' ? Number(b) : b;
+  
+    if (isNaN(a) || isNaN(b)) return '0 / 0 B';
+  
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  
+    const max = Math.max(a, b);
+    const i = Math.floor(Math.log(max) / Math.log(k));
+    const unit = sizes[i];
+    const dm = decimals < 0 ? 0 : decimals;
+  
+    const format = (val: number) => (val / Math.pow(k, i)).toFixed(dm);
+    return `${format(a)}/${format(b)} ${unit}`;
+}
+
+  
+
+
 /**
  * Function to update the configuration of a worker.
  * 
@@ -60,7 +115,6 @@ export async function getJobs(): Promise<taskqueue.Job[]> {
     try {
         const client = getClient();
         const jobUnary = await client.listJobs(taskqueue.ListJobsRequest, callOptions);
-        console.log(jobUnary.response?.jobs);
         return jobUnary.response?.jobs || [];
     } catch (error) {
         console.error("Error while retrieving jobs:", error);

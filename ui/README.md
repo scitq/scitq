@@ -221,6 +221,7 @@ The API layer (`lib/api.ts`) makes several key features possible:
 | 📋 Job Management  | `getJobs()`                                              | Retrieves job status and info                                  |
 | 🧪 Flavor Discovery| `getFlavors()`                                           | Retrieves available flavors for worker creation                |
 | 🎨 UI Mapping      | `getStatusText()`, `getStatusClass()`                   | Maps backend status codes to frontend classes                  |
+| 📊 Worker Stats    | `getStats()`, `formatBytesPair()`                        | Retrieves worker statistics and formats byte values            |
 
 These functions use the client generated from the `.proto` file (`taskqueue.client.ts`) and the associated data types (`taskqueue.ts`), making the communication **type-safe**, **predictable**, and **intuitive**.
 
@@ -298,6 +299,52 @@ To run the tests, follow these steps:
 1. Install dependencies if you haven’t already:
 ```bash
 npm install
+```
+2. Run the tests with the following command:
+```bash
+npx vitest
+```
+### Frameworks de Test
+Nous utilisons **Vitest** pour les tests unitaires, ainsi que **Testing Library** pour les tests de composants.
+
+### Structure des Tests
+Les tests sont situés dans le répertoire src/tests. Chaque fonctionnalité/composant a son propre fichier de test afin d'assurer une approche modulaire.
+
+### Types de Tests
+ - **Tests de composants :** Ces tests se concentrent sur la vérification du comportement des composants individuellement. Par exemple, nous testons le composant **CreateForm** pour nous assurer qu'il interagit correctement avec l'API backend lors de l'ajout d'un worker.
+
+ - **Tests API :** Nous simulons les réponses de l'API gRPC pour vérifier que le frontend réagit correctement dans différents scénarios.
+
+Voici un exemple de test pour le composant **CreateForm :**
+```ts
+import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import CreateForm from './CreateForm.svelte';
+import { newWorker } from '../lib/api';
+
+vi.mock('../lib/api', async () => {
+  const actual = await vi.importActual('../lib/api');
+  return {
+    ...actual,
+    newWorker: vi.fn().mockResolvedValue({ workerId: 'def456', name: 'worker-new', status: 'P' }),
+  };
+});
+
+describe('CreateForm', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should call newWorker with form values when Add button is clicked', async () => {
+    const { getByTestId, container } = render(CreateForm);
+    const addButton = getByTestId('add-worker-button');
+    await fireEvent.click(addButton);
+
+    await waitFor(() => {
+      expect(newWorker).toHaveBeenCalledWith(4, 2, 'small', 'eu-west', 'aws', 3);
+    });
+  });
+});
 ```
 
 ## Conclusion
