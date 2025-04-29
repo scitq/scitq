@@ -3,9 +3,6 @@
   import logo from '../assets/icons/logoGMT.png';
   import '../styles/dashboard.css';
 
-  export let isSidebarVisible: boolean;
-  export let toggleSidebar: () => void;
-
   let tasksOpen = false;
 </script>
 

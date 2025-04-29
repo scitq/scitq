@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
-import JobsCompo from './JobsCompo.svelte';
+import JobsCompo from '../components/JobsCompo.svelte';
 import { getJobs } from '../lib/api';
 
 // Mock the `getJobs` function and utility helpers

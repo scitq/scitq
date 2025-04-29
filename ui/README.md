@@ -32,6 +32,7 @@ ui/
 │   │   ├── loginForm.css
 │   │   ├── loginPage.css
 │   │   └── worker.css
+│   ├── Test/
 │   ├── App.svelte
 │   ├── main.ts
 │   └── app.css
@@ -286,6 +287,18 @@ If the token exists ➜ redirect to dashboard.
 - `@types/google-protobuf`: TypeScript types for `google-protobuf`
 
 > These dependencies enable a full-featured Svelte app with type-safe gRPC communication, rich icon support, and automated documentation.
+
+## 🚀 Testing
+
+This project includes unit tests to ensure the functionality and reliability of the components.
+
+### Running Tests
+To run the tests, follow these steps:
+
+1. Install dependencies if you haven’t already:
+```bash
+npm install
+```
 
 ## Conclusion
 

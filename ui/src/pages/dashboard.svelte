@@ -4,6 +4,8 @@
   import CreateForm from '../components/CreateForm.svelte';
   import JobCompo from '../components/JobsCompo.svelte';
   import '../styles/dashboard.css';
+
+  let workerCompoRef;
 </script>
 
 <div class="dashboard-content">
@@ -20,7 +22,7 @@
 
   <!-- Section displaying workers -->
   <div class="worker-section">
-    <WorkerCompo />
+    <WorkerCompo bind:this={workerCompoRef} />
   </div>
 
   <div class="bottom-div">
@@ -31,7 +33,7 @@
     
     <!-- Section for adding a new worker -->
     <div class="add-worker-section">
-      <CreateForm />
+      <CreateForm on:workerAdded={() => workerCompoRef?.refresh?.()} />
     </div>
   </div>
 </div>

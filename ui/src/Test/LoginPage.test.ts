@@ -1,7 +1,7 @@
 import { beforeAll } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 import { describe, it, expect } from 'vitest';
-import LoginPage from './LoginPage.svelte';
+import LoginPage from '../pages/LoginPage.svelte';
 
 beforeAll(() => {
     // Simulation d'un délai pour garantir que la page est prête

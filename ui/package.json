@@ -18,18 +18,14 @@
     "gen-proto": "protoc --ts_out ./gen --proto_path=../proto taskqueue.proto"
   },
   "devDependencies": {
-    "@jest/globals": "^29.7.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/svelte": "^5.2.7",
     "@tsconfig/svelte": "^5.0.4",
     "@types/google-protobuf": "^3.15.12",
-    "jest": "^29.7.0",
     "jsdom": "^26.1.0",
     "svelte": "^5.27.0",
     "svelte-check": "^4.1.4",
-    "svelte-jester": "^5.0.0",
-    "ts-jest": "^29.3.2",
     "tsdoc": "^0.0.4",
     "typedoc": "^0.28.3",
     "typescript": "~5.7.2",

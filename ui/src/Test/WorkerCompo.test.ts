@@ -1,6 +1,6 @@
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import WorkerCompo from './WorkerCompo.svelte';
+import WorkerCompo from '../components/WorkerCompo.svelte';
 
 // Mock all functions from ../lib/api
 vi.mock('../lib/api', () => {

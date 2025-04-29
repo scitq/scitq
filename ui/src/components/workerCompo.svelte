@@ -12,6 +12,10 @@
     workers = await getWorkers();
   });
 
+  export async function refresh() {
+    workers = await getWorkers();
+  }
+
   // Function to update concurrency or prefetch values
   const updateValue = async (worker, field: 'concurrency' | 'prefetch', delta: number) => {
     console.log(worker);
@@ -48,7 +52,7 @@
       </thead>
       <tbody>
         {#each workers as worker (worker.workerId)}
-          <tr>
+        <tr data-testid={`worker-${worker.workerId}`}>
             <!-- Worker name clickable to open task view -->
             <td class="clickable" on:click={() => goToTaskView(worker.name)}>{worker.name}</td>
             <td>{worker.batch}</td>

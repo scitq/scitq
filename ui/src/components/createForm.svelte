@@ -2,6 +2,9 @@
   import { onMount } from "svelte";
   import { getFlavors, newWorker } from "../lib/api";
   import "../styles/createForm.css";
+  import { createEventDispatcher } from 'svelte';
+
+  const dispatch = createEventDispatcher();
 
   let provider = "";
   let flavor = "";
@@ -193,7 +196,10 @@
   <!-- ADD -->
   <button
     class="add-button"
-    on:click={() => newWorker(concurrency, prefetch, flavor, region, provider, number)}
+    on:click={async () => {
+      await newWorker(concurrency, prefetch, flavor, region, provider, number);
+      dispatch('workerAdded'); // Notify external components that a worker was added
+    }}
     aria-label="Add"
     data-testid="add-worker-button"
   >
