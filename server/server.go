@@ -782,7 +782,6 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 
 	if req.Stats != nil {
 		s.workerStats.Store(req.WorkerId, req.Stats)
-		log.Printf("👀 Worker %d sending stats: %+v", req.WorkerId, req.Stats)
 	} else {
 		log.Printf("⚠️ Worker %d did not send stats", req.WorkerId)
 	}

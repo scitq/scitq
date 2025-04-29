@@ -19,6 +19,7 @@ type WorkerStats struct {
 	CPUUsagePercent float32
 	MemUsagePercent float32
 	Load1Min        float32
+	IOWaitPercent   float32
 	Disks           []DiskUsage
 	DiskIO          DiskIOStats
 	NetIO           NetIOStats
@@ -72,6 +73,11 @@ func CollectWorkerStats() (*WorkerStats, error) {
 		return nil, err
 	}
 	stats.Load1Min = float32(loadAvg.Load1)
+
+	times, err := cpu.Times(false)
+	if err == nil && len(times) > 0 {
+		stats.IOWaitPercent = float32(times[0].Iowait)
+	}
 
 	partitions, err := disk.Partitions(true)
 	if err != nil {
@@ -158,6 +164,7 @@ func (ws *WorkerStats) ToProto() *pb.WorkerStats {
 		CpuUsagePercent: ws.CPUUsagePercent,
 		MemUsagePercent: ws.MemUsagePercent,
 		Load_1Min:       ws.Load1Min,
+		IowaitPercent:   ws.IOWaitPercent,
 		Disks:           disks,
 		DiskIo: &pb.DiskIOStats{
 			ReadBytesTotal:  ws.DiskIO.ReadBytesTotal,

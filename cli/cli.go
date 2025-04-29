@@ -266,23 +266,24 @@ func (c *CLI) WorkerStats() error {
 
 	fmt.Println("📈 Worker Stats:")
 	for workerID, stats := range res.WorkerStats {
-		fmt.Printf("Worker ID: %d\n", workerID)
-		fmt.Printf("  CPU:  %.2f%%\n", stats.CpuUsagePercent)
-		fmt.Printf("  MEM:  %.2f%%\n", stats.MemUsagePercent)
-		fmt.Printf("  Load (1 min): %.2f\n", stats.Load_1Min)
+		fmt.Printf("🆔 Worker ID: %d\n", workerID)
+		fmt.Printf("  🖥️  CPU Usage:  %.2f%%\n", stats.CpuUsagePercent)
+		fmt.Printf("  🧠 Memory Usage: %.2f%%\n", stats.MemUsagePercent)
+		fmt.Printf("  📈 Load (1 min): %.2f\n", stats.Load_1Min)
+		fmt.Printf("  ⏳ IO Wait: %.2f%%\n", stats.IowaitPercent)
 
-		fmt.Println("  Disks:")
+		fmt.Println("  💽 Disks:")
 		for _, d := range stats.Disks {
-			fmt.Printf("    %s: %.2f%% used\n", d.DeviceName, d.UsagePercent)
+			fmt.Printf("    📦 %s: %.2f%% used\n", d.DeviceName, d.UsagePercent)
 		}
 
-		fmt.Println("  Disk IO:")
-		fmt.Printf("    Read:  %.2f B/s (total %d bytes)\n", stats.DiskIo.ReadBytesRate, stats.DiskIo.ReadBytesTotal)
-		fmt.Printf("    Write: %.2f B/s (total %d bytes)\n", stats.DiskIo.WriteBytesRate, stats.DiskIo.WriteBytesTotal)
+		fmt.Println("  📀 Disk IO:")
+		fmt.Printf("    📥 Read:  %.2f B/s (total %d bytes)\n", stats.DiskIo.ReadBytesRate, stats.DiskIo.ReadBytesTotal)
+		fmt.Printf("    📤 Write: %.2f B/s (total %d bytes)\n", stats.DiskIo.WriteBytesRate, stats.DiskIo.WriteBytesTotal)
 
-		fmt.Println("  Net IO:")
-		fmt.Printf("    Receive: %.2f B/s (total %d bytes)\n", stats.NetIo.RecvBytesRate, stats.NetIo.RecvBytesTotal)
-		fmt.Printf("    Send:    %.2f B/s (total %d bytes)\n", stats.NetIo.SentBytesRate, stats.NetIo.SentBytesTotal)
+		fmt.Println("  🌐 Network IO:")
+		fmt.Printf("    📥 Receive: %.2f B/s (total %d bytes)\n", stats.NetIo.RecvBytesRate, stats.NetIo.RecvBytesTotal)
+		fmt.Printf("    📤 Send:    %.2f B/s (total %d bytes)\n", stats.NetIo.SentBytesRate, stats.NetIo.SentBytesTotal)
 	}
 
 	return nil

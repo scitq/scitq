@@ -3157,9 +3157,10 @@ type WorkerStats struct {
 	CpuUsagePercent float32                `protobuf:"fixed32,1,opt,name=cpu_usage_percent,json=cpuUsagePercent,proto3" json:"cpu_usage_percent,omitempty"` // 0-100, float
 	MemUsagePercent float32                `protobuf:"fixed32,2,opt,name=mem_usage_percent,json=memUsagePercent,proto3" json:"mem_usage_percent,omitempty"` // 0-100, float
 	Load_1Min       float32                `protobuf:"fixed32,3,opt,name=load_1min,json=load1min,proto3" json:"load_1min,omitempty"`                        // e.g., 0.58, float
-	Disks           []*DiskUsage           `protobuf:"bytes,4,rep,name=disks,proto3" json:"disks,omitempty"`                                                // Per-disk usage
-	DiskIo          *DiskIOStats           `protobuf:"bytes,5,opt,name=disk_io,json=diskIo,proto3" json:"disk_io,omitempty"`                                // Global disk IO (aggregated)
-	NetIo           *NetIOStats            `protobuf:"bytes,6,opt,name=net_io,json=netIo,proto3" json:"net_io,omitempty"`                                   // Global network IO (aggregated)
+	IowaitPercent   float32                `protobuf:"fixed32,4,opt,name=iowait_percent,json=iowaitPercent,proto3" json:"iowait_percent,omitempty"`         // 0-100 float
+	Disks           []*DiskUsage           `protobuf:"bytes,5,rep,name=disks,proto3" json:"disks,omitempty"`                                                // Per-disk usage
+	DiskIo          *DiskIOStats           `protobuf:"bytes,6,opt,name=disk_io,json=diskIo,proto3" json:"disk_io,omitempty"`                                // Global disk IO (aggregated)
+	NetIo           *NetIOStats            `protobuf:"bytes,7,opt,name=net_io,json=netIo,proto3" json:"net_io,omitempty"`                                   // Global network IO (aggregated)
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -3211,6 +3212,13 @@ func (x *WorkerStats) GetMemUsagePercent() float32 {
 func (x *WorkerStats) GetLoad_1Min() float32 {
 	if x != nil {
 		return x.Load_1Min
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetIowaitPercent() float32 {
+	if x != nil {
+		return x.IowaitPercent
 	}
 	return 0
 }
@@ -3816,14 +3824,15 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0e_workflow_nameB\x0e\n" +
 	"\f_workflow_id\"1\n" +
 	"\bStepList\x12%\n" +
-	"\x05steps\x18\x01 \x03(\v2\x0f.taskqueue.StepR\x05steps\"\x8d\x02\n" +
+	"\x05steps\x18\x01 \x03(\v2\x0f.taskqueue.StepR\x05steps\"\xb4\x02\n" +
 	"\vWorkerStats\x12*\n" +
 	"\x11cpu_usage_percent\x18\x01 \x01(\x02R\x0fcpuUsagePercent\x12*\n" +
 	"\x11mem_usage_percent\x18\x02 \x01(\x02R\x0fmemUsagePercent\x12\x1b\n" +
-	"\tload_1min\x18\x03 \x01(\x02R\bload1min\x12*\n" +
-	"\x05disks\x18\x04 \x03(\v2\x14.taskqueue.DiskUsageR\x05disks\x12/\n" +
-	"\adisk_io\x18\x05 \x01(\v2\x16.taskqueue.DiskIOStatsR\x06diskIo\x12,\n" +
-	"\x06net_io\x18\x06 \x01(\v2\x15.taskqueue.NetIOStatsR\x05netIo\"Q\n" +
+	"\tload_1min\x18\x03 \x01(\x02R\bload1min\x12%\n" +
+	"\x0eiowait_percent\x18\x04 \x01(\x02R\riowaitPercent\x12*\n" +
+	"\x05disks\x18\x05 \x03(\v2\x14.taskqueue.DiskUsageR\x05disks\x12/\n" +
+	"\adisk_io\x18\x06 \x01(\v2\x16.taskqueue.DiskIOStatsR\x06diskIo\x12,\n" +
+	"\x06net_io\x18\a \x01(\v2\x15.taskqueue.NetIOStatsR\x05netIo\"Q\n" +
 	"\tDiskUsage\x12\x1f\n" +
 	"\vdevice_name\x18\x01 \x01(\tR\n" +
 	"deviceName\x12#\n" +
