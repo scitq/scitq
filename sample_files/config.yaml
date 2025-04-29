@@ -16,7 +16,10 @@ providers:
         publisher: "Canonical"
         offer: "ubuntu-24_04-lts"
         sku: "server"
-        version: "latest"      
+        version: "latest"
+      quotas:
+        swedencentral:
+          cpu: 320
   openstack:
     ovh:
       auth_url: "https://ovh.example.com:5000/v3"

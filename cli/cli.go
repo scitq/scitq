@@ -28,6 +28,7 @@ type Attr struct {
 			Input     []string `arg:"--input,separate" help:"Input values for the task (can be repeated)"`
 			Resource  []string `arg:"--resource,separate" help:"Input values for the task (can be repeated)"`
 			Output    string   `arg:"--output,separate" help:"Output folder where results are copied for the task"`
+			StepId    *uint32  `arg:"--step-id" help:"Step ID if task is affected to a step"`
 		} `arg:"subcommand:create" help:"Create a new task"`
 
 		List *struct {
@@ -47,13 +48,16 @@ type Attr struct {
 			Provider    string `arg:"--provider,required" help:"Worker provider in the form providerName.configName like azure.primary"`
 			Region      string `arg:"--region" help:"Worker region, default to provider default region"`
 			Count       int    `arg:"--count" help:"How many worker to create" default:"1"`
-			StepId      int    `arg:"--step" help:"Worker step ID if worker is affected to a task"`
+			StepId      uint32 `arg:"--step" help:"Worker step ID if worker is affected to a task"`
 			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
 			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
 		} `arg:"subcommand:deploy" help:"Create and deploy a new worker instance"`
 		Delete *struct {
-			WorkerId int `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
+			WorkerId uint32 `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
 		} `arg:"subcommand:delete" help:"Delete a worker instance"`
+		Stats *struct {
+			WorkerIds []uint32 `arg:"--worker-id,separate,required" help:"Worker IDs to get stats for"`
+		} `arg:"subcommand:stats" help:"Fetch current stats for workers"`
 	} `arg:"subcommand:worker" help:"Manage workers"`
 
 	// Flavor commands
@@ -88,6 +92,56 @@ type Attr struct {
 		} `arg:"subcommand:change-password" help:"Change your password"`
 	} `arg:"subcommand:user" help:"User management"`
 
+	Recruiter *struct {
+		List *struct {
+			StepId uint32 `arg:"--step-id" help:"Step ID to filter"`
+		} `arg:"subcommand:list" help:"List all recruiters"`
+		Create *struct {
+			StepId      uint32  `arg:"--step-id,required" help:"Step ID"`
+			Rank        uint32  `arg:"--rank" default:"1" help:"Recruiter rank"`
+			Protofilter string  `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
+			Concurrency uint32  `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
+			Prefetch    uint32  `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
+			MaxWorkers  *uint32 `arg:"--max-workers" help:"Maximum number of workers"`
+			Rounds      int     `arg:"--rounds" help:"Number of rounds"`
+			Timeout     int     `arg:"--timeout" default:"10" help:"Timeout in seconds"`
+		} `arg:"subcommand:create" help:"Create a new recruiter"`
+		Delete *struct {
+			StepId uint32 `arg:"--step-id,required" help:"Step ID to delete"`
+			Rank   int    `arg:"--rank,required" help:"Recruiter rank to delete"`
+		} `arg:"subcommand:delete" help:"Delete a recruiter"`
+	} `arg:"subcommand:recruiter" help:"Recruiter management"`
+
+	// Workflow commands
+	Workflow *struct {
+		List *struct {
+			NameLike string `arg:"--name-like" help:"Filter workflows by name"`
+		} `arg:"subcommand:list" help:"List workflows"`
+		Create *struct {
+			Name           string  `arg:"--name,required" help:"Workflow name"`
+			RunStrategy    string  `arg:"--run-strategy" help:"Run strategy (one letter B/T/D or Z, defaulting to B): \n\t(B)atch wise, e.g. workers do all tasks of a certain step (default)\n\t(T)hread wise, e.g. workers focus on going as far as possible in the workflow for each entry point\n\t(D)ebug\n\t(Z)suspended"`
+			MaximumWorkers *uint32 `arg:"--maximum-workers" help:"Maximum number of workers"`
+		} `arg:"subcommand:create" help:"Create a new workflow"`
+		Delete *struct {
+			WorkflowId uint32 `arg:"--id,required" help:"Workflow ID to delete"`
+		} `arg:"subcommand:delete" help:"Delete a workflow"`
+	} `arg:"subcommand:workflow" help:"Manage workflows"`
+
+	// Step commands
+	Step *struct {
+		List *struct {
+			WorkflowId uint32 `arg:"--workflow-id,required" help:"Workflow ID to list steps for"`
+		} `arg:"subcommand:list" help:"List steps for a workflow"`
+		Create *struct {
+			WorkflowId   uint32 `arg:"--workflow-id" help:"Workflow ID"`
+			WorkflowName string `arg:"--workflow-name" help:"Workflow name (alternative to ID)"`
+			Name         string `arg:"--name,required" help:"Step name"`
+		} `arg:"subcommand:create" help:"Create a step"`
+		Delete *struct {
+			StepId uint32 `arg:"--id,required" help:"Step ID to delete"`
+		} `arg:"subcommand:delete" help:"Delete a step"`
+	} `arg:"subcommand:step" help:"Manage steps"`
+
 	// Login commands
 	Login *struct {
 	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
@@ -108,13 +162,14 @@ func (c *CLI) TaskCreate() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	req := &pb.Task{
+	req := &pb.TaskRequest{
 		Command:   c.Attr.Task.Create.Command,
 		Container: c.Attr.Task.Create.Container,
 		Shell:     &c.Attr.Task.Create.Shell,
 		Input:     c.Attr.Task.Create.Input,
 		Resource:  c.Attr.Task.Create.Resource,
 		Output:    &c.Attr.Task.Create.Output,
+		StepId:    c.Attr.Task.Create.StepId,
 	}
 	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {
@@ -197,6 +252,42 @@ func (c *CLI) WorkerList() error {
 	return nil
 }
 
+func (c *CLI) WorkerStats() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.GetWorkerStatsRequest{
+		WorkerIds: c.Attr.Worker.Stats.WorkerIds,
+	}
+	res, err := c.QC.Client.GetWorkerStats(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error fetching worker stats: %w", err)
+	}
+
+	fmt.Println("📈 Worker Stats:")
+	for workerID, stats := range res.WorkerStats {
+		fmt.Printf("Worker ID: %d\n", workerID)
+		fmt.Printf("  CPU:  %.2f%%\n", stats.CpuUsagePercent)
+		fmt.Printf("  MEM:  %.2f%%\n", stats.MemUsagePercent)
+		fmt.Printf("  Load (1 min): %.2f\n", stats.Load_1Min)
+
+		fmt.Println("  Disks:")
+		for _, d := range stats.Disks {
+			fmt.Printf("    %s: %.2f%% used\n", d.DeviceName, d.UsagePercent)
+		}
+
+		fmt.Println("  Disk IO:")
+		fmt.Printf("    Read:  %.2f B/s (total %d bytes)\n", stats.DiskIo.ReadBytesRate, stats.DiskIo.ReadBytesTotal)
+		fmt.Printf("    Write: %.2f B/s (total %d bytes)\n", stats.DiskIo.WriteBytesRate, stats.DiskIo.WriteBytesTotal)
+
+		fmt.Println("  Net IO:")
+		fmt.Printf("    Receive: %.2f B/s (total %d bytes)\n", stats.NetIo.RecvBytesRate, stats.NetIo.RecvBytesTotal)
+		fmt.Printf("    Send:    %.2f B/s (total %d bytes)\n", stats.NetIo.SentBytesRate, stats.NetIo.SentBytesTotal)
+	}
+
+	return nil
+}
+
 // ListFlavors handles listing flavors.
 func (c *CLI) FlavorList(limit uint32, filter string) error {
 	ctx, cancel := c.WithTimeout()
@@ -250,7 +341,7 @@ func (c *CLI) WorkerDeploy() error {
 		FlavorId:    flavor.FlavorId,
 		RegionId:    flavor.RegionId,
 		Number:      uint32(c.Attr.Worker.Deploy.Count),
-		StepId:      uint32(c.Attr.Worker.Deploy.StepId),
+		StepId:      &c.Attr.Worker.Deploy.StepId,
 		Concurrency: uint32(c.Attr.Worker.Deploy.Concurrency),
 		Prefetch:    uint32(c.Attr.Worker.Deploy.Prefetch),
 	}
@@ -388,6 +479,176 @@ func CreateUser(client pb.TaskQueueClient, user *pb.CreateUserRequest) error {
 	return nil
 }
 
+func (c *CLI) RecruiterList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.RecruiterFilter{}
+	if c.Attr.Recruiter.List.StepId != 0 {
+		req.StepId = &c.Attr.Recruiter.List.StepId
+	}
+
+	res, err := c.QC.Client.ListRecruiters(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error fetching recruiters: %w", err)
+	}
+
+	fmt.Println("🏗️ Recruiter List:")
+	for _, r := range res.Recruiters {
+		if r.MaxWorkers != nil {
+			fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Max=%d Rounds=%d Timeout=%d Maximum Workers=%d\n",
+				r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Rounds, r.Timeout, *r.MaxWorkers)
+		} else {
+			fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Rounds=%d Timeout=%d Maximum Workers=unlimited\n",
+				r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.Rounds, r.Timeout)
+		}
+	}
+	return nil
+}
+
+func (c *CLI) RecruiterCreate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.Recruiter{
+		StepId:      c.Attr.Recruiter.Create.StepId,
+		Rank:        c.Attr.Recruiter.Create.Rank,
+		Protofilter: c.Attr.Recruiter.Create.Protofilter,
+		Concurrency: c.Attr.Recruiter.Create.Concurrency,
+		Prefetch:    c.Attr.Recruiter.Create.Prefetch,
+		MaxWorkers:  c.Attr.Recruiter.Create.MaxWorkers,
+		Rounds:      uint32(c.Attr.Recruiter.Create.Rounds),
+		Timeout:     uint32(c.Attr.Recruiter.Create.Timeout),
+	}
+
+	_, err := c.QC.Client.CreateRecruiter(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error creating recruiter: %w", err)
+	}
+	fmt.Println("✅ Recruiter created successfully")
+	return nil
+}
+
+func (c *CLI) RecruiterDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.RecruiterId{
+		StepId: c.Attr.Recruiter.Delete.StepId,
+		Rank:   uint32(c.Attr.Recruiter.Delete.Rank),
+	}
+
+	_, err := c.QC.Client.DeleteRecruiter(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error deleting recruiter: %w", err)
+	}
+
+	fmt.Printf("✅ Recruiter step_id=%d rank=%d deleted\n", req.StepId, req.Rank)
+	return nil
+}
+
+func (c *CLI) WorkflowList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.WorkflowFilter{NameLike: nil}
+	if c.Attr.Workflow.List.NameLike != "" {
+		req.NameLike = &c.Attr.Workflow.List.NameLike
+	}
+
+	res, err := c.QC.Client.ListWorkflows(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to list workflows: %w", err)
+	}
+
+	fmt.Println("📘 Workflow List:")
+	for _, w := range res.Workflows {
+		if w.MaximumWorkers != nil {
+			fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: %d\n",
+				w.WorkflowId, w.Name, w.RunStrategy, *w.MaximumWorkers)
+		} else {
+			fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: unlimited\n",
+				w.WorkflowId, w.Name, w.RunStrategy)
+		}
+	}
+	return nil
+}
+
+func (c *CLI) WorkflowCreate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.WorkflowRequest{
+		Name:           c.Attr.Workflow.Create.Name,
+		RunStrategy:    &c.Attr.Workflow.Create.RunStrategy,
+		MaximumWorkers: c.Attr.Workflow.Create.MaximumWorkers,
+	}
+	res, err := c.QC.Client.CreateWorkflow(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to create workflow: %w", err)
+	}
+	fmt.Printf("✅ Created workflow with ID %d\n", res.WorkflowId)
+	return nil
+}
+
+func (c *CLI) WorkflowDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.DeleteWorkflow(ctx, &pb.WorkflowId{WorkflowId: c.Attr.Workflow.Delete.WorkflowId})
+	if err != nil {
+		return fmt.Errorf("failed to delete workflow: %w", err)
+	}
+	fmt.Println("🗑️ Workflow deleted")
+	return nil
+}
+
+func (c *CLI) StepList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	res, err := c.QC.Client.ListSteps(ctx, &pb.WorkflowId{WorkflowId: c.Attr.Step.List.WorkflowId})
+	if err != nil {
+		return fmt.Errorf("failed to list steps: %w", err)
+	}
+
+	fmt.Printf("🪜 Steps in Workflow %d:\n", c.Attr.Step.List.WorkflowId)
+	for _, s := range res.Steps {
+		fmt.Printf("🔹 Step ID: %d | Name: %s\n", s.StepId, s.Name)
+	}
+	return nil
+}
+
+func (c *CLI) StepCreate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.StepRequest{
+		Name:         c.Attr.Step.Create.Name,
+		WorkflowName: &c.Attr.Step.Create.WorkflowName,
+		WorkflowId:   &c.Attr.Step.Create.WorkflowId,
+	}
+
+	res, err := c.QC.Client.CreateStep(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to create step: %w", err)
+	}
+	fmt.Printf("✅ Created step with ID %d\n", res.StepId)
+	return nil
+}
+
+func (c *CLI) StepDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.DeleteStep(ctx, &pb.StepId{StepId: c.Attr.Step.Delete.StepId})
+	if err != nil {
+		return fmt.Errorf("failed to delete step: %w", err)
+	}
+	fmt.Println("🗑️ Step deleted")
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -431,6 +692,8 @@ func Run(c CLI) error {
 			err = c.WorkerDeploy()
 		case c.Attr.Worker.Delete != nil:
 			err = c.WorkerDelete()
+		case c.Attr.Worker.Stats != nil:
+			err = c.WorkerStats()
 		}
 	case c.Attr.Flavor != nil:
 		switch {
@@ -473,6 +736,35 @@ func Run(c CLI) error {
 			err = CreateUser(c.QC.Client, user)
 		case c.Attr.User.ChangePassword != nil:
 			err = ChangePassword(c.Attr.Server, c.Attr.User.ChangePassword.Username)
+		}
+	case c.Attr.Recruiter != nil:
+		switch {
+		case c.Attr.Recruiter.List != nil:
+			return c.RecruiterList()
+		case c.Attr.Recruiter.Create != nil:
+			return c.RecruiterCreate()
+		case c.Attr.Recruiter.Delete != nil:
+			return c.RecruiterDelete()
+		default:
+			return fmt.Errorf("no recruiter subcommand specified")
+		}
+	case c.Attr.Workflow != nil:
+		switch {
+		case c.Attr.Workflow.List != nil:
+			err = c.WorkflowList()
+		case c.Attr.Workflow.Create != nil:
+			err = c.WorkflowCreate()
+		case c.Attr.Workflow.Delete != nil:
+			err = c.WorkflowDelete()
+		}
+	case c.Attr.Step != nil:
+		switch {
+		case c.Attr.Step.List != nil:
+			err = c.StepList()
+		case c.Attr.Step.Create != nil:
+			err = c.StepCreate()
+		case c.Attr.Step.Delete != nil:
+			err = c.StepDelete()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

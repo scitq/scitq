@@ -2,9 +2,9 @@
 -- Workflow Table
 CREATE TABLE IF NOT EXISTS workflow (
     workflow_id SERIAL PRIMARY KEY,
-    workflow_name TEXT NOT NULL,
+    workflow_name TEXT NOT NULL UNIQUE,
     run_strategy CHAR(1) NOT NULL DEFAULT 'B',  -- (B: Batch wise execution, T: Thread wise execution - follow thread logic, D: Debug execution, Z: suspended execution)
-    maximum_worker INT DEFAULT 0
+    maximum_workers INT DEFAULT 0
 );
 
 -- Step Table
@@ -12,8 +12,10 @@ CREATE TABLE IF NOT EXISTS step (
     step_id SERIAL PRIMARY KEY,
     step_name TEXT NOT NULL,
     workflow_id INT REFERENCES workflow(workflow_id) ON DELETE CASCADE,
-    stats JSONB DEFAULT '{}'
+    stats JSONB DEFAULT '{}',
+    CONSTRAINT step_name_unique UNIQUE (step_name, workflow_id)
 );
+
 
 
 -- Provider Table
@@ -62,7 +64,7 @@ CREATE TABLE IF NOT EXISTS worker (
     step_id INT NULL REFERENCES step(step_id) ON DELETE SET NULL,
     concurrency INT NOT NULL DEFAULT 1,
     prefetch INT NOT NULL DEFAULT 0,
-    status CHAR(1) NOT NULL DEFAULT 'I', -- (O: Offline, I: Installing, R: Ready, P: Paused, F: Failing)
+    status CHAR(1) NOT NULL DEFAULT 'I', -- (O: Offline, I: Installing, R: Ready, P: Paused, F: Failing, Q: Quarantined (pause+offline), L: Lost (failing+offline))
     stats JSONB DEFAULT '{}',
     last_ping TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -73,7 +75,8 @@ CREATE TABLE IF NOT EXISTS worker (
     is_permanent BOOLEAN DEFAULT TRUE,
     hostname TEXT DEFAULT '',
     ipv4 inet,
-    ipv6 inet
+    ipv6 inet,
+    recyclable_scope CHAR(1) NOT NULL DEFAULT 'W' -- (G: Global, W: Workflow-only, T: Temporarily blocked, N: Never recyclable)
 );
 
 
@@ -119,17 +122,12 @@ CREATE INDEX idx_task_worker ON task(worker_id);
 CREATE TABLE IF NOT EXISTS recruiter (
     step_id INT REFERENCES step(step_id),
     rank INT DEFAULT 1,
-    step_name TEXT DEFAULT '',
     timeout INT DEFAULT 0,
-    is_recycling BOOLEAN DEFAULT FALSE,
-    worker_flavor TEXT NOT NULL,
-    worker_provider TEXT DEFAULT '',
-    worker_region TEXT DEFAULT '',
+    protofilter TEXT NOT NULL
     worker_concurrency INT DEFAULT 1,
     worker_prefetch INT DEFAULT 0,
-    maximum_worker INT DEFAULT 0,
+    maximum_workers INT DEFAULT 0,
     rounds INT DEFAULT 1,
-    is_active BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (step_id, rank)
 );
 
@@ -177,4 +175,9 @@ CREATE TABLE scitq_user_session (
     created_at TIMESTAMP DEFAULT NOW(),
     expires_at TIMESTAMP,
     last_used  TIMESTAMP
+);
+
+CREATE TABLE memory_store (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL
 );
