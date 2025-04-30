@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
+	"strings"
 
 	"golang.org/x/term"
 
@@ -14,32 +16,38 @@ import (
 )
 
 func promptCredentials() (string, string, error) {
-	// Open /dev/tty to get a real terminal even in a subshell
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		fmt.Println("❌ No terminal available for login prompt.")
-		fmt.Println("   Please run interactively or pass credentials another way.")
-		os.Exit(1)
+	var input *os.File
+	var err error
+
+	if runtime.GOOS == "windows" {
+		input = os.Stdin
+	} else {
+		input, err = os.OpenFile("/dev/tty", os.O_RDWR, 0)
+		if err != nil {
+			fmt.Println("❌ No terminal available for login prompt.")
+			fmt.Println("   Please run interactively or pass credentials another way.")
+			os.Exit(1)
+		}
+		defer input.Close()
 	}
-	defer tty.Close()
 
-	fmt.Fprint(tty, "🔐 Username: ")
-	reader := bufio.NewReader(tty)
-
+	fmt.Fprint(input, "🔐 Username: ")
+	reader := bufio.NewReader(input)
 	username, err := reader.ReadString('\n')
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read username: %w", err)
 	}
+	username = strings.TrimSpace(username)
 
-	fmt.Fprint(tty, "🔑 Password: ")
-	fd := int(tty.Fd())
+	fmt.Fprint(input, "🔑 Password: ")
+	fd := int(input.Fd())
 	passwordBytes, err := term.ReadPassword(fd)
-	fmt.Fprintln(tty) // newline after password
+	fmt.Fprintln(input) // add newline after password prompt
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read password: %w", err)
 	}
 
-	return username[:len(username)-1], string(passwordBytes), nil
+	return username, string(passwordBytes), nil
 }
 
 func getToken() (string, error) {
