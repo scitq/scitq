@@ -59,8 +59,6 @@ export async function getStats(workerIds: number[]): Promise<Record<number, task
             }
             return map;
         }, {} as Record<number, taskqueue.WorkerStats>);
-
-        console.log(workerStatsMap); // Log to verify the structure
         return workerStatsMap;
     } catch (error) {
         console.error("Error while retrieving Stats:", error);
@@ -87,7 +85,49 @@ export function formatBytesPair(a: number | bigint, b: number | bigint, decimals
     return `${format(a)}/${format(b)} ${unit}`;
 }
 
-  
+
+export async function getAllTasks(workerId: number, statusFilter?: string): Promise<taskqueue.Task[]> {
+    try {
+        const client = getClient();
+        const request: taskqueue.ListTasksRequest = { statusFilter };
+        const taskUnary = await client.listTasks(request, callOptions);
+        console.log(taskUnary.response?.tasks);
+        return taskUnary.response?.tasks || [];  // If 'response.workers' exists
+    } catch (error) {
+        console.error("Error while retrieving tasks:", error);
+        return [];  // In case of error, return an empty array
+    }
+}
+
+// Fonction principale retournant un objet avec des méthodes filtrées
+export function getTasks(workerId: number){
+    return {
+      async accepted() {
+        const tasks = await getAllTasks(workerId, 'A');
+        return tasks.length;
+      },
+      async completed() {
+        const tasks = await getAllTasks(workerId, 'C');
+        return tasks.length;
+      },
+      async downloading() {
+        const tasks = await getAllTasks(workerId, 'D');
+        return tasks.length;
+      },
+      async running() {
+        const tasks = await getAllTasks(workerId, 'R');
+        return tasks.length;
+      },
+      async failed() {
+        const tasks = await getAllTasks(workerId, 'F');
+        return tasks.length;
+      },
+      async successes() {
+        const tasks = await getAllTasks(workerId, 'S');
+        return tasks.length;
+      },
+    };
+  }
 
 
 /**

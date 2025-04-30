@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as grpcWeb from 'grpc-web';
   import { onMount } from 'svelte';
-  import { delWorker, getWorkers, updateWorkerConfig, getStatusClass, getStatusText, getStats, formatBytesPair} from '../lib/api';
+  import { delWorker, getWorkers, updateWorkerConfig, getStatusClass, getStatusText, getStats, formatBytesPair, getTasks} from '../lib/api';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser } from 'lucide-svelte';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
@@ -9,11 +9,25 @@
   let workers: Worker[] = [];
   let workersStatsMap: Record<number, taskqueue.WorkerStats> = {};
 
+  let tasksAccepted: Record<number, number> = {};
+  let tasksRunning: Record<number, number> = {};
+  let tasksSuccesses: Record<number, number> = {};
+  let tasksFailed: Record<number, number> = {};
+
   onMount(async () => {
     workers = await getWorkers();
     const workerIds = workers.map(worker => worker.workerId);
     // Retrieve worker statistics
     workersStatsMap = await getStats(workerIds);  // Call to the new getStats function
+
+    // Charger le nombre de tâches par worker
+    for (const worker of workers) {
+      const counter = getTasks(worker.workerId);
+      tasksAccepted[worker.workerId] = await counter.accepted();
+      tasksRunning[worker.workerId] = await counter.running();
+      tasksSuccesses[worker.workerId] = await counter.successes();
+      tasksFailed[worker.workerId] = await counter.failed();
+    }
   });
 
 
@@ -21,16 +35,23 @@
     workers = await getWorkers();
     const workerIds = workers.map(worker => worker.workerId);
     workersStatsMap = await getStats(workerIds);
+
+    for (const worker of workers) {
+      const counter = getTasks(worker.workerId);
+      tasksAccepted[worker.workerId] = (await getTasks(worker.workerId)).accepted;
+      tasksRunning[worker.workerId] = (await getTasks(worker.workerId)).running;
+      tasksSuccesses[worker.workerId] = (await getTasks(worker.workerId)).successes;
+      tasksFailed[worker.workerId] = (await getTasks(worker.workerId)).failed;
+    }
   }
 
   // Function to update concurrency or prefetch values
   const updateValue = async (worker, field: 'concurrency' | 'prefetch', delta: number) => {
-    console.log(worker);
     const newValue = Math.max(0, worker[field] + delta);
     worker[field] = newValue;
-
     await updateWorkerConfig(worker.workerId, worker.concurrency, worker.prefetch);
-    console.log(worker);
+    // Refresh data after the update
+    await refresh();
   };
 </script>
 
@@ -82,10 +103,10 @@
               <button class="small-btn" data-testid={`increase-prefetch-${worker.workerId}`} on:click={() => updateValue(worker, 'prefetch', 1)}>+</button>
             </td>
 
-            <td>{worker.accepted}</td>
-            <td>{worker.running}</td>
-            <td>{worker.successes}</td>
-            <td>{worker.fail}</td>
+            <td>{tasksAccepted[worker.workerId]}</td>
+            <td>{tasksRunning[worker.workerId]}</td>
+            <td>{tasksSuccesses[worker.workerId]}</td>
+            <td>{tasksFailed[worker.workerId]}</td>
 
             <!-- Statistics -->
             {#if workersStatsMap[worker.workerId]}
