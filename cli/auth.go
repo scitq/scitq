@@ -16,38 +16,43 @@ import (
 )
 
 func promptCredentials() (string, string, error) {
-	var input *os.File
-	var err error
-
-	if runtime.GOOS == "windows" {
-		input = os.Stdin
-	} else {
-		input, err = os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if runtime.GOOS != "windows" {
+		// Unix logic (as before)
+		tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 		if err != nil {
-			fmt.Println("❌ No terminal available for login prompt.")
-			fmt.Println("   Please run interactively or pass credentials another way.")
+			fmt.Fprintln(os.Stderr, "❌ No terminal available for login prompt.")
 			os.Exit(1)
 		}
-		defer input.Close()
+		defer tty.Close()
+
+		fmt.Fprint(tty, "🔐 Username: ")
+		reader := bufio.NewReader(tty)
+		username, err := reader.ReadString('\n')
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read username: %w", err)
+		}
+		username = strings.TrimSpace(username)
+
+		fmt.Fprint(tty, "🔑 Password: ")
+		passwordBytes, err := term.ReadPassword(int(tty.Fd()))
+		fmt.Fprintln(tty)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read password: %w", err)
+		}
+
+		return username, string(passwordBytes), nil
 	}
 
-	fmt.Fprint(input, "🔐 Username: ")
-	reader := bufio.NewReader(input)
-	username, err := reader.ReadString('\n')
+	// Windows: use ReadConsoleW to print and read interactively
+	username, err := readConsoleLine("🔐 Username: ")
 	if err != nil {
-		return "", "", fmt.Errorf("failed to read username: %w", err)
+		return "", "", err
 	}
-	username = strings.TrimSpace(username)
-
-	fmt.Fprint(input, "🔑 Password: ")
-	fd := int(input.Fd())
-	passwordBytes, err := term.ReadPassword(fd)
-	fmt.Fprintln(input) // add newline after password prompt
+	password, err := readConsolePassword("🔑 Password: ")
 	if err != nil {
-		return "", "", fmt.Errorf("failed to read password: %w", err)
+		return "", "", err
 	}
-
-	return username, string(passwordBytes), nil
+	return username, password, nil
 }
 
 func getToken() (string, error) {
@@ -79,7 +84,7 @@ func createToken(serverAddr string) string {
 		Password: password,
 	})
 	if err != nil {
-		log.Fatal("login failed: %w", err)
+		log.Fatalf("login failed: %v (%s)", err, password)
 	}
 
 	// Store token for current session only
