@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getFlavors, newWorker } from "../lib/api";
+  import { getFlavors, newWorker, getWorkFlow } from "../lib/api";
   import "../styles/createForm.css";
   import { createEventDispatcher } from 'svelte';
 
@@ -12,22 +12,26 @@
   let number = 1;
   let concurrency = 1;
   let prefetch = 1;
-  let task = "";
+  let wfStep = "";
 
   let listFlavor = [];
+  let listWf = [];
 
   // Autocomplete visibility flags
   let showFlavorSuggestions = false;
   let showRegionSuggestions = false;
   let showProviderSuggestions = false;
+  let showWfStepSuggestions = false;
 
   let flavorSuggestions = [];
   let regionSuggestions = [];
   let providerSuggestions = [];
+  let wfStepSuggestions = [];
 
-  // Fetch available flavors on mount
+  // Fetch available flavors and workflows on mount
   onMount(async () => {
     listFlavor = await getFlavors();
+    listWf = await getWorkFlow(); // récupère tous les workflows
   });
 
   // Dynamic flavor suggestions
@@ -57,6 +61,15 @@
     )
   );
 
+  // Dynamic workflow step suggestions
+  $: wfStepSuggestions = Array.from(
+    new Set(
+      listWf
+        .map(wf => wf.name)
+        .filter(name => name?.toLowerCase().includes(wfStep.toLowerCase()))
+    )
+  );
+
   // Select a flavor from suggestions
   function selectFlavor(suggestion: string) {
     flavor = suggestion;
@@ -73,6 +86,12 @@
   function selectProvider(suggestion: string) {
     provider = suggestion;
     showProviderSuggestions = false;
+  }
+
+  // Select a workflow step from suggestions
+  function selectWfStep(suggestion: string) {
+    wfStep = suggestion;
+    showWfStepSuggestions = false;
   }
 </script>
 
@@ -181,11 +200,36 @@
     {/if}
   </div>
 
-  <!-- TASK -->
-  <div class="form-group">
-    <label for="task">Task :</label>
-    <input id="task" type="text" bind:value={task} />
+  <!-- STEP -->
+  <div class="form-group autocomplete">
+    <label for="step">Step (Workflow.step) : </label>
+    <input
+      id="step"
+      type="text"
+      bind:value={wfStep}
+      autocomplete="off"
+      placeholder="Type to search..."
+      on:focus={() => showWfStepSuggestions = true}
+      on:input={() => showWfStepSuggestions = true}
+      on:blur={() => setTimeout(() => showWfStepSuggestions = false, 150)}
+    />
+    {#if showWfStepSuggestions && wfStepSuggestions.length > 0}
+      <ul class="suggestions">
+        {#each wfStepSuggestions as suggestion}
+          <li>
+            <button
+              class="suggestion-item"
+              type="button"
+              on:click={() => selectWfStep(suggestion)}
+            >
+              {suggestion}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </div>
+  <!--VERIFIER QUE CA SOIT BON MAIS SI ON CREER DIRECT D'ICI, DIRE QUE SI CA N4EXISTE PAS ALORS ENREGISTTRER LE NOM ET A LA FIN IL FAUDRA APPELLER CREATEWORFLOW ET FAIRE UNE POP UP QUI DEMANDE LE NOMRBE DE WORKER A METTRE ETC A VOIR-->
 
   <!-- NUMBER -->
   <div class="form-group">
@@ -197,7 +241,7 @@
   <button
     class="add-button"
     on:click={async () => {
-      await newWorker(concurrency, prefetch, flavor, region, provider, number);
+      await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
       dispatch('workerAdded'); // Notify external components that a worker was added
     }}
     aria-label="Add"

@@ -116,25 +116,82 @@
 .submenu {
   display: flex;
   flex-direction: column;
-  padding-left: 2rem;
+  padding-left: 2rem;  /* Un peu d'indentation à gauche pour le sous-menu */
   margin-top: 0.5rem;
-  gap: 0.3rem;
+  gap: 0.5rem;  /* Espacement entre les groupes */
+  background-color: #192245;  /* Fond de sous-menu */
+  border-radius: 6px;  /* Coins arrondis pour le sous-menu */
+  padding: 0.5rem 1rem;
 }
 
 /* Links inside submenu */
 .submenu a {
   font-size: 0.95rem;
-  color: #888;
+  color: #ccc;
   padding: 0.3rem 0;
   text-align: left;
+  border-radius: 4px;
+  transition: background 0.2s ease;
 }
 
 /* Hover effect for submenu links */
 .submenu a:hover {
-  color: #fff;
+  color: white;
+  background-color: #192245;  /* Darker hover effect */
 }
 
-/* Logout link at the bottom of the sidebar */
+/* Submenu header (groupes comme "Starting", "Progress", etc.) */
+.submenu-header {
+  display: flex;  /* Utiliser flexbox pour disposer le texte et le chevron */
+  justify-content: space-between; /* Espacer le texte et le chevron */
+  align-items: center;  /* Centrer verticalement les éléments */
+  background-color: #192245; /* Fond pour les groupes */
+  border: none;
+  color: #ccc;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0.5rem 1rem; /* Un peu d'espacement autour du texte */
+  text-align: left;  /* Aligner le texte à gauche */
+  width: 100%; /* S'assurer que le bouton occupe toute la largeur */
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+/* Chevron dans le submenu header */
+.submenu-header .chevron {
+  transition: transform 0.3s ease; /* Animation de rotation du chevron */
+}
+
+/* Rotation du chevron quand le sous-menu est ouvert */
+.submenu-header.open .chevron {
+  transform: rotate(180deg);
+}
+
+/* Liens dans le sous-menu */
+.submenu-items {
+  padding-left: 1.75rem;  /* Indentation pour les éléments dans le groupe */
+  margin-top: 0.5rem;    /* Un peu d'espacement au-dessus des éléments */
+}
+
+/* Chaque élément du sous-menu (comme Pending, Assigned) */
+.submenu-items a {
+  display: block;        /* S'assurer que chaque lien occupe une ligne entière */
+  font-size: 1rem;
+  font-style: italic;
+  color: #ccc;
+  padding: 0.3rem 0;
+  text-align: left;      /* Aligner le texte à gauche */
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+/* Hover sur les liens du sous-menu */
+.submenu-items a:hover {
+  color: white;
+  background-color: #192245;  /* Changer de couleur de fond au survol */
+}
+
+/* Styling for logout link */
 .logout {
   margin-top: auto;
   color: #f87171;

@@ -52,9 +52,9 @@
               <td>{new Date(job.modifiedAt).toLocaleString()}</td>
               <td class="actions">
                 {#if job.status === 'F'}
-                  <button data-testid={`refresh-button-${job.jobId}`} on:click={() => handleRestart(job.jobId)}><RefreshCw /></button>
+                  <button data-testid={`refresh-button-${job.jobId}`} on:click={() => handleRestart(job.jobId)} title="Restart"><RefreshCw /></button>
                 {/if}
-                <button data-testid={`trash-button-${job.jobId}`}><Trash /></button>
+                <button data-testid={`trash-button-${job.jobId}`} title="Delete"><Trash /></button>
               </td>
             </tr>
           {/each}

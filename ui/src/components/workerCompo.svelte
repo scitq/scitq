@@ -9,10 +9,7 @@
   let workers: Worker[] = [];
   let workersStatsMap: Record<number, taskqueue.WorkerStats> = {};
 
-  let tasksAccepted: Record<number, number> = {};
-  let tasksRunning: Record<number, number> = {};
-  let tasksSuccesses: Record<number, number> = {};
-  let tasksFailed: Record<number, number> = {};
+  let tasksStatus: Record<number, Record<string, number>> = {};
 
   onMount(async () => {
     workers = await getWorkers();
@@ -22,11 +19,20 @@
 
     // Charger le nombre de tâches par worker
     for (const worker of workers) {
-      const counter = getTasks(worker.workerId);
-      tasksAccepted[worker.workerId] = await counter.accepted();
-      tasksRunning[worker.workerId] = await counter.running();
-      tasksSuccesses[worker.workerId] = await counter.successes();
-      tasksFailed[worker.workerId] = await counter.failed();
+      tasksStatus[worker.workerId] = {
+        pending: await getTasks(worker.workerId).pending(),
+        assigned: await getTasks(worker.workerId).assigned(),
+        accepted: await getTasks(worker.workerId).accepted(),
+        downloading: await getTasks(worker.workerId).downloading(),
+        running: await getTasks(worker.workerId).running(),
+        uploadingSuccess: await getTasks(worker.workerId).uploadingSuccess(),
+        succeeded: await getTasks(worker.workerId).succeeded(),
+        uploadingFailure: await getTasks(worker.workerId).uploadingFailure(),
+        failed: await getTasks(worker.workerId).failed(),
+        suspended: await getTasks(worker.workerId).suspended(),
+        canceled: await getTasks(worker.workerId).canceled(),
+        waiting: await getTasks(worker.workerId).waiting(),
+      };
     }
   });
 
@@ -36,12 +42,22 @@
     const workerIds = workers.map(worker => worker.workerId);
     workersStatsMap = await getStats(workerIds);
 
+    // Charger le nombre de tâches par worker
     for (const worker of workers) {
-      const counter = getTasks(worker.workerId);
-      tasksAccepted[worker.workerId] = (await getTasks(worker.workerId)).accepted;
-      tasksRunning[worker.workerId] = (await getTasks(worker.workerId)).running;
-      tasksSuccesses[worker.workerId] = (await getTasks(worker.workerId)).successes;
-      tasksFailed[worker.workerId] = (await getTasks(worker.workerId)).failed;
+      tasksStatus[worker.workerId] = {
+        pending: await getTasks(worker.workerId).pending(),
+        assigned: await getTasks(worker.workerId).assigned(),
+        accepted: await getTasks(worker.workerId).accepted(),
+        downloading: await getTasks(worker.workerId).downloading(),
+        running: await getTasks(worker.workerId).running(),
+        uploadingSuccess: await getTasks(worker.workerId).uploadingSuccess(),
+        succeeded: await getTasks(worker.workerId).succeeded(),
+        uploadingFailure: await getTasks(worker.workerId).uploadingFailure(),
+        failed: await getTasks(worker.workerId).failed(),
+        suspended: await getTasks(worker.workerId).suspended(),
+        canceled: await getTasks(worker.workerId).canceled(),
+        waiting: await getTasks(worker.workerId).waiting(),
+      };
     }
   }
 
@@ -65,8 +81,8 @@
           <th>Status</th>
           <th>Concurrency</th>
           <th>Prefetch</th>
-          <th>Accepted</th>
-          <th>Running</th>
+          <th>Starting </th>
+          <th>Progress</th>
           <th>Successes</th>
           <th>Fails</th>
           <th>CPU%</th>
@@ -84,7 +100,10 @@
         <tr data-testid={`worker-${worker.workerId}`}>
             <!-- Worker name clickable to open task view -->
             <td class="clickable" on:click={() => goToTaskView(worker.name)}>{worker.name}</td>
-            <td>{worker.batch}</td>
+            <td class="actions">              
+              <!-- Bouton d'édition -->
+              <button title="Edit"><Edit /></button>
+            </td>
             <td>
               <div class="status-pill {getStatusClass(worker.status)}" title={getStatusText(worker.status)}></div>
             </td>
@@ -103,10 +122,44 @@
               <button class="small-btn" data-testid={`increase-prefetch-${worker.workerId}`} on:click={() => updateValue(worker, 'prefetch', 1)}>+</button>
             </td>
 
-            <td>{tasksAccepted[worker.workerId]}</td>
-            <td>{tasksRunning[worker.workerId]}</td>
-            <td>{tasksSuccesses[worker.workerId]}</td>
-            <td>{tasksFailed[worker.workerId]}</td>
+            <!-- Tasks awaiting execution: Pending + Assigned + Accepted -->
+            <td
+              data-testid={`tasks-awaiting-execution-${worker.workerId}`}
+              title={`Pending: ${tasksStatus[worker.workerId]?.pending}, Assigned: ${tasksStatus[worker.workerId]?.assigned}, Accepted: ${tasksStatus[worker.workerId]?.accepted}`}
+            >
+              {(tasksStatus[worker.workerId]?.pending ?? 0)
+              + (tasksStatus[worker.workerId]?.assigned ?? 0)
+              + (tasksStatus[worker.workerId]?.accepted ?? 0)}
+            </td>
+            <!-- Tasks in progress: Downloading + Waiting + Running -->
+            <td
+              data-testid={`tasks-in-progress-${worker.workerId}`}
+              title={`Downloading: ${tasksStatus[worker.workerId]?.downloading}, Waiting: ${tasksStatus[worker.workerId]?.waiting}, Running: ${tasksStatus[worker.workerId]?.running}`}
+            >
+              {(tasksStatus[worker.workerId]?.downloading ?? 0)
+              + (tasksStatus[worker.workerId]?.waiting ?? 0)
+              + (tasksStatus[worker.workerId]?.running ?? 0)}
+            </td>
+          
+            <!-- Successful tasks: Uploading after success + Completed -->
+            <td
+              data-testid={`successful-tasks-${worker.workerId}`}
+              title={`UploadingSuccess: ${tasksStatus[worker.workerId]?.uploadingSuccess}, Succeeded: ${tasksStatus[worker.workerId]?.succeeded}`}
+            >
+              {(tasksStatus[worker.workerId]?.uploadingSuccess ?? 0) + (tasksStatus[worker.workerId]?.succeeded ?? 0)}
+            </td>
+          
+
+            <!-- Failed tasks: Uploading after failure + Failed + Suspended + Canceled -->
+            <td
+              data-testid={`failed-tasks-${worker.workerId}`}
+              title={`UploadingFailure: ${tasksStatus[worker.workerId]?.uploadingFailure}, Failed: ${tasksStatus[worker.workerId]?.failed}, Suspended: ${tasksStatus[worker.workerId]?.suspended}, Canceled: ${tasksStatus[worker.workerId]?.canceled}`}
+            >
+              {(tasksStatus[worker.workerId]?.uploadingFailure ?? 0) 
+              + (tasksStatus[worker.workerId]?.failed ?? 0) 
+              + (tasksStatus[worker.workerId]?.suspended ?? 0) 
+              + (tasksStatus[worker.workerId]?.canceled ?? 0)}
+            </td>
 
             <!-- Statistics -->
             {#if workersStatsMap[worker.workerId]}
@@ -164,19 +217,31 @@
             
             <!-- Action buttons -->
             <td class="actions">
-              <button><Edit /></button>
-              <button><PauseCircle /></button>
-              <button><Eraser /></button>
+
+              <!-- Bouton de pause -->
+              <button title="Pause"><PauseCircle /></button>
+
+              <!-- Bouton d'effacement -->
+              <button title="Clean"><Eraser /></button>
+              
               <br />
-              <button><RefreshCw /></button>
-              <button on:click={() => {
-                console.log('Worker ID:', worker.workerId);
-                if (worker.workerId) {
-                  delWorker({ workerId: worker.workerId });
-                } else {
-                  console.error('Invalid Worker ID');
-                }
-              }} data-testid={`delete-worker-${worker.workerId}`}>
+              
+              <!-- Bouton de rafraîchissement -->
+              <button title="Restart"><RefreshCw /></button>
+
+              <!-- Bouton de suppression -->
+              <button 
+                title="Delete"
+                on:click={() => {
+                  console.log('Worker ID:', worker.workerId);
+                  if (worker.workerId) {
+                    delWorker({ workerId: worker.workerId });
+                  } else {
+                    console.error('Invalid Worker ID');
+                  }
+                }} 
+                data-testid={`delete-worker-${worker.workerId}`}
+              >
                 <Trash />
               </button>
             </td>

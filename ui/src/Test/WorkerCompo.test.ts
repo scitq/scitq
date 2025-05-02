@@ -2,6 +2,45 @@ import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import WorkerCompo from '../components/WorkerCompo.svelte';
 
+
+
+// Définir le type de `tasksStatus` pour résoudre l'erreur
+interface TaskStatus {
+  pending: number;
+  assigned: number;
+  accepted: number;
+  downloading: number;
+  running: number;
+  uploadingSuccess: number;
+  succeeded: number;
+  uploadingFailure: number;
+  failed: number;
+  suspended: number;
+  canceled: number;
+  waiting: number;
+}
+
+interface TasksStatus {
+  [workerId: number]: TaskStatus;
+}
+
+const tasksStatus = {
+  1: {
+    pending: 3,
+    assigned: 2,
+    accepted: 1,
+    downloading: 4,
+    running: 5,
+    uploadingSuccess: 6,
+    succeeded: 7,
+    uploadingFailure: 8,
+    failed: 9,
+    suspended: 10,
+    canceled: 11,
+    waiting: 12,
+  }
+};
+
 // Mock all functions from ../lib/api
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal() as typeof import('../lib/api');
@@ -13,10 +52,24 @@ vi.mock('../lib/api', async (importOriginal) => {
     getStatusClass: (status: string) => status,
     getStatusText: (status: string) => status,
     getStats: vi.fn(),
+    getTasks: vi.fn((workerId: number) => ({
+      pending: () => tasksStatus[workerId as keyof typeof tasksStatus]?.pending ?? 0,
+      assigned: () => tasksStatus[workerId as keyof typeof tasksStatus]?.assigned ?? 0,
+      accepted: () => tasksStatus[workerId as keyof typeof tasksStatus]?.accepted ?? 0,
+      downloading: () => tasksStatus[workerId as keyof typeof tasksStatus]?.downloading ?? 0,
+      running: () => tasksStatus[workerId as keyof typeof tasksStatus]?.running ?? 0,
+      uploadingSuccess: () => tasksStatus[workerId as keyof typeof tasksStatus]?.uploadingSuccess ?? 0,
+      succeeded: () => tasksStatus[workerId as keyof typeof tasksStatus]?.succeeded ?? 0,
+      uploadingFailure: () => tasksStatus[workerId as keyof typeof tasksStatus]?.uploadingFailure ?? 0,
+      failed: () => tasksStatus[workerId as keyof typeof tasksStatus]?.failed ?? 0,
+      suspended: () => tasksStatus[workerId as keyof typeof tasksStatus]?.suspended ?? 0,
+      canceled: () => tasksStatus[workerId as keyof typeof tasksStatus]?.canceled ?? 0,
+      waiting: () => tasksStatus[workerId as keyof typeof tasksStatus]?.waiting ?? 0,
+    })),
   };
 });
 
-import { getWorkers, updateWorkerConfig, delWorker, getStats } from '../lib/api';
+import { getWorkers, updateWorkerConfig, delWorker, getStats} from '../lib/api';
 
 const mockWorkers = [
   {
@@ -63,6 +116,8 @@ const mockStats = {
     },
   }
 };
+
+
 
 describe('WorkerCompo', () => {
   beforeEach(() => {
@@ -158,4 +213,67 @@ describe('WorkerCompo', () => {
       expect(screen.getByText('2.0/1.0 GB')).toBeTruthy();
     });
   });
+
+  it('should correctly display the task status counts for each worker', async () => {
+    (getWorkers as any).mockResolvedValue(mockWorkers);
+    (getStats as any).mockResolvedValue(mockStats);
+  
+    const { getByTestId } = render(WorkerCompo);
+  
+    await waitFor(() => {
+      // 1. Tasks awaiting execution (Pending + Assigned + Accepted)
+      const awaitingExecutionTotal = 3 + 2 + 1; // Pending + Assigned + Accepted
+      expect(getByTestId('tasks-awaiting-execution-1').textContent).toBe(String(awaitingExecutionTotal));
+  
+      // 2. Tasks in progress (Downloading + Waiting + Running)
+      const inProgressTotal = 4 + 12 + 5; // Downloading + Waiting + Running
+      expect(getByTestId('tasks-in-progress-1').textContent).toBe(String(inProgressTotal));
+  
+      // 3. Successful tasks (UploadingSuccess + Succeeded)
+      const successfulTasksTotal = 6 + 7; // UploadingSuccess + Succeeded
+      expect(getByTestId('successful-tasks-1').textContent).toBe(String(successfulTasksTotal));
+  
+      // 4. Failed tasks (UploadingFailure + Failed + Suspended + Canceled)
+      const failedTasksTotal = 8 + 9 + 10 + 11; // UploadingFailure + Failed + Suspended + Canceled
+      expect(getByTestId('failed-tasks-1').textContent).toBe(String(failedTasksTotal));
+    });
+  });  
+
+  it('should display the details when hovering over each task status cell', async () => {
+    (getWorkers as any).mockResolvedValue(mockWorkers);
+    (getStats as any).mockResolvedValue(mockStats);
+
+    const { getByTestId } = render(WorkerCompo);
+
+    await waitFor(() => {
+      // Vérification pour la cellule "Tasks awaiting execution"
+      const tasksAwaitingCell = getByTestId('tasks-awaiting-execution-1');
+      fireEvent.mouseOver(tasksAwaitingCell);
+      expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Pending: 3'));
+      expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Assigned: 2'));
+      expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Accepted: 1'));
+
+      // Vérification pour la cellule "Tasks in progress"
+      const tasksInProgressCell = getByTestId('tasks-in-progress-1');
+      fireEvent.mouseOver(tasksInProgressCell);
+      expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Downloading: 4'));
+      expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Waiting: 12'));
+      expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Running: 5'));
+
+      // Vérification pour la cellule "Successful tasks"
+      const successfulTasksCell = getByTestId('successful-tasks-1');
+      fireEvent.mouseOver(successfulTasksCell);
+      expect(successfulTasksCell).toHaveAttribute('title', expect.stringContaining('UploadingSuccess: 6'));
+      expect(successfulTasksCell).toHaveAttribute('title', expect.stringContaining('Succeeded: 7'));
+
+      // Vérification pour la cellule "Failed tasks"
+      const failedTasksCell = getByTestId('failed-tasks-1');
+      fireEvent.mouseOver(failedTasksCell);
+      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('UploadingFailure: 8'));
+      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('Failed: 9'));
+      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('Suspended: 10'));
+      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('Canceled: 11'));
+    });
+  });
+
 });

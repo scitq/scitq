@@ -99,35 +99,72 @@ export async function getAllTasks(workerId: number, statusFilter?: string): Prom
     }
 }
 
-// Fonction principale retournant un objet avec des méthodes filtrées
-export function getTasks(workerId: number){
+// Fonction principale retournant un objet avec des méthodes filtrées par statut
+export function getTasks(workerId: number) {
     return {
-      async accepted() {
+      // Tâches en attente
+      async pending() {
+        const tasks = await getAllTasks(workerId, 'P');
+        return tasks.length;
+      },
+      // Tâches assignées mais pas encore acceptées
+      async assigned() {
         const tasks = await getAllTasks(workerId, 'A');
         return tasks.length;
       },
-      async completed() {
+      // Tâches acceptées par le worker
+      async accepted() {
         const tasks = await getAllTasks(workerId, 'C');
         return tasks.length;
       },
+      // Tâches en cours de téléchargement
       async downloading() {
         const tasks = await getAllTasks(workerId, 'D');
         return tasks.length;
       },
+      // Tâches en cours d'exécution
       async running() {
         const tasks = await getAllTasks(workerId, 'R');
         return tasks.length;
       },
+      // Tâches terminées avec succès et en cours d’upload
+      async uploadingSuccess() {
+        const tasks = await getAllTasks(workerId, 'U');
+        return tasks.length;
+      },
+      // Tâches échouées et en cours d’upload des résultats
+      async uploadingFailure() {
+        const tasks = await getAllTasks(workerId, 'V');
+        return tasks.length;
+      },
+      // Tâches réussies
+      async succeeded() {
+        const tasks = await getAllTasks(workerId, 'S');
+        return tasks.length;
+      },
+      // Tâches échouées
       async failed() {
         const tasks = await getAllTasks(workerId, 'F');
         return tasks.length;
       },
-      async successes() {
-        const tasks = await getAllTasks(workerId, 'S');
+      // Tâches suspendues
+      async suspended() {
+        const tasks = await getAllTasks(workerId, 'Z');
         return tasks.length;
       },
+      // Tâches annulées
+      async canceled() {
+        const tasks = await getAllTasks(workerId, 'X');
+        return tasks.length;
+      },
+      // Tâches en attente de conditions externes
+      async waiting() {
+        const tasks = await getAllTasks(workerId, 'W');
+        return tasks.length;
+      }
     };
   }
+  
 
 
 /**
@@ -178,6 +215,22 @@ export async function getFlavors(): Promise<taskqueue.Flavor[]> {
     }
 }
 
+export async function getWorkFlow(name?: string): Promise<taskqueue.Workflow[]> {
+    try {
+      const client = getClient();
+      if (name) {
+        const wfUnary = await client.listWorkflows({ nameLike: name });
+        return wfUnary.response?.workflows || [];
+      } else {
+        const wfUnary = await client.listWorkflows({});
+        return wfUnary.response?.workflows || [];
+      }
+    } catch (error) {
+      console.error("Error while retrieving work flows:", error);
+      return [];
+    }
+  }
+
 /**
  * Function to create a new worker with the specified configuration.
  * 
@@ -190,7 +243,7 @@ export async function getFlavors(): Promise<taskqueue.Flavor[]> {
  * @returns A promise that resolves when the worker is created.
  * @throws An error if the selected flavor is not found.
  */
-export async function newWorker(concurrency: number, prefetch: number, flavor: string, region: string, provider: string, number: number) {
+export async function newWorker(concurrency: number, prefetch: number, flavor: string, region: string, provider: string, number: number, wfStep : string) {
     try {
         const client = getClient();
 
@@ -211,13 +264,28 @@ export async function newWorker(concurrency: number, prefetch: number, flavor: s
             throw new Error(`Flavor not found for: ${flavor} / ${region} / ${provider}`);
         }
 
+        let stepId: number | null = null;
+        if (wfStep) {
+          const [workflowName, stepName] = wfStep.split(".");
+          const workflows = await getWorkFlow(workflowName);
+          // Cherche un nom strictement égal
+          const matchedWorkflow = workflows.find(wf => wf.name === workflowName);
+    
+          const stepListUnary = await client.listSteps({ workflowId: matchedWorkflow?.workflowId ?? 0 }, callOptions);
+          const stepList = stepListUnary.response?.steps || [];
+          const matchedStep= stepList.find(st => st.name === stepName);
+            // Utilisation de ?? pour s'assurer que `undefined` devient `null`
+            stepId = matchedStep?.stepId ?? null;     
+        }
+
         const workerReq: taskqueue.WorkerRequest = {
-            concurrency,
-            prefetch,
-            flavorId: selectedFlavor.flavorId,
-            regionId: selectedFlavor.regionId,
-            providerId: selectedFlavor.providerId,
-            number
+          concurrency,
+          prefetch,
+          flavorId: selectedFlavor.flavorId,
+          regionId: selectedFlavor.regionId,
+          providerId: selectedFlavor.providerId,
+          number,
+          ...(stepId !== null && { stepId }) // ⬅️ conditionnellement ajouté
         };
 
         await client.createWorker(workerReq, callOptions);
@@ -226,6 +294,7 @@ export async function newWorker(concurrency: number, prefetch: number, flavor: s
         console.error("Error creating worker: ", error);
     }
 }
+
 
 /**
  * Function to delete a worker by its ID.
@@ -252,10 +321,17 @@ export async function delWorker(workerId: { workerId: any }) {
 export function getStatusClass(status: string): string {
     switch (status) {
         case 'P': return 'pending';
+        case 'A': return 'assigned';
+        case 'C': return 'accepted';
+        case 'D' : return 'downloading';
         case 'R': return 'running';
+        case 'U' : return 'uploading (after success)';
+        case 'V' : return 'uploading (after failure)';
         case 'S': return 'succeeded';
         case 'F': return 'failed';
+        case 'Z' : return 'suspended';
         case 'X': return 'canceled';
+        case 'W' : return 'waiting';
         default: return 'unknown';
     }
 }
@@ -268,11 +344,18 @@ export function getStatusClass(status: string): string {
  */
 export function getStatusText(status: string): string {
     switch (status) {
-        case 'P': return 'Pending';
-        case 'R': return 'Running';
-        case 'S': return 'Succeeded';
-        case 'F': return 'Failed';
-        case 'X': return 'Canceled';
-        default: return 'Unknown';
+        case 'P': return 'pending';
+        case 'A': return 'assigned';
+        case 'C': return 'accepted';
+        case 'D' : return 'downloading';
+        case 'R': return 'running';
+        case 'U' : return 'uploading (after success)';
+        case 'V' : return 'uploading (after failure)';
+        case 'S': return 'succeeded';
+        case 'F': return 'failed';
+        case 'Z' : return 'suspended';
+        case 'X': return 'canceled';
+        case 'W' : return 'waiting';
+        default: return 'unknown';
     }
 }
