@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS recruiter (
     step_id INT REFERENCES step(step_id),
     rank INT DEFAULT 1,
     timeout INT DEFAULT 0,
-    protofilter TEXT NOT NULL
+    protofilter TEXT NOT NULL,
     worker_concurrency INT DEFAULT 1,
     worker_prefetch INT DEFAULT 0,
     maximum_workers INT DEFAULT 0,

@@ -16,20 +16,19 @@ OUTDIR=bin
 
 all: build-server build-client build-cli build-fetch
 
-build-server:
-	mkdir -p $(BINARY_DIR)
+$(BINARY_DIR):
+	@mkdir -p $(BINARY_DIR)
+
+build-server: | $(BINARY_DIR)
 	go build -o $(BINARY_SERVER) $(SRC_SERVER)
 
-build-client:
-	mkdir -p $(BINARY_DIR)
+build-client: | $(BINARY_DIR)
 	go build -o $(BINARY_CLIENT) $(SRC_CLIENT)
 
-build-cli:
-	mkdir -p $(BINARY_DIR)
+build-cli: | $(BINARY_DIR)
 	go build -o $(BINARY_CLI) $(SRC_CLI)
 
-build-fetch:
-	mkdir -p $(BINARY_DIR)
+build-fetch: | $(BINARY_DIR)
 	go build -o $(BINARY_FETCH) $(SRC_FETCH)
 
 static-all: static-server static-client static-cli static-fetch
@@ -61,12 +60,24 @@ docs:
 	mkdir -p docs
 	protoc --doc_out=./docs --doc_opt=markdown,api.md proto/*.proto
 
-# Install compiled binaries
 install: all
+ifeq ($(OS),Windows_NT)
+	@echo Installing binaries to %USERPROFILE%\bin...
+	@powershell -Command "New-Item -ItemType Directory -Force -Path \"$$env:USERPROFILE\\bin\" | Out-Null"
+	@powershell -Command "Copy-Item -Force '$(BINARY_SERVER).exe' \"$$env:USERPROFILE\\bin\\scitq-server.exe\""
+	@powershell -Command "Copy-Item -Force '$(BINARY_CLIENT).exe' \"$$env:USERPROFILE\\bin\\scitq-client.exe\""
+	@powershell -Command "Copy-Item -Force '$(BINARY_CLI).exe'    \"$$env:USERPROFILE\\bin\\scitq.exe\""
+	@powershell -Command "Copy-Item -Force '$(BINARY_FETCH).exe'  \"$$env:USERPROFILE\\bin\\scitq-fetch.exe\""
+	@powershell -Command "$$userBin=[System.Environment]::ExpandEnvironmentVariables('%USERPROFILE%\bin'); $$path=[Environment]::GetEnvironmentVariable('PATH','User'); if (!($$path.Split(';') -contains $$userBin)) { [Environment]::SetEnvironmentVariable('PATH', $$path + ';' + $$userBin, 'User'); Write-Output 'PATH updated (persisted)'; } else { Write-Output 'Already in PATH.' }"
+	@echo To reload your PATH now, run this in PowerShell:
+	@echo   $$env:PATH = [System.Environment]::GetEnvironmentVariable('PATH','User') + ';' + [System.Environment]::GetEnvironmentVariable('PATH','Machine')
+else
+	@echo "Installing binaries to /usr/local/bin..."
 	install -m 755 $(BINARY_SERVER) /usr/local/bin/
 	install -m 755 $(BINARY_CLIENT) /usr/local/bin/
-	install -m 755 $(BINARY_CLI) /usr/local/bin/
-	install -m 755 $(BINARY_FETCH) /usr/local/bin/
+	install -m 755 $(BINARY_CLI)    /usr/local/bin/
+	install -m 755 $(BINARY_FETCH)  /usr/local/bin/
+endif
 
 install2: all
 	install -m 755 $(BINARY_SERVER) /usr/local/bin/scitq2-server
