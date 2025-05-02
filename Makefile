@@ -4,10 +4,10 @@ SRC_CLIENT=./cmd/client
 SRC_CLI=./cmd/cli
 SRC_FETCH=./cmd/fetch
 
-BINARY_SERVER=$(BINARY_DIR)/scitq-server
-BINARY_CLIENT=$(BINARY_DIR)/scitq-client
-BINARY_CLI=$(BINARY_DIR)/scitq
-BINARY_FETCH=$(BINARY_DIR)/scitq-fetch
+BINARY_SERVER=$(BINARY_DIR)/scitq-server.exe
+BINARY_CLIENT=$(BINARY_DIR)/scitq-client.exe
+BINARY_CLI=$(BINARY_DIR)/scitq.exe
+BINARY_FETCH=$(BINARY_DIR)/scitq-fetch.exe
 
 PLATFORMS=linux/amd64 darwin/amd64 windows/amd64
 OUTDIR=bin
@@ -64,10 +64,10 @@ install: all
 ifeq ($(OS),Windows_NT)
 	@echo Installing binaries to %USERPROFILE%\bin...
 	@powershell -Command "New-Item -ItemType Directory -Force -Path \"$$env:USERPROFILE\\bin\" | Out-Null"
-	@powershell -Command "Copy-Item -Force '$(BINARY_SERVER).exe' \"$$env:USERPROFILE\\bin\\scitq-server.exe\""
-	@powershell -Command "Copy-Item -Force '$(BINARY_CLIENT).exe' \"$$env:USERPROFILE\\bin\\scitq-client.exe\""
-	@powershell -Command "Copy-Item -Force '$(BINARY_CLI).exe'    \"$$env:USERPROFILE\\bin\\scitq.exe\""
-	@powershell -Command "Copy-Item -Force '$(BINARY_FETCH).exe'  \"$$env:USERPROFILE\\bin\\scitq-fetch.exe\""
+	@powershell -Command "Copy-Item -Force '$(BINARY_SERVER)' \"$$env:USERPROFILE\\bin\\scitq-server.exe\""
+	@powershell -Command "Copy-Item -Force '$(BINARY_CLIENT)' \"$$env:USERPROFILE\\bin\\scitq-client.exe\""
+	@powershell -Command "Copy-Item -Force '$(BINARY_CLI)'    \"$$env:USERPROFILE\\bin\\scitq.exe\""
+	@powershell -Command "Copy-Item -Force '$(BINARY_FETCH)'  \"$$env:USERPROFILE\\bin\\scitq-fetch.exe\""
 	@powershell -Command "$$userBin=[System.Environment]::ExpandEnvironmentVariables('%USERPROFILE%\bin'); $$path=[Environment]::GetEnvironmentVariable('PATH','User'); if (!($$path.Split(';') -contains $$userBin)) { [Environment]::SetEnvironmentVariable('PATH', $$path + ';' + $$userBin, 'User'); Write-Output 'PATH updated (persisted)'; } else { Write-Output 'Already in PATH.' }"
 	@echo To reload your PATH now, run this in PowerShell:
 	@echo   $$env:PATH = [System.Environment]::GetEnvironmentVariable('PATH','User') + ';' + [System.Environment]::GetEnvironmentVariable('PATH','Machine')
