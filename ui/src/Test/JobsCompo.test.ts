@@ -1,19 +1,20 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import JobsCompo from '../components/JobsCompo.svelte';
-import { getJobs } from '../lib/api';
+import { getJobs, delJob } from '../lib/api';
 
 // Mock the `getJobs` function and utility helpers
 vi.mock('../lib/api', () => ({
   getJobs: vi.fn(),
-  getStatusClass: (status: string) => {
+  getJobStatusClass: (status: string) => {
     switch (status) {
       case 'R': return 'running';
       case 'S': return 'succeeded';
       default: return 'unknown';
     }
   },
-  getStatusText: (status: string) => status,
+  delJob: vi.fn(),
+  getJobStatusText: (status: string) => status,
 }));
 
 describe('JobsCompo', () => {
@@ -21,7 +22,7 @@ describe('JobsCompo', () => {
     const mockJobs = [
       {
         jobId: 'job-1',
-        status: 'R', // Status "running"
+        status: 'R', // "Running" status
         action: 'C', // Deploy Worker
         progression: 50,
         modifiedAt: new Date('2025-03-10T21:12:30').toISOString(),
@@ -29,7 +30,7 @@ describe('JobsCompo', () => {
       },
       {
         jobId: 'job-2',
-        status: 'S', // Status "succeeded"
+        status: 'S', // "Succeeded" status
         action: 'D', // Destroy Worker
         progression: 100,
         modifiedAt: new Date('2025-04-28T21:12:30').toISOString(),
@@ -92,7 +93,7 @@ describe('JobsCompo', () => {
     const mockJobs = [
       {
         jobId: 'job-1',
-        status: 'F', // Failed => Refresh button should appear
+        status: 'F', // Failed => Refresh button should be visible
         action: 'C',
         progression: 50,
         modifiedAt: new Date().toISOString(),
@@ -117,9 +118,54 @@ describe('JobsCompo', () => {
       expect(screen.getByTestId('refresh-button-job-1')).toBeInTheDocument();
       expect(screen.getByTestId('trash-button-job-1')).toBeInTheDocument();
 
-      // Job-2 (succeeded) => should have only Trash button
+      // Job-2 (succeeded) => should only have Trash button
       expect(screen.queryByTestId('refresh-button-job-2')).toBeNull();
       expect(screen.getByTestId('trash-button-job-2')).toBeInTheDocument();
     });
+  });
+
+  it('should delete a job when trash button is clicked', async () => {
+    const mockJobs = [
+      {
+        jobId: 1,
+        status: 'S',
+        action: 'D',
+        progression: 100,
+        modifiedAt: new Date().toISOString(),
+        workerId: 'worker-1',
+      },
+      {
+        jobId: 2,
+        status: 'S',
+        action: 'C',
+        progression: 100,
+        modifiedAt: new Date().toISOString(),
+        workerId: 'worker-2',
+      }
+    ];
+
+    // Mock API responses
+    (getJobs as any).mockResolvedValue(mockJobs);
+
+    render(JobsCompo);
+
+    // Wait until jobs appear
+    await waitFor(() => {
+      expect(screen.getByTestId('job-row-1')).toBeInTheDocument();
+      expect(screen.getByTestId('job-row-2')).toBeInTheDocument();
+    });
+
+    // Click the delete button for jobId = 1
+    const deleteButton = screen.getByTestId('trash-button-1');
+    await deleteButton.click();
+
+    // Wait for DOM update
+    await waitFor(() => {
+      expect(screen.queryByTestId('job-row-1')).toBeNull(); // Disappeared
+      expect(screen.queryByTestId('job-row-2')).toBeInTheDocument(); // Still present
+    });
+
+    // Confirm delJob was called with correct jobId
+    expect(delJob).toHaveBeenCalledWith({ jobId: 1 });
   });
 });

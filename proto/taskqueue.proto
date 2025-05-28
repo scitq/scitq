@@ -19,11 +19,14 @@ service TaskQueue {
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
     rpc DeleteWorker(WorkerId) returns (Ack);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
+    rpc GetWorkerStatuses (WorkerStatusRequest) returns (WorkerStatusResponse);
     rpc ListJobs (ListJobsRequest) returns (JobsList);
+    rpc DeleteJob (JobId) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
     rpc Login(LoginRequest) returns (LoginResponse);
-    rpc CreateUser(CreateUserRequest) returns (Ack);
+    rpc Logout(Token) returns (Ack);
+    rpc CreateUser(CreateUserRequest) returns (UserId);
     rpc ListUsers(google.protobuf.Empty) returns (UsersList);
     rpc DeleteUser(UserId) returns (Ack);
     rpc UpdateUser(User) returns (Ack);
@@ -146,8 +149,31 @@ message WorkerId {
     uint32 worker_id = 1;
 }
 
+message WorkerStatusRequest {
+  repeated uint32 worker_ids = 1;
+}
+
+message WorkerStatus {
+  uint32 worker_id = 1;
+  string status = 2;
+}
+
+message WorkerStatusResponse {
+  repeated WorkerStatus statuses = 1;
+}
+
+message WorkerDetails {
+  uint32 worker_id = 1;
+  string worker_name = 2;
+}
+
 message WorkerIds {
-    repeated uint32 worker_ids = 1;
+  repeated WorkerDetails workers_details = 1;
+}
+
+
+message JobId {
+    uint32 job_id = 1;
 }
 
 message PingAndGetNewTasksRequest {
@@ -181,11 +207,6 @@ message WorkerUpdateRequest {
     optional uint32 concurrency = 5;
     optional uint32 prefetch = 6;
     optional uint32 step_id = 7;
-}
-
-message WorkerStatus {
-    uint32 worker_id =1;
-    string status =2;
 }
 
 message ListFlavorsRequest {
@@ -249,6 +270,10 @@ message LoginRequest {
 }
 
 message LoginResponse {
+  string token = 1;
+}
+
+message Token {
   string token = 1;
 }
 

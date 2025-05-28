@@ -1,111 +1,183 @@
-/* === Login Form Container Styles === */
-
-/* Container for the login form with white background, border, and shadow */
-.login-form-container {
-  background-color: rgba(255, 255, 255, 0.9); /* Slight transparency for background */
-  border: 1.5px solid #192245; /* Dark border for definition */
-  border-radius: 8px; /* Rounded corners for softer look */
-  padding: 1rem; /* Padding for inner spacing */
-  max-width: 600px; /* Maximum width for the container */
-  width: 100%; /* Full width for smaller screens */
-  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1); /* Soft shadow for depth */
-  display: flex; /* Flexbox for easy layout */
-  flex-direction: column; /* Stack the children elements vertically */
-  gap: 1rem; /* Space between elements */
-  justify-content: center; /* Vertically center the content */
-  align-items: center; /* Horizontally center the content */
-  margin: 1rem auto; /* Center the container with margin */
+/* Login form container */
+.loginform-container {
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1.5px solid #192245;
+  border-radius: 8px;
+  padding: 1rem;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  justify-content: center;
+  align-items: center;
+  margin: 1rem auto;
 }
 
-/* === Login Form Title === */
-
-/* Title of the login form */
-.login-form-title {
-  text-align: center; /* Center the text */
-  color: black; /* Black color for title */
-  font-size: 2rem; /* Larger font size */
-  font-weight: bold; /* Bold font weight for emphasis */
-  margin-top: 0; /* Remove top margin */
-  margin-bottom: 0; /* Remove bottom margin */
-  line-height: 1.2; /* Line height for readability */
-  text-transform: uppercase; /* Uppercase for styling */
+/* Login form title */
+.loginform-title {
+  text-align: center;
+  color: black;
+  font-size: 2rem;
+  font-weight: bold;
+  margin-top: 0;
+  margin-bottom: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
 }
 
-/* === Form Group Styles === */
-
-/* Form group to structure the form elements */
-.login-form-group {
-  display: flex; /* Use flexbox for alignment */
-  flex-direction: column; /* Stack the children vertically */
-  align-items: flex-start; /* Align items to the left */
-  width: 100%; /* Full width of the parent container */
+/* Form group layout */
+.loginform-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  position: relative;
 }
 
-/* === Login Form Label Styles === */
-
-/* Style for labels in the form */
-.login-form-label {
-  font-size: 1rem; /* Standard font size for labels */
-  font-weight: 500; /* Medium weight for labels */
-  margin-bottom: 0.5rem; /* Space between label and input */
-  color: black; /* Black text color */
+/* Label styling */
+.loginform-label {
+  font-size: 1rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: black;
 }
 
-/* === Login Form Input Styles === */
-
-/* Input field styles */
-.login-form-input {
-  width: 100%; /* Full width of the container */
-  padding: 0.75rem; /* Padding for spacing inside the input */
-  border: 1.5px solid #192245; /* Border to match the theme */
-  border-radius: 4px; /* Rounded corners */
-  font-size: 1rem; /* Standard font size */
-  box-sizing: border-box; /* Ensure padding does not affect width */
+/* Input styling */
+.loginform-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1.5px solid #192245;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box;
 }
 
-/* === Login Form Button Styles === */
-
-/* Style for the submit button */
-.login-form-button {
-  width: 100%; /* Full width for the button */
-  padding: 0.75rem; /* Padding inside the button */
-  background-color: #192245; /* Dark background color */
-  color: white; /* White text color */
-  border: none; /* No border */
-  border-radius: 4px; /* Rounded corners */
-  font-size: 1rem; /* Standard font size */
-  font-weight: bold; /* Bold text for emphasis */
-  cursor: pointer; /* Pointer cursor to indicate it's clickable */
-  margin-top: 0.5rem; /* Space above the button */
+/* Submit button styling */
+.loginform-button {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: #192245;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+.loginform-button:hover {
+  background-color: #0056b3;
 }
 
-/* Disabled state for the login button */
-.login-form-button:disabled {
-  background-color: #192245; /* Keep background the same */
-  cursor: not-allowed; /* Indicate that the button is not clickable */
+.loginform-button:disabled {
+  background-color: #192245;
+  cursor: not-allowed;
 }
 
-/* === Footer Section Styles === */
-
-/* Footer section for additional links like "forgot password" */
-.login-form-footer {
-  text-align: left; /* Left align the footer text */
-  width: 100%; /* Full width of the parent */
+/* Footer section */
+.loginform-footer {
+  text-align: left;
+  width: 100%;
 }
 
-/* Style for the "Forgot password?" link */
-.login-form-forgot {
-  color: black; /* Black text color */
-  text-decoration: underline; /* Underlined text for emphasis */
-  font-size: 0.9rem; /* Slightly smaller font size */
-  cursor: pointer; /* Pointer cursor to indicate it's clickable */
+/* Forgot password button */
+.loginform-forgot {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: black;
+  text-decoration: underline;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: inline;
 }
 
-/* === Error Message Styles === */
+.loginform-forgot:hover {
+  color: blue;
+}
 
-/* Style for error messages in the login form */
-.login-form-message {
-  padding: 0; /* No padding */
-  margin: 0; /* No margin */
-  color: red; /* Red color for error messages */
+/* Error message styling */
+.loginform-message {
+  padding: 0;
+  margin: 0;
+  color: red;
+}
+
+/* Modal overlay */
+.loginform-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Modal content */
+.loginform-modal-content {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  max-width: 300px;
+  width: 90%;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+/* Modal close button */
+.loginform-modal-close-button {
+  margin: 1rem auto 0 auto;
+  padding: 0.5rem 1rem;
+  background-color: #192245;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 50%;
+  display: block;
+}
+
+.loginform-modal-close-button:hover {
+  background-color: #0056b3;
+}
+
+/* Password toggle button */
+.password-toggle-button {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #192245;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.password-toggle-button:hover {
+  outline: 2px solid #192245;
+  outline-offset: 2px;
+}
+
+/* Wrapper for input and icon */
+.password-input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* Input padding to make room for icon */
+.password-input {
+  padding-right: 2.5rem;
 }

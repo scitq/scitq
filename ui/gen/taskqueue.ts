@@ -326,13 +326,66 @@ export interface WorkerId {
     workerId: number;
 }
 /**
- * @generated from protobuf message taskqueue.WorkerIds
+ * @generated from protobuf message taskqueue.WorkerStatusRequest
  */
-export interface WorkerIds {
+export interface WorkerStatusRequest {
     /**
      * @generated from protobuf field: repeated uint32 worker_ids = 1;
      */
     workerIds: number[];
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerStatus
+ */
+export interface WorkerStatus {
+    /**
+     * @generated from protobuf field: uint32 worker_id = 1;
+     */
+    workerId: number;
+    /**
+     * @generated from protobuf field: string status = 2;
+     */
+    status: string;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerStatusResponse
+ */
+export interface WorkerStatusResponse {
+    /**
+     * @generated from protobuf field: repeated taskqueue.WorkerStatus statuses = 1;
+     */
+    statuses: WorkerStatus[];
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerDetails
+ */
+export interface WorkerDetails {
+    /**
+     * @generated from protobuf field: uint32 worker_id = 1;
+     */
+    workerId: number;
+    /**
+     * @generated from protobuf field: string worker_name = 2;
+     */
+    workerName: string;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerIds
+ */
+export interface WorkerIds {
+    /**
+     * @generated from protobuf field: repeated taskqueue.WorkerDetails workers_details = 1;
+     */
+    workersDetails: WorkerDetails[];
+}
+/**
+ * @generated from protobuf message taskqueue.JobId
+ */
+export interface JobId {
+    /**
+     * @generated from protobuf field: uint32 job_id = 1;
+     */
+    jobId: number;
 }
 /**
  * @generated from protobuf message taskqueue.PingAndGetNewTasksRequest
@@ -430,19 +483,6 @@ export interface WorkerUpdateRequest {
      * @generated from protobuf field: optional uint32 step_id = 7;
      */
     stepId?: number;
-}
-/**
- * @generated from protobuf message taskqueue.WorkerStatus
- */
-export interface WorkerStatus {
-    /**
-     * @generated from protobuf field: uint32 worker_id = 1;
-     */
-    workerId: number;
-    /**
-     * @generated from protobuf field: string status = 2;
-     */
-    status: string;
 }
 /**
  * @generated from protobuf message taskqueue.ListFlavorsRequest
@@ -624,6 +664,15 @@ export interface LoginRequest {
  * @generated from protobuf message taskqueue.LoginResponse
  */
 export interface LoginResponse {
+    /**
+     * @generated from protobuf field: string token = 1;
+     */
+    token: string;
+}
+/**
+ * @generated from protobuf message taskqueue.Token
+ */
+export interface Token {
     /**
      * @generated from protobuf field: string token = 1;
      */
@@ -2103,20 +2152,20 @@ class WorkerId$Type extends MessageType<WorkerId> {
  */
 export const WorkerId = new WorkerId$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class WorkerIds$Type extends MessageType<WorkerIds> {
+class WorkerStatusRequest$Type extends MessageType<WorkerStatusRequest> {
     constructor() {
-        super("taskqueue.WorkerIds", [
+        super("taskqueue.WorkerStatusRequest", [
             { no: 1, name: "worker_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
-    create(value?: PartialMessage<WorkerIds>): WorkerIds {
+    create(value?: PartialMessage<WorkerStatusRequest>): WorkerStatusRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.workerIds = [];
         if (value !== undefined)
-            reflectionMergePartial<WorkerIds>(this, message, value);
+            reflectionMergePartial<WorkerStatusRequest>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerIds): WorkerIds {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatusRequest): WorkerStatusRequest {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -2139,7 +2188,7 @@ class WorkerIds$Type extends MessageType<WorkerIds> {
         }
         return message;
     }
-    internalBinaryWrite(message: WorkerIds, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: WorkerStatusRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* repeated uint32 worker_ids = 1; */
         if (message.workerIds.length) {
             writer.tag(1, WireType.LengthDelimited).fork();
@@ -2154,9 +2203,260 @@ class WorkerIds$Type extends MessageType<WorkerIds> {
     }
 }
 /**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatusRequest
+ */
+export const WorkerStatusRequest = new WorkerStatusRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerStatus$Type extends MessageType<WorkerStatus> {
+    constructor() {
+        super("taskqueue.WorkerStatus", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerStatus>): WorkerStatus {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = 0;
+        message.status = "";
+        if (value !== undefined)
+            reflectionMergePartial<WorkerStatus>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatus): WorkerStatus {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 worker_id */ 1:
+                    message.workerId = reader.uint32();
+                    break;
+                case /* string status */ 2:
+                    message.status = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerStatus, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 worker_id = 1; */
+        if (message.workerId !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.workerId);
+        /* string status = 2; */
+        if (message.status !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.status);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatus
+ */
+export const WorkerStatus = new WorkerStatus$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerStatusResponse$Type extends MessageType<WorkerStatusResponse> {
+    constructor() {
+        super("taskqueue.WorkerStatusResponse", [
+            { no: 1, name: "statuses", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => WorkerStatus }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerStatusResponse>): WorkerStatusResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.statuses = [];
+        if (value !== undefined)
+            reflectionMergePartial<WorkerStatusResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatusResponse): WorkerStatusResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.WorkerStatus statuses */ 1:
+                    message.statuses.push(WorkerStatus.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerStatusResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.WorkerStatus statuses = 1; */
+        for (let i = 0; i < message.statuses.length; i++)
+            WorkerStatus.internalBinaryWrite(message.statuses[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatusResponse
+ */
+export const WorkerStatusResponse = new WorkerStatusResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerDetails$Type extends MessageType<WorkerDetails> {
+    constructor() {
+        super("taskqueue.WorkerDetails", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "worker_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerDetails>): WorkerDetails {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = 0;
+        message.workerName = "";
+        if (value !== undefined)
+            reflectionMergePartial<WorkerDetails>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerDetails): WorkerDetails {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 worker_id */ 1:
+                    message.workerId = reader.uint32();
+                    break;
+                case /* string worker_name */ 2:
+                    message.workerName = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerDetails, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 worker_id = 1; */
+        if (message.workerId !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.workerId);
+        /* string worker_name = 2; */
+        if (message.workerName !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.workerName);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerDetails
+ */
+export const WorkerDetails = new WorkerDetails$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerIds$Type extends MessageType<WorkerIds> {
+    constructor() {
+        super("taskqueue.WorkerIds", [
+            { no: 1, name: "workers_details", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => WorkerDetails }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerIds>): WorkerIds {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workersDetails = [];
+        if (value !== undefined)
+            reflectionMergePartial<WorkerIds>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerIds): WorkerIds {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.WorkerDetails workers_details */ 1:
+                    message.workersDetails.push(WorkerDetails.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerIds, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.WorkerDetails workers_details = 1; */
+        for (let i = 0; i < message.workersDetails.length; i++)
+            WorkerDetails.internalBinaryWrite(message.workersDetails[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
  * @generated MessageType for protobuf message taskqueue.WorkerIds
  */
 export const WorkerIds = new WorkerIds$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JobId$Type extends MessageType<JobId> {
+    constructor() {
+        super("taskqueue.JobId", [
+            { no: 1, name: "job_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JobId>): JobId {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.jobId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<JobId>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JobId): JobId {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 job_id */ 1:
+                    message.jobId = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JobId, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 job_id = 1; */
+        if (message.jobId !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.jobId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.JobId
+ */
+export const JobId = new JobId$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class PingAndGetNewTasksRequest$Type extends MessageType<PingAndGetNewTasksRequest> {
     constructor() {
@@ -2487,61 +2787,6 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
  * @generated MessageType for protobuf message taskqueue.WorkerUpdateRequest
  */
 export const WorkerUpdateRequest = new WorkerUpdateRequest$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class WorkerStatus$Type extends MessageType<WorkerStatus> {
-    constructor() {
-        super("taskqueue.WorkerStatus", [
-            { no: 1, name: "worker_id", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
-            { no: 2, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
-        ]);
-    }
-    create(value?: PartialMessage<WorkerStatus>): WorkerStatus {
-        const message = globalThis.Object.create((this.messagePrototype!));
-        message.workerId = 0;
-        message.status = "";
-        if (value !== undefined)
-            reflectionMergePartial<WorkerStatus>(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatus): WorkerStatus {
-        let message = target ?? this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* uint32 worker_id */ 1:
-                    message.workerId = reader.uint32();
-                    break;
-                case /* string status */ 2:
-                    message.status = reader.string();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message: WorkerStatus, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* uint32 worker_id = 1; */
-        if (message.workerId !== 0)
-            writer.tag(1, WireType.Varint).uint32(message.workerId);
-        /* string status = 2; */
-        if (message.status !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.status);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message taskqueue.WorkerStatus
- */
-export const WorkerStatus = new WorkerStatus$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListFlavorsRequest$Type extends MessageType<ListFlavorsRequest> {
     constructor() {
@@ -3164,6 +3409,53 @@ class LoginResponse$Type extends MessageType<LoginResponse> {
  * @generated MessageType for protobuf message taskqueue.LoginResponse
  */
 export const LoginResponse = new LoginResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Token$Type extends MessageType<Token> {
+    constructor() {
+        super("taskqueue.Token", [
+            { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Token>): Token {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.token = "";
+        if (value !== undefined)
+            reflectionMergePartial<Token>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Token): Token {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string token */ 1:
+                    message.token = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Token, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string token = 1; */
+        if (message.token !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.token);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.Token
+ */
+export const Token = new Token$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CreateUserRequest$Type extends MessageType<CreateUserRequest> {
     constructor() {
@@ -4732,11 +5024,14 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "UpdateWorkerStatus", options: {}, I: WorkerStatus, O: Ack },
     { name: "DeleteWorker", options: {}, I: WorkerId, O: Ack },
     { name: "UpdateWorker", options: {}, I: WorkerUpdateRequest, O: Ack },
+    { name: "GetWorkerStatuses", options: {}, I: WorkerStatusRequest, O: WorkerStatusResponse },
     { name: "ListJobs", options: {}, I: ListJobsRequest, O: JobsList },
+    { name: "DeleteJob", options: {}, I: JobId, O: Ack },
     { name: "ListFlavors", options: {}, I: ListFlavorsRequest, O: FlavorsList },
     { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneConfig },
     { name: "Login", options: {}, I: LoginRequest, O: LoginResponse },
-    { name: "CreateUser", options: {}, I: CreateUserRequest, O: Ack },
+    { name: "Logout", options: {}, I: Token, O: Ack },
+    { name: "CreateUser", options: {}, I: CreateUserRequest, O: UserId },
     { name: "ListUsers", options: {}, I: Empty, O: UsersList },
     { name: "DeleteUser", options: {}, I: UserId, O: Ack },
     { name: "UpdateUser", options: {}, I: User, O: Ack },

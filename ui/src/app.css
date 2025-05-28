@@ -1,141 +1,256 @@
 /* === Root Styles === */
 
-/* Root element default styles */
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif; /* Default font stack */
-  line-height: 1.5; /* Line height for text */
-  font-weight: 400; /* Normal font weight */
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
 
-  color-scheme: light dark; /* Define color scheme preference (light/dark) */
-  color: rgba(255, 255, 255, 0.87); /* Text color */
-  background-color: #242424; /* Dark background color */
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
 
-  font-synthesis: none; /* Disable font synthesis (italics, etc.) */
-  text-rendering: optimizeLegibility; /* Optimize text rendering for better legibility */
-  -webkit-font-smoothing: antialiased; /* Smooth fonts for Webkit browsers */
-  -moz-osx-font-smoothing: grayscale; /* Smooth fonts for Firefox on macOS */
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* === Link Styles === */
+/* === Login Forgot Password Link === */
 
-/* Style for links */
-a {
-  font-weight: 500; /* Medium font weight for links */
-  color: #646cff; /* Blue color for links */
-  text-decoration: inherit; /* Remove underline */
+.link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: black;
+  text-decoration: underline;
+  cursor: pointer;
+  display: inline;
 }
 
-/* Hover state for links */
-a:hover {
-  color: #535bf2; /* Darker blue when hovering over links */
+.link:hover {
+  color: blue;
+}
+
+/* === Buttons === */
+
+.btn-validate {
+  font-size: 1.1em;
+  padding: 0.75em 1.5em;
+  background-color: #192245;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.btn-validate:hover {
+  background-color: #0f1736;
+  border-color: transparent;
+}
+
+.btn-action {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.50rem;
+  margin: 2px;
+  background-color: #192245;
+  border: 1px solid #444;
+  color: white;
+  border-radius: 8px; /* as before */
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.6);
+  transition: background 0.3s, transform 0.2s, color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  line-height: 1;
+}
+
+/* Hover effect for action buttons */
+.btn-action:hover {
+  background-color: #333;
+  transform: scale(1.1);
+}
+
+/* Active (click) effect */
+.btn-action:active {
+  transform: scale(0.97);
+  background-color: #0a1125;
+}
+
+/* SVG inside buttons */
+.btn-action svg {
+  width: 14px;
+  height: 14px;
+  color: white;
+  transition: color 0.2s;
+}
+
+.btn-action:hover svg {
+  color: #ffeb3b;
+}
+
+/* === Global Table Styles === */
+
+.listTable {
+  width: auto;
+  min-width: 100%;
+  border-collapse: collapse;
+  color: black;
+  font-size: 0.85rem;
+}
+
+.listTable th,
+.listTable td {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid #333;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.listTable th {
+  background-color: grey;
+  color: black;
+}
+
+.listTable tr:nth-child(even) {
+  background-color: #f2f2f2;
+}
+
+/* === Toolbar Styles === */
+
+.toolbar {
+  display: flex;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background-color: #242424;
+  color: #E6DDBA;
+  align-items: center;
 }
 
 /* === Login Page Styles === */
 
-/* Body styles for login page */
 .body-login {
-  margin: 0; /* Remove default margin */
-  padding: 0; /* Remove default padding */
-  font-family: Arial, sans-serif; /* Use Arial font */
-  background: url('/path/to/background.jpg') no-repeat center center fixed; /* Set background image */
-  background-size: cover; /* Ensure the background image covers the entire page */
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background: url('/path/to/background.jpg') no-repeat center center fixed;
+  background-size: cover;
 }
 
 /* === Dashboard Page Styles === */
 
-/* Body styles for dashboard page */
 .body-dashboard {
-  margin: 0; /* Remove default margin */
-  display: flex; /* Use flexbox for layout */
-  place-items: center; /* Center content vertically and horizontally */
-  min-width: 320px; /* Set a minimum width */
-  min-height: 100vh; /* Set a minimum height of 100% of the viewport height */
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
 }
 
-/* Header styles */
-h1 {
-  font-size: 3.2em; /* Set a large font size */
-  line-height: 1.1; /* Adjust line height */
-  text-align: center; /* Center align text */
-}
-
-/* Card component styling */
 .card {
-  padding: 2em; /* Add padding around card content */
+  padding: 2em;
 }
 
-/* Full width and height for the app container */
 #app {
-  height: 100%; /* Full height */
-  width: 100%; /* Full width */
+  height: 100%;
+  width: 100%;
 }
-
-/* Button styles */
-button {
-  border-radius: 8px; /* Round corners for buttons */
-  border: 1px solid transparent; /* Transparent border by default */
-  font-size: 1em; /* Set font size for the button */
-  font-weight: 500; /* Medium font weight */
-  font-family: inherit; /* Inherit font family from parent */
-  background-color: #1a1a1a; /* Dark background color for buttons */
-  cursor: pointer; /* Change cursor to pointer on hover */
-  transition: border-color 0.25s; /* Smooth transition for border color */
-}
-
-/* Hover effect for buttons */
-button:hover {
-  border-color: #646cff; /* Change border color on hover */
-}
-
-/* Focus styles for buttons */
-button:focus {
-  outline: none;
-}
-
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
 
 /* === Light Mode Styles === */
 
-/* Adjust styles for light mode if the user prefers it */
 @media (prefers-color-scheme: light) {
   :root {
-    color: #213547; /* Dark text color in light mode */
-    background-color: #ffffff; /* White background for light mode */
+    color: #213547;
+    background-color: #ffffff;
   }
-  
-  /* Hover state for links in light mode */
-  a:hover {
-    color: #747bff; /* Lighter blue for link hover in light mode */
+
+  .link {
+    color: #213547;
   }
-  
-  /* Button background color for light mode */
-  button {
-    background-color: #f9f9f9; /* Light background color for buttons in light mode */
+
+  .link:hover {
+    color: #3355aa;
+  }
+
+  .btn-validate {
+    background-color: #3355aa;
+    color: white;
+  }
+
+  .btn-validate:hover {
+    background-color: #223377;
+  }
+
+  .table-common th {
+    background-color: #3355aa;
+    color: white;
+  }
+
+  .toolbar {
+    background-color: #f0f0f0;
+    color: #213547;
   }
 }
 
 /* === App Container Styles === */
 
-/* Main layout container styles */
 .app-container {
-  display: flex; /* Use flexbox layout */
-  height: 100vh; /* Full height */
-  overflow: hidden; /* Hide overflowing content */
-  transition: all 0.3s ease; /* Smooth transition for all properties */
+  display: flex;
+  height: 100vh;
+  transition: all 0.3s ease;
 }
 
-/* Main content styles */
 .main-content {
-  flex: 1; /* Make main content flexible */
-  overflow-x: auto; /* Allow horizontal scrolling */
-  transition: all 0.3s ease; /* Smooth transition for all properties */
-  padding: 0 1rem 1rem 1rem; /* Add padding to content */
+  flex: 1;
+  overflow-x: auto;
+  transition: all 0.3s ease;
+  padding: 0 1rem 1rem 1rem;
+  position: relative;
 }
 
-/* When sidebar is hidden, extend the main content */
 .sidebar-hidden .main-content {
-  margin-left: 0; /* Remove left margin when sidebar is hidden */
+  margin-left: 0;
+}
+
+.hamburger-button {
+  z-index: 100;
+  background: transparent;
+  border: none;
+  padding: 0.5rem;
+  cursor: pointer;
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: 36px;
+  width: 30px;
+}
+
+.hamburger-icon {
+  width: 100%;
+  height: 3px;
+  background-color: #333;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+/* Success alert message */
+.alert-success {
+    background-color: #e6ffed;
+    color: #2c662d;
+    border: 1px solid #2c662d;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 4px;
+    font-weight: bold;
 }

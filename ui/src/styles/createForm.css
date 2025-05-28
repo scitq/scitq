@@ -1,46 +1,67 @@
-/* Container for the whole form */
-.form-container {
+/* Container for the entire form */
+.createForm-form-container {
   max-width: 100%;
   padding: 0.5rem;
   background-color: #fff;
   border-radius: 8px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
 }
 
-/* Title inside the form */
-h2 {
+/* Form title */
+.createForm-title {
   text-align: center;
   font-size: 0.8rem;
   background-color: #192245;
   color: white;
 }
 
-/* Wrapper for each label + input field */
-.form-group {
-  margin-bottom: 0.5rem;
+/* Wrapper for label and input */
+.createForm-form-group {
+  margin-bottom: 0.2rem;
+  position: relative; /* Needed for eye button positioning */
 }
 
-/* Label for input fields */
-label {
+/* Label style */
+.createForm-label {
   display: block;
   text-decoration: underline;
   text-align: left;
-  font-size: 0.6rem;
+  font-size: 0.75rem;
 }
 
-/* Basic styling for inputs */
-input {
+/* Input field style */
+.createForm-input {
   width: 100%;
-  padding: 0.2rem 0.4rem; /* reduced height */
+  padding: 0.2rem 2.5rem 0.2rem 0.4rem; /* Extra right padding for eye button */
   border: 1px solid #ccc;
   border-radius: 4px;
-  font-size: 0.75rem; /* smaller text */
+  font-size: 0.75rem;
   box-sizing: border-box;
 }
 
-/* Button to add a worker (or any main form action) */
-.add-button {
-  width: 30%;
-  padding: 0.1rem 0.6rem; /* smaller padding for a compact look */
+/* Password input container for eye button positioning */
+.createForm-password-field {
+  position: relative;
+}
+
+/* Eye button style */
+.createForm-eye-button {
+  position: absolute;
+  right: 8px;
+  top: 1.37rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  color: #192245;
+}
+
+/* Add worker button */
+.createForm-add-button {
+  width: 32%;
+  padding: 0.3rem 0.6rem;
   background-color: #192245;
   color: white;
   border: none;
@@ -48,51 +69,21 @@ input {
   font-size: 0.75rem;
   cursor: pointer;
   display: block;
-  margin: 0 auto; /* center horizontally */
+  margin: 0 auto;
 }
 
-/* Disabled state for add button */
-.add-button:disabled {
+.createForm-add-button:disabled {
   background-color: #cccccc;
   cursor: not-allowed;
 }
 
-/* Dropdown list shown under input when typing (autocomplete) */
-.autocomplete-list {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  z-index: 10;
-  max-height: 120px;
-  overflow-y: auto;
-  font-size: 0.75rem;
-}
-
-/* Each item in the autocomplete list */
-.autocomplete-list li {
-  padding: 0.3rem 0.5rem;
-  cursor: pointer;
-}
-
-.autocomplete-list li:hover {
-  background-color: #f0f0f0;
-}
-
-/* Wrapper to contain input + dropdown (position: relative) */
-.autocomplete {
+.createForm-autocomplete {
   position: relative;
 }
 
-/* Alternative suggestion list styling */
-.suggestions {
-  list-style-type: none;
+/* Autocomplete suggestions list */
+.createForm-suggestions {
+  list-style: none;
   padding: 0;
   margin: 0;
   border: 1px solid #ccc;
@@ -104,8 +95,8 @@ input {
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
-/* Individual suggestion item as a button */
-.suggestion-item {
+/* Individual suggestion item */
+.createForm-suggestion-item {
   display: block;
   width: 100%;
   text-align: center;
@@ -117,9 +108,8 @@ input {
   font-weight: normal;
 }
 
-/* Highlight effect when hovering/focusing on suggestions */
-.suggestion-item:hover,
-.suggestion-item:focus {
+.createForm-suggestion-item:hover,
+.createForm-suggestion-item:focus {
   background-color: #f0f0f0;
   outline: none;
 }

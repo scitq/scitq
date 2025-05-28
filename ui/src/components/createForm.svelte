@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getFlavors, newWorker, getWorkFlow } from "../lib/api";
+  import { getFlavors, newWorker, getWorkFlow, getStatus } from "../lib/api";
   import "../styles/createForm.css";
-  import { createEventDispatcher } from 'svelte';
+  import { WorkerDetails } from "../../gen/taskqueue";
 
-  const dispatch = createEventDispatcher();
+  export let onWorkerCreated: (event: { detail: { worker: WorkerDetails } }) => void = () => {};
 
+  // Form field values
   let provider = "";
   let flavor = "";
   let region = "";
@@ -14,27 +15,29 @@
   let prefetch = 1;
   let wfStep = "";
 
+  // Lists retrieved from the backend
   let listFlavor = [];
   let listWf = [];
 
-  // Autocomplete visibility flags
+  // Autocomplete dropdown visibility flags
   let showFlavorSuggestions = false;
   let showRegionSuggestions = false;
   let showProviderSuggestions = false;
   let showWfStepSuggestions = false;
 
+  // Filtered suggestion arrays
   let flavorSuggestions = [];
   let regionSuggestions = [];
   let providerSuggestions = [];
   let wfStepSuggestions = [];
 
-  // Fetch available flavors and workflows on mount
+  // Fetch data when the component is mounted
   onMount(async () => {
     listFlavor = await getFlavors();
-    listWf = await getWorkFlow(); // récupère tous les workflows
+    listWf = await getWorkFlow();
   });
 
-  // Dynamic flavor suggestions
+  // Reactive statements to update suggestion lists based on input
   $: flavorSuggestions = Array.from(
     new Set(
       listFlavor
@@ -43,7 +46,6 @@
     )
   );
 
-  // Dynamic region suggestions
   $: regionSuggestions = Array.from(
     new Set(
       listFlavor
@@ -52,7 +54,6 @@
     )
   );
 
-  // Dynamic provider suggestions
   $: providerSuggestions = Array.from(
     new Set(
       listFlavor
@@ -61,7 +62,6 @@
     )
   );
 
-  // Dynamic workflow step suggestions
   $: wfStepSuggestions = Array.from(
     new Set(
       listWf
@@ -70,51 +70,83 @@
     )
   );
 
-  // Select a flavor from suggestions
+  // Handle suggestion selection
   function selectFlavor(suggestion: string) {
     flavor = suggestion;
     showFlavorSuggestions = false;
   }
 
-  // Select a region from suggestions
   function selectRegion(suggestion: string) {
     region = suggestion;
     showRegionSuggestions = false;
   }
 
-  // Select a provider from suggestions
   function selectProvider(suggestion: string) {
     provider = suggestion;
     showProviderSuggestions = false;
   }
 
-  // Select a workflow step from suggestions
   function selectWfStep(suggestion: string) {
     wfStep = suggestion;
     showWfStepSuggestions = false;
   }
+
+  // Handle form submission to create a new worker
+  async function handleAddWorker() {
+    const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
+    const workerCreatedDetails = workersDetails[workersDetails.length - 1];
+    const statuses = await getStatus([workerCreatedDetails.workerId]);
+    const statusObj = statuses[0];
+    const workerStatus = statusObj ? statusObj.status : 'unknown';
+
+    onWorkerCreated({
+      detail: {
+        worker: {
+          workerId: workerCreatedDetails.workerId,
+          name: workerCreatedDetails.workerName,
+          concurrency,
+          prefetch,
+          status: workerStatus,
+          flavor,
+          provider,
+          region,
+        }
+      }
+    });
+
+    // Reset form fields after submission
+    concurrency = 1;
+    prefetch = 1;
+    flavor = "";
+    region = "";
+    provider = "";
+    number = 1;
+    wfStep = "";
+  }
 </script>
 
-<div class="form-container">
-  <h2>Create Worker</h2>
 
-  <!-- CONCURRENCY -->
-  <div class="form-group">
-    <label for="concurrency">Concurrency :</label>
-    <input id="concurrency" type="number" bind:value={concurrency} min="0" />
+<div class="createForm-form-container">
+  <h2 class="createForm-title">Create Worker</h2>
+
+  <!-- Concurrency input -->
+  <div class="createForm-form-group">
+    <label class="createForm-label" for="concurrency">Concurrency:</label>
+    <input id="concurrency" class="createForm-input" type="number" bind:value={concurrency} min="0" />
   </div>
 
-  <!-- PREFETCH -->
-  <div class="form-group">
-    <label for="prefetch">Prefetch :</label>
-    <input id="prefetch" type="number" bind:value={prefetch} min="0" />
+  <!-- Prefetch input -->
+  <div class="createForm-form-group">
+    <label class="createForm-label" for="prefetch">Prefetch:</label>
+    <input id="prefetch" class="createForm-input" type="number" bind:value={prefetch} min="1" />
   </div>
 
-  <!-- FLAVOR -->
-  <div class="form-group autocomplete">
-    <label for="flavor">Flavor :</label>
+  <!-- Flavor autocomplete -->
+  <div class="createForm-form-group createForm-autocomplete">
+    <label class="createForm-label" for="flavor">Flavor:</label>
     <input
       id="flavor"
+      class="createForm-input"
       type="text"
       bind:value={flavor}
       autocomplete="off"
@@ -124,14 +156,10 @@
       on:blur={() => setTimeout(() => showFlavorSuggestions = false, 150)}
     />
     {#if showFlavorSuggestions && flavorSuggestions.length > 0}
-      <ul class="suggestions">
+      <ul class="createForm-suggestions">
         {#each flavorSuggestions as suggestion}
           <li>
-            <button
-              class="suggestion-item"
-              type="button"
-              on:click={() => selectFlavor(suggestion)}
-            >
+            <button class="createForm-suggestion-item" type="button" on:click={() => selectFlavor(suggestion)}>
               {suggestion}
             </button>
           </li>
@@ -140,11 +168,12 @@
     {/if}
   </div>
 
-  <!-- REGION -->
-  <div class="form-group autocomplete">
-    <label for="region">Region :</label>
+  <!-- Region autocomplete -->
+  <div class="createForm-form-group createForm-autocomplete">
+    <label class="createForm-label" for="region">Region:</label>
     <input
       id="region"
+      class="createForm-input"
       type="text"
       bind:value={region}
       autocomplete="off"
@@ -154,14 +183,10 @@
       on:blur={() => setTimeout(() => showRegionSuggestions = false, 150)}
     />
     {#if showRegionSuggestions && regionSuggestions.length > 0}
-      <ul class="suggestions">
+      <ul class="createForm-suggestions">
         {#each regionSuggestions as suggestion}
           <li>
-            <button
-              class="suggestion-item"
-              type="button"
-              on:click={() => selectRegion(suggestion)}
-            >
+            <button class="createForm-suggestion-item" type="button" on:click={() => selectRegion(suggestion)}>
               {suggestion}
             </button>
           </li>
@@ -170,11 +195,12 @@
     {/if}
   </div>
 
-  <!-- PROVIDER -->
-  <div class="form-group autocomplete">
-    <label for="provider">Provider :</label>
+  <!-- Provider autocomplete -->
+  <div class="createForm-form-group createForm-autocomplete">
+    <label class="createForm-label" for="provider">Provider:</label>
     <input
       id="provider"
+      class="createForm-input"
       type="text"
       bind:value={provider}
       autocomplete="off"
@@ -184,14 +210,10 @@
       on:blur={() => setTimeout(() => showProviderSuggestions = false, 150)}
     />
     {#if showProviderSuggestions && providerSuggestions.length > 0}
-      <ul class="suggestions">
+      <ul class="createForm-suggestions">
         {#each providerSuggestions as suggestion}
           <li>
-            <button
-              class="suggestion-item"
-              type="button"
-              on:click={() => selectProvider(suggestion)}
-            >
+            <button class="createForm-suggestion-item" type="button" on:click={() => selectProvider(suggestion)}>
               {suggestion}
             </button>
           </li>
@@ -200,11 +222,12 @@
     {/if}
   </div>
 
-  <!-- STEP -->
-  <div class="form-group autocomplete">
-    <label for="step">Step (Workflow.step) : </label>
+  <!-- Workflow step autocomplete -->
+  <div class="createForm-form-group createForm-autocomplete">
+    <label class="createForm-label" for="step">Step (Workflow.step):</label>
     <input
       id="step"
+      class="createForm-input"
       type="text"
       bind:value={wfStep}
       autocomplete="off"
@@ -214,14 +237,10 @@
       on:blur={() => setTimeout(() => showWfStepSuggestions = false, 150)}
     />
     {#if showWfStepSuggestions && wfStepSuggestions.length > 0}
-      <ul class="suggestions">
+      <ul class="createForm-suggestions">
         {#each wfStepSuggestions as suggestion}
           <li>
-            <button
-              class="suggestion-item"
-              type="button"
-              on:click={() => selectWfStep(suggestion)}
-            >
+            <button class="createForm-suggestion-item" type="button" on:click={() => selectWfStep(suggestion)}>
               {suggestion}
             </button>
           </li>
@@ -229,24 +248,15 @@
       </ul>
     {/if}
   </div>
-  <!--VERIFIER QUE CA SOIT BON MAIS SI ON CREER DIRECT D'ICI, DIRE QUE SI CA N4EXISTE PAS ALORS ENREGISTTRER LE NOM ET A LA FIN IL FAUDRA APPELLER CREATEWORFLOW ET FAIRE UNE POP UP QUI DEMANDE LE NOMRBE DE WORKER A METTRE ETC A VOIR-->
 
-  <!-- NUMBER -->
-  <div class="form-group">
-    <label for="number">Number :</label>
-    <input id="number" type="number" bind:value={number} min="0" />
+  <!-- Number of workers to create -->
+  <div class="createForm-form-group">
+    <label class="createForm-label" for="number">Number:</label>
+    <input id="number" class="createForm-input" type="number" bind:value={number} min="0" />
   </div>
 
-  <!-- ADD -->
-  <button
-    class="add-button"
-    on:click={async () => {
-      await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
-      dispatch('workerAdded'); // Notify external components that a worker was added
-    }}
-    aria-label="Add"
-    data-testid="add-worker-button"
-  >
+  <!-- Submit button -->
+  <button class="btn-validate createForm-add-button" on:click={handleAddWorker} aria-label="Add" data-testid="add-worker-button">
     Add
   </button>
 </div>

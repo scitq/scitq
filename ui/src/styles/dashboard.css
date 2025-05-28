@@ -1,11 +1,8 @@
-/* === Sidebar Styles === */
-
-/* Main sidebar container */
-.sidebar {
+.dashboard-sidebar {
   width: 260px;
   height: 100vh;
   background-color: #192245;
-  color: white;
+  color: #e5e7eb;
   display: flex;
   flex-direction: column;
   padding: 1.5rem 1rem;
@@ -15,261 +12,252 @@
   transition: transform 0.3s ease;
 }
 
-/* Hidden state for responsive toggle */
-.sidebar.hidden {
+.dashboard-sidebar.hidden {
   transform: translateX(-100%);
 }
 
-/* Sidebar header: logo + title */
-.sidebar-header {
+.dashboard-sidebar-header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   font-size: 1.5rem;
   font-weight: bold;
   margin-bottom: 2rem;
-  color: #fff;
+  color: #f3f4f6;
 }
 
-/* Logo image in sidebar */
-.logo {
+.dashboard-logo {
   width: 40px;
   height: 32px;
   object-fit: contain;
 }
 
-/* Navigation section inside the sidebar */
-.sidebar-nav {
+.dashboard-sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-/* Navigation link base style */
-.nav-link {
+/* Main navigation links */
+.dashboard-nav-link {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: #ccc;
+  color: #d1d5db;
   text-decoration: none;
-  font-size: 1rem;
+  font-size: 1.25rem;
   padding: 0.5rem;
   border-radius: 6px;
-  transition: background 0.2s, color 0.2s;
+  transition: color 0.2s, background-color 0.2s;
   text-align: left;
   font-weight: bold;
-}
-
-/* Dropdown-style nav link (like "Tasks") */
-.nav-link.dropdown {
-  background: #192245;
-  color: #ccc;
-  font: bold;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  background: none;
+  border: none;
   width: 100%;
 }
 
-/* Remove border on hover for dropdown */
-.nav-link.dropdown:hover {
-  border: none;
+.dashboard-nav-link:hover,
+.dashboard-nav-link.active {
+  color: #8ecae6;
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
-/* Hover effect for regular nav links */
-.nav-link:hover {
-  background-color: grey;
-  color: white;
-}
-
-/* Icon inside nav links */
-.icon {
-  width: 20px;
-  height: 20px;
-  color: #ccc;
-}
-
-/* General dropdown layout */
-.dropdown {
-  display: flex;
+.dashboard-nav-link.dropdown {
   justify-content: space-between;
-  align-items: center;
   cursor: pointer;
 }
 
-/* Left-aligned content in dropdown */
-.left {
+.dashboard-icon {
+  width: 20px;
+  height: 20px;
+  color: #9ca3af;
+}
+
+.dashboard-left {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
-/* Chevron icon for dropdowns */
-.chevron {
+/* Chevron icon */
+.dashboard-chevron {
   width: 16px;
   height: 16px;
-  color: #ccc;
+  color: #9ca3af;
+  transition: transform 0.3s ease;
+  align-self: right;
 }
 
-/* Submenu for dropdowns (e.g., task categories) */
-.submenu {
-  display: flex;
-  flex-direction: column;
-  padding-left: 2rem;  /* Un peu d'indentation à gauche pour le sous-menu */
-  margin-top: 0.5rem;
-  gap: 0.5rem;  /* Espacement entre les groupes */
-  background-color: #192245;  /* Fond de sous-menu */
-  border-radius: 6px;  /* Coins arrondis pour le sous-menu */
-  padding: 0.5rem 1rem;
-}
-
-/* Links inside submenu */
-.submenu a {
-  font-size: 0.95rem;
-  color: #ccc;
-  padding: 0.3rem 0;
-  text-align: left;
-  border-radius: 4px;
-  transition: background 0.2s ease;
-}
-
-/* Hover effect for submenu links */
-.submenu a:hover {
-  color: white;
-  background-color: #192245;  /* Darker hover effect */
-}
-
-/* Submenu header (groupes comme "Starting", "Progress", etc.) */
-.submenu-header {
-  display: flex;  /* Utiliser flexbox pour disposer le texte et le chevron */
-  justify-content: space-between; /* Espacer le texte et le chevron */
-  align-items: center;  /* Centrer verticalement les éléments */
-  background-color: #192245; /* Fond pour les groupes */
-  border: none;
-  color: #ccc;
-  font-weight: bold;
-  cursor: pointer;
-  padding: 0.5rem 1rem; /* Un peu d'espacement autour du texte */
-  text-align: left;  /* Aligner le texte à gauche */
-  width: 100%; /* S'assurer que le bouton occupe toute la largeur */
-  border-radius: 4px;
-  transition: background-color 0.2s ease;
-}
-
-/* Chevron dans le submenu header */
-.submenu-header .chevron {
-  transition: transform 0.3s ease; /* Animation de rotation du chevron */
-}
-
-/* Rotation du chevron quand le sous-menu est ouvert */
-.submenu-header.open .chevron {
+.dashboard-chevron.rotate {
   transform: rotate(180deg);
 }
 
-/* Liens dans le sous-menu */
-.submenu-items {
-  padding-left: 1.75rem;  /* Indentation pour les éléments dans le groupe */
-  margin-top: 0.5rem;    /* Un peu d'espacement au-dessus des éléments */
+/* Submenu container */
+.dashboard-submenu {
+  display: flex;
+  flex-direction: column;
+  padding-left: 1rem;
+  margin-top: 0.5rem;
+  gap: 0.5rem;
+  background-color: transparent;
 }
 
-/* Chaque élément du sous-menu (comme Pending, Assigned) */
-.submenu-items a {
-  display: block;        /* S'assurer que chaque lien occupe une ligne entière */
+/* Submenu header */
+.dashboard-submenu-header {
+  display: flex;
+  justify-content: space-between; /* Positions chevron on right */
+  align-items: center;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.2s;
+  padding: 0.4rem 0.75rem;
+  width: 80%;
+}
+
+.dashboard-submenu-header:hover,
+.dashboard-submenu-header.active {
+  color: #a5d8f0;
+}
+
+/* Submenu links */
+.dashboard-submenu-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-left: 1.25rem;
+  margin-top: 0.3rem;
+}
+
+.dashboard-submenu-items a {
   font-size: 1rem;
   font-style: italic;
-  color: #ccc;
+  color: #94a3b8;
   padding: 0.3rem 0;
-  text-align: left;      /* Aligner le texte à gauche */
+  text-align: left;
   border-radius: 4px;
-  transition: background 0.2s ease;
+  transition: color 0.2s;
+  text-decoration: none;
 }
 
-/* Hover sur les liens du sous-menu */
-.submenu-items a:hover {
-  color: white;
-  background-color: #192245;  /* Changer de couleur de fond au survol */
+.dashboard-submenu-items a:hover,
+.dashboard-submenu-items a.active {
+  color: #c1e3f6;
+  background: none;
 }
 
-/* Styling for logout link */
-.logout {
+/* Logout button */
+.dashboard-logout {
   margin-top: auto;
   color: #f87171;
   text-align: left;
+  background-color: #192245;
+  border: none;
 }
 
-/* Hover effect for logout */
-.logout:hover {
+.dashboard-logout:hover {
   color: #ef4444;
   background-color: #1e1e1e;
+  border: none;
 }
 
-/* === Dashboard Layout === */
-
-/* Wrapper around the dashboard content */
+/* Dashboard main content area */
 .dashboard-content {
   position: relative;
-}
-
-/* Top header section of dashboard */
-.header {
-  margin-bottom: 2rem;
-}
-
-/* Hamburger menu button (mobile) */
-.hamburger-button {
-  background: transparent;
-  border: none;
-  padding: 0.5rem;
-  cursor: pointer;
-  position: absolute;
-  top: 1rem;
-  left: 1rem;
-  z-index: 100;
+  padding: 1rem;
+  height: 100vh;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  height: 36px;
-  width: 30px;
 }
 
-/* Each bar in the hamburger icon */
-.hamburger-icon {
-  width: 100%;
-  height: 3px;
-  background-color: #333;
-  border-radius: 4px;
-  transition: all 0.3s ease;
-}
-
-/* Container for job + create form sections */
-.bottom-div {
+.dashboard-bottom-div {
   display: flex;
   gap: 20px;
-  justify-content: space-between; /* Push items apart */
-  align-items: center; /* Center vertically */
+  justify-content: space-between;
+  align-items: flex-start;
   border-radius: 8px;
+  height: calc(100vh - 150px);
+  box-sizing: border-box;
 }
 
-/* Top section with worker list/table */
-.worker-section {
+.dashboard-job-section {
+  flex: 3;
+  text-align: center;
+  border-radius: 8px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
+  max-height: 100%;
+  overflow-y: auto;
+  background: none;
+  box-sizing: border-box;
+}
+
+.dashboard-add-worker-section {
+  flex: 1;
+  border-radius: 8px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
+  max-height: 100%;
+  overflow-y: auto;
+  background: none;
+  box-sizing: border-box;
+}
+
+.dashboard-worker-section {
   margin-top: 2rem;
   margin-bottom: 1rem;
   box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
 }
 
-/* Left section in bottom: job viewer */
-.job-section {
-  flex: 3;
-  text-align: center;
-  border-radius: 8px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
+/* Popup overlay */
+.dashboard-popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
 }
 
-/* Right section in bottom: worker creator form */
-.add-worker-section {
-  flex: 1;
+/* Popup container */
+.dashboard-popup {
+  background-color: white;
+  padding: 20px;
   border-radius: 8px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
+  width: 300px;
+  text-align: center;
+}
+
+.dashboard-popup-actions {
+  margin-top: 20px;
+}
+
+.dashboard-popup-actions button {
+  margin: 0 10px;
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* Confirm button */
+.dashboard-confirm {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+}
+
+/* Cancel button */
+.dashboard-cancel {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
 }

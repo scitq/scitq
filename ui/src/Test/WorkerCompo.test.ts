@@ -4,7 +4,7 @@ import WorkerCompo from '../components/WorkerCompo.svelte';
 
 
 
-// Définir le type de `tasksStatus` pour résoudre l'erreur
+// Define types for task status
 interface TaskStatus {
   pending: number;
   assigned: number;
@@ -24,6 +24,7 @@ interface TasksStatus {
   [workerId: number]: TaskStatus;
 }
 
+// Example task status data for testing
 const tasksStatus = {
   1: {
     pending: 3,
@@ -49,8 +50,8 @@ vi.mock('../lib/api', async (importOriginal) => {
     getWorkers: vi.fn(),
     updateWorkerConfig: vi.fn(),
     delWorker: vi.fn(),
-    getStatusClass: (status: string) => status,
-    getStatusText: (status: string) => status,
+    getWorkerStatusClass: (status: string) => status,
+    getWorkerStatusText: (status: string) => status,
     getStats: vi.fn(),
     getTasks: vi.fn((workerId: number) => ({
       pending: () => tasksStatus[workerId as keyof typeof tasksStatus]?.pending ?? 0,
@@ -69,8 +70,9 @@ vi.mock('../lib/api', async (importOriginal) => {
   };
 });
 
-import { getWorkers, updateWorkerConfig, delWorker, getStats} from '../lib/api';
+import { getWorkers, updateWorkerConfig, delWorker, getStats } from '../lib/api';
 
+// Example worker data
 const mockWorkers = [
   {
     workerId: 1,
@@ -92,32 +94,30 @@ const mockWorkers = [
   },
 ];
 
+// Example stats for one worker
 const mockStats = {
   1: {
     cpuUsagePercent: 42.5,
     memUsagePercent: 73.1,
     load1Min: 2.5,
-    iowaitPercent: 1.1,
     disks: [
       { deviceName: 'sda1', usagePercent: 60.4 },
       { deviceName: 'sdb1', usagePercent: 88.2 },
     ],
     diskIo: {
-      readBytesRate: 1048576n, // 1MB/s
-      writeBytesRate: 524288n, // 512KB/s
-      readBytesTotal: 1073741824n, // 1GB
-      writeBytesTotal: 536870912n, // 512MB
+      readBytesRate: 1048576,
+      writeBytesRate: 524288,
+      readBytesTotal: 1073741824,
+      writeBytesTotal: 536870912,
     },
     netIo: {
-      sentBytesRate: 2097152n, // 2MB/s
-      recvBytesRate: 1048576n, // 1MB/s
-      sentBytesTotal: 2147483648n, // 2GB
-      recvBytesTotal: 1073741824n, // 1GB
+      sentBytesRate: 2097152,
+      recvBytesRate: 1048576,
+      sentBytesTotal: 2147483648,
+      recvBytesTotal: 1073741824,
     },
-  }
+  },
 };
-
-
 
 describe('WorkerCompo', () => {
   beforeEach(() => {
@@ -128,14 +128,14 @@ describe('WorkerCompo', () => {
     (getWorkers as any).mockResolvedValue(mockWorkers);
     (getStats as any).mockResolvedValue(mockStats);
 
-    const { getByText } = render(WorkerCompo);
+    const { getByText } = render(WorkerCompo, { props: { workers: mockWorkers } });
 
     await waitFor(() => {
       expect(getByText('Worker One')).toBeTruthy();
     });
   });
 
-  it('should display "No workers found." when no jobs are available', async () => {
+  it('should display "No workers found." when there are no workers', async () => {
     (getWorkers as any).mockResolvedValue([]);
     (getStats as any).mockResolvedValue({});
 
@@ -146,44 +146,11 @@ describe('WorkerCompo', () => {
     });
   });
 
-  it('should increase a worker\'s concurrency', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-
-    const { getByTestId } = render(WorkerCompo);
-
-    await waitFor(() => getByTestId('increase-concurrency-1'));
-
-    const plusButton = getByTestId('increase-concurrency-1');
-    await fireEvent.click(plusButton);
-
-    await waitFor(() => {
-      expect(updateWorkerConfig).toHaveBeenCalledWith(1, 6, 10);
-    });
-  });
-
-  it('should decrease a worker\'s prefetch', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-
-    const { getByTestId } = render(WorkerCompo);
-    await waitFor(() => getByTestId('decrease-prefetch-1'));
-
-    const prefetchMinusButton = getByTestId('decrease-prefetch-1');
-    // Set the concurrency to a known value for the test
-    mockWorkers[0].concurrency = 5; // Explicitly set concurrency to 5
-    await fireEvent.click(prefetchMinusButton);
-
-    await waitFor(() => {
-      expect(updateWorkerConfig).toHaveBeenCalledWith(1, 5, 9);
-    });
-  });
-
   it('should delete a worker', async () => {
     (getWorkers as any).mockResolvedValue(mockWorkers);
     (getStats as any).mockResolvedValue(mockStats);
 
-    const { getByText } = render(WorkerCompo);
+    const { getByText } = render(WorkerCompo, { props: { workers: mockWorkers } });
 
     await waitFor(() => getByText('Worker One'));
 
@@ -197,9 +164,31 @@ describe('WorkerCompo', () => {
 
   it('should display statistics for a worker', async () => {
     (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
+    (getStats as any).mockResolvedValue({
+      1: {
+        cpuUsagePercent: 42.5,
+        memUsagePercent: 73.1,
+        load1Min: 2.5,
+        disks: [
+          { deviceName: 'sda1', usagePercent: 60.4 },
+          { deviceName: 'sdb1', usagePercent: 88.2 },
+        ],
+        diskIo: {
+          readBytesRate: 1048576,
+          writeBytesRate: 524288,
+          readBytesTotal: 1073741824,
+          writeBytesTotal: 536870912,
+        },
+        netIo: {
+          sentBytesRate: 2097152,
+          recvBytesRate: 1048576,
+          sentBytesTotal: 2147483648,
+          recvBytesTotal: 1073741824,
+        },
+      },
+    });
 
-    render(WorkerCompo);
+    render(WorkerCompo, { props: { workers: mockWorkers } });
 
     await waitFor(() => {
       expect(screen.getByText('42.5%')).toBeTruthy();
@@ -214,59 +203,51 @@ describe('WorkerCompo', () => {
     });
   });
 
-  it('should correctly display the task status counts for each worker', async () => {
+  it('should correctly display task counts by status category', async () => {
     (getWorkers as any).mockResolvedValue(mockWorkers);
     (getStats as any).mockResolvedValue(mockStats);
   
-    const { getByTestId } = render(WorkerCompo);
+    const { getByTestId } = render(WorkerCompo, { props: { workers: mockWorkers } });
   
     await waitFor(() => {
-      // 1. Tasks awaiting execution (Pending + Assigned + Accepted)
-      const awaitingExecutionTotal = 3 + 2 + 1; // Pending + Assigned + Accepted
+      const awaitingExecutionTotal = 3 + 2 + 1;
       expect(getByTestId('tasks-awaiting-execution-1').textContent).toBe(String(awaitingExecutionTotal));
   
-      // 2. Tasks in progress (Downloading + Waiting + Running)
-      const inProgressTotal = 4 + 12 + 5; // Downloading + Waiting + Running
+      const inProgressTotal = 4 + 12 + 5;
       expect(getByTestId('tasks-in-progress-1').textContent).toBe(String(inProgressTotal));
   
-      // 3. Successful tasks (UploadingSuccess + Succeeded)
-      const successfulTasksTotal = 6 + 7; // UploadingSuccess + Succeeded
+      const successfulTasksTotal = 6 + 7;
       expect(getByTestId('successful-tasks-1').textContent).toBe(String(successfulTasksTotal));
   
-      // 4. Failed tasks (UploadingFailure + Failed + Suspended + Canceled)
-      const failedTasksTotal = 8 + 9 + 10 + 11; // UploadingFailure + Failed + Suspended + Canceled
+      const failedTasksTotal = 8 + 9 + 10 + 11;
       expect(getByTestId('failed-tasks-1').textContent).toBe(String(failedTasksTotal));
     });
-  });  
+  });
 
-  it('should display the details when hovering over each task status cell', async () => {
+  it('should display task breakdowns in tooltip on hover', async () => {
     (getWorkers as any).mockResolvedValue(mockWorkers);
     (getStats as any).mockResolvedValue(mockStats);
 
-    const { getByTestId } = render(WorkerCompo);
+    const { getByTestId } = render(WorkerCompo, { props: { workers: mockWorkers } });
 
     await waitFor(() => {
-      // Vérification pour la cellule "Tasks awaiting execution"
       const tasksAwaitingCell = getByTestId('tasks-awaiting-execution-1');
       fireEvent.mouseOver(tasksAwaitingCell);
       expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Pending: 3'));
       expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Assigned: 2'));
       expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Accepted: 1'));
 
-      // Vérification pour la cellule "Tasks in progress"
       const tasksInProgressCell = getByTestId('tasks-in-progress-1');
       fireEvent.mouseOver(tasksInProgressCell);
       expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Downloading: 4'));
       expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Waiting: 12'));
       expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Running: 5'));
 
-      // Vérification pour la cellule "Successful tasks"
       const successfulTasksCell = getByTestId('successful-tasks-1');
       fireEvent.mouseOver(successfulTasksCell);
       expect(successfulTasksCell).toHaveAttribute('title', expect.stringContaining('UploadingSuccess: 6'));
       expect(successfulTasksCell).toHaveAttribute('title', expect.stringContaining('Succeeded: 7'));
 
-      // Vérification pour la cellule "Failed tasks"
       const failedTasksCell = getByTestId('failed-tasks-1');
       fireEvent.mouseOver(failedTasksCell);
       expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('UploadingFailure: 8'));

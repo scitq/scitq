@@ -1,38 +1,60 @@
 <script lang="ts">
-  import Sidebar from './components/SideBar.svelte'; // Import Sidebar component
-  import Dashboard from './pages/Dashboard.svelte'; // Import Dashboard page
-  import LoginPage from './pages/LoginPage.svelte'; // Import Login page
-  import './app.css'; // Import global styles
+  import Sidebar from './components/SideBar.svelte';
+  import LoginPage from './pages/LoginPage.svelte';
+  import './app.css';
 
-  let isSidebarVisible = true; // State: controls the visibility of the sidebar
-  let isLoggedIn = true; // State: controls user authentication status
+  import { getToken } from './lib/auth';
+  import { isLoggedIn, userInfo } from './lib/Stores/user';
+  import { onMount } from 'svelte';
+  import Router from 'svelte-spa-router';
 
-  // Function to toggle sidebar visibility
+  // Pages
+  import Dashboard from './pages/Dashboard.svelte';
+  import SettingPage from './pages/SettingPage.svelte';
+
+  let isSidebarVisible = true;
+  let logged = false;
+
+  $: $isLoggedIn;
+  $: logged = $isLoggedIn;
+
   const toggleSidebar = () => {
     isSidebarVisible = !isSidebarVisible;
   };
 
-  // Reactive statement: update body class based on login state
-  $: {
-    if (isLoggedIn) {
-      document.body.className = 'body-dashboard'; // Apply dashboard styles
-    } else {
-      document.body.className = 'body-login'; // Apply login page styles
+  onMount(async () => {
+    const tokenCookie = await getToken();
+    if (tokenCookie) {
+      isLoggedIn.set(true);
+      userInfo.set({ token: tokenCookie });
     }
+  });
+
+  $: {
+    document.body.className = logged ? 'body-dashboard' : 'body-login';
   }
+
+  const routes = {
+    '/': Dashboard,
+    '/settings': SettingPage,
+  };
 </script>
 
-{#if isLoggedIn}
-  <!-- Render dashboard layout when logged in -->
+{#if logged}
   <div class="app-container {isSidebarVisible ? '' : 'sidebar-hidden'}">
     {#if isSidebarVisible}
-      <Sidebar {isSidebarVisible} {toggleSidebar} /> <!-- Sidebar component -->
+      <Sidebar {isSidebarVisible} {toggleSidebar} />
     {/if}
     <div class="main-content">
-      <Dashboard {toggleSidebar} /> <!-- Main dashboard content -->
+      <!-- The button is now to the right of the sidebar -->
+      <button class="hamburger-button" on:click={toggleSidebar} aria-label="Toggle sidebar">
+        <span class="hamburger-icon"></span>
+        <span class="hamburger-icon"></span>
+        <span class="hamburger-icon"></span>
+      </button>
+      <Router {routes} />
     </div>
   </div>
 {:else}
-  <!-- Render login page when not logged in -->
   <LoginPage />
 {/if}
