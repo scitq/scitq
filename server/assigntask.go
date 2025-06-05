@@ -174,6 +174,9 @@ func (s *taskQueueServer) assignPendingTasks() {
 	for _, status := range workerStatusMap {
 		if status.StepID != nil {
 			stepSlots[*status.StepID] += int(status.TotalCapacity - status.UsedCapacity)
+		} else {
+			// If no step_id, treat as global worker
+			stepSlots[0] += int(status.TotalCapacity - status.UsedCapacity)
 		}
 	}
 
@@ -191,7 +194,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 		part := fmt.Sprintf(`
 			(SELECT task_id, step_id
 			FROM task
-			WHERE status = 'P' AND step_id = $%d
+			WHERE status = 'P' AND COALESCE(step_id,0) = %d
 			ORDER BY created_at
 			LIMIT %d)
 		`, argIndex, slots)
