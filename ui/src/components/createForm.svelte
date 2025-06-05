@@ -4,40 +4,85 @@
   import "../styles/createForm.css";
   import { WorkerDetails } from "../../gen/taskqueue";
 
-  export let onWorkerCreated: (event: { detail: { worker: WorkerDetails } }) => void = () => {};
+  /**
+   * Callback function type triggered when a new worker is created.
+   * @callback onWorkerCreated
+   * @param {Object} event - Event object containing detail of the new worker.
+   * @param {Object} event.detail - Detail object with worker info.
+   * @param {WorkerDetails} event.detail.worker - The created worker details.
+   */
 
-  // Form field values
+  /**
+   * Event callback prop triggered when a new worker is created.
+   * @type {(event: { detail: { worker: WorkerDetails } }) => void}
+   */
+  export let onWorkerCreated = () => {};
+
+  /** @type {string} - Provider name input value */
   let provider = "";
+
+  /** @type {string} - Flavor input value */
   let flavor = "";
+
+  /** @type {string} - Region input value */
   let region = "";
+
+  /** @type {number} - Number of workers to create */
   let number = 1;
+
+  /** @type {number} - Worker concurrency value */
   let concurrency = 1;
+
+  /** @type {number} - Worker prefetch value */
   let prefetch = 1;
+
+  /** @type {string} - Workflow step input value */
   let wfStep = "";
 
-  // Lists retrieved from the backend
+  /** @type {Array} - List of flavor objects fetched from backend */
   let listFlavor = [];
+
+  /** @type {Array} - List of workflow objects fetched from backend */
   let listWf = [];
 
-  // Autocomplete dropdown visibility flags
+  /** @type {boolean} - Flag to show/hide flavor autocomplete suggestions */
   let showFlavorSuggestions = false;
+
+  /** @type {boolean} - Flag to show/hide region autocomplete suggestions */
   let showRegionSuggestions = false;
+
+  /** @type {boolean} - Flag to show/hide provider autocomplete suggestions */
   let showProviderSuggestions = false;
+
+  /** @type {boolean} - Flag to show/hide workflow step autocomplete suggestions */
   let showWfStepSuggestions = false;
 
-  // Filtered suggestion arrays
+  /** @type {string[]} - Filtered flavor suggestions based on user input */
   let flavorSuggestions = [];
+
+  /** @type {string[]} - Filtered region suggestions based on user input */
   let regionSuggestions = [];
+
+  /** @type {string[]} - Filtered provider suggestions based on user input */
   let providerSuggestions = [];
+
+  /** @type {string[]} - Filtered workflow step suggestions based on user input */
   let wfStepSuggestions = [];
 
-  // Fetch data when the component is mounted
+  /**
+   * Lifecycle hook that runs once when component is mounted.
+   * Fetches flavor and workflow data from backend API.
+   * @async
+   * @returns {Promise<void>}
+   */
   onMount(async () => {
     listFlavor = await getFlavors();
     listWf = await getWorkFlow();
   });
 
-  // Reactive statements to update suggestion lists based on input
+  /**
+   * Reactive statement updating flavorSuggestions array whenever `flavor` or `listFlavor` changes.
+   */
   $: flavorSuggestions = Array.from(
     new Set(
       listFlavor
@@ -46,6 +91,9 @@
     )
   );
 
+  /**
+   * Reactive statement updating regionSuggestions array whenever `region` or `listFlavor` changes.
+   */
   $: regionSuggestions = Array.from(
     new Set(
       listFlavor
@@ -54,6 +102,9 @@
     )
   );
 
+  /**
+   * Reactive statement updating providerSuggestions array whenever `provider` or `listFlavor` changes.
+   */
   $: providerSuggestions = Array.from(
     new Set(
       listFlavor
@@ -62,6 +113,9 @@
     )
   );
 
+  /**
+   * Reactive statement updating wfStepSuggestions array whenever `wfStep` or `listWf` changes.
+   */
   $: wfStepSuggestions = Array.from(
     new Set(
       listWf
@@ -70,28 +124,54 @@
     )
   );
 
-  // Handle suggestion selection
+  /**
+   * Handles selection of a flavor suggestion.
+   * Updates the flavor input value and hides the suggestion dropdown.
+   * @param {string} suggestion - Selected flavor suggestion
+   */
   function selectFlavor(suggestion: string) {
     flavor = suggestion;
     showFlavorSuggestions = false;
   }
 
+  /**
+   * Handles selection of a region suggestion.
+   * Updates the region input value and hides the suggestion dropdown.
+   * @param {string} suggestion - Selected region suggestion
+   */
   function selectRegion(suggestion: string) {
     region = suggestion;
     showRegionSuggestions = false;
   }
 
+  /**
+   * Handles selection of a provider suggestion.
+   * Updates the provider input value and hides the suggestion dropdown.
+   * @param {string} suggestion - Selected provider suggestion
+   */
   function selectProvider(suggestion: string) {
     provider = suggestion;
     showProviderSuggestions = false;
   }
 
+  /**
+   * Handles selection of a workflow step suggestion.
+   * Updates the workflow step input value and hides the suggestion dropdown.
+   * @param {string} suggestion - Selected workflow step suggestion
+   */
   function selectWfStep(suggestion: string) {
     wfStep = suggestion;
     showWfStepSuggestions = false;
   }
 
-  // Handle form submission to create a new worker
+  /**
+   * Handles form submission to create new worker(s).
+   * Calls backend API with current form data, retrieves status,
+   * triggers onWorkerCreated event with new worker details,
+   * and resets form fields to default values.
+   * @async
+   * @returns {Promise<void>}
+   */
   async function handleAddWorker() {
     const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
     const workerCreatedDetails = workersDetails[workersDetails.length - 1];
@@ -114,7 +194,7 @@
       }
     });
 
-    // Reset form fields after submission
+    // Reset form fields
     concurrency = 1;
     prefetch = 1;
     flavor = "";
@@ -125,26 +205,26 @@
   }
 </script>
 
-
 <div class="createForm-form-container">
   <h2 class="createForm-title">Create Worker</h2>
 
   <!-- Concurrency input -->
   <div class="createForm-form-group">
     <label class="createForm-label" for="concurrency">Concurrency:</label>
-    <input id="concurrency" class="createForm-input" type="number" bind:value={concurrency} min="0" />
+    <input data-testid="concurrency-createWorker" id="concurrency" class="createForm-input" type="number" bind:value={concurrency} min="0" />
   </div>
 
   <!-- Prefetch input -->
   <div class="createForm-form-group">
     <label class="createForm-label" for="prefetch">Prefetch:</label>
-    <input id="prefetch" class="createForm-input" type="number" bind:value={prefetch} min="1" />
+    <input data-testid="prefetch-createWorker" id="prefetch" class="createForm-input" type="number" bind:value={prefetch} min="1" />
   </div>
 
   <!-- Flavor autocomplete -->
   <div class="createForm-form-group createForm-autocomplete">
     <label class="createForm-label" for="flavor">Flavor:</label>
     <input
+      data-testid="flavor-createWorker"
       id="flavor"
       class="createForm-input"
       type="text"
@@ -172,6 +252,7 @@
   <div class="createForm-form-group createForm-autocomplete">
     <label class="createForm-label" for="region">Region:</label>
     <input
+      data-testid="region-createWorker"
       id="region"
       class="createForm-input"
       type="text"
@@ -199,6 +280,7 @@
   <div class="createForm-form-group createForm-autocomplete">
     <label class="createForm-label" for="provider">Provider:</label>
     <input
+      data-testid="provider-createWorker"
       id="provider"
       class="createForm-input"
       type="text"
@@ -226,6 +308,7 @@
   <div class="createForm-form-group createForm-autocomplete">
     <label class="createForm-label" for="step">Step (Workflow.step):</label>
     <input
+      data-testid="wfStep-createWorker"
       id="step"
       class="createForm-input"
       type="text"
@@ -252,7 +335,7 @@
   <!-- Number of workers to create -->
   <div class="createForm-form-group">
     <label class="createForm-label" for="number">Number:</label>
-    <input id="number" class="createForm-input" type="number" bind:value={number} min="0" />
+    <input data-testid="number-createWorker" id="number" class="createForm-input" type="number" bind:value={number} min="0" />
   </div>
 
   <!-- Submit button -->

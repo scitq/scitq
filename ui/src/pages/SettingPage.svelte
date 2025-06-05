@@ -33,7 +33,10 @@
   let successMessage: string = '';
   let alertTimeout;
 
-  // Fetch user data and user list on component mount
+  /**
+   * Fetch user data and user list on component mount.
+   * Retrieves current user details and list of all users.
+   */
   onMount(async () => {
     try {
       const token = $userInfo?.token;
@@ -47,8 +50,10 @@
   });
 
   /**
-   * Handle new user creation event from CreateUserForm
-   * Adds new user to local users list and shows success message
+   * Handles new user creation event from CreateUserForm component.
+   * Adds the new user to the local users array and shows a success message.
+   * 
+   * @param event - Custom event containing the new user in event.detail.user.
    */
   function handleUserCreated(event) {
     if (event?.detail?.user) {
@@ -56,7 +61,6 @@
     }
     successMessage = "User Created";
 
-    // Clear success message after 5 seconds
     clearTimeout(alertTimeout);
     alertTimeout = setTimeout(() => {
       successMessage = '';
@@ -64,8 +68,11 @@
   }
 
   /**
-   * Handle user deletion event from UserList
-   * Deletes user via API and updates local list, then shows success message
+   * Handles user deletion event from UserList component.
+   * Deletes the user via API and updates the local users list.
+   * Shows a success message after deletion.
+   * 
+   * @param event - Custom event containing userId to delete in event.detail.userId.
    */
   async function handleDeleteUser(event) {
     const userIdToDelete = event.detail.userId;
@@ -86,33 +93,36 @@
   }
 
   /**
-   * Handle user update event from UserList
-   * Updates user info via API and updates local list, then shows success message
+   * Handles user update event from UserList component.
+   * Updates the user via API and updates the local users list.
+   * Shows a success message after update.
+   * 
+   * @param event - Custom event containing userId and update data in event.detail.
    */
-async function handleUpdateUser(event) {
-  const { userId, updates } = event.detail;
-  
-  try {
-    await updateUser(userId, updates);
+  async function handleUpdateUser(event) {
+    const { userId, updates } = event.detail;
 
-    // Optimized local state update
-    users = users.map(u => u.userId === userId ? { ...u, ...updates } : u);
+    try {
+      await updateUser(userId, updates);
+      users = users.map(u => u.userId === userId ? { ...u, ...updates } : u);
 
-    successMessage = "User Updated";
-    clearTimeout(alertTimeout);
-    alertTimeout = setTimeout(() => {
-      successMessage = '';
-    }, 5000);
-  } catch (error) {
-    console.error("Update error:", error);
-    alert("Error updating user.");
+      successMessage = "User Updated";
+
+      clearTimeout(alertTimeout);
+      alertTimeout = setTimeout(() => {
+        successMessage = '';
+      }, 5000);
+    } catch (error) {
+      console.error("Update error:", error);
+      alert("Error updating user.");
+    }
   }
-}
-
 
   /**
-   * Handle password reset event from UserList
-   * Calls API to reset password and shows success message
+   * Handles password reset event from UserList component.
+   * Calls API to reset the user's password and shows a success message.
+   * 
+   * @param event - Custom event containing user info and new password in event.detail.
    */
   async function handleForgotPassword(event) {
     const { userId, username, email, isAdmin } = event.detail.user;
@@ -131,7 +141,9 @@ async function handleUpdateUser(event) {
   }
 
   /**
-   * Toggle password visibility for old, new, or confirm fields
+   * Toggles the visibility of password input fields.
+   * 
+   * @param type - Which password field to toggle ('old', 'new', or 'confirm').
    */
   function toggleShow(type: 'old' | 'new' | 'confirm') {
     if (type === 'old') showOld = !showOld;
@@ -140,7 +152,7 @@ async function handleUpdateUser(event) {
   }
 
   /**
-   * Open the password change modal and reset fields
+   * Opens the password change modal and resets input fields and error messages.
    */
   function openModal() {
     showModal = true;
@@ -151,14 +163,16 @@ async function handleUpdateUser(event) {
   }
 
   /**
-   * Close the password change modal
+   * Closes the password change modal.
    */
   function closeModal() {
     showModal = false;
   }
 
   /**
-   * Confirm password change after validation
+   * Confirms the password change after validating input fields.
+   * Checks password match and difference, then calls API to change the password.
+   * Displays error messages if validation or API call fails.
    */
   async function confirmPasswordChange() {
     if (newPassword !== confirmNewPassword) {
@@ -179,7 +193,7 @@ async function handleUpdateUser(event) {
 </script>
 
 <!-- Personal profile display -->
-<div class="settings-container">
+<div class="settings-container" data-testid="settings-page">
   <h2 class="settings-myProfile">My Profile :</h2>
   {#if user}
     <div class="settings-info-item">

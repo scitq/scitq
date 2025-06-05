@@ -8,7 +8,7 @@
 <!--
   General wrapper for the login page layout
 -->
-<div class="loginpage-page-wrapper">
+<div class="loginpage-page-wrapper" data-testid="login-page">
 
   <!--
     Header section with site title and branding

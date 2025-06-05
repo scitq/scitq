@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 import { mockApi } from './mocks/api_mock';
+import { mockAuth } from './mocks/auth_mock';
 
 vi.mock('grpc-web', () => {
   return {
@@ -9,12 +10,10 @@ vi.mock('grpc-web', () => {
   };
 });
 
-// Mock global de l'API
+// Global API mock
 vi.mock('../lib/api', () => mockApi);
+vi.mock('../lib/auth', () => mockAuth);
 
-
-// Suppression des logs en test
+// Suppress console logs during tests
 vi.spyOn(console, 'error').mockImplementation(() => {});
 vi.spyOn(console, 'log').mockImplementation(() => {});
-
-(globalThis as any).mockApi = mockApi;

@@ -1,15 +1,9 @@
+vi.mock('../lib/api', () => mockApi);
+import { mockApi } from '../mocks/api_mock';
+
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import CreateUserForm from '../components/CreateUserForm.svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWorkerToken } from '../lib/auth';
-
-vi.mock('../lib/api', () => ({
-    newUser: vi.fn(),
-    getWorkerToken: vi.fn().mockResolvedValue('mock-token'),
-    fetchWorkerStatuses: vi.fn().mockResolvedValue([])
-}));
-
-import { newUser } from '../lib/api';
 
 describe('CreateUserForm', () => {
   beforeEach(() => {
@@ -18,7 +12,7 @@ describe('CreateUserForm', () => {
 
   it('fills the form and creates a new user', async () => {
     // Mock newUser to resolve with an ID
-    (newUser as any).mockResolvedValue(42);
+    mockApi.newUser.mockResolvedValue(42);
 
     // Create a mock for the event handler
     const mockUserCreated = vi.fn();
@@ -46,7 +40,7 @@ describe('CreateUserForm', () => {
     await fireEvent.click(createBtn);
 
     // Verify newUser was called with correct arguments
-    expect(newUser).toHaveBeenCalledWith('testuser', 'secret123', 'test@mail.com', true);
+    expect(mockApi.newUser).toHaveBeenCalledWith('testuser', 'secret123', 'test@mail.com', true);
 
     // Verify the onUserCreated event was triggered with the expected data
     await waitFor(() => {

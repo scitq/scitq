@@ -692,11 +692,15 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	}
 	defer tx.Rollback()
 
-	// **Filter by status if provided**
-	if req.StatusFilter != nil && *req.StatusFilter != "" {
-		rows, err = tx.Query(`SELECT task_id, command, container, status FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
+	// **Filter by status and worker if provided**
+	if req.StatusFilter != nil && *req.StatusFilter != "" && req.WorkerIdFilter != nil {
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
+	} else if req.StatusFilter != nil && *req.StatusFilter != "" {
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
+	} else if req.WorkerIdFilter != nil {
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
 	} else {
-		rows, err = tx.Query(`SELECT task_id, command, container, status FROM task ORDER BY task_id`)
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task ORDER BY task_id`)
 	}
 
 	if err != nil {
@@ -707,7 +711,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	for rows.Next() {
 		var task pb.Task
-		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status)
+		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status, &task.WorkerId)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue

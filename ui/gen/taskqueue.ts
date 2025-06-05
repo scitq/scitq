@@ -167,6 +167,10 @@ export interface Task {
      * @generated from protobuf field: string status = 16;
      */
     status: string;
+    /**
+     * @generated from protobuf field: optional uint32 worker_id = 17;
+     */
+    workerId?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -417,6 +421,10 @@ export interface ListTasksRequest {
      * @generated from protobuf field: optional string status_filter = 1;
      */
     statusFilter?: string;
+    /**
+     * @generated from protobuf field: optional uint32 worker_id_filter = 2;
+     */
+    workerIdFilter?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkerRequest
@@ -1358,7 +1366,8 @@ class Task$Type extends MessageType<Task> {
             { no: 13, name: "download_timeout", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 14, name: "running_timeout", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 15, name: "upload_timeout", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 16, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 16, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 17, name: "worker_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -1426,6 +1435,9 @@ class Task$Type extends MessageType<Task> {
                 case /* string status */ 16:
                     message.status = reader.string();
                     break;
+                case /* optional uint32 worker_id */ 17:
+                    message.workerId = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1486,6 +1498,9 @@ class Task$Type extends MessageType<Task> {
         /* string status = 16; */
         if (message.status !== "")
             writer.tag(16, WireType.LengthDelimited).string(message.status);
+        /* optional uint32 worker_id = 17; */
+        if (message.workerId !== undefined)
+            writer.tag(17, WireType.Varint).uint32(message.workerId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2562,7 +2577,8 @@ export const Ack = new Ack$Type();
 class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
     constructor() {
         super("taskqueue.ListTasksRequest", [
-            { no: 1, name: "status_filter", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "status_filter", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "worker_id_filter", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<ListTasksRequest>): ListTasksRequest {
@@ -2579,6 +2595,9 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
                 case /* optional string status_filter */ 1:
                     message.statusFilter = reader.string();
                     break;
+                case /* optional uint32 worker_id_filter */ 2:
+                    message.workerIdFilter = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2594,6 +2613,9 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
         /* optional string status_filter = 1; */
         if (message.statusFilter !== undefined)
             writer.tag(1, WireType.LengthDelimited).string(message.statusFilter);
+        /* optional uint32 worker_id_filter = 2; */
+        if (message.workerIdFilter !== undefined)
+            writer.tag(2, WireType.Varint).uint32(message.workerIdFilter);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -23,6 +23,12 @@
   let newPassword = '';
   let showForgotPassword = false;
 
+  /**
+   * Opens the edit modal for a given user.
+   * Initializes the form fields with the user's current data.
+   * @param {User} user - The user to be edited.
+   * @returns {void}
+   */
   function openEditModal(user: User) {
     editingUser = user;
     editedUsername = user.username;
@@ -31,20 +37,28 @@
     showEditModal = true;
   }
 
+  /**
+   * Closes the edit modal and resets the editing user.
+   * @returns {void}
+   */
   function closeEditModal() {
     showEditModal = false;
     editingUser = null;
   }
 
+  /**
+   * Confirms the changes made to the user.
+   * Prepares an object containing only the updated fields and triggers the onUserUpdated event.
+   * Then closes the edit modal.
+   * @returns {void}
+   */
   function confirmEdit() {
     const updates: Partial<User> = {};
     
-    // Prepare only the fields that were changed
     if (editedUsername !== editingUser.username) updates.username = editedUsername;
     if (editedEmail !== editingUser.email) updates.email = editedEmail;
     if (editedIsAdmin !== editingUser.isAdmin) updates.isAdmin = editedIsAdmin;
 
-    // Only send the update if there are actual changes
     if (Object.keys(updates).length > 0) {
       onUserUpdated({
         detail: {
@@ -57,18 +71,34 @@
     closeEditModal();
   }
 
+  /**
+   * Opens the password change modal for a given user.
+   * Initializes the new password field.
+   * @param {User} user - The user whose password will be changed.
+   * @returns {void}
+   */
   function openPasswordModal(user: User) {
     passwordUser = user;
     newPassword = '';
     showPasswordModal = true;
   }
 
+  /**
+   * Closes the password change modal and resets related fields.
+   * @returns {void}
+   */
   function closePasswordModal() {
     showPasswordModal = false;
     passwordUser = null;
     newPassword = '';
   }
 
+  /**
+   * Confirms the password change.
+   * Triggers the onForgotPassword event with the user and new password,
+   * then closes the modal.
+   * @returns {void}
+   */
   function confirmPasswordChange() {
     onForgotPassword({
       detail: {
@@ -79,12 +109,19 @@
     closePasswordModal();
   }
 
+  /**
+   * Handles user deletion by triggering the onUserDeleted event.
+   * @param {number} userId - The ID of the user to delete.
+   * @returns {void}
+   */
   function handleDeleteUser(userId: number) {
     onUserDeleted({
       detail: { userId }
     });
   }
 </script>
+
+
 
 {#if users && users.length > 0}
   <div class="workerCompo-table-wrapper">
@@ -104,10 +141,10 @@
             <td>{user.email}</td>
             <td>{user.isAdmin ? 'Yes' : 'No'}</td>
             <td class="workerCompo-actions">
-              <button class="btn-action" title="Delete" on:click={() => handleDeleteUser(user.userId)}>
+              <button class="btn-action" title="Delete" data-testid={`delete-btn-user-${user.userId}`} on:click={() => handleDeleteUser(user.userId)}>
                 <Trash />
               </button>
-              <button class="btn-action" title="Edit User" on:click={() => openEditModal(user)}>
+              <button class="btn-action" title="Edit User" data-testid={`edit-btn-user-${user.userId}`} on:click={() => openEditModal(user)}>
                 <Pencil />
               </button>
               <button
@@ -135,17 +172,17 @@
       
       <div class="form-group">
         <label for="username" class="userList-label-settings">Username:</label>
-        <input id="username" type="text" bind:value={editedUsername} />
+        <input data-testid="username-edit" id="username" type="text" bind:value={editedUsername} />
       </div>
 
       <div class="form-group">
         <label for="email" class="userList-label-settings">Email:</label>
-        <input id="email" type="email" bind:value={editedEmail} />
+        <input data-testid="email-edit" id="email" type="email" bind:value={editedEmail} />
       </div>
 
       <div class="form-group">
         <label for="isAdmin" class="userList-label-settings">Admin:</label>
-        <input id="isAdmin" type="checkbox" bind:checked={editedIsAdmin} class="userList-checkbox-input" />
+        <input data-testid="isAdmin-edit" id="isAdmin" type="checkbox" bind:checked={editedIsAdmin} class="userList-checkbox-input" />
       </div>
 
 

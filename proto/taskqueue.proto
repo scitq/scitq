@@ -88,6 +88,7 @@ message Task {
     optional float running_timeout  = 14;
     optional float upload_timeout  = 15;
     string status = 16;
+    optional uint32 worker_id = 17;
 }
 
 message TaskList {
@@ -187,6 +188,7 @@ message Ack {
 
 message ListTasksRequest {
     optional string status_filter = 1;
+    optional uint32 worker_id_filter = 2;
 }
 
 message WorkerRequest {

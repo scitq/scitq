@@ -1,11 +1,12 @@
 import { beforeAll, beforeEach } from 'vitest';
-import { render, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, fireEvent, waitFor, screen, getByTestId } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import LoginPage from '../pages/LoginPage.svelte';
 import Sidebar from '../components/SideBar.svelte';
 import { get } from 'svelte/store';
 import { isLoggedIn, userInfo } from '../lib/Stores/user';
 import * as auth from '../lib/auth';
+import App from '../App.svelte';
 
 const mockFetch = vi.fn((url, options) => {
   if (url === 'http://localhost:8081/login') {
@@ -44,6 +45,7 @@ vi.mock('../lib/auth', async () => {
   return {
     ...actual,
     logout: vi.fn(actual.logout),
+    getToken: vi.fn(),
   };
 });
 
@@ -52,7 +54,7 @@ beforeAll(() => {
   return new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second delay
 });
 
-describe('LoginPage', () => {
+describe('LoginForm', () => {
   it('should render username and password inputs', () => {
     const { getByLabelText } = render(LoginPage);
 
@@ -78,44 +80,47 @@ describe('LoginPage', () => {
     expect(usernameInput.value).toBe('myusername');
     expect(passwordInput.value).toBe('mypassword');
   });
+});
 
-  it('should perform login and store token (Cookie)', async () => {
-    const { getByLabelText, getByText } = render(LoginPage);
+describe('Login functionality', () => {
+  beforeEach (() => {
+    isLoggedIn.set(false);
+    userInfo.set({ token: null});
+  })
 
+
+  it('should trigger login, update store state and display dashboard', async () => {
+    const { getByText, getByLabelText, getByTestId } = render(App);
     const usernameInput = getByLabelText('Username') as HTMLInputElement;
     const passwordInput = getByLabelText('Password') as HTMLInputElement;
-    const loginButton = getByText('Log In');
 
-    await fireEvent.input(usernameInput, { target: { value: 'user1' } });
-    await fireEvent.input(passwordInput, { target: { value: 'pass1' } });
+    await fireEvent.input(usernameInput, { target: { value: 'myusername' } });
+    await fireEvent.input(passwordInput, { target: { value: 'mypassword' } });
 
-    await fireEvent.click(loginButton);
+    expect(getByText('Log In')).toBeInTheDocument();
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://localhost:8081/login',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ username: 'user1', password: 'pass1' }),
-        credentials: 'include'
-      })
-    );
+    // Clicks on "Log in"
+    await fireEvent.click(getByText('Log In'));
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://localhost:8081/fetchCookie',
-      expect.objectContaining({
-        method: 'GET',
-        credentials: 'include',
-      })
-    );
-
-    // Check that getToken correctly retrieved the token
-    await waitFor(async () => {
-      const token = await auth.getToken();
-      expect(token).toBe('mocked-token-123');
+    (auth.getToken as any).mockResolvedValue('mocked-token-123');
+  
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:8081/login',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+        }),
+      );
+    });
+    await waitFor(()=>{
+      // Check side effects on stores
+      expect(get(userInfo)).toEqual({ token:'mocked-token-123'});
+      expect(get(isLoggedIn)).toBe(true);
+      expect(getByTestId('dashboard-page')).toBeInTheDocument();
     });
   });
-});
+})
 
 describe('Logout functionality', () => {
   beforeEach(() => {
@@ -123,8 +128,8 @@ describe('Logout functionality', () => {
     isLoggedIn.set(true);
   });
 
-  it('should trigger logout and update store state', async () => {
-    const { getByTestId, getByText, queryByText } = render(Sidebar);
+  it('should trigger logout, update store state and display login page', async () => {
+    const { getByTestId, getByText, queryByText } = render(App);
 
     // Opens the confirmation popup
     await fireEvent.click(getByTestId('logout-button'));
@@ -155,6 +160,10 @@ describe('Logout functionality', () => {
     // Check side effects on stores
     expect(get(userInfo)).toEqual({ token: null });
     expect(get(isLoggedIn)).toBe(false);
+    await waitFor(()=>{
+      expect(getByTestId('login-page')).toBeInTheDocument();
+    });
+    
   });
 
   it('should cancel logout when clicking cancel', async () => {

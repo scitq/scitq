@@ -13,7 +13,9 @@
   import { isLoggedIn } from '../lib/Stores/user';
   import { logout } from '../lib/auth';
   import Router from 'svelte-spa-router';
+  import Dashboard from '../pages/Dashboard.svelte';
   import SettingPage from '../pages/SettingPage.svelte';
+  import TaskPage from '../pages/TaskPage.svelte';
 
   let tasksOpen = false;
   let awaitingExecutionOpen = false;
@@ -24,23 +26,42 @@
   let showLogoutPopup = false;
 
   const routes = {
-    '/settings': SettingPage
+    '/dashboard' : Dashboard,
+    '/settings': SettingPage,
+    '/tasks' : TaskPage
   };
 
+  /**
+   * Shows the logout confirmation popup.
+   * @returns {void}
+   */
   function confirmLogout() {
     showLogoutPopup = true;
   }
 
+  /**
+   * Cancels the logout process by closing the popup.
+   * @returns {void}
+   */
   function cancelLogout() {
     showLogoutPopup = false;
   }
 
+  /**
+   * Logs out the user and closes the confirmation popup.
+   * @returns {void}
+   */
   function performLogout() {
     logout();
     showLogoutPopup = false;
   }
 
-  // Toggle the visibility of a submenu
+  /**
+   * Toggles the visibility of a specified submenu.
+   * @param {string} submenu - The identifier of the submenu to toggle.
+   * Can be one of 'awaitingExecution', 'inProgress', 'successfulTasks', or 'failsTasks'.
+   * @returns {void}
+   */
   function toggleSubMenu(submenu: string) {
     if (submenu === 'awaitingExecution') awaitingExecutionOpen = !awaitingExecutionOpen;
     if (submenu === 'inProgress') inProgressOpen = !inProgressOpen;
@@ -56,37 +77,32 @@
   </div>
 
   <nav class="dashboard-sidebar-nav">
-    <a class="dashboard-nav-link" href="#">
+    <a class="dashboard-nav-link" href="#/">
       <Home class="dashboard-icon" /> Dashboard
     </a>
 
     <div class="dashboard-nav-section">
-      <button
-        class="dashboard-nav-link dropdown"
-        aria-expanded={tasksOpen}
-        aria-controls="task-submenu"
-        on:click={() => (tasksOpen = !tasksOpen)}
-      >
-        <div class="dashboard-left">
-          <ListChecks class="dashboard-icon" />
-          Tasks
-        </div>
-        <ChevronDown class="dashboard-chevron {tasksOpen ? 'rotate' : ''}" />
-      </button>
+    <a href="#/tasks" class="dashboard-nav-link" data-testid="tasks-button" on:click={() => (tasksOpen = !tasksOpen)}>
+      <div class="dashboard-left">
+        <ListChecks class="dashboard-icon" />
+        Tasks
+      </div>
+      <ChevronDown class="dashboard-chevron {tasksOpen ? 'rotate' : ''}" />
+    </a>
 
       {#if tasksOpen}
         <div class="dashboard-submenu" id="task-submenu">
           <!-- Awaiting Execution -->
           <div>
-            <button class="dashboard-submenu-header" on:click={() => toggleSubMenu('awaitingExecution')}>
+            <button class="dashboard-submenu-header" data-testid="starting-button" on:click={() => toggleSubMenu('awaitingExecution')}>
               Starting
               <ChevronDown class="dashboard-chevron {awaitingExecutionOpen ? 'rotate' : ''}" />
             </button>
             {#if awaitingExecutionOpen}
               <div class="dashboard-submenu-items">
-                <a href="#">Pending</a>
-                <a href="#">Assigned</a>
-                <a href="#">Accepted</a>
+                <a data-testid="pending-link" href="#/tasks?status=P">Pending</a>
+                <a href="#/tasks?status=A">Assigned</a>
+                <a href="#/tasks?status=C">Accepted</a>
               </div>
             {/if}
           </div>
@@ -99,9 +115,9 @@
             </button>
             {#if inProgressOpen}
               <div class="dashboard-submenu-items">
-                <a href="#">Downloading</a>
-                <a href="#">Waiting</a>
-                <a href="#">Running</a>
+                <a href="#/tasks?status=D">Downloading</a>
+                <a href="#/tasks?status=W">Waiting</a>
+                <a href="#/tasks?status=R">Running</a>
               </div>
             {/if}
           </div>
@@ -114,8 +130,8 @@
             </button>
             {#if successfulTasksOpen}
               <div class="dashboard-submenu-items">
-                <a href="#">Uploading (after success)</a>
-                <a href="#">Succeeded</a>
+                <a href="#/tasks?status=U">Uploading (after success)</a>
+                <a href="#/tasks?status=S">Succeeded</a>
               </div>
             {/if}
           </div>
@@ -128,9 +144,10 @@
             </button>
             {#if failsTasksOpen}
               <div class="dashboard-submenu-items">
-                <a href="#">Uploading (after failure)</a>
-                <a href="#">Suspended</a>
-                <a href="#">Canceled</a>
+                <a href="#/tasks?status=V">Uploading (after failure)</a>
+                <a href="#/tasks?status=F">Failed</a>
+                <a href="#/tasks?status=Z">Suspended</a>
+                <a href="#/tasks?status=X">Canceled</a>
               </div>
             {/if}
           </div>

@@ -292,6 +292,7 @@ type Task struct {
 	RunningTimeout   *float32               `protobuf:"fixed32,14,opt,name=running_timeout,json=runningTimeout,proto3,oneof" json:"running_timeout,omitempty"`
 	UploadTimeout    *float32               `protobuf:"fixed32,15,opt,name=upload_timeout,json=uploadTimeout,proto3,oneof" json:"upload_timeout,omitempty"`
 	Status           string                 `protobuf:"bytes,16,opt,name=status,proto3" json:"status,omitempty"`
+	WorkerId         *uint32                `protobuf:"varint,17,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -436,6 +437,13 @@ func (x *Task) GetStatus() string {
 		return x.Status
 	}
 	return ""
+}
+
+func (x *Task) GetWorkerId() uint32 {
+	if x != nil && x.WorkerId != nil {
+		return *x.WorkerId
+	}
+	return 0
 }
 
 type TaskList struct {
@@ -1411,10 +1419,11 @@ func (x *Ack) GetSuccess() bool {
 }
 
 type ListTasksRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StatusFilter  *string                `protobuf:"bytes,1,opt,name=status_filter,json=statusFilter,proto3,oneof" json:"status_filter,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	StatusFilter   *string                `protobuf:"bytes,1,opt,name=status_filter,json=statusFilter,proto3,oneof" json:"status_filter,omitempty"`
+	WorkerIdFilter *uint32                `protobuf:"varint,2,opt,name=worker_id_filter,json=workerIdFilter,proto3,oneof" json:"worker_id_filter,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ListTasksRequest) Reset() {
@@ -1452,6 +1461,13 @@ func (x *ListTasksRequest) GetStatusFilter() string {
 		return *x.StatusFilter
 	}
 	return ""
+}
+
+func (x *ListTasksRequest) GetWorkerIdFilter() uint32 {
+	if x != nil && x.WorkerIdFilter != nil {
+		return *x.WorkerIdFilter
+	}
+	return 0
 }
 
 type WorkerRequest struct {
@@ -3788,7 +3804,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\v_uses_cacheB\x13\n" +
 	"\x11_download_timeoutB\x12\n" +
 	"\x10_running_timeoutB\x11\n" +
-	"\x0f_upload_timeout\"\xab\x05\n" +
+	"\x0f_upload_timeout\"\xdb\x05\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\rR\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -3807,7 +3823,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10download_timeout\x18\r \x01(\x02H\aR\x0fdownloadTimeout\x88\x01\x01\x12,\n" +
 	"\x0frunning_timeout\x18\x0e \x01(\x02H\bR\x0erunningTimeout\x88\x01\x01\x12*\n" +
 	"\x0eupload_timeout\x18\x0f \x01(\x02H\tR\ruploadTimeout\x88\x01\x01\x12\x16\n" +
-	"\x06status\x18\x10 \x01(\tR\x06statusB\b\n" +
+	"\x06status\x18\x10 \x01(\tR\x06status\x12 \n" +
+	"\tworker_id\x18\x11 \x01(\rH\n" +
+	"R\bworkerId\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -3818,7 +3836,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\v_uses_cacheB\x13\n" +
 	"\x11_download_timeoutB\x12\n" +
 	"\x10_running_timeoutB\x11\n" +
-	"\x0f_upload_timeout\"1\n" +
+	"\x0f_upload_timeoutB\f\n" +
+	"\n" +
+	"_worker_id\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\x83\x02\n" +
 	"\x06Worker\x12\x1b\n" +
@@ -3881,10 +3901,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tworker_id\x18\x01 \x01(\rR\bworkerId\x12,\n" +
 	"\x05stats\x18\x02 \x01(\v2\x16.taskqueue.WorkerStatsR\x05stats\"\x1f\n" +
 	"\x03Ack\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"N\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x92\x01\n" +
 	"\x10ListTasksRequest\x12(\n" +
-	"\rstatus_filter\x18\x01 \x01(\tH\x00R\fstatusFilter\x88\x01\x01B\x10\n" +
-	"\x0e_status_filter\"\xea\x01\n" +
+	"\rstatus_filter\x18\x01 \x01(\tH\x00R\fstatusFilter\x88\x01\x01\x12-\n" +
+	"\x10worker_id_filter\x18\x02 \x01(\rH\x01R\x0eworkerIdFilter\x88\x01\x01B\x10\n" +
+	"\x0e_status_filterB\x13\n" +
+	"\x11_worker_id_filter\"\xea\x01\n" +
 	"\rWorkerRequest\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\rR\n" +
 	"providerId\x12\x1b\n" +

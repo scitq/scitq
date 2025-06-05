@@ -229,81 +229,6 @@ export function formatBytesPair(a: number | bigint, b: number | bigint, decimals
 }
 
 /**
- * Retrieves all tasks for a specific worker, optionally filtered by status.
- * @param workerId - The worker ID.
- * @param statusFilter - Optional task status filter.
- * @returns A promise resolving to a list of tasks.
- */
-export async function getAllTasks(workerId: number, statusFilter?: string): Promise<taskqueue.Task[]> {
-  try {
-    const request: taskqueue.ListTasksRequest = { statusFilter };
-    const taskUnary = await client.listTasks(request, callOptionsWorker);
-    return taskUnary.response?.tasks || [];
-  } catch (error) {
-    console.error("Error while retrieving tasks:", error);
-    return [];
-  }
-}
-
-/**
- * Returns a set of functions to get task counts by status for a specific worker.
- * @param workerId - The worker ID.
- * @returns An object with async methods for each task status.
- */
-export function getTasks(workerId: number) {
-  return {
-    async pending() {
-      const tasks = await getAllTasks(workerId, 'P');
-      return tasks.length;
-    },
-    async assigned() {
-      const tasks = await getAllTasks(workerId, 'A');
-      return tasks.length;
-    },
-    async accepted() {
-      const tasks = await getAllTasks(workerId, 'C');
-      return tasks.length;
-    },
-    async downloading() {
-      const tasks = await getAllTasks(workerId, 'D');
-      return tasks.length;
-    },
-    async running() {
-      const tasks = await getAllTasks(workerId, 'R');
-      return tasks.length;
-    },
-    async uploadingSuccess() {
-      const tasks = await getAllTasks(workerId, 'U');
-      return tasks.length;
-    },
-    async uploadingFailure() {
-      const tasks = await getAllTasks(workerId, 'V');
-      return tasks.length;
-    },
-    async succeeded() {
-      const tasks = await getAllTasks(workerId, 'S');
-      return tasks.length;
-    },
-    async failed() {
-      const tasks = await getAllTasks(workerId, 'F');
-      return tasks.length;
-    },
-    async suspended() {
-      const tasks = await getAllTasks(workerId, 'Z');
-      return tasks.length;
-    },
-    async canceled() {
-      const tasks = await getAllTasks(workerId, 'X');
-      return tasks.length;
-    },
-    async waiting() {
-      const tasks = await getAllTasks(workerId, 'W');
-      return tasks.length;
-    }
-  };
-}
-
-/**
  * Updates a worker's configuration.
  * @param workerId - The ID of the worker.
  * @param concurrency - Optional concurrency level.
@@ -441,6 +366,75 @@ export async function delWorker(workerId: { workerId: any }) {
   }
 }
 
+/**
+ * Retrieves the count of tasks grouped by their status.
+ * 
+ * @param {number} [workerId] - Optional ID of the worker to filter tasks by.
+ *                              If omitted, counts for all workers are returned.
+ * @returns {Promise<Record<string, number>>} - A promise resolving to an object
+ *                                             mapping task statuses to their counts.
+ *                                             Includes a total count under the key 'all'.
+ */
+export async function getTasksCount(workerId?: number): Promise<Record<string, number>> {
+  try {
+    const request: taskqueue.ListTasksRequest = {};
+
+    if (workerId) {
+      request.workerIdFilter = workerId;
+    }
+
+    const taskUnary = await client.listTasks(request, callOptionsWorker);
+    const workerTasks = taskUnary.response?.tasks || [];
+
+    // Initialize counts for each status to zero
+    const counts: Record<string, number> = {
+      pending: 0,
+      assigned: 0,
+      accepted: 0,
+      downloading: 0,
+      running: 0,
+      uploadingSuccess: 0,
+      uploadingFailure: 0,
+      succeeded: 0,
+      failed: 0,
+      suspended: 0,
+      canceled: 0,
+      waiting: 0,
+      all: 0,
+    };
+
+    // Map status codes to keys in counts object
+    const statusMap: Record<string, keyof typeof counts> = {
+      P: 'pending',
+      A: 'assigned',
+      C: 'accepted',
+      D: 'downloading',
+      R: 'running',
+      U: 'uploadingSuccess',
+      V: 'uploadingFailure',
+      S: 'succeeded',
+      F: 'failed',
+      Z: 'suspended',
+      X: 'canceled',
+      W: 'waiting',
+    };
+
+    // Count tasks per status
+    for (const task of workerTasks) {
+      const key = statusMap[task.status];
+      if (key) {
+        counts[key]++;
+        counts.all++;
+      }
+    }
+
+    return counts;
+
+  } catch (error) {
+    console.error("Error while retrieving worker tasks:", error);
+    return {};
+  }
+}
 
 
 /* -------------------------------- JOB -------------------------------- */ 
@@ -475,6 +469,66 @@ export async function delJob(jobId: { jobId: any }) {
     }
 }
 
+
+/* -------------------------------- TASKS -------------------------------- */ 
+
+/**
+ * Retrieves all tasks, optionally filtered by worker ID, step ID, and status.
+ * Can also sort the resulting list by task ID, worker ID, or workflow step ID.
+ * 
+ * @param {number} [workerId] - Optional worker ID to filter tasks by.
+ * @param {number} [stepId] - Optional step ID to filter tasks by.
+ * @param {string} [statusFilter] - Optional task status to filter by.
+ * @param {'task' | 'worker' | 'workflow'} [sortBy] - Optional sorting key for the returned tasks.
+ * @returns {Promise<taskqueue.Task[]>} - A promise resolving to an array of tasks matching the filters and sorted if specified.
+ */
+export async function getAllTasks(
+  workerId?: number,
+  stepId?: number,
+  statusFilter?: string,
+  sortBy?: 'task' | 'worker' | 'workflow'
+): Promise<taskqueue.Task[]> {
+  try {
+    const request: taskqueue.ListTasksRequest = {};
+
+    if (statusFilter) {
+      request.statusFilter = statusFilter;
+    }
+
+    if (workerId) {
+      request.workerIdFilter = workerId;
+    }
+
+    const taskUnary = await client.listTasks(request, callOptionsWorker);
+    let allTasks = taskUnary.response?.tasks || [];
+
+    // Filter tasks by stepId if provided
+    if (stepId !== undefined) {
+      allTasks = allTasks.filter(task => task.stepId === stepId);
+    }
+
+    // Sort tasks if sortBy is provided
+    if (sortBy) {
+      allTasks.sort((a, b) => {
+        switch (sortBy) {
+          case 'task':
+            return (a.taskId ?? 0) - (b.taskId ?? 0);
+          case 'worker':
+            return (a.workerId ?? 0) - (b.workerId ?? 0);
+          case 'workflow':
+            return (a.stepId ?? 0) - (b.stepId ?? 0);
+          default:
+            return 0;
+        }
+      });
+    }
+
+    return allTasks;
+  } catch (error) {
+    console.error("Error while retrieving tasks:", error);
+    return [];
+  }
+}
 
 /* -------------------------------- STATUS -------------------------------- */ 
 

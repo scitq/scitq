@@ -23,28 +23,43 @@ ui/
 ├── src/
 │   ├── assets/
 │   ├── components/
-│   │   ├── createForm.svelte
-│   │   ├── jobsCompo.svelte
-│   │   ├── loginForm.svelte
+│   │   ├── CreateForm.svelte
+│   │   ├── CreateUserForm.ts
+│   │   ├── JobsCompo.svelte
+│   │   ├── JoginForm.svelte
 │   │   ├── Sidebar.svelte
-│   │   └── workerCompo.svelte
+│   │   ├── TaskList.svelte
+│   │   ├── UserList.svelte
+│   │   └── WorkerCompo.svelte
 │   ├── lib/
+│   │   ├── Stores/
 │   │   ├── api.ts
+│   │   ├── auth.ts
 │   │   └── grpcClient.ts
+│   ├── mocks/
+│   │   ├── api_mocks.ts
+│   │   ├── auth_mock.ts
+│   │   └── grpc-web.ts
 │   ├── pages/
 │   │   ├── Dashboard.svelte
-│   │   └── loginPage.svelte
+│   │   ├── LoginPage.svelte
+│   │   ├── SettingPage.svelte
+│   │   └── TaskPage.svelte
 │   ├── styles/
 │   │   ├── createForm.css
 │   │   ├── dashboard.css
 │   │   ├── jobsCompo.css
 │   │   ├── loginForm.css
 │   │   ├── loginPage.css
+│   │   ├── SettingPage.css
+│   │   ├── tasks.css
+│   │   └── userList.css
 │   │   └── worker.css
 │   ├── Test/
 │   ├── App.svelte
 │   ├── main.ts
-│   └── app.css
+│   ├── app.ts
+│   └── setupTests.css
 ├── index.html
 └── package.json
 
@@ -247,13 +262,13 @@ The API layer (`lib/api.ts`) makes several key features possible:
 
 | Feature                | Function(s)                                                                                              | Description                                                                                  |
 |------------------------|--------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| 👤 **User Management**  | `changepswd()`, `getListUser()`, `newUser()`, `delUser()`, `forgotPassword()`, `getUser()`, `updateUser()` | User management: password change, creation, deletion, retrieval, update                      |
-| 👷 **Worker Management**| `getWorkers()`, `newWorker()`, `updateWorkerConfig()`, `delWorker()`, `getStatus()`                     | Worker management: list, create, update config, delete, status                              |
-| 📋 **Job Management**   | `getJobs()`, `delJob()`, `getJobStatusClass()`, `getJobStatusText()`                                    | Job management: retrieve, delete, status mapping for UI                                     |
-| 🧪 **Flavor Discovery** | `getFlavors()`                                                                                          | Retrieve available flavors for worker creation                                             |
-| 🎨 **UI Mapping**       | `getJobStatusClass()`, `getJobStatusText()`, `getWorkerStatusClass()`, `getWorkerStatusText()`          | Map backend status codes to frontend classes and texts                                     |
-| 📊 **Worker Stats**     | `getStats()`, `formatBytesPair()`                                                                       | Retrieve worker statistics and format byte data                                            |
-| 📋 **Task Management**  | `getAllTasks()`, `getTasks()`                                                                           | Retrieve tasks with status filters                                                         |
+| 👤 **User Management**  | `changepswd()`, `getListUser()`, `newUser()`, `delUser()`, `forgotPassword()`, `getUser()`, `updateUser()`            | User management: password change, creation, deletion, retrieval, update                      |
+| 👷 **Worker Management**| `getWorkers()`, `newWorker()`, `updateWorkerConfig()`, `delWorker()`, `getStatus()`, `getTasksCount()`              | Worker management: list, create, update config, delete, status, task counts                  |
+| 📋 **Job Management**   | `getJobs()`, `delJob()`, `getJobStatusClass()`, `getJobStatusText()`                                           | Job management: retrieve, delete, status mapping for UI                                     |
+| 🧪 **Flavor Discovery** | `getFlavors()`                                                                                           | Retrieve available flavors for worker creation                                             |
+| 🎨 **UI Mapping**       | `getJobStatusClass()`, `getJobStatusText()`, `getWorkerStatusClass()`, `getWorkerStatusText()`                  | Map backend status codes to frontend classes and texts                                     |
+| 📊 **Worker Stats**     | `getStats()`, `formatBytesPair()`                                                                          | Retrieve worker statistics and format byte data                                            |
+| 📋 **Task Management**  | `getAllTasks()`                                                                                          | Retrieve tasks with status filters                                                         |
 
 These functions use the client generated from the `.proto` file (`taskqueue.client.ts`) and the associated data types (`taskqueue.ts`), making the communication **type-safe**, **predictable**, and **intuitive**.
 
@@ -261,21 +276,23 @@ These functions use the client generated from the `.proto` file (`taskqueue.clie
 
 | 🧩 Component             | 📝 Description |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
-| 🔨 **createForm.svelte** | Worker creation form with auto-completion (provider, flavor, region).<br>Uses `onMount()` to fetch available flavors.<br>Dynamic suggestion dropdown.<br>Calls `newWorker(...)` with form data.<br>**Styles**: `createForm.css` |
+| 🔨 **createForm.svelte** | Worker creation form with auto-completion (provider, flavor, region).<br>Uses `onMount()` to fetch available flavors.<br>Dynamic suggestion dropdown.<br>Calls `newWorker(...)` with form data and emits the new worker via event to the Dashboard page.<br>**Styles**: `createForm.css` |
 | 📋 **jobsCompo.svelte**  | Displays all current and past jobs with status, progress, and available actions.<br>Calls `getJobs()` in `onMount`.<br>Dynamic table display.<br>Lucide icons for restart/delete.<br>Status styled via `getStatusClass()` and `getStatusText()`.<br>**Styles**: `jobsCompo.css` |
 | 🔐 **loginForm.svelte**  | Simple login form.<br>Uses `getClient().login()` for authentication.<br>Handles loading (`isLoading`) and errors.<br>**Styles**: `loginForm.css` |
 | 📚 **Sidebar.svelte**    | Sidebar navigation with dropdowns and icons via lucide-svelte (Dashboard, Tasks, Batch, Settings, Logout).<br>Handles `tasksOpen` for submenus.<br>`isSidebarVisible` and `toggleSidebar()` passed as props.<br>**Styles**: `dashboard.css` |
-| 👷 **workerCompo.svelte**| Displays all workers with metrics and modifiable actions.<br>Calls `getWorkers()` on `onMount`.<br>Buttons to change concurrency/prefetch (+/-).<br>Actions: edit, pause, delete (`delWorker()`).<br>Shows stats: CPU%, RAM, Load, Disk, Network.<br>**Styles**: `worker.css`, `jobsCompo.css` |
-| 📋 **UserList.svelte**   | Displays a table of users with columns: Username, Email, Admin status, and Actions.<br>Supports editing user info via modal, password reset modal, and user deletion.<br>Dispatches events for update and delete.<br>Uses lucide icons for actions.<br>**Styles**: `worker.css`, `userList.css` |
-| 🆕 **CreateUserForm.svelte** | Form for creating new users.<br>Inputs for username, email, password (with toggle visibility), and admin checkbox.<br>Calls API to create user and dispatches `userCreated` event.<br>Resets form fields after successful creation.<br>**Styles**: `createForm.css` |
+| 👷 **workerCompo.svelte** | Displays all workers with metrics and modifiable actions.<br>🧩 Receives the preloaded list of workers from the parent page (`dashboard.svelte`).<br>🔁 Periodically refreshes only dynamic data: stats (`getStats()`), statuses (`getStatus()`), and task counts (`getTasksCount()`).<br>🔧 Buttons to change concurrency/prefetch (+/-) and inline edit for workflow/step name.<br>🛠️ Emits updates via `onWorkerUpdated` and deletions via `onWorkerDeleted`.<br>📊 Shows metrics: CPU%, RAM, Load, Disk, Network, and detailed task status counts.<br>**Styles**: `worker.css`, `jobsCompo.css` |
+| 📋 **UserList.svelte** | Displays a table of users with columns: Username, Email, Admin status, and Actions.<br>Receives the `users` list as a prop from the parent component (`SettingsPage`).<br>Provides modals for editing user info and resetting passwords.<br>Supports user deletion with confirmation.<br>Dispatches events: `onUserUpdated`, `onUserDeleted`, and `onForgotPassword`.<br>Includes password visibility toggle with `Eye` / `EyeOff` icons<br>**Styles**: `worker.css`, `userList.css` |
+| 🆕 **CreateUserForm.svelte** | Form for creating new users.<br>Receives input for username, email, password (with visibility toggle), and admin checkbox.<br>Calls the API to create a user and notifies the parent component (`SettingsPage`) via the `onUserCreated` callback with the new user data.<br>Resets form fields after successful creation.<br>**Styles**: `createForm.css` |
+| 📝 **TaskList.svelte**   | Displays all tasks in a detailed table with columns: Task ID, Name, Command, Worker, Workflow, Step, Status, Start, Runtime, Output, Error, Actions.<br>Uses `getJobStatusClass()`, `getJobStatusText()`, and lucide icons for restart, download, delete.<br>Shows a message if no tasks found.<br>**Styles**: `worker.css`, `jobsCompo.css` |
 
 ## 📄 Pages
 
 | 📄 Page                  | 📝 Description |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 🖥️ **Dashboard.svelte**   | Main page after login.<br>Displays `WorkerCompo` (top), and `JobCompo` + `CreateForm` (bottom).<br>Includes hamburger button to toggle sidebar.<br>**Styles**: `dashboard.css` |
+| 🖥️ **Dashboard.svelte** | Main page after login.<br>Displays `WorkerCompo` with a list of workers retrieved on mount via `getWorkers()`.<br>Handles worker updates (`handleWorkerUpdated`) and deletions (`handleWorkerDeleted`) by syncing with the API and updating local state.<br>Includes `CreateForm` to create new workers and appends them via `onWorkerCreated` → `onWorkerAdded`.<br>Shows success messages on add/delete actions.<br>Also includes `JobCompo` for job-related UI.<br>**Styles**: `dashboard.css` |
 | 🔐 **loginPage.svelte**   | Login page with `LoginForm`.<br>Checks for token in `localStorage` and redirects to `/dashboard`.<br>Displays logo and header.<br>**Styles**: `loginPage.css` |
-| ⚙️ **SettingPage.svelte**  | User and admin settings.<br>Displays personal profile info and allows password changes via a modal.<br>If the user is an admin: user creation and editable user list.<br>**Styles**: `SettingPage.css` |
+| ⚙️ **SettingPage.svelte** | User and admin settings page.<br>Displays personal profile info and allows password change via modal.<br>Fetches and maintains the full list of users on mount using `getListUser()`, then passes it to `UserList`.<br>If the user is admin: shows `CreateUserForm` and `UserList`.<br>Receives new user data from `CreateUserForm` via `onUserCreated` and adds it to the local list.<br>Handles user updates (`onUserUpdated`), deletion (`onUserDeleted`), and password reset (`onForgotPassword`), updating local state and showing success alerts accordingly.<br>**Styles**: `SettingPage.css` |
+| 📝 **TaskPage.svelte**    | Task management page with dynamic filters: status, worker, workflow, and sorting.<br>Fetches tasks, workers, and workflows on mount.<br>Updates task list on URL hash change.<br>Includes filter form and status filter buttons.<br>Displays filtered tasks via `TaskList`.<br>**Styles**: `tasks.css` |
 
 ## 📖 Event-Driven Architecture in Svelte
 This application leverages Svelte's custom event system for **surgical-precision component communication**, achieving **300-500ms faster operations** by eliminating full data reloads. The system maintains **sub-50ms UI updates** through local state management.
@@ -435,10 +452,40 @@ This section explains how the authentication flow is implemented in the applicat
 
 ## 🚀 Testing
 
-This project includes unit tests to ensure the functionality and reliability of the components.
+This project includes both **unit tests** and **integration tests** to ensure the functionality, reliability, and correct interaction of components and pages.
 
 ### Testing Frameworks
-We use **Vitest** for unit testing, as well as **Testing Library** for component testing.
+We use **Vitest** for running tests and **Testing Library** for component rendering and user interaction simulation.
+
+### Mock Setup
+To simplify mocking, all mocked API and auth functions are centralized in the `src/types/mocks` directory:  
+- `src/types/mocks/api_mock.ts`  
+- `src/types/mocks/auth_mock.ts`  
+
+These mocks are globally applied in `src/setupTests.ts`:
+
+```ts
+// src/setupTests.ts
+import '@testing-library/jest-dom';
+import { vi } from 'vitest';
+import { mockApi } from './mocks/api_mock';
+import { mockAuth } from './mocks/auth_mock';
+
+vi.mock('grpc-web', () => ({ grpc: {} }));
+
+// Global mocks for API and Auth modules
+vi.mock('../lib/api', () => mockApi);
+vi.mock('../lib/auth', () => mockAuth);
+
+// Silence console errors and logs during tests
+vi.spyOn(console, 'error').mockImplementation(() => {});
+vi.spyOn(console, 'log').mockImplementation(() => {});
+```
+In individual test files, you simply import `mockApi` to redefine or spy on specific API function behaviors as needed:
+```ts
+import { mockApi } from '../mocks/api_mock';
+vi.mock('../lib/api', () => mockApi);
+```
 
 ### Running Tests
 To run the tests, follow these steps:
@@ -453,77 +500,95 @@ npx vitest
 ```
 
 ### Test Structure
-Tests are located in the `src/tests` directory. Each feature/component has its own test file to ensure a modular approach.
+All tests reside in the `src/tests` directory, with one file per feature or component, to maintain modularity and clarity.
 
 ### Types of Tests
-- **Component Tests:** These tests focus on verifying the behavior of individual components. For example, we test the **CreateForm** component to ensure it interacts correctly with the backend API when adding a worker.
 
-- **API Tests:** We mock gRPC API responses to verify that the frontend reacts correctly in different scenarios.
+| 🧩 Type                  |  📝 Description                                                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅ **Unit Tests**        | Verify individual components and utility functions in isolation.<br>Mocks API calls to test internal logic and component behavior.             |
+| 🔁 **Integration Tests** | Validate interaction between multiple components/pages and user workflows.<br>Simulate real user scenarios including navigation and data flow. |
 
-Here is an example test for the **CreateForm** component:
+#### Example Unit Test: WorkerCompo Component
+This test verifies that the component correctly displays a list of workers, using the centralized mock API.
 ```ts
-import { render, fireEvent, waitFor } from '@testing-library/svelte';
-import CreateForm from '../components/CreateForm.svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getFlavors, getWorkFlow, newWorker, getStatus } from '../lib/api';
+import { render, waitFor } from '@testing-library/svelte';
+import WorkerCompo from '../components/WorkerCompo.svelte';
+import { describe, it, expect, vi } from 'vitest';
+import { mockApi } from '../types/mocks/api_mock';
 
-// Mock the API functions
-vi.mock('../lib/api', () => ({
-  getFlavors: vi.fn(),
-  getWorkFlow: vi.fn(),
-  newWorker: vi.fn(),
-  getStatus: vi.fn(),
-}));
+vi.mock('../lib/api', () => mockApi);
 
-describe('CreateForm', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+const mockWorkers = [
+  { workerId: 'w1', workerName: 'Worker One' },
+  { workerId: 'w2', workerName: 'Worker Two' }
+];
 
-  const mockFlavors = [
-    { flavorName: 'flavor1', region: 'us-east', provider: 'aws' },
-  ];
-  const mockWorkflows = [
-    { name: 'step1' },
-  ];
-  const mockNewWorkerResponse = [
-    { workerId: 'w1', workerName: 'workerOne' }
-  ];
-  const mockStatusResponse = [
-    { workerId: 'w1', status: 'running' }
-  ];
+const mockStats = {
+  totalWorkers: 2,
+  activeWorkers: 1,
+};
 
-  it('should call newWorker with correct parameters when form is submitted', async () => {
-    // Mock API functions
-    (getFlavors as any).mockResolvedValue(mockFlavors);
-    (getWorkFlow as any).mockResolvedValue(mockWorkflows);
-    (newWorker as any).mockResolvedValue(mockNewWorkerResponse);
-    (getStatus as any).mockResolvedValue([]);
+describe('WorkerCompo', () => {
+  it('should display the list of workers', async () => {
+    (mockApi.getWorkers as any).mockResolvedValue(mockWorkers);
+    (mockApi.getStats as any).mockResolvedValue(mockStats);
 
-    // Render the component
-    const { getByLabelText, getByTestId } = render(CreateForm);
+    const { getByText } = render(WorkerCompo, { props: { workers: mockWorkers } });
 
-    // Fill form fields
-    await fireEvent.input(getByLabelText('Concurrency:'), { target: { value: '5' } });
-    await fireEvent.input(getByLabelText('Prefetch:'), { target: { value: '10' } });
-    await fireEvent.input(getByLabelText('Flavor:'), { target: { value: 'flavor1' } });
-    await fireEvent.input(getByLabelText('Region:'), { target: { value: 'us-east' } });
-    await fireEvent.input(getByLabelText('Provider:'), { target: { value: 'aws' } });
-    await fireEvent.input(getByLabelText('Step (Workflow.step):'), { target: { value: 'step1' } });
-    await fireEvent.input(getByLabelText('Number:'), { target: { value: '3' } });
-
-    // Submit the form
-    await fireEvent.click(getByTestId('add-worker-button'));
-
-    // Check that newWorker was called with correct arguments
     await waitFor(() => {
-      expect(newWorker).toHaveBeenCalledWith(
-        5, 10, 'flavor1', 'us-east', 'aws', 3, 'step1'
-      );
+      expect(getByText('Worker One')).toBeTruthy();
     });
   });
 });
 ```
+
+#### Example Integration Test
+This test simulates user interaction navigating from the main app to the Settings page, verifying the page rendering and UI updates.
+```ts
+import { render, fireEvent, waitFor } from '@testing-library/svelte';
+import App from '../App.svelte';
+
+it('should display Setting page when clicking "Settings" in the ToolBar', async () => {
+  const { getByTestId, getByText, queryByText } = render(App);
+
+  // Wait for dashboard content to appear after login
+  await waitFor(() => {
+    expect(queryByText('Settings')).toBeInTheDocument();
+  });
+
+  // Click the "Settings" button
+  const settingsButton = getByText('Settings');
+  await fireEvent.click(settingsButton);
+
+  // Wait for the Settings page to be displayed
+  await waitFor(() => {
+    expect(getByTestId('settings-page')).toBeInTheDocument();
+  });
+});
+```
+### 📂 Test Files Overview
+
+| 🧪 Test File               | 🧪 Type(s) of Tests Included        |
+|---------------------------|-------------------------------------|
+| `CreateForm.test.ts`      | Unit                                |
+| `CreateUserForm.test.ts`  | Unit                                |
+| `JobsCompo.test.ts`       | Unit                                |
+| `LoginPage.test.ts`       | Unit + Integration                  |
+| `Navigation.test.ts`      | Integration                         |
+| `SettingPage.test.ts`     | Unit + Integration                  |
+| `TaskList.test.ts`        | Unit                                |
+| `TaskPage.test.ts`        | Integration                         |
+| `UserList.test.ts`        | Unit                                |
+| `WorkerCompo.test.ts`     | Unit                                |
+| `dashboard.test.ts`       | Integration                         |
+
+
+> **Note:**
+> **- Unit tests focus on isolated components and functions.<br>**
+> **- Integration tests verify that multiple parts work together correctly and simulate real user behavior.<br>**
+> **- You can expand this table as you add more test files.**
+
 
 ## Conclusion
 

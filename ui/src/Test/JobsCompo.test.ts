@@ -1,44 +1,32 @@
+vi.mock('../lib/api', () => mockApi);
+import { mockApi } from '../mocks/api_mock';
+
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import JobsCompo from '../components/JobsCompo.svelte';
-import { getJobs, delJob } from '../lib/api';
-
-// Mock the `getJobs` function and utility helpers
-vi.mock('../lib/api', () => ({
-  getJobs: vi.fn(),
-  getJobStatusClass: (status: string) => {
-    switch (status) {
-      case 'R': return 'running';
-      case 'S': return 'succeeded';
-      default: return 'unknown';
-    }
-  },
-  delJob: vi.fn(),
-  getJobStatusText: (status: string) => status,
-}));
 
 describe('JobsCompo', () => {
   it('should display the job information correctly', async () => {
     const mockJobs = [
       {
         jobId: 'job-1',
-        status: 'R', // "Running" status
-        action: 'C', // Deploy Worker
+        status: 'R', // Running status
+        action: 'C', // Deploy Worker action
         progression: 50,
         modifiedAt: new Date('2025-03-10T21:12:30').toISOString(),
         workerId: 'worker-1',
       },
       {
         jobId: 'job-2',
-        status: 'S', // "Succeeded" status
-        action: 'D', // Destroy Worker
+        status: 'S', // Succeeded status
+        action: 'D', // Destroy Worker action
         progression: 100,
         modifiedAt: new Date('2025-04-28T21:12:30').toISOString(),
         workerId: 'worker-2',
       }
     ];
 
-    (getJobs as any).mockResolvedValue(mockJobs);
+    mockApi.getJobs.mockResolvedValue(mockJobs);
 
     render(JobsCompo);
 
@@ -50,6 +38,7 @@ describe('JobsCompo', () => {
       expect(screen.getByText('worker-1')).toBeInTheDocument();
       expect(screen.getByTestId('status-pill-job-1')).toHaveClass('running');
       expect(screen.getByText(job1ModifiedDate)).toBeInTheDocument();
+
       expect(screen.getByText('Destroy Worker')).toBeInTheDocument();
       expect(screen.getByText('worker-2')).toBeInTheDocument();
       expect(screen.getByTestId('status-pill-job-2')).toHaveClass('succeeded');
@@ -58,7 +47,7 @@ describe('JobsCompo', () => {
   });
 
   it('should show a message when there are no jobs', async () => {
-    (getJobs as any).mockResolvedValue([]);
+    mockApi.getJobs.mockResolvedValue([]);
 
     render(JobsCompo);
 
@@ -79,7 +68,7 @@ describe('JobsCompo', () => {
       }
     ];
 
-    (getJobs as any).mockResolvedValue(mockJobs);
+    mockApi.getJobs.mockResolvedValue(mockJobs);
 
     render(JobsCompo);
 
@@ -93,7 +82,7 @@ describe('JobsCompo', () => {
     const mockJobs = [
       {
         jobId: 'job-1',
-        status: 'F', // Failed => Refresh button should be visible
+        status: 'F', // Failed status - refresh button should be visible
         action: 'C',
         progression: 50,
         modifiedAt: new Date().toISOString(),
@@ -101,7 +90,7 @@ describe('JobsCompo', () => {
       },
       {
         jobId: 'job-2',
-        status: 'S', // Succeeded => No refresh button
+        status: 'S', // Succeeded - no refresh button
         action: 'D',
         progression: 100,
         modifiedAt: new Date().toISOString(),
@@ -109,16 +98,16 @@ describe('JobsCompo', () => {
       }
     ];
 
-    (getJobs as any).mockResolvedValue(mockJobs);
+    mockApi.getJobs.mockResolvedValue(mockJobs);
 
     render(JobsCompo);
 
     await waitFor(() => {
-      // Job-1 (failed) => should have both Refresh and Trash buttons
+      // Job-1 (failed) should have both Refresh and Trash buttons
       expect(screen.getByTestId('refresh-button-job-1')).toBeInTheDocument();
       expect(screen.getByTestId('trash-button-job-1')).toBeInTheDocument();
 
-      // Job-2 (succeeded) => should only have Trash button
+      // Job-2 (succeeded) should have only Trash button
       expect(screen.queryByTestId('refresh-button-job-2')).toBeNull();
       expect(screen.getByTestId('trash-button-job-2')).toBeInTheDocument();
     });
@@ -145,7 +134,7 @@ describe('JobsCompo', () => {
     ];
 
     // Mock API responses
-    (getJobs as any).mockResolvedValue(mockJobs);
+    mockApi.getJobs.mockResolvedValue(mockJobs);
 
     render(JobsCompo);
 
@@ -161,11 +150,11 @@ describe('JobsCompo', () => {
 
     // Wait for DOM update
     await waitFor(() => {
-      expect(screen.queryByTestId('job-row-1')).toBeNull(); // Disappeared
+      expect(screen.queryByTestId('job-row-1')).toBeNull(); // Should be removed
       expect(screen.queryByTestId('job-row-2')).toBeInTheDocument(); // Still present
     });
 
     // Confirm delJob was called with correct jobId
-    expect(delJob).toHaveBeenCalledWith({ jobId: 1 });
+    expect(mockApi.delJob).toHaveBeenCalledWith({ jobId: 1 });
   });
 });

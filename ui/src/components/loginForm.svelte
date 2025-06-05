@@ -1,19 +1,28 @@
 <script lang="ts">
-  import '../styles/loginForm.css';
-  import { getLogin } from '../lib/auth';
-  import { isLoggedIn } from '../lib/Stores/user';
-  import { push } from 'svelte-spa-router';
+  import '../styles/loginForm.css';              // Styles specific to the login form
+  import { getLogin } from '../lib/auth';        // API call for authentication
+  import { isLoggedIn } from '../lib/Stores/user'; // Svelte store for global auth state
+  import { push } from 'svelte-spa-router';      // For navigation after login
 
-  import { Eye, EyeOff } from 'lucide-svelte';
+  import { Eye, EyeOff } from 'lucide-svelte';   // Icons for showing/hiding password
 
+  // Local state variables
   let username = '';
   let password = '';
-  let message = '';
-  let isLoading = false;
-  let showModal = false;
-  let showPassword = false;
+  let message = '';          // Feedback message (error/info)
+  let isLoading = false;     // Controls loading state of login button
+  let showModal = false;     // Controls visibility of "Forgot password" modal
+  let showPassword = false;  // Toggle password field visibility
 
-  // Handle user login
+  /**
+   * Handles the user login process:
+   * - Validates that username and password are provided
+   * - Calls the backend API to authenticate the user
+   * - Updates the UI with success or error messages
+   * - Updates the global login state on success or failure
+   * - Navigates to the homepage upon successful login
+   * @returns {Promise<void>} Resolves when login process completes
+   */
   async function handleLogin() {
     if (!username || !password) {
       message = "Please enter a username and password.";
@@ -21,11 +30,12 @@
     }
 
     isLoading = true;
+
     try {
-      await getLogin(username, password);
+      await getLogin(username, password); // Call API to authenticate
       message = '';
-      isLoggedIn.set(true);
-      push('/');
+      isLoggedIn.set(true);              // Update global store
+      push('/');                         // Navigate to homepage
     } catch (error) {
       console.error("Login error: ", error);
       message = "Login failed. Check your credentials.";
@@ -35,11 +45,15 @@
     }
   }
 
-  // Toggle password field visibility
+  /**
+   * Toggles the visibility of the password input field
+   * @returns {void}
+   */
   function togglePasswordVisibility() {
     showPassword = !showPassword;
   }
 </script>
+
 
 <div class="loginform-container">
   <h1 class="loginform-title">Login</h1>

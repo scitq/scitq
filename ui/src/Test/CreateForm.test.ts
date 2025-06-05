@@ -1,16 +1,10 @@
+vi.mock('../lib/api', () => mockApi);
+import { mockApi } from '../mocks/api_mock';
+
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import CreateForm from '../components/CreateForm.svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the API functions
-vi.mock('../lib/api', () => ({
-  getFlavors: vi.fn(),
-  getWorkFlow: vi.fn(),
-  newWorker: vi.fn(),
-  getStatus: vi.fn(),
-}));
-
-import { getFlavors, getWorkFlow, newWorker, getStatus } from '../lib/api';
 
 describe('CreateForm', () => {
   beforeEach(() => {
@@ -32,30 +26,30 @@ describe('CreateForm', () => {
 
   it('should load flavors and workflows on mount', async () => {
     // Mock API functions
-    (getFlavors as any).mockResolvedValue(mockFlavors);
-    (getWorkFlow as any).mockResolvedValue(mockWorkflows);
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
 
     // Render the component
     render(CreateForm);
 
     // Check that API functions were called
     await waitFor(() => {
-      expect(getFlavors).toHaveBeenCalled();
-      expect(getWorkFlow).toHaveBeenCalled();
+      expect(mockApi.getFlavors).toHaveBeenCalled();
+      expect(mockApi.getWorkFlow).toHaveBeenCalled();
     });
   });
 
   it('should correctly fill and update form fields', async () => {
     // Mock API functions
-    (getFlavors as any).mockResolvedValue(mockFlavors);
-    (getWorkFlow as any).mockResolvedValue(mockWorkflows);
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
 
     // Render the component
     const { getByLabelText } = render(CreateForm);
 
     // Wait for data to load
     await waitFor(() => {
-      expect(getFlavors).toHaveBeenCalled();
+      expect(mockApi.getFlavors).toHaveBeenCalled();
     });
 
     // Fill and verify form fields
@@ -78,10 +72,10 @@ describe('CreateForm', () => {
 
   it('should call newWorker with correct parameters when form is submitted', async () => {
     // Mock API functions
-    (getFlavors as any).mockResolvedValue(mockFlavors);
-    (getWorkFlow as any).mockResolvedValue(mockWorkflows);
-    (newWorker as any).mockResolvedValue(mockNewWorkerResponse);
-    (getStatus as any).mockResolvedValue([]);
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
+    mockApi.newWorker.mockResolvedValue(mockNewWorkerResponse);
+    mockApi.getStatus.mockResolvedValue([]);
 
     // Render the component
     const { getByLabelText, getByTestId } = render(CreateForm);
@@ -100,7 +94,7 @@ describe('CreateForm', () => {
 
     // Check that newWorker was called with correct arguments
     await waitFor(() => {
-      expect(newWorker).toHaveBeenCalledWith(
+      expect(mockApi.newWorker).toHaveBeenCalledWith(
         5, 10, 'flavor1', 'us-east', 'aws', 3, 'step1'
       );
     });
@@ -108,10 +102,10 @@ describe('CreateForm', () => {
 
   it('should dispatch onWorkerCreated event with correct data', async () => {
     // Mock API functions
-    (getFlavors as any).mockResolvedValue(mockFlavors);
-    (getWorkFlow as any).mockResolvedValue(mockWorkflows);
-    (newWorker as any).mockResolvedValue(mockNewWorkerResponse);
-    (getStatus as any).mockResolvedValue(mockStatusResponse);
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
+    mockApi.newWorker.mockResolvedValue(mockNewWorkerResponse);
+    mockApi.getStatus.mockResolvedValue(mockStatusResponse);
 
     // Mock the onWorkerCreated function
     const mockOnWorkerCreated = vi.fn();

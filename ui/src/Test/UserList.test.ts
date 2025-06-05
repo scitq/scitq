@@ -1,13 +1,9 @@
+vi.mock('../lib/api', () => mockApi);
+import { mockApi } from '../mocks/api_mock';
+
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import UserList from '../components/UserList.svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWorkerToken } from '../lib/auth';
-
-vi.mock('../lib/api', () => ({
-    newUser: vi.fn(),
-    getWorkerToken: vi.fn().mockResolvedValue('mock-token'),
-    fetchWorkerStatuses: vi.fn().mockResolvedValue([])
-}));
 
 describe('UserList', () => {
   beforeEach(() => {

@@ -1,0 +1,154 @@
+.tasks-container {
+  margin-top: 4rem;
+}
+
+.filters-form {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  align-items: center; /* vertically center align */
+}
+
+.filter-group {
+  display: flex;
+  align-items: center; /* aligns label and select on the same line */
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #444;
+  min-width: 150px;
+}
+
+.filter-group label {
+  font-weight: 600;
+  white-space: nowrap; /* prevents label from wrapping to next line */
+}
+
+.filter-group select {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+  min-width: 100px;
+}
+
+.filter-group select:hover {
+  border-color: #5fc18b;
+  outline: none;
+  box-shadow: 0 0 5px rgba(95, 193, 139, 0.5);
+}
+
+/* Status tabs button styles */
+.status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.status-tabs button {
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin: 0;
+  border-right: 1px solid #ddd;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.status-tabs button:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.status-tabs button:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  border-right: none;
+}
+
+.status-tabs button:hover {
+  filter: brightness(0.9);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
+  z-index: 1;
+  position: relative;
+}
+
+/* Status colors - reuse the same class names for .tasks-status-pill */
+.status-tabs .status-all,
+.tasks-status-pill.all {
+  background-color: #bdbdbd;
+  font-weight: bold;
+}
+
+.status-tabs .status-pending,
+.tasks-status-pill.pending {
+  background-color: #c9e2f5;
+}
+
+.status-tabs .status-assigned,
+.tasks-status-pill.assigned {
+  background-color: #99caed;
+}
+
+.status-tabs .status-accepted,
+.tasks-status-pill.accepted {
+  background-color: #6bb2e6;
+}
+
+.status-tabs .status-downloading,
+.tasks-status-pill.downloading {
+  background-color: #c7ebd2;
+}
+
+.status-tabs .status-waiting,
+.tasks-status-pill.waiting {
+  background-color: #90d6a9;
+}
+
+.status-tabs .status-running,
+.tasks-status-pill.running {
+  background-color: #5fc18b;
+}
+
+.status-tabs .status-uploading-as,
+.tasks-status-pill.uploading-as {
+  background-color: #ffe8b5;
+}
+
+.status-tabs .status-succeeded,
+.tasks-status-pill.succeeded {
+  background-color: #ffd17a;
+}
+
+.status-tabs .status-uploading-af,
+.tasks-status-pill.uploading-af {
+  background-color: #ffb742;
+}
+
+.status-tabs .status-failed,
+.tasks-status-pill.failed {
+  background-color: #f5b6af;
+}
+
+.status-tabs .status-suspended,
+.tasks-status-pill.suspended {
+  background-color: #ec857b;
+}
+
+.status-tabs .status-canceled,
+.tasks-status-pill.canceled {
+  background-color: #d9534f;
+}
+
+/* Pill styles */
+.tasks-status-pill {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+}

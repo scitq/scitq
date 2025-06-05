@@ -1,30 +1,43 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Trash, RefreshCw } from 'lucide-svelte';
+  import { Trash, RefreshCw } from 'lucide-svelte'; // Icons for delete and restart
   import { getJobs, getJobStatusClass, getJobStatusText, delJob } from '../lib/api';
-  import type { Job } from '../proto/taskqueue_pb';
+  import type { Job } from '../proto/taskqueue_pb'; // Type definition for Job object
 
-  import "../styles/worker.css";    // Shared styles for tables and buttons
-  import "../styles/jobsCompo.css"; // Job-specific styles
+  import "../styles/worker.css";    // Shared table and layout styles
+  import "../styles/jobsCompo.css"; // Styles specific to job list and progress bar
 
   let jobs: Job[] = [];
 
-  // Fetch jobs from the API when component mounts
+  // Fetch job data from backend API once component is mounted
   onMount(async () => {
     jobs = await getJobs();
   });
 
-  // Remove job from UI list and backend
+  /**
+   * Deletes a job by its ID.
+   * - Optimistically removes the job from the UI immediately.
+   * - Calls the backend API to delete the job.
+   * @param {number} jobId - The ID of the job to delete.
+   * @returns {Promise<void>} Resolves when the deletion API call completes.
+   */
   async function deleteJob(jobId: number) {
-    jobs = jobs.filter(job => job.jobId !== jobId);
-    await delJob({ jobId });
+    jobs = jobs.filter(job => job.jobId !== jobId); // Update UI immediately
+    await delJob({ jobId });                         // Perform actual API deletion
   }
 
-  // Placeholder for restarting a job (not yet implemented)
+/**
+ * Handles restarting a job.
+ * - Currently a placeholder with no implementation.
+ * - Intended to restart jobs with status 'F' (finished).
+ * @param {number} jobId - The ID of the job to restart.
+ * @returns {void}
+ */
   function handleRestart(jobId: number) {
     // TODO: Implement job restart logic
   }
 </script>
+
 
 {#if jobs && jobs.length > 0}
   <div class="workerCompo-table-wrapper">
