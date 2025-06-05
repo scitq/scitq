@@ -194,7 +194,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 		part := fmt.Sprintf(`
 			(SELECT task_id, step_id
 			FROM task
-			WHERE status = 'P' AND COALESCE(step_id,0) = %d
+			WHERE status = 'P' AND COALESCE(step_id,0) = $%d
 			ORDER BY created_at
 			LIMIT %d)
 		`, argIndex, slots)
