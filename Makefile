@@ -3,11 +3,16 @@ SRC_SERVER=./cmd/server
 SRC_CLIENT=./cmd/client
 SRC_CLI=./cmd/cli
 SRC_FETCH=./cmd/fetch
+ifeq ($(OS),Windows_NT)
+	EXE=.exe
+else
+	EXE=
+endif
 
-BINARY_SERVER=$(BINARY_DIR)/scitq-server.exe
-BINARY_CLIENT=$(BINARY_DIR)/scitq-client.exe
-BINARY_CLI=$(BINARY_DIR)/scitq.exe
-BINARY_FETCH=$(BINARY_DIR)/scitq-fetch.exe
+BINARY_SERVER=$(BINARY_DIR)/scitq-server$(EXE)
+BINARY_CLIENT=$(BINARY_DIR)/scitq-client$(EXE)
+BINARY_CLI=$(BINARY_DIR)/scitq$(EXE)
+BINARY_FETCH=$(BINARY_DIR)/scitq-fetch$(EXE)
 
 PLATFORMS=linux/amd64 darwin/amd64 windows/amd64
 OUTDIR=bin

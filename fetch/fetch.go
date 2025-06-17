@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 
 	//"net/url"
@@ -24,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
+	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/rc"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
@@ -248,30 +250,83 @@ func NewRcloneBackend(ctx context.Context, remote string) (*RcloneBackend, error
 
 // Copy implements the Copy method for RcloneBackend.
 func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI, selfIsSource bool) error {
-	var otherFs *RcloneBackend // Pointer to hold the concrete type
-
-	if src.File == "" {
-		return fmt.Errorf("cannot copy directory: source %s", src)
-	}
+	var otherFs *RcloneBackend
 
 	switch v := otherFsInterface.(type) {
 	case *RcloneBackend:
-		otherFs = v // Correct type assertion
+		otherFs = v
 	case *LocalBackend:
-		var localFs *LocalBackend
-		localFs = v
+		localFs := v
 		otherFs = &localFs.RcloneBackend
 	default:
 		return fmt.Errorf("Copy of RcloneBackend only supports RcloneBackend or LocalBackend, not %T", v)
 	}
 
 	ctx := context.Background()
+	basePath, pattern, hasGlob := detectGlob(src.CompletePath())
+
+	if hasGlob {
+		if !selfIsSource {
+			return fmt.Errorf("globbing not supported when source is external (selfIsSource=false)")
+		}
+
+		filt, err := filter.NewFilter(&filter.Options{
+			MinAge: 0,
+			MaxAge: 1<<63 - 1,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create filter: %w", err)
+		}
+		err = filt.AddRule("+ " + pattern)
+		if err != nil {
+			return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+		}
+
+		// Optional: exclude everything else
+		_ = filt.AddRule("- *")
+
+		//baseFs, err := fs.NewFs(ctx, basePath)
+		//if err != nil {
+		//	return fmt.Errorf("failed to resolve base path %q: %v", basePath, err)
+		//}
+
+		entries, err := rb.List(basePath)
+		if err != nil {
+			return fmt.Errorf("failed to list entries under %q: %v", basePath, err)
+		}
+
+		for _, entry := range entries {
+			obj, ok := entry.(fs.Object)
+			if !ok {
+				continue
+			}
+			relPath := obj.Remote()
+			if !filt.Include(relPath, 0, time.Time{}, nil) {
+				continue
+			}
+
+			target := dst.CompletePath()
+			if strings.HasSuffix(target, "/") {
+				target = path.Join(target, path.Base(relPath))
+			}
+
+			err = operations.CopyFile(ctx, otherFs.rcloneFs, rb.rcloneFs, target, relPath)
+			if err != nil {
+				return fmt.Errorf("copy failed for %q: %v", relPath, err)
+			}
+		}
+		return nil
+	}
+
+	// Non-glob case
+	if src.File == "" {
+		return fmt.Errorf("cannot copy directory: source %s", src)
+	}
+
 	var err error
 	if selfIsSource {
-		//log.Printf("Copy <%s>:<%s> -> <%s>:<%s>", rb.rcloneFs.Name()+":"+rb.rcloneFs.Root(), src.CompletePath(), otherFs.rcloneFs.Name()+":"+otherFs.rcloneFs.Root(), dst.CompletePath())
 		err = operations.CopyFile(ctx, otherFs.rcloneFs, rb.rcloneFs, dst.CompletePath(), src.CompletePath())
 	} else {
-		//log.Printf("Copy <%s>:<%s> -> <%s>:<%s>", otherFs.rcloneFs.Name()+":"+otherFs.rcloneFs.Root(), src.CompletePath(), rb.rcloneFs.Name()+":"+rb.rcloneFs.Root(), dst.CompletePath())
 		err = operations.CopyFile(ctx, rb.rcloneFs, otherFs.rcloneFs, dst.CompletePath(), src.CompletePath())
 	}
 	if err != nil {
@@ -472,7 +527,9 @@ func (op *Operation) Copy() error {
 		return fmt.Errorf("actions for destination are declared on source for now, cannot handle destination action: %s", op.dstUri)
 	}
 	if op.dstUri.File == "" {
-		op.dstUri.File = op.srcUri.File
+		if _, _, ok := detectGlob(op.srcUri.CompletePath()); !ok {
+			op.dstUri.File = op.srcUri.File
+		}
 	}
 
 	for _, action := range op.dstUri.Actions {
