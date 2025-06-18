@@ -52,6 +52,7 @@ const (
 	TaskQueue_CreateStep_FullMethodName          = "/taskqueue.TaskQueue/CreateStep"
 	TaskQueue_DeleteStep_FullMethodName          = "/taskqueue.TaskQueue/DeleteStep"
 	TaskQueue_GetWorkerStats_FullMethodName      = "/taskqueue.TaskQueue/GetWorkerStats"
+	TaskQueue_FetchList_FullMethodName           = "/taskqueue.TaskQueue/FetchList"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -90,6 +91,7 @@ type TaskQueueClient interface {
 	CreateStep(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepId, error)
 	DeleteStep(ctx context.Context, in *StepId, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkerStats(ctx context.Context, in *GetWorkerStatsRequest, opts ...grpc.CallOption) (*GetWorkerStatsResponse, error)
+	FetchList(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchListResponse, error)
 }
 
 type taskQueueClient struct {
@@ -432,6 +434,16 @@ func (c *taskQueueClient) GetWorkerStats(ctx context.Context, in *GetWorkerStats
 	return out, nil
 }
 
+func (c *taskQueueClient) FetchList(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FetchListResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_FetchList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -468,6 +480,7 @@ type TaskQueueServer interface {
 	CreateStep(context.Context, *StepRequest) (*StepId, error)
 	DeleteStep(context.Context, *StepId) (*Ack, error)
 	GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error)
+	FetchList(context.Context, *FetchListRequest) (*FetchListResponse, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -573,6 +586,9 @@ func (UnimplementedTaskQueueServer) DeleteStep(context.Context, *StepId) (*Ack, 
 }
 func (UnimplementedTaskQueueServer) GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkerStats not implemented")
+}
+func (UnimplementedTaskQueueServer) FetchList(context.Context, *FetchListRequest) (*FetchListResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FetchList not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -1153,6 +1169,24 @@ func _TaskQueue_GetWorkerStats_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_FetchList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FetchListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).FetchList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_FetchList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).FetchList(ctx, req.(*FetchListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1279,6 +1313,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkerStats",
 			Handler:    _TaskQueue_GetWorkerStats_Handler,
+		},
+		{
+			MethodName: "FetchList",
+			Handler:    _TaskQueue_FetchList_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

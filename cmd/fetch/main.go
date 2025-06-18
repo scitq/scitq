@@ -63,7 +63,7 @@ func main() {
 			log.Fatalf("List failed: %v", err)
 		}
 		for _, file := range files {
-			fileName := file.String()
+			fileName := op.SrcBase() + file.String()
 			if fetch.IsDir(file) {
 				fileName += "/"
 			}

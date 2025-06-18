@@ -22,6 +22,8 @@ import (
 	"github.com/gmtsciencedev/scitq2/server/providers"
 	"github.com/gmtsciencedev/scitq2/server/watchdog"
 
+	"github.com/gmtsciencedev/scitq2/fetch"
+
 	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	"github.com/golang-jwt/jwt"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
@@ -1392,6 +1394,15 @@ func (s *taskQueueServer) GetWorkerStats(ctx context.Context, req *pb.GetWorkerS
 	}
 
 	return resp, nil
+}
+
+func (s *taskQueueServer) FetchList(ctx context.Context, req *pb.FetchListRequest) (*pb.FetchListResponse, error) {
+	files, err := fetch.List(DefaultRcloneConfig, req.Uri)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fetch list failed: %v", err)
+	}
+
+	return &pb.FetchListResponse{Files: files}, nil
 }
 
 func applyMigrations(db *sql.DB) error {

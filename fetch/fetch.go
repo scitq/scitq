@@ -335,18 +335,47 @@ func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI
 	return nil
 }
 
-// List implements the List method for RcloneBackend.
 func (rb *RcloneBackend) List(path string) (fs.DirEntries, error) {
 	ctx := context.Background()
 
+	// Detect and split glob
+	basePath, pattern, hasGlob := detectGlob(path)
+
+	var err error
+	if !hasGlob {
+		basePath = path
+	}
+
+	var filt *filter.Filter
+	if hasGlob {
+		filt, err = filter.NewFilter(&filter.Options{
+			MinAge: 0,
+			MaxAge: 1<<63 - 1,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create filter: %w", err)
+		}
+		err = filt.AddRule("+ " + pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+		}
+		_ = filt.AddRule("- *")
+	}
+
 	var entries fs.DirEntries
-	err := walk.ListR(ctx, rb.rcloneFs, path, true, 0, walk.ListAll, func(newEntries fs.DirEntries) error {
-		entries = append(entries, newEntries...)
+	err = walk.ListR(ctx, rb.rcloneFs, basePath, true, 0, walk.ListAll, func(newEntries fs.DirEntries) error {
+		for _, entry := range newEntries {
+			if filt != nil && !filt.Include(entry.Remote(), 0, time.Time{}, nil) {
+				continue
+			}
+			entries = append(entries, entry)
+		}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list directory: %v", err)
+		return nil, fmt.Errorf("failed to list directory: %w", err)
 	}
+
 	return entries, nil
 }
 
@@ -598,6 +627,19 @@ func (op *Operation) List() (fs.DirEntries, error) {
 	return op.src.fs.List(path)
 }
 
+func (op *Operation) SrcBase() string {
+	var component string
+	switch op.srcUri.Component {
+	case "/":
+		component = "/"
+	case "./":
+		component = ""
+	default:
+		component = op.srcUri.Component + op.srcUri.Separator
+	}
+	return op.srcUri.Proto + ":" + op.srcUri.Separator + op.srcUri.Separator + component
+}
+
 func (op *Operation) Info() (fs.DirEntry, error) {
 	path := op.srcUri.Path
 	if op.srcUri.File != "" {
@@ -622,13 +664,35 @@ func Copy(rcloneConfig, srcStr, dstStr string) error {
 	return err
 }
 
-func List(rcloneConfig, srcStr string) (fs.DirEntries, error) {
+func RawList(rcloneConfig, srcStr string) (fs.DirEntries, error) {
 	op, err := NewOperation(rcloneConfig, srcStr, "")
 	defer CleanConfig()
 	if err != nil {
 		return nil, fmt.Errorf("could not initiate list operation %v", err)
 	}
 	return op.List()
+}
+
+func List(rcloneConfig, srcStr string) ([]string, error) {
+	op, err := NewOperation(rcloneConfig, srcStr, "")
+	defer CleanConfig()
+	if err != nil {
+		return nil, fmt.Errorf("could not initiate list operation %v", err)
+	}
+	prefix := op.SrcBase()
+	entries, err := op.List()
+	if err != nil {
+		return nil, err
+	}
+	var result []string
+	for _, f := range entries {
+		if IsDir(f) {
+			result = append(result, prefix+f.String()+"/")
+		} else {
+			result = append(result, prefix+f.String()) // Fallback for other types
+		}
+	}
+	return result, nil
 }
 
 func Info(rcloneConfig, srcStr string) (fs.DirEntry, error) {

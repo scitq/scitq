@@ -142,6 +142,14 @@ type Attr struct {
 		} `arg:"subcommand:delete" help:"Delete a step"`
 	} `arg:"subcommand:step" help:"Manage steps"`
 
+	// File commands
+	File *struct {
+		List *struct {
+			URI     string `arg:"positional,required" help:"URI to list files from (supports glob patterns)"`
+			Timeout int    `arg:"--timeout" default:"30" help:"Timeout for listing files (in seconds)"`
+		} `arg:"subcommand:list" help:"List remote files"`
+	} `arg:"subcommand:file" help:"Remote file listing"`
+
 	// Login commands
 	Login *struct {
 	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
@@ -650,6 +658,25 @@ func (c *CLI) StepDelete() error {
 	return nil
 }
 
+func (c *CLI) FileList() error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.Attr.File.List.Timeout)*time.Second)
+	defer cancel()
+
+	req := &pb.FetchListRequest{
+		Uri: c.Attr.File.List.URI,
+	}
+
+	resp, err := c.QC.Client.FetchList(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to list files via gRPC: %w", err)
+	}
+
+	for _, filename := range resp.Files {
+		fmt.Println(filename)
+	}
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -766,6 +793,11 @@ func Run(c CLI) error {
 			err = c.StepCreate()
 		case c.Attr.Step.Delete != nil:
 			err = c.StepDelete()
+		}
+	case c.Attr.File != nil:
+		switch {
+		case c.Attr.File.List != nil:
+			err = c.FileList()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")
