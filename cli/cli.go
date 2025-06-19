@@ -24,7 +24,7 @@ type Attr struct {
 		Create *struct {
 			Container string   `arg:"--container,required" help:"Container to run"`
 			Command   string   `arg:"--command,required" help:"Command to execute"`
-			Shell     string   `arg:"--shell" help:"Shell to use"`
+			Shell     *string  `arg:"--shell" help:"Shell to use"`
 			Input     []string `arg:"--input,separate" help:"Input values for the task (can be repeated)"`
 			Resource  []string `arg:"--resource,separate" help:"Input values for the task (can be repeated)"`
 			Output    string   `arg:"--output,separate" help:"Output folder where results are copied for the task"`
@@ -173,7 +173,7 @@ func (c *CLI) TaskCreate() error {
 	req := &pb.TaskRequest{
 		Command:   c.Attr.Task.Create.Command,
 		Container: c.Attr.Task.Create.Container,
-		Shell:     &c.Attr.Task.Create.Shell,
+		Shell:     c.Attr.Task.Create.Shell,
 		Input:     c.Attr.Task.Create.Input,
 		Resource:  c.Attr.Task.Create.Resource,
 		Output:    &c.Attr.Task.Create.Output,
