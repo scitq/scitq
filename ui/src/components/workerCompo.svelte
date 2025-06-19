@@ -11,13 +11,15 @@
   let tasksCount: Record<number, Record<string, number>> = {};
   let interval;
   let tasksAllCount;
+  let hasLoaded = false;
+
 
   export let onWorkerUpdated: (event: { detail: { workerId: number; updates: Partial<Worker> } }) => void = () => {};
   export let onWorkerDeleted: (event: { detail: { workerId: number } }) => void = () => {};
 
   onMount(() => {
+    
     updateWorkerData();
-
     interval = setInterval(() => {
       updateWorkerData();
     }, 5000);
@@ -25,7 +27,15 @@
     return () => clearInterval(interval);
   });
 
-  $: console.log('Workers list:', workers.map(w => w.workerId));
+  /**
+   * Reactive statement to trigger initial data update when
+   * workers list becomes non-empty and data hasn't been loaded yet.
+   * Ensures updateWorkerData() is called only once after workers load.
+   */
+  $: if (workers.length > 0 && !hasLoaded) {
+    updateWorkerData();
+    hasLoaded = true;
+  }
 
   // Reactively enrich workers with status (without mutating the original `workers` prop)
   $: displayWorkers = workers.map(worker => ({
@@ -46,21 +56,22 @@
     if (workers.length === 0) return;
 
     const workerIds = workers.map(w => w.workerId);
+    try {
+      
+      workersStatsMap = await getStats(workerIds);
 
-    // Fetch worker stats
-    workersStatsMap = await getStats(workerIds);
+      const statuses = await getStatus(workerIds);
+      statusMap = new Map(statuses.map(s => [s.workerId, s.status]));
 
-    // Fetch worker statuses
-    const statuses = await getStatus(workerIds);
-    statusMap = new Map(statuses.map(s => [s.workerId, s.status]));
-
-    // Fetch tasks for each worker
-    for (const id of workerIds) {
-      tasksCount[id] = await getTasksCount(id);
+      for (const id of workerIds) {
+        tasksCount[id] = await getTasksCount(id);
+      }
+      tasksAllCount = await getTasksCount();
+    } catch (err) {
+      console.error('Error chargement data:', err);
     }
-
-    tasksAllCount = await getTasksCount();
   }
+
 
   /**
    * Updates a numeric property of a worker (either 'concurrency' or 'prefetch') by a delta.
@@ -130,7 +141,7 @@
       <thead>
         <tr>
           <th>Name</th>
-          <th>Batch</th>
+          <th>Wf.Step</th>
           <th>Status</th>
           <th>Concurrency</th>
           <th>Prefetch</th>

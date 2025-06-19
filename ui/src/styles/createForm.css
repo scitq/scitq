@@ -113,3 +113,108 @@
   background-color: #f0f0f0;
   outline: none;
 }
+
+/* Intègre ton CSS ici ou dans createForm.css */
+
+/* Styles spécifiques à la liste des workflows et steps */
+.workflow-list {
+  max-width: 100%;
+  margin-bottom: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0.3rem;
+  background: #fafafa;
+}
+.workflow-item {
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+  font-size: 0.75rem;
+}
+.workflow-item:last-child {
+  border-bottom: none;
+}
+.workflow-item:hover {
+  background-color: #dbe6fb;
+}
+.workflow-steps {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0.3rem;
+  margin-top: 0.3rem;
+  background: #fefefe;
+  max-width: 100%;
+}
+.workflow-steps ul {
+  padding-left: 1rem;
+  margin: 0;
+}
+.workflow-steps li button {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.3rem;
+  margin-bottom: 0.2rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.workflow-steps li button:hover {
+  background-color: #f0f0f0;
+}
+.selected-workflow {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #192245;
+  font-weight: bold;
+}
+
+.createForm-step-suggestions {
+  position: relative;
+  left: 100%;
+  top: 0;
+  margin-left: 0.5rem;
+  min-width: 200px;
+}
+
+.suggestions-container {
+  position: relative;
+}
+
+.workflow-steps-columns {
+  display: flex;
+  position: absolute;
+  background: white;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  z-index: 1000;
+}
+
+.workflow-list, .steps-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.workflow-list {
+  border-right: 1px solid #eee;
+}
+
+.createForm-suggestion-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.createForm-suggestion-item:hover, 
+.createForm-suggestion-item.active {
+  background-color: #f0f0f0;
+}
+

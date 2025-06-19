@@ -20,41 +20,43 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TaskQueue_SubmitTask_FullMethodName          = "/taskqueue.TaskQueue/SubmitTask"
-	TaskQueue_RegisterWorker_FullMethodName      = "/taskqueue.TaskQueue/RegisterWorker"
-	TaskQueue_PingAndTakeNewTasks_FullMethodName = "/taskqueue.TaskQueue/PingAndTakeNewTasks"
-	TaskQueue_UpdateTaskStatus_FullMethodName    = "/taskqueue.TaskQueue/UpdateTaskStatus"
-	TaskQueue_SendTaskLogs_FullMethodName        = "/taskqueue.TaskQueue/SendTaskLogs"
-	TaskQueue_StreamTaskLogs_FullMethodName      = "/taskqueue.TaskQueue/StreamTaskLogs"
-	TaskQueue_ListTasks_FullMethodName           = "/taskqueue.TaskQueue/ListTasks"
-	TaskQueue_ListWorkers_FullMethodName         = "/taskqueue.TaskQueue/ListWorkers"
-	TaskQueue_CreateWorker_FullMethodName        = "/taskqueue.TaskQueue/CreateWorker"
-	TaskQueue_UpdateWorkerStatus_FullMethodName  = "/taskqueue.TaskQueue/UpdateWorkerStatus"
-	TaskQueue_DeleteWorker_FullMethodName        = "/taskqueue.TaskQueue/DeleteWorker"
-	TaskQueue_UpdateWorker_FullMethodName        = "/taskqueue.TaskQueue/UpdateWorker"
-	TaskQueue_GetWorkerStatuses_FullMethodName   = "/taskqueue.TaskQueue/GetWorkerStatuses"
-	TaskQueue_ListJobs_FullMethodName            = "/taskqueue.TaskQueue/ListJobs"
-	TaskQueue_DeleteJob_FullMethodName           = "/taskqueue.TaskQueue/DeleteJob"
-	TaskQueue_ListFlavors_FullMethodName         = "/taskqueue.TaskQueue/ListFlavors"
-	TaskQueue_GetRcloneConfig_FullMethodName     = "/taskqueue.TaskQueue/GetRcloneConfig"
-	TaskQueue_Login_FullMethodName               = "/taskqueue.TaskQueue/Login"
-	TaskQueue_Logout_FullMethodName              = "/taskqueue.TaskQueue/Logout"
-	TaskQueue_CreateUser_FullMethodName          = "/taskqueue.TaskQueue/CreateUser"
-	TaskQueue_ListUsers_FullMethodName           = "/taskqueue.TaskQueue/ListUsers"
-	TaskQueue_DeleteUser_FullMethodName          = "/taskqueue.TaskQueue/DeleteUser"
-	TaskQueue_UpdateUser_FullMethodName          = "/taskqueue.TaskQueue/UpdateUser"
-	TaskQueue_ChangePassword_FullMethodName      = "/taskqueue.TaskQueue/ChangePassword"
-	TaskQueue_ListRecruiters_FullMethodName      = "/taskqueue.TaskQueue/ListRecruiters"
-	TaskQueue_CreateRecruiter_FullMethodName     = "/taskqueue.TaskQueue/CreateRecruiter"
-	TaskQueue_UpdateRecruiter_FullMethodName     = "/taskqueue.TaskQueue/UpdateRecruiter"
-	TaskQueue_DeleteRecruiter_FullMethodName     = "/taskqueue.TaskQueue/DeleteRecruiter"
-	TaskQueue_ListWorkflows_FullMethodName       = "/taskqueue.TaskQueue/ListWorkflows"
-	TaskQueue_CreateWorkflow_FullMethodName      = "/taskqueue.TaskQueue/CreateWorkflow"
-	TaskQueue_DeleteWorkflow_FullMethodName      = "/taskqueue.TaskQueue/DeleteWorkflow"
-	TaskQueue_ListSteps_FullMethodName           = "/taskqueue.TaskQueue/ListSteps"
-	TaskQueue_CreateStep_FullMethodName          = "/taskqueue.TaskQueue/CreateStep"
-	TaskQueue_DeleteStep_FullMethodName          = "/taskqueue.TaskQueue/DeleteStep"
-	TaskQueue_GetWorkerStats_FullMethodName      = "/taskqueue.TaskQueue/GetWorkerStats"
+	TaskQueue_SubmitTask_FullMethodName           = "/taskqueue.TaskQueue/SubmitTask"
+	TaskQueue_RegisterWorker_FullMethodName       = "/taskqueue.TaskQueue/RegisterWorker"
+	TaskQueue_PingAndTakeNewTasks_FullMethodName  = "/taskqueue.TaskQueue/PingAndTakeNewTasks"
+	TaskQueue_UpdateTaskStatus_FullMethodName     = "/taskqueue.TaskQueue/UpdateTaskStatus"
+	TaskQueue_SendTaskLogs_FullMethodName         = "/taskqueue.TaskQueue/SendTaskLogs"
+	TaskQueue_StreamTaskLogsOutput_FullMethodName = "/taskqueue.TaskQueue/StreamTaskLogsOutput"
+	TaskQueue_StreamTaskLogsErr_FullMethodName    = "/taskqueue.TaskQueue/StreamTaskLogsErr"
+	TaskQueue_GetLogsChunk_FullMethodName         = "/taskqueue.TaskQueue/GetLogsChunk"
+	TaskQueue_ListTasks_FullMethodName            = "/taskqueue.TaskQueue/ListTasks"
+	TaskQueue_ListWorkers_FullMethodName          = "/taskqueue.TaskQueue/ListWorkers"
+	TaskQueue_CreateWorker_FullMethodName         = "/taskqueue.TaskQueue/CreateWorker"
+	TaskQueue_UpdateWorkerStatus_FullMethodName   = "/taskqueue.TaskQueue/UpdateWorkerStatus"
+	TaskQueue_DeleteWorker_FullMethodName         = "/taskqueue.TaskQueue/DeleteWorker"
+	TaskQueue_UpdateWorker_FullMethodName         = "/taskqueue.TaskQueue/UpdateWorker"
+	TaskQueue_GetWorkerStatuses_FullMethodName    = "/taskqueue.TaskQueue/GetWorkerStatuses"
+	TaskQueue_ListJobs_FullMethodName             = "/taskqueue.TaskQueue/ListJobs"
+	TaskQueue_DeleteJob_FullMethodName            = "/taskqueue.TaskQueue/DeleteJob"
+	TaskQueue_ListFlavors_FullMethodName          = "/taskqueue.TaskQueue/ListFlavors"
+	TaskQueue_GetRcloneConfig_FullMethodName      = "/taskqueue.TaskQueue/GetRcloneConfig"
+	TaskQueue_Login_FullMethodName                = "/taskqueue.TaskQueue/Login"
+	TaskQueue_Logout_FullMethodName               = "/taskqueue.TaskQueue/Logout"
+	TaskQueue_CreateUser_FullMethodName           = "/taskqueue.TaskQueue/CreateUser"
+	TaskQueue_ListUsers_FullMethodName            = "/taskqueue.TaskQueue/ListUsers"
+	TaskQueue_DeleteUser_FullMethodName           = "/taskqueue.TaskQueue/DeleteUser"
+	TaskQueue_UpdateUser_FullMethodName           = "/taskqueue.TaskQueue/UpdateUser"
+	TaskQueue_ChangePassword_FullMethodName       = "/taskqueue.TaskQueue/ChangePassword"
+	TaskQueue_ListRecruiters_FullMethodName       = "/taskqueue.TaskQueue/ListRecruiters"
+	TaskQueue_CreateRecruiter_FullMethodName      = "/taskqueue.TaskQueue/CreateRecruiter"
+	TaskQueue_UpdateRecruiter_FullMethodName      = "/taskqueue.TaskQueue/UpdateRecruiter"
+	TaskQueue_DeleteRecruiter_FullMethodName      = "/taskqueue.TaskQueue/DeleteRecruiter"
+	TaskQueue_ListWorkflows_FullMethodName        = "/taskqueue.TaskQueue/ListWorkflows"
+	TaskQueue_CreateWorkflow_FullMethodName       = "/taskqueue.TaskQueue/CreateWorkflow"
+	TaskQueue_DeleteWorkflow_FullMethodName       = "/taskqueue.TaskQueue/DeleteWorkflow"
+	TaskQueue_ListSteps_FullMethodName            = "/taskqueue.TaskQueue/ListSteps"
+	TaskQueue_CreateStep_FullMethodName           = "/taskqueue.TaskQueue/CreateStep"
+	TaskQueue_DeleteStep_FullMethodName           = "/taskqueue.TaskQueue/DeleteStep"
+	TaskQueue_GetWorkerStats_FullMethodName       = "/taskqueue.TaskQueue/GetWorkerStats"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -66,7 +68,9 @@ type TaskQueueClient interface {
 	PingAndTakeNewTasks(ctx context.Context, in *PingAndGetNewTasksRequest, opts ...grpc.CallOption) (*TaskListAndOther, error)
 	UpdateTaskStatus(ctx context.Context, in *TaskStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
 	SendTaskLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TaskLog, Ack], error)
-	StreamTaskLogs(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
+	StreamTaskLogsOutput(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
+	StreamTaskLogsErr(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
+	GetLogsChunk(ctx context.Context, in *GetLogsRequest, opts ...grpc.CallOption) (*LogChunkList, error)
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskList, error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
@@ -159,9 +163,9 @@ func (c *taskQueueClient) SendTaskLogs(ctx context.Context, opts ...grpc.CallOpt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskQueue_SendTaskLogsClient = grpc.ClientStreamingClient[TaskLog, Ack]
 
-func (c *taskQueueClient) StreamTaskLogs(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error) {
+func (c *taskQueueClient) StreamTaskLogsOutput(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TaskQueue_ServiceDesc.Streams[1], TaskQueue_StreamTaskLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &TaskQueue_ServiceDesc.Streams[1], TaskQueue_StreamTaskLogsOutput_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +180,36 @@ func (c *taskQueueClient) StreamTaskLogs(ctx context.Context, in *TaskId, opts .
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TaskQueue_StreamTaskLogsClient = grpc.ServerStreamingClient[TaskLog]
+type TaskQueue_StreamTaskLogsOutputClient = grpc.ServerStreamingClient[TaskLog]
+
+func (c *taskQueueClient) StreamTaskLogsErr(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TaskQueue_ServiceDesc.Streams[2], TaskQueue_StreamTaskLogsErr_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TaskId, TaskLog]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskQueue_StreamTaskLogsErrClient = grpc.ServerStreamingClient[TaskLog]
+
+func (c *taskQueueClient) GetLogsChunk(ctx context.Context, in *GetLogsRequest, opts ...grpc.CallOption) (*LogChunkList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LogChunkList)
+	err := c.cc.Invoke(ctx, TaskQueue_GetLogsChunk_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 func (c *taskQueueClient) ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskList, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -477,7 +510,9 @@ type TaskQueueServer interface {
 	PingAndTakeNewTasks(context.Context, *PingAndGetNewTasksRequest) (*TaskListAndOther, error)
 	UpdateTaskStatus(context.Context, *TaskStatusUpdate) (*Ack, error)
 	SendTaskLogs(grpc.ClientStreamingServer[TaskLog, Ack]) error
-	StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
+	StreamTaskLogsOutput(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
+	StreamTaskLogsErr(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
+	GetLogsChunk(context.Context, *GetLogsRequest) (*LogChunkList, error)
 	ListTasks(context.Context, *ListTasksRequest) (*TaskList, error)
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
@@ -532,8 +567,14 @@ func (UnimplementedTaskQueueServer) UpdateTaskStatus(context.Context, *TaskStatu
 func (UnimplementedTaskQueueServer) SendTaskLogs(grpc.ClientStreamingServer[TaskLog, Ack]) error {
 	return status.Errorf(codes.Unimplemented, "method SendTaskLogs not implemented")
 }
-func (UnimplementedTaskQueueServer) StreamTaskLogs(*TaskId, grpc.ServerStreamingServer[TaskLog]) error {
-	return status.Errorf(codes.Unimplemented, "method StreamTaskLogs not implemented")
+func (UnimplementedTaskQueueServer) StreamTaskLogsOutput(*TaskId, grpc.ServerStreamingServer[TaskLog]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamTaskLogsOutput not implemented")
+}
+func (UnimplementedTaskQueueServer) StreamTaskLogsErr(*TaskId, grpc.ServerStreamingServer[TaskLog]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamTaskLogsErr not implemented")
+}
+func (UnimplementedTaskQueueServer) GetLogsChunk(context.Context, *GetLogsRequest) (*LogChunkList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetLogsChunk not implemented")
 }
 func (UnimplementedTaskQueueServer) ListTasks(context.Context, *ListTasksRequest) (*TaskList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
@@ -722,16 +763,45 @@ func _TaskQueue_SendTaskLogs_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskQueue_SendTaskLogsServer = grpc.ClientStreamingServer[TaskLog, Ack]
 
-func _TaskQueue_StreamTaskLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _TaskQueue_StreamTaskLogsOutput_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(TaskId)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(TaskQueueServer).StreamTaskLogs(m, &grpc.GenericServerStream[TaskId, TaskLog]{ServerStream: stream})
+	return srv.(TaskQueueServer).StreamTaskLogsOutput(m, &grpc.GenericServerStream[TaskId, TaskLog]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TaskQueue_StreamTaskLogsServer = grpc.ServerStreamingServer[TaskLog]
+type TaskQueue_StreamTaskLogsOutputServer = grpc.ServerStreamingServer[TaskLog]
+
+func _TaskQueue_StreamTaskLogsErr_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(TaskId)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TaskQueueServer).StreamTaskLogsErr(m, &grpc.GenericServerStream[TaskId, TaskLog]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskQueue_StreamTaskLogsErrServer = grpc.ServerStreamingServer[TaskLog]
+
+func _TaskQueue_GetLogsChunk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetLogsChunk(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetLogsChunk_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetLogsChunk(ctx, req.(*GetLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
 
 func _TaskQueue_ListTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListTasksRequest)
@@ -1279,6 +1349,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TaskQueue_UpdateTaskStatus_Handler,
 		},
 		{
+			MethodName: "GetLogsChunk",
+			Handler:    _TaskQueue_GetLogsChunk_Handler,
+		},
+		{
 			MethodName: "ListTasks",
 			Handler:    _TaskQueue_ListTasks_Handler,
 		},
@@ -1402,8 +1476,13 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "StreamTaskLogs",
-			Handler:       _TaskQueue_StreamTaskLogs_Handler,
+			StreamName:    "StreamTaskLogsOutput",
+			Handler:       _TaskQueue_StreamTaskLogsOutput_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "StreamTaskLogsErr",
+			Handler:       _TaskQueue_StreamTaskLogsErr_Handler,
 			ServerStreams: true,
 		},
 	},

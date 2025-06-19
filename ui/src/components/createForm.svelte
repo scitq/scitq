@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getFlavors, newWorker, getWorkFlow, getStatus } from "../lib/api";
+  import { getFlavors, newWorker, getWorkFlow, getStatus, getSteps } from "../lib/api";
   import "../styles/createForm.css";
-  import { WorkerDetails } from "../../gen/taskqueue";
+  import { WorkerDetails, Workflow } from "../../gen/taskqueue";
 
-  /**
+  /** 
    * Callback function type triggered when a new worker is created.
    * @callback onWorkerCreated
    * @param {Object} event - Event object containing detail of the new worker.
@@ -12,10 +12,7 @@
    * @param {WorkerDetails} event.detail.worker - The created worker details.
    */
 
-  /**
-   * Event callback prop triggered when a new worker is created.
-   * @type {(event: { detail: { worker: WorkerDetails } }) => void}
-   */
+  /** @type {(event: { detail: { worker: WorkerDetails } }) => void} */
   export let onWorkerCreated = () => {};
 
   /** @type {string} - Provider name input value */
@@ -36,14 +33,26 @@
   /** @type {number} - Worker prefetch value */
   let prefetch = 1;
 
-  /** @type {string} - Workflow step input value */
-  let wfStep = "";
+  /** @type {string} - Workflow step in format 'Workflow.Step' */
+  let wfStep = ""; 
 
-  /** @type {Array} - List of flavor objects fetched from backend */
+  /** @type {string} - Selected workflow name */
+  let wf = "";
+
+  /** @type {string} - Selected step name */
+  let step = "";
+
+  /** @type {Array<{ flavorName: string, region: string, provider: string }>} */
   let listFlavor = [];
 
-  /** @type {Array} - List of workflow objects fetched from backend */
+  /** @type {Workflow[]} - List of workflow objects */
   let listWf = [];
+
+  /** @type {Array<{name: string}>} - List of step objects for selected workflow */
+  let listStep: Array<{ name: string }> = [];
+
+  /** @type {boolean} - Indicates whether workflow steps are being loaded */
+  let isLoadingSteps = false;
 
   /** @type {boolean} - Flag to show/hide flavor autocomplete suggestions */
   let showFlavorSuggestions = false;
@@ -54,35 +63,41 @@
   /** @type {boolean} - Flag to show/hide provider autocomplete suggestions */
   let showProviderSuggestions = false;
 
-  /** @type {boolean} - Flag to show/hide workflow step autocomplete suggestions */
-  let showWfStepSuggestions = false;
+  /** @type {boolean} - Flag to show/hide workflow autocomplete suggestions */
+  let showWfSuggestions = false;
 
-  /** @type {string[]} - Filtered flavor suggestions based on user input */
+  /** @type {boolean} - Flag to show/hide workflow step suggestions */
+  let showStepSuggestions = false;
+
+  /** @type {string[]} - Filtered flavor suggestions based on input */
   let flavorSuggestions = [];
 
-  /** @type {string[]} - Filtered region suggestions based on user input */
+  /** @type {string[]} - Filtered region suggestions based on input */
   let regionSuggestions = [];
 
-  /** @type {string[]} - Filtered provider suggestions based on user input */
+  /** @type {string[]} - Filtered provider suggestions based on input */
   let providerSuggestions = [];
 
-  /** @type {string[]} - Filtered workflow step suggestions based on user input */
-  let wfStepSuggestions = [];
+  /** @type {string[]} - Filtered workflow name suggestions */
+  let wfSuggestions = [];
+
+  /** @type {string[]} - Filtered step name suggestions */
+  let stepSuggestions = [];
+
+  /** @type {string|null} - Workflow name currently hovered to fetch steps */
+  let hoveredWf: string | null = null;
 
   /**
-   * Lifecycle hook that runs once when component is mounted.
-   * Fetches flavor and workflow data from backend API.
+   * Lifecycle hook that runs on component mount.
+   * Fetches initial data for flavors and workflows.
    * @async
-   * @returns {Promise<void>}
    */
   onMount(async () => {
     listFlavor = await getFlavors();
     listWf = await getWorkFlow();
   });
 
-  /**
-   * Reactive statement updating flavorSuggestions array whenever `flavor` or `listFlavor` changes.
-   */
+  /** Updates flavor suggestions based on input and available data. */
   $: flavorSuggestions = Array.from(
     new Set(
       listFlavor
@@ -91,9 +106,7 @@
     )
   );
 
-  /**
-   * Reactive statement updating regionSuggestions array whenever `region` or `listFlavor` changes.
-   */
+  /** Updates region suggestions based on input and available data. */
   $: regionSuggestions = Array.from(
     new Set(
       listFlavor
@@ -102,9 +115,7 @@
     )
   );
 
-  /**
-   * Reactive statement updating providerSuggestions array whenever `provider` or `listFlavor` changes.
-   */
+  /** Updates provider suggestions based on input and available data. */
   $: providerSuggestions = Array.from(
     new Set(
       listFlavor
@@ -113,21 +124,23 @@
     )
   );
 
-  /**
-   * Reactive statement updating wfStepSuggestions array whenever `wfStep` or `listWf` changes.
-   */
-  $: wfStepSuggestions = Array.from(
+  /** Updates workflow name suggestions based on input and available workflows. */
+  $: wfSuggestions = Array.from(
     new Set(
       listWf
         .map(wf => wf.name)
-        .filter(name => name?.toLowerCase().includes(wfStep.toLowerCase()))
+        .filter(name => name?.toLowerCase().includes(wf.toLowerCase()))
     )
   );
 
+  /** Updates step suggestions from the fetched listStep, filtered by input. */
+  $: stepSuggestions = listStep?.map(s => s.name)?.filter(name =>
+    name?.toLowerCase().includes(step.toLowerCase())
+  ) || [];
+
   /**
-   * Handles selection of a flavor suggestion.
-   * Updates the flavor input value and hides the suggestion dropdown.
-   * @param {string} suggestion - Selected flavor suggestion
+   * Selects a flavor from the suggestions.
+   * @param {string} suggestion - Selected flavor name
    */
   function selectFlavor(suggestion: string) {
     flavor = suggestion;
@@ -135,9 +148,8 @@
   }
 
   /**
-   * Handles selection of a region suggestion.
-   * Updates the region input value and hides the suggestion dropdown.
-   * @param {string} suggestion - Selected region suggestion
+   * Selects a region from the suggestions.
+   * @param {string} suggestion - Selected region name
    */
   function selectRegion(suggestion: string) {
     region = suggestion;
@@ -145,9 +157,8 @@
   }
 
   /**
-   * Handles selection of a provider suggestion.
-   * Updates the provider input value and hides the suggestion dropdown.
-   * @param {string} suggestion - Selected provider suggestion
+   * Selects a provider from the suggestions.
+   * @param {string} suggestion - Selected provider name
    */
   function selectProvider(suggestion: string) {
     provider = suggestion;
@@ -155,24 +166,65 @@
   }
 
   /**
-   * Handles selection of a workflow step suggestion.
-   * Updates the workflow step input value and hides the suggestion dropdown.
-   * @param {string} suggestion - Selected workflow step suggestion
+   * Selects a workflow from the suggestions.
+   * @param {string} suggestion - Selected workflow name
    */
-  function selectWfStep(suggestion: string) {
+  function selectWf(suggestion: string) {
     wfStep = suggestion;
-    showWfStepSuggestions = false;
+    wf = suggestion;
+    showWfSuggestions = false;
   }
 
   /**
-   * Handles form submission to create new worker(s).
-   * Calls backend API with current form data, retrieves status,
-   * triggers onWorkerCreated event with new worker details,
-   * and resets form fields to default values.
+   * Handles hovering over a workflow to load its steps asynchronously.
+   * Updates `listStep` and controls loading state.
+   * @param {string} wfName - Workflow name hovered by the user
+   * @returns {Promise<void>}
+   */
+  async function handleWfHover(wfName: string): Promise<void> {
+    hoveredWf = wfName;
+    const selectedWf = listWf.find(w => w.name === wfName);
+
+    if (!selectedWf?.workflowId) {
+      console.error("No workflow ID found for", wfName);
+      listStep = [];
+      return;
+    }
+
+    isLoadingSteps = true;
+    try {
+      listStep = await getSteps(selectedWf.workflowId) || [];
+      showStepSuggestions = listStep.length > 0;
+    } catch (error) {
+      console.error("Failed to load steps:", error);
+      listStep = [];
+      showStepSuggestions = false;
+    } finally {
+      isLoadingSteps = false;
+    }
+  }
+
+  /**
+   * Selects a step from the workflow steps list.
+   * Updates the combined wfStep value and hides step suggestions.
+   * @param {string} suggestion - Step name selected
+   */
+  function selectStep(suggestion: string) {
+    wfStep = `${hoveredWf}.${suggestion}`;
+    step = suggestion;
+    showStepSuggestions = false;
+    showWfSuggestions = false;
+  }
+
+  /**
+   * Handles form submission to add a new worker.
+   * Creates the worker via backend API, retrieves its status,
+   * and emits a `onWorkerCreated` event.
+   * Resets form fields afterward.
    * @async
    * @returns {Promise<void>}
    */
-  async function handleAddWorker() {
+  async function handleAddWorker(): Promise<void> {
     const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
     const workerCreatedDetails = workersDetails[workersDetails.length - 1];
     const statuses = await getStatus([workerCreatedDetails.workerId]);
@@ -194,7 +246,7 @@
       }
     });
 
-    // Reset form fields
+    // Reset form
     concurrency = 1;
     prefetch = 1;
     flavor = "";
@@ -204,6 +256,7 @@
     wfStep = "";
   }
 </script>
+
 
 <div class="createForm-form-container">
   <h2 class="createForm-title">Create Worker</h2>
@@ -315,21 +368,62 @@
       bind:value={wfStep}
       autocomplete="off"
       placeholder="Type to search..."
-      on:focus={() => showWfStepSuggestions = true}
-      on:input={() => showWfStepSuggestions = true}
-      on:blur={() => setTimeout(() => showWfStepSuggestions = false, 150)}
+      on:focus={() => showWfSuggestions = true}
+      on:input={() => showWfSuggestions = true}
+      on:blur={() => setTimeout(() => {
+        showWfSuggestions = false;
+        showStepSuggestions = false;
+        hoveredWf = null;
+      }, 150)}
     />
-    {#if showWfStepSuggestions && wfStepSuggestions.length > 0}
-      <ul class="createForm-suggestions">
-        {#each wfStepSuggestions as suggestion}
-          <li>
-            <button class="createForm-suggestion-item" type="button" on:click={() => selectWfStep(suggestion)}>
-              {suggestion}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+
+    <div class="suggestions-container">
+      {#if showWfSuggestions && wfSuggestions.length > 0}
+        <div class="workflow-steps-columns">
+          <!-- Workflows -->
+          <ul class="createForm-suggestions workflow-list">
+            {#each wfSuggestions as suggestionWf}
+              <li>
+                <button 
+                  class="createForm-suggestion-item {hoveredWf === suggestionWf ? 'active' : ''}" 
+                  type="button" 
+                  on:click={() => selectWf(suggestionWf)}
+                  on:mouseenter={() => handleWfHover(suggestionWf)}
+                >
+                  {suggestionWf}
+                </button>
+              </li>
+            {/each}
+          </ul>
+
+          <!-- Steps -->
+          {#if hoveredWf}
+            <ul 
+              class="createForm-suggestions steps-list" 
+              style:max-height={listStep.length > 5 ? '150px' : (listStep.length * 30 + 10) + 'px'}
+            >
+              {#if isLoadingSteps}
+                <li class="createForm-suggestion-item">Loading steps...</li>
+              {:else if listStep.length > 0}
+                {#each listStep as stepObj (stepObj.name)}
+                  <li>
+                    <button 
+                      class="createForm-suggestion-item" 
+                      type="button" 
+                      on:click={() => selectStep(stepObj.name)}
+                    >
+                      {stepObj.name}
+                    </button>
+                  </li>
+                {/each}
+              {:else}
+                <li class="createForm-suggestion-item">No steps available</li>
+              {/if}
+            </ul>
+          {/if}
+        </div>
+      {/if}
+    </div>
   </div>
 
   <!-- Number of workers to create -->

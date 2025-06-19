@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	// "container/list"
 	"context"
 	"crypto/tls"
 	"database/sql"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	"github.com/golang-jwt/jwt"
+	"github.com/hpcloud/tail"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
@@ -218,19 +220,184 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 	}
 }
 
-func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsServer) error {
-	logPath := getLogPath(req.TaskId, "stdout", s.logRoot)
-	file, err := os.Open(logPath)
+func (s *taskQueueServer) StreamTaskLogsErr(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsErrServer) error {
+	var status string
+	fmt.Printf("Streaming logs for task %v\n", req.TaskId)
+	logPath := getLogPath(req.TaskId, "stderr", s.logRoot)
+
+	// Configure tail to follow the file in follow mode
+	t, err := tail.TailFile(logPath, tail.Config{
+		Follow:    true,  // keep reading new appended lines
+		ReOpen:    true,  // reopen file automatically if rotated
+		MustExist: false, // do not block if file does not exist yet
+		Poll:      true,  // use polling instead of inotify for compatibility
+	})
 	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
+		return fmt.Errorf("failed to tail file: %w", err)
+	}
+	defer t.Cleanup()
+
+	for {
+		select {
+		case line, ok := <-t.Lines:
+			if !ok {
+				fmt.Println("tail.Lines channel closed, stopping stream")
+				return nil
+			}
+
+			// Send the log line to the client
+			err := stream.Send(&pb.TaskLog{
+				TaskId:  req.TaskId,
+				LogType: "stderr",
+				LogText: line.Text,
+			})
+			if err != nil {
+				return err
+			}
+
+		case <-time.After(500 * time.Millisecond):
+			// Periodically check if the task is finished
+			err := s.db.QueryRow(`SELECT status FROM task WHERE task_id = $1`, req.TaskId).Scan(&status)
+			if err != nil {
+				return fmt.Errorf("failed to query task status: %w", err)
+			}
+			if status == "S" || status == "F" {
+				fmt.Println("Task is finished (success or failed).")
+				return nil
+			}
+		}
+	}
+}
+
+func (s *taskQueueServer) StreamTaskLogsOutput(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsOutputServer) error {
+	var status string
+	fmt.Printf("Streaming logs for task %v\n", req.TaskId)
+	logPath := getLogPath(req.TaskId, "stdout", s.logRoot)
+
+	// Configure tail to follow the file in follow mode
+	t, err := tail.TailFile(logPath, tail.Config{
+		Follow:    true,  // keep reading new appended lines
+		ReOpen:    true,  // reopen file automatically if rotated
+		MustExist: false, // do not block if file does not exist yet
+		Poll:      true,  // use polling instead of inotify for compatibility
+	})
+	if err != nil {
+		return fmt.Errorf("failed to tail file: %w", err)
+	}
+	defer t.Cleanup()
+
+	for {
+		select {
+		case line, ok := <-t.Lines:
+			if !ok {
+				fmt.Println("tail.Lines channel closed, stopping stream")
+				return nil
+			}
+
+			// Send the log line to the client
+			err := stream.Send(&pb.TaskLog{
+				TaskId:  req.TaskId,
+				LogType: "stdout",
+				LogText: line.Text,
+			})
+			if err != nil {
+				return err
+			}
+
+		case <-time.After(500 * time.Millisecond):
+			// Periodically check if the task is finished
+			err := s.db.QueryRow(`SELECT status FROM task WHERE task_id = $1`, req.TaskId).Scan(&status)
+			if err != nil {
+				return fmt.Errorf("failed to query task status: %w", err)
+			}
+			if status == "S" || status == "F" {
+				fmt.Println("Task is finished (success or failed).")
+				return nil
+			}
+		}
+	}
+}
+
+// totalLines = number of lines to return
+// skipFromEnd = number of lines to skip from the end (for "load more")
+func tailLines(path string, totalLines int, skipFromEnd int) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer file.Close()
 
+	// Read all lines (needed to know the end)
+	var lines []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		stream.Send(&pb.TaskLog{TaskId: req.TaskId, LogType: "stdout", LogText: scanner.Text()})
+		lines = append(lines, scanner.Text())
 	}
-	return nil
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// Calculate the range to return
+	end := len(lines) - skipFromEnd
+	start := end - totalLines
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = 0
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	return lines[start:end], nil
+}
+
+func (s *taskQueueServer) GetLogsChunk(ctx context.Context, req *pb.GetLogsRequest) (*pb.LogChunkList, error) {
+	var result []*pb.LogChunk
+
+	// Iterate over each requested task ID
+	for _, taskId := range req.TaskIds {
+		skip := 0
+		// If a skip value is provided, use it to skip lines from the end of the log
+		if req.SkipFromEnd != nil {
+			skip = int(*req.SkipFromEnd)
+		}
+
+		// If the requested log type is stdout, fetch only stdout logs
+		if req.LogType != nil && *req.LogType == "stdout" {
+			stdoutPath := getLogPath(taskId, "stdout", s.logRoot)
+			stdoutTail, _ := tailLines(stdoutPath, int(req.ChunkSize), skip) // Read last chunk of stdout log lines
+			result = append(result, &pb.LogChunk{
+				TaskId: taskId,
+				Stdout: stdoutTail,
+			})
+
+			// If the requested log type is stderr, fetch only stderr logs
+		} else if req.LogType != nil && *req.LogType == "stderr" {
+			stderrPath := getLogPath(taskId, "stderr", s.logRoot)
+			stderrTail, _ := tailLines(stderrPath, int(req.ChunkSize), skip) // Read last chunk of stderr log lines
+			result = append(result, &pb.LogChunk{
+				TaskId: taskId,
+				Stderr: stderrTail,
+			})
+
+			// If no specific log type is requested, fetch both stdout and stderr logs
+		} else {
+			stdoutPath := getLogPath(taskId, "stdout", s.logRoot)
+			stderrPath := getLogPath(taskId, "stderr", s.logRoot)
+			stdoutTail, _ := tailLines(stdoutPath, int(req.ChunkSize), skip) // Read last chunk of stdout log lines
+			stderrTail, _ := tailLines(stderrPath, int(req.ChunkSize), skip) // Read last chunk of stderr log lines
+			result = append(result, &pb.LogChunk{
+				TaskId: taskId,
+				Stdout: stdoutTail,
+				Stderr: stderrTail,
+			})
+		}
+	}
+
+	// Return the list of log chunks for all requested tasks
+	return &pb.LogChunkList{Logs: result}, nil
 }
 
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
@@ -694,13 +861,13 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	// **Filter by status and worker if provided**
 	if req.StatusFilter != nil && *req.StatusFilter != "" && req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
 	} else if req.StatusFilter != nil && *req.StatusFilter != "" {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
 	} else if req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
 	} else {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id FROM task ORDER BY task_id`)
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task ORDER BY task_id`)
 	}
 
 	if err != nil {
@@ -711,7 +878,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	for rows.Next() {
 		var task pb.Task
-		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status, &task.WorkerId)
+		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status, &task.WorkerId, &task.StepId)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue

@@ -12,7 +12,9 @@ service TaskQueue {
     rpc PingAndTakeNewTasks(PingAndGetNewTasksRequest) returns (TaskListAndOther);
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
     rpc SendTaskLogs(stream TaskLog) returns (Ack);
-    rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
+    rpc StreamTaskLogsOutput(TaskId) returns (stream TaskLog);
+    rpc StreamTaskLogsErr(TaskId) returns (stream TaskLog);
+    rpc GetLogsChunk(GetLogsRequest) returns (LogChunkList);
     rpc ListTasks (ListTasksRequest) returns (TaskList);
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
@@ -89,6 +91,7 @@ message Task {
     optional float upload_timeout  = 15;
     string status = 16;
     optional uint32 worker_id = 17;
+    optional uint32 workflow_id = 18;
 }
 
 message TaskList {
@@ -140,6 +143,27 @@ message TaskLog {
     uint32 task_id = 1;
     string log_type = 2; // 'O' for stdout, 'E' for stderr
     string log_text = 3;
+}
+
+message GetLogsRequest {
+  repeated uint32 taskIds = 1;
+    uint32 chunkSize = 2;
+  optional uint32 skipFromEnd = 3;
+  optional string log_type = 4;
+}
+
+message LogChunk {
+  uint32 taskId = 1;
+  repeated string stdout = 2;
+  repeated string stderr = 3;
+}
+
+message LogChunkList {
+  repeated LogChunk logs = 1;
+}
+
+message TaskIds {
+    repeated uint32 task_ids = 1;
 }
 
 message TaskId {
@@ -422,3 +446,4 @@ message GetWorkerStatsRequest {
 message GetWorkerStatsResponse {
     map<uint32, WorkerStats> worker_stats = 1;
 }
+

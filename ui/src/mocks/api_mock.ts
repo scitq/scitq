@@ -33,6 +33,12 @@ export const mockApi = {
 
   getTasksCount: vi.fn().mockResolvedValue([]),
   getAllTasks: vi.fn(),
+  streamTaskLogsOutput: vi.fn(),
+  streamTaskLogsErr: vi.fn(),
+  getLogsBatch: vi.fn(),
+  
+  getSteps: vi.fn().mockResolvedValue([]),
+
 
 };
 

@@ -1,13 +1,91 @@
 <script lang="ts">
   import * as grpcWeb from 'grpc-web';
-  import { onMount } from 'svelte';
-  import {getJobStatusClass, getJobStatusText, getAllTasks} from '../lib/api';
-  import { RefreshCcw, Download, Trash } from 'lucide-svelte';
+  import { onMount, afterUpdate } from 'svelte';
+  import { getJobStatusClass, getJobStatusText, getAllTasks, getSteps } from '../lib/api';
+  import { RefreshCcw, Download, Trash, Eye, Workflow } from 'lucide-svelte';
   import '../styles/worker.css';
-   import '../styles/jobsCompo.css';
+  import '../styles/jobsCompo.css';
+  import { TaskLog } from '../../gen/taskqueue';
 
-  export let tasks : TaskList = [];
-  
+  /** 
+   * List of tasks to be displayed in the table.
+   * @type {TaskList} 
+   */
+  export let tasks: TaskList = [];
+
+  /**
+   * Mapping of task IDs to their saved logs.
+   * @type {Record<number, TaskLog[]>}
+   */
+  export let taskLogsSaved: Record<number, TaskLog[]> = {};
+
+  /**
+   * List of all workers available.
+   * @type {Worker[]}
+   */
+  export let workers: Worker[] = [];
+
+  /**
+   * List of all workflows available.
+   * @type {Workflow[]}
+   */
+  export let workflows: Workflow[] = [];
+
+  /**
+   * List of all steps from all workflows.
+   * @type {Step[]}
+   */
+  export let allSteps: Step[] = [];
+
+  /**
+   * Callback function called when the "Full Log" button is clicked.
+   * @type {(taskId: number) => void}
+   */
+  export let onOpenModal: (taskId: number) => void;
+
+  /**
+   * Mapping of task IDs to their respective log HTML containers.
+   * Used for auto-scrolling log content.
+   * @type {Record<number, HTMLDivElement>}
+   */
+  let logContainers: Record<number, HTMLDivElement> = {};
+
+  /**
+   * Resolves and returns a display name based on provided identifiers.
+   * Priority: workerId > workflowId > stepId (with workflowId)
+   * @param {number} [workerId]
+   * @param {number} [workflowId]
+   * @param {number} [stepId]
+   * @returns {string} Display name
+   */
+  function getName(workerId?: number, workflowId?: number, stepId?: number): string {
+    if (workerId != undefined) {
+      const worker = workers.find(w => w.workerId === workerId);
+      return worker ? worker.name : `Worker ${workerId}`;
+    }
+
+    if (workflowId != undefined && stepId == undefined) {
+      const workflow = workflows.find(w => w.workflowId === workflowId);
+      return workflow ? workflow.name : `Workflow ${workflowId}`;
+    }
+
+    if (workflowId != undefined && stepId != undefined) {
+      const step = allSteps.find(s => s.workflowId === workflowId && s.stepId === stepId);
+      return step ? step.name : `Step ${stepId}`;
+    }
+
+    return '';
+  }
+
+  /**
+   * Lifecycle hook called after DOM updates.
+   * Used to scroll log containers to the bottom automatically.
+   */
+  afterUpdate(() => {
+    Object.values(logContainers).forEach(container => {
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+  });
 </script>
 
 
@@ -35,20 +113,51 @@
           <tr data-testid={`task-${task.taskId}`}>
             <td>{task.taskId}</td>
             <td>{task.name}</td>
-            <td>{task.command}</td>
-            <td>{task.workerId}</td>
-            <td>Wf</td>
-            <td>{task.stepId}</td>
+            <td>
+              <div class="truncate-command" title={task.command}>{task.command}</div>
+            </td>
+            <td> <a href="#/" class="link">{getName(task.workerId)}</a></td>
+            <td> <a href={`#/workflows?open=${1}`} class="link">{getName(undefined, task.workflowId, undefined)}</a></td>
+            <td> <a href={`#/workflows?open=${1}`} class="link">{getName(undefined, 1, task.stepId)}</a></td>
             <td>
               <div class="tasks-status-pill {getJobStatusClass(task.status)}" title={getJobStatusText(task.status)}></div>
             </td>
-            <td>Start</td>
+            <td> </td>
             <td>{task.runningTimeout}</td>
-            <td>{task.output}</td>
-            <td>{task.retry}</td>
+            <td>
+              <div style="white-space: pre-wrap;" bind:this={logContainers[task.taskId]}>
+                {#if taskLogsSaved?.find(log => log.taskId === task.taskId)?.stdout.length}
+                  {#each taskLogsSaved?.find(log => log.taskId === task.taskId)?.stdout as line, i (i)}
+{line}
+                    {#if i < taskLogsSaved?.find(log => log.taskId === task.taskId)?.stdout.length - 1}
+                      <br />
+                    {/if}
+                  {/each}
+                {:else}
+                  {task.output}
+                {/if}
+              </div>
+            </td>
+
+            <td>
+            <div style="white-space: pre-wrap;" bind:this={logContainers[task.taskId]}>
+              {#if taskLogsSaved?.find(log => log.taskId === task.taskId)?.stderr.length}
+                {#each taskLogsSaved?.find(log => log.taskId === task.taskId)?.stderr as line, i (i)}
+{line}
+                  {#if i < taskLogsSaved?.find(log => log.taskId === task.taskId)?.stderr.length - 1}
+                    <br />
+                  {/if}
+                {/each}
+              {:else}
+                {task.output}
+              {/if}
+            </div>
+            </td>
 
             <td class="workerCompo-actions">
+              <button class="btn-action" title="Full Log" on:click={() => onOpenModal(task.taskId)}><Eye /></button>
               <button class="btn-action" title="Restart"><RefreshCcw /></button>
+              <br />
               <button class="btn-action" title="Download"><Download /></button>
               <button class="btn-action" title="Delete"><Trash /></button>
             </td>

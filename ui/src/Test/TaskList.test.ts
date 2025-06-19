@@ -1,11 +1,10 @@
 vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import TaskList from '../components/TaskList.svelte';
 
-// Mock data injected via prop
 const mockTasks = [
   {
     taskId: 1,
@@ -13,9 +12,10 @@ const mockTasks = [
     command: 'echo A',
     workerId: 'Worker-1',
     stepId: 10,
+    workflowId: 100,
     status: 1,
     runningTimeout: '30s',
-    output: 'OK',
+    output: 'Default Output A',
     retry: 0
   },
   {
@@ -24,30 +24,61 @@ const mockTasks = [
     command: 'echo B',
     workerId: 'Worker-2',
     stepId: 11,
+    workflowId: 101,
     status: 2,
     runningTimeout: '45s',
-    output: 'OK',
+    output: 'Default Output B',
     retry: 1
   },
 ];
 
+const mockTaskLogsSaved = {
+  1: [
+    { logText: 'stdout log A1', logType: 'stdout', taskId: 1 },
+    { logText: 'stderr log A1', logType: 'stderr', taskId: 1 },
+  ],
+  2: [
+    { logText: 'stdout log B1', logType: 'stdout', taskId: 2 },
+    { logText: 'stdout log B2', logType: 'stdout', taskId: 2 },
+    { logText: 'stderr log B1', logType: 'stderr', taskId: 2 },
+  ],
+};
+
 describe('TaskList', () => {
-  it('displays tasks in the table', async () => {
-    render(TaskList, { tasks: mockTasks });
+  it('displays tasks with output and error logs', async () => {
+    render(TaskList, {
+      tasks: mockTasks,
+      taskLogsSaved: mockTaskLogsSaved,
+      workers: [],
+      workflows: [],
+      allSteps: [],
+      onOpenModal: vi.fn(),
+    });
 
-    // Checks that rows are properly rendered
     const rows = await screen.findAllByTestId(/^task-/);
-    expect(rows.length).toBe(2); // 2 mocked tasks
+    expect(rows.length).toBe(2);
 
-    // Checks that contents are visible
     expect(screen.getByText('Task A')).toBeInTheDocument();
     expect(screen.getByText('Task B')).toBeInTheDocument();
     expect(screen.getByText('echo A')).toBeInTheDocument();
     expect(screen.getByText('echo B')).toBeInTheDocument();
+
+    expect(screen.getByText((content) => content.includes('stdout log A1'))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('stdout log B1'))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('stdout log B2'))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('stderr log A1'))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('stderr log B1'))).toBeInTheDocument();
   });
 
-  it('displays a message if no tasks are present', async () => {
-    render(TaskList, { tasks: [] });
+  it('displays default message when no tasks are present', async () => {
+    render(TaskList, {
+      tasks: [],
+      taskLogsSaved: {},
+      workers: [],
+      workflows: [],
+      allSteps: [],
+      onOpenModal: vi.fn(),
+    });
 
     expect(screen.getByText('No task found.')).toBeInTheDocument();
   });

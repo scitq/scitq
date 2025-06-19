@@ -261,23 +261,6 @@ export async function getFlavors(): Promise<taskqueue.Flavor[]> {
 }
 
 /**
- * Retrieves workflows by name (if provided).
- * @param name - Optional name to filter workflows.
- * @returns A promise resolving to an array of workflows.
- */
-export async function getWorkFlow(name?: string): Promise<taskqueue.Workflow[]> {
-  try {
-    const wfUnary = name
-      ? await client.listWorkflows({ nameLike: name }, callOptionsWorker)
-      : await client.listWorkflows({}, callOptionsWorker);
-    return wfUnary.response?.workflows || [];
-  } catch (error) {
-    console.error("Error while retrieving workflows:", error);
-    return [];
-  }
-}
-
-/**
  * Creates new workers based on the given configuration.
  * @param concurrency - Number of concurrent tasks the worker can run.
  * @param prefetch - Number of tasks to prefetch.
@@ -470,13 +453,52 @@ export async function delJob(jobId: { jobId: any }) {
 }
 
 
+/* -------------------------------- WORKFLOWS -------------------------------- */ 
+
+/**
+ * Retrieves a list of workflows from the server.
+ * If a `name` is provided, only workflows whose names match or partially match the given string will be returned.
+ *
+ * @param {string} [name] - Optional string to filter workflows by name (case-insensitive, partial match).
+ * @returns {Promise<taskqueue.Workflow[]>} A promise resolving to an array of workflows. Returns an empty array on error.
+ */
+export async function getWorkFlow(name?: string): Promise<taskqueue.Workflow[]> {
+  try {
+    const wfUnary = name
+      ? await client.listWorkflows({ nameLike: name }, callOptionsWorker)
+      : await client.listWorkflows({}, callOptionsWorker);
+    return wfUnary.response?.workflows || [];
+  } catch (error) {
+    console.error("Error while retrieving workflows:", error);
+    return [];
+  }
+}
+
+/**
+ * Retrieves all steps associated with a specific workflow.
+ *
+ * @param {number} workflowId - The ID of the workflow for which to retrieve steps.
+ * @returns {Promise<taskqueue.Step[]>} A promise resolving to an array of steps. Returns an empty array on error.
+ */
+export async function getSteps(workflowId: number): Promise<taskqueue.Step[]> {
+  try {
+    const stepUnary = await client.listSteps({ workflowId }, callOptionsWorker);
+    return stepUnary.response?.steps || [];
+  } catch (error) {
+    console.error("Error while retrieving steps:", error);
+    return [];
+  }
+}
+
+
 /* -------------------------------- TASKS -------------------------------- */ 
 
 /**
- * Retrieves all tasks, optionally filtered by worker ID, step ID, and status.
- * Can also sort the resulting list by task ID, worker ID, or workflow step ID.
+ * Retrieves all tasks, optionally filtered by worker ID, workflowID, step ID, and status.
+ * Can also sort the resulting list by task ID, worker ID, workflowID or workflow step ID.
  * 
  * @param {number} [workerId] - Optional worker ID to filter tasks by.
+ * @param {number} [workflowId] - Optional workflow ID to filter tasks by.
  * @param {number} [stepId] - Optional step ID to filter tasks by.
  * @param {string} [statusFilter] - Optional task status to filter by.
  * @param {'task' | 'worker' | 'workflow'} [sortBy] - Optional sorting key for the returned tasks.
@@ -484,9 +506,10 @@ export async function delJob(jobId: { jobId: any }) {
  */
 export async function getAllTasks(
   workerId?: number,
+  workflowId?: number,
   stepId?: number,
   statusFilter?: string,
-  sortBy?: 'task' | 'worker' | 'workflow'
+  sortBy?: 'task' | 'worker' | 'workflow' | 'step'
 ): Promise<taskqueue.Task[]> {
   try {
     const request: taskqueue.ListTasksRequest = {};
@@ -502,6 +525,11 @@ export async function getAllTasks(
     const taskUnary = await client.listTasks(request, callOptionsWorker);
     let allTasks = taskUnary.response?.tasks || [];
 
+    // Filter tasks by worflowId if provided
+    if (workflowId !== undefined) {
+      allTasks = allTasks.filter(task => task.workflowId === workflowId);
+    }
+
     // Filter tasks by stepId if provided
     if (stepId !== undefined) {
       allTasks = allTasks.filter(task => task.stepId === stepId);
@@ -516,6 +544,8 @@ export async function getAllTasks(
           case 'worker':
             return (a.workerId ?? 0) - (b.workerId ?? 0);
           case 'workflow':
+            return (a.workflowId ?? 0) - (b.workflowId ?? 0);
+          case 'step':
             return (a.stepId ?? 0) - (b.stepId ?? 0);
           default:
             return 0;
@@ -529,6 +559,78 @@ export async function getAllTasks(
     return [];
   }
 }
+
+/**
+ * Streams the standard output logs (`stdout`) of a task in real time.
+ * Continuously listens to logs from the server and calls `onNewLog` for each received log entry.
+ *
+ * @param {number} taskIdNumber - The ID of the task for which logs should be streamed.
+ * @param {(log: taskqueue.TaskLog) => void} onNewLog - Callback function that is invoked each time a new stdout log is received.
+ * @returns {Promise<void>} A promise that resolves when the streaming ends or fails.
+ */
+export async function streamTaskLogsOutput(
+  taskIdNumber: number,
+  onNewLog: (log: taskqueue.TaskLog) => void
+): Promise<void> {
+  try {
+    const TaskId: taskqueue.TaskId = { taskId: taskIdNumber };
+    const taskLogStream = client.streamTaskLogsOutput(TaskId, callOptionsWorker);
+    
+    for await (const log of taskLogStream.responses) {
+      onNewLog(log);
+    }
+  } catch (error) {
+    console.error("Error while streaming task log:", error);
+  }
+}
+
+/**
+ * Streams the standard error logs (`stderr`) of a task in real time.
+ * Continuously listens to logs from the server and calls `onNewLog` for each received error log entry.
+ *
+ * @param {number} taskIdNumber - The ID of the task for which error logs should be streamed.
+ * @param {(log: taskqueue.TaskLog) => void} onNewLog - Callback function that is invoked each time a new stderr log is received.
+ * @returns {Promise<void>} A promise that resolves when the streaming ends or fails.
+ */
+export async function streamTaskLogsErr(
+  taskIdNumber: number,
+  onNewLog: (log: taskqueue.TaskLog) => void
+): Promise<void> {
+  try {
+    const TaskId: taskqueue.TaskId = { taskId: taskIdNumber };
+    const taskLogStream = client.streamTaskLogsErr(TaskId, callOptionsWorker);
+    
+    for await (const log of taskLogStream.responses) {
+      onNewLog(log);
+    }
+  } catch (error) {
+    console.error("Error while streaming task log:", error);
+  }
+}
+
+export async function getLogsBatch(taskIds: number[], chunkSize: number, skip?: number, type?: string): Promise<taskqueue.LogChunk[]> {
+  try {
+    const request: any = {
+      taskIds: taskIds,
+      chunkSize: chunkSize,
+    };
+
+    if (skip !== undefined) {
+      request.skipFromEnd = skip;
+    }
+
+    if (type !== undefined) {
+      request.logType = type;
+    }
+
+    const response = await client.getLogsChunk(request, callOptionsWorker);
+    return response.response?.logs || [];
+  } catch (error) {
+    console.error("Error while retrieving logs:", error);
+    return [];
+  }
+}
+
 
 /* -------------------------------- STATUS -------------------------------- */ 
 

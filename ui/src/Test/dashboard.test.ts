@@ -48,7 +48,6 @@ describe('Worker integration', () => {
     mockApi.getWorkers.mockResolvedValue([
       { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1' }
     ]);
-    mockApi.getStats.mockResolvedValue({});
     mockApi.getStatus.mockResolvedValue([{ workerId: 1, status: 'online' }]);
   });
 

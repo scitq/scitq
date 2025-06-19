@@ -1,0 +1,99 @@
+<script lang="ts"> 
+  import StepList from './StepList.svelte';
+  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronRight, ChevronDown } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  
+  /**
+   * List of workflows passed as a prop.
+   * @type {Array<{ workflowId: number, name: string }>}
+   */
+  export let workflows = [];
+
+  /**
+   * Set of workflow IDs that are currently expanded.
+   * This is used to control visibility of steps per workflow.
+   * @type {Set<number>}
+   */
+  let expandedWorkflows = new Set<number>();
+
+  /**
+   * Toggles the expanded/collapsed state of a workflow.
+   * If already expanded, it collapses it; otherwise, expands it.
+   * Creates a new Set to trigger Svelte reactivity.
+   *
+   * @param {number} workflowId - The ID of the workflow to toggle.
+   */
+  function toggleWorkflow(workflowId: number): void {
+    if (expandedWorkflows.has(workflowId)) {
+      expandedWorkflows.delete(workflowId);
+    } else {
+      expandedWorkflows.add(workflowId);
+    }
+
+    // Force reactivity by creating a new Set
+    expandedWorkflows = new Set(expandedWorkflows);
+  }
+
+  /**
+   * Lifecycle hook that runs once when the component mounts.
+   * If the URL hash contains `?open=<workflowId>`, that workflow will be auto-expanded and scrolled into view.
+   */
+  onMount(() => {
+    const hash = window.location.hash;
+    const params = new URLSearchParams(hash.split('?')[1]);
+    const openId = params.get('open');
+
+    if (openId) {
+      const workflowId = parseInt(openId);
+      if (!isNaN(workflowId)) {
+        expandedWorkflows.add(workflowId);
+        expandedWorkflows = new Set(expandedWorkflows); // trigger reactivity
+
+        // Scroll to the workflow element (if found)
+        setTimeout(() => {
+          const el = document.querySelector(`[data-testid="wf-${workflowId}"]`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
+      }
+    }
+  });
+</script>
+
+
+
+{#if workflows && workflows.length > 0}
+  <div class="wf-list">
+    {#each workflows as wf (wf.workflowId)}
+      <div class="wf-item" data-testid={`wf-${wf.workflowId}`}>
+        <button class="wf-chevron-btn" on:click={() => toggleWorkflow(wf.workflowId)}>
+          {#if expandedWorkflows.has(wf.workflowId)}
+            <ChevronDown class="wf-chevron" data-testid={`chevronDown-${wf.workflowId}`}/>
+          {:else}
+            <ChevronRight class="wf-chevron" data-testid={`chevronRight-${wf.workflowId}`}/>
+          {/if}
+        </button>
+
+        <div class="wf-info">
+          <span class="wf-id">#{wf.workflowId}</span>
+          <a href={`#/tasks?workflowId=${wf.workflowId}`} class="wf-name">{wf.name}</a>
+          <div class="wf-progress-bar"></div> <!-- à remplacer plus tard -->
+        </div>
+
+        <div class="wf-actions">
+          <button class="btn-action" title="Pause"><PauseCircle /></button>
+          <button class="btn-action" title="Reset"><RefreshCw /></button>
+          <button class="btn-action" title="Break"><CircleX /></button>
+          <button class="btn-action" title="Clear"><Eraser /></button>
+        </div>
+      </div>
+
+      {#if expandedWorkflows.has(wf.workflowId)}
+        <div class="wf-steps">
+          <StepList workflowId={wf.workflowId} />
+        </div>
+      {/if}
+    {/each}
+  </div>
+{:else}
+  <p class="workerCompo-empty-state">No Workflow found.</p>
+{/if}

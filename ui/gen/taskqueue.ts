@@ -171,6 +171,10 @@ export interface Task {
      * @generated from protobuf field: optional uint32 worker_id = 17;
      */
     workerId?: number;
+    /**
+     * @generated from protobuf field: optional uint32 workflow_id = 18;
+     */
+    workflowId?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -310,6 +314,62 @@ export interface TaskLog {
      * @generated from protobuf field: string log_text = 3;
      */
     logText: string;
+}
+/**
+ * @generated from protobuf message taskqueue.GetLogsRequest
+ */
+export interface GetLogsRequest {
+    /**
+     * @generated from protobuf field: repeated uint32 taskIds = 1;
+     */
+    taskIds: number[];
+    /**
+     * @generated from protobuf field: uint32 chunkSize = 2;
+     */
+    chunkSize: number;
+    /**
+     * @generated from protobuf field: optional uint32 skipFromEnd = 3;
+     */
+    skipFromEnd?: number;
+    /**
+     * @generated from protobuf field: optional string log_type = 4;
+     */
+    logType?: string;
+}
+/**
+ * @generated from protobuf message taskqueue.LogChunk
+ */
+export interface LogChunk {
+    /**
+     * @generated from protobuf field: uint32 taskId = 1;
+     */
+    taskId: number;
+    /**
+     * @generated from protobuf field: repeated string stdout = 2;
+     */
+    stdout: string[];
+    /**
+     * @generated from protobuf field: repeated string stderr = 3;
+     */
+    stderr: string[];
+}
+/**
+ * @generated from protobuf message taskqueue.LogChunkList
+ */
+export interface LogChunkList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.LogChunk logs = 1;
+     */
+    logs: LogChunk[];
+}
+/**
+ * @generated from protobuf message taskqueue.TaskIds
+ */
+export interface TaskIds {
+    /**
+     * @generated from protobuf field: repeated uint32 task_ids = 1;
+     */
+    taskIds: number[];
 }
 /**
  * @generated from protobuf message taskqueue.TaskId
@@ -1367,7 +1427,8 @@ class Task$Type extends MessageType<Task> {
             { no: 14, name: "running_timeout", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 15, name: "upload_timeout", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 16, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 17, name: "worker_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
+            { no: 17, name: "worker_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 18, name: "workflow_id", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -1438,6 +1499,9 @@ class Task$Type extends MessageType<Task> {
                 case /* optional uint32 worker_id */ 17:
                     message.workerId = reader.uint32();
                     break;
+                case /* optional uint32 workflow_id */ 18:
+                    message.workflowId = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1501,6 +1565,9 @@ class Task$Type extends MessageType<Task> {
         /* optional uint32 worker_id = 17; */
         if (message.workerId !== undefined)
             writer.tag(17, WireType.Varint).uint32(message.workerId);
+        /* optional uint32 workflow_id = 18; */
+        if (message.workflowId !== undefined)
+            writer.tag(18, WireType.Varint).uint32(message.workflowId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2072,6 +2139,248 @@ class TaskLog$Type extends MessageType<TaskLog> {
  * @generated MessageType for protobuf message taskqueue.TaskLog
  */
 export const TaskLog = new TaskLog$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetLogsRequest$Type extends MessageType<GetLogsRequest> {
+    constructor() {
+        super("taskqueue.GetLogsRequest", [
+            { no: 1, name: "taskIds", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "chunkSize", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "skipFromEnd", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "log_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetLogsRequest>): GetLogsRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.taskIds = [];
+        message.chunkSize = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GetLogsRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetLogsRequest): GetLogsRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated uint32 taskIds */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.taskIds.push(reader.uint32());
+                    else
+                        message.taskIds.push(reader.uint32());
+                    break;
+                case /* uint32 chunkSize */ 2:
+                    message.chunkSize = reader.uint32();
+                    break;
+                case /* optional uint32 skipFromEnd */ 3:
+                    message.skipFromEnd = reader.uint32();
+                    break;
+                case /* optional string log_type */ 4:
+                    message.logType = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetLogsRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated uint32 taskIds = 1; */
+        if (message.taskIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.taskIds.length; i++)
+                writer.uint32(message.taskIds[i]);
+            writer.join();
+        }
+        /* uint32 chunkSize = 2; */
+        if (message.chunkSize !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.chunkSize);
+        /* optional uint32 skipFromEnd = 3; */
+        if (message.skipFromEnd !== undefined)
+            writer.tag(3, WireType.Varint).uint32(message.skipFromEnd);
+        /* optional string log_type = 4; */
+        if (message.logType !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.logType);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.GetLogsRequest
+ */
+export const GetLogsRequest = new GetLogsRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class LogChunk$Type extends MessageType<LogChunk> {
+    constructor() {
+        super("taskqueue.LogChunk", [
+            { no: 1, name: "taskId", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "stdout", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "stderr", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<LogChunk>): LogChunk {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.taskId = 0;
+        message.stdout = [];
+        message.stderr = [];
+        if (value !== undefined)
+            reflectionMergePartial<LogChunk>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: LogChunk): LogChunk {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 taskId */ 1:
+                    message.taskId = reader.uint32();
+                    break;
+                case /* repeated string stdout */ 2:
+                    message.stdout.push(reader.string());
+                    break;
+                case /* repeated string stderr */ 3:
+                    message.stderr.push(reader.string());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: LogChunk, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 taskId = 1; */
+        if (message.taskId !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.taskId);
+        /* repeated string stdout = 2; */
+        for (let i = 0; i < message.stdout.length; i++)
+            writer.tag(2, WireType.LengthDelimited).string(message.stdout[i]);
+        /* repeated string stderr = 3; */
+        for (let i = 0; i < message.stderr.length; i++)
+            writer.tag(3, WireType.LengthDelimited).string(message.stderr[i]);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.LogChunk
+ */
+export const LogChunk = new LogChunk$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class LogChunkList$Type extends MessageType<LogChunkList> {
+    constructor() {
+        super("taskqueue.LogChunkList", [
+            { no: 1, name: "logs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => LogChunk }
+        ]);
+    }
+    create(value?: PartialMessage<LogChunkList>): LogChunkList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.logs = [];
+        if (value !== undefined)
+            reflectionMergePartial<LogChunkList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: LogChunkList): LogChunkList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.LogChunk logs */ 1:
+                    message.logs.push(LogChunk.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: LogChunkList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.LogChunk logs = 1; */
+        for (let i = 0; i < message.logs.length; i++)
+            LogChunk.internalBinaryWrite(message.logs[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.LogChunkList
+ */
+export const LogChunkList = new LogChunkList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class TaskIds$Type extends MessageType<TaskIds> {
+    constructor() {
+        super("taskqueue.TaskIds", [
+            { no: 1, name: "task_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<TaskIds>): TaskIds {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.taskIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<TaskIds>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: TaskIds): TaskIds {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated uint32 task_ids */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.taskIds.push(reader.uint32());
+                    else
+                        message.taskIds.push(reader.uint32());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: TaskIds, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated uint32 task_ids = 1; */
+        if (message.taskIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.taskIds.length; i++)
+                writer.uint32(message.taskIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.TaskIds
+ */
+export const TaskIds = new TaskIds$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TaskId$Type extends MessageType<TaskId> {
     constructor() {
@@ -5039,7 +5348,9 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "PingAndTakeNewTasks", options: {}, I: PingAndGetNewTasksRequest, O: TaskListAndOther },
     { name: "UpdateTaskStatus", options: {}, I: TaskStatusUpdate, O: Ack },
     { name: "SendTaskLogs", clientStreaming: true, options: {}, I: TaskLog, O: Ack },
-    { name: "StreamTaskLogs", serverStreaming: true, options: {}, I: TaskId, O: TaskLog },
+    { name: "StreamTaskLogsOutput", serverStreaming: true, options: {}, I: TaskId, O: TaskLog },
+    { name: "StreamTaskLogsErr", serverStreaming: true, options: {}, I: TaskId, O: TaskLog },
+    { name: "GetLogsChunk", options: {}, I: GetLogsRequest, O: LogChunkList },
     { name: "ListTasks", options: {}, I: ListTasksRequest, O: TaskList },
     { name: "ListWorkers", options: {}, I: ListWorkersRequest, O: WorkersList },
     { name: "CreateWorker", options: {}, I: WorkerRequest, O: WorkerIds },

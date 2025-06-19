@@ -1,21 +1,14 @@
 <script lang="ts">
-  import {
-    Home,
-    ListChecks,
-    Package,
-    Settings,
-    Power,
-    ChevronDown
-  } from 'lucide-svelte';
+  import { Home, ListChecks, Package, Settings, Power, ChevronDown} from 'lucide-svelte';
   import logo from '../assets/icons/logoGMT.png';
   import '../styles/dashboard.css';
-
   import { isLoggedIn } from '../lib/Stores/user';
   import { logout } from '../lib/auth';
   import Router from 'svelte-spa-router';
   import Dashboard from '../pages/Dashboard.svelte';
   import SettingPage from '../pages/SettingPage.svelte';
   import TaskPage from '../pages/TaskPage.svelte';
+  import WorkflowPage from '../pages/WorkflowPage.svelte';
 
   let tasksOpen = false;
   let awaitingExecutionOpen = false;
@@ -28,7 +21,8 @@
   const routes = {
     '/dashboard' : Dashboard,
     '/settings': SettingPage,
-    '/tasks' : TaskPage
+    '/tasks' : TaskPage,
+    '/worflows' : WorkflowPage
   };
 
   /**
@@ -155,8 +149,8 @@
       {/if}
     </div>
 
-    <a class="dashboard-nav-link" href="#">
-      <Package class="dashboard-icon" /> Batch
+    <a class="dashboard-nav-link" href="#/workflows">
+      <Package class="dashboard-icon" /> Workflows
     </a>
 
     <a class="dashboard-nav-link" href="#/settings">

@@ -28,9 +28,11 @@ ui/
 │   │   ├── JobsCompo.svelte
 │   │   ├── JoginForm.svelte
 │   │   ├── Sidebar.svelte
+│   │   ├── StepList.svelte
 │   │   ├── TaskList.svelte
 │   │   ├── UserList.svelte
-│   │   └── WorkerCompo.svelte
+│   │   ├── WorkerCompo.svelte
+│   │   └── WorkflowList.svelte
 │   ├── lib/
 │   │   ├── Stores/
 │   │   ├── api.ts
@@ -44,7 +46,8 @@ ui/
 │   │   ├── Dashboard.svelte
 │   │   ├── LoginPage.svelte
 │   │   ├── SettingPage.svelte
-│   │   └── TaskPage.svelte
+│   │   ├── TaskPage.svelte
+│   │   └── WorkflowPage.svelte
 │   ├── styles/
 │   │   ├── createForm.css
 │   │   ├── dashboard.css
@@ -53,8 +56,9 @@ ui/
 │   │   ├── loginPage.css
 │   │   ├── SettingPage.css
 │   │   ├── tasks.css
-│   │   └── userList.css
-│   │   └── worker.css
+│   │   ├── userList.css
+│   │   ├── worker.css
+│   │   └── workflow.css
 │   ├── Test/
 │   ├── App.svelte
 │   ├── main.ts
@@ -260,15 +264,16 @@ Here:
 
 The API layer (`lib/api.ts`) makes several key features possible:
 
-| Feature                | Function(s)                                                                                              | Description                                                                                  |
-|------------------------|--------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| 👤 **User Management**  | `changepswd()`, `getListUser()`, `newUser()`, `delUser()`, `forgotPassword()`, `getUser()`, `updateUser()`            | User management: password change, creation, deletion, retrieval, update                      |
-| 👷 **Worker Management**| `getWorkers()`, `newWorker()`, `updateWorkerConfig()`, `delWorker()`, `getStatus()`, `getTasksCount()`              | Worker management: list, create, update config, delete, status, task counts                  |
-| 📋 **Job Management**   | `getJobs()`, `delJob()`, `getJobStatusClass()`, `getJobStatusText()`                                           | Job management: retrieve, delete, status mapping for UI                                     |
-| 🧪 **Flavor Discovery** | `getFlavors()`                                                                                           | Retrieve available flavors for worker creation                                             |
-| 🎨 **UI Mapping**       | `getJobStatusClass()`, `getJobStatusText()`, `getWorkerStatusClass()`, `getWorkerStatusText()`                  | Map backend status codes to frontend classes and texts                                     |
-| 📊 **Worker Stats**     | `getStats()`, `formatBytesPair()`                                                                          | Retrieve worker statistics and format byte data                                            |
-| 📋 **Task Management**  | `getAllTasks()`                                                                                          | Retrieve tasks with status filters                                                         |
+| Feature                   | Function(s)                                                                                                                       | Description                                                                                          |
+|---------------------------|-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| 👤 **User Management**     | `changepswd()`, `getListUser()`, `newUser()`, `delUser()`, `forgotPassword()`, `getUser()`, `updateUser()`                        | User management: password change, creation, deletion, retrieval, update                              |
+| 👷 **Worker Management**   | `getWorkers()`, `newWorker()`, `updateWorkerConfig()`, `delWorker()`, `getStatus()`, `getTasksCount()`                            | Worker management: list, create, update config, delete, status, task counts                          |
+| 📋 **Job Management**      | `getJobs()`, `delJob()`, `getJobStatusClass()`, `getJobStatusText()`                                                             | Job management: retrieve, delete, status mapping for UI                                               |
+| 🧪 **Flavor Discovery**    | `getFlavors()`                                                                                                                    | Retrieve available flavors for worker creation                                                       |
+| 🎨 **UI Mapping**          | `getJobStatusClass()`, `getJobStatusText()`, `getWorkerStatusClass()`, `getWorkerStatusText()`                                  | Map backend status codes to frontend classes and texts                                               |
+| 📊 **Worker Stats**        | `getStats()`, `formatBytesPair()`                                                                                                 | Retrieve worker statistics and format byte data                                                      |
+| 📋 **Task Management**     | `getAllTasks()`, `streamTaskLogsOutput()`, `streamTaskLogsErr()`                                                                  | Retrieve tasks with filters/sorting; stream live task logs (stdout & stderr)                         |
+| 🔄 **Workflow Management** | `getWorkFlow()`, `getSteps()`                                                                                                     | Retrieve workflows and their associated steps                                                        |
 
 These functions use the client generated from the `.proto` file (`taskqueue.client.ts`) and the associated data types (`taskqueue.ts`), making the communication **type-safe**, **predictable**, and **intuitive**.
 
@@ -284,6 +289,9 @@ These functions use the client generated from the `.proto` file (`taskqueue.clie
 | 📋 **UserList.svelte** | Displays a table of users with columns: Username, Email, Admin status, and Actions.<br>Receives the `users` list as a prop from the parent component (`SettingsPage`).<br>Provides modals for editing user info and resetting passwords.<br>Supports user deletion with confirmation.<br>Dispatches events: `onUserUpdated`, `onUserDeleted`, and `onForgotPassword`.<br>Includes password visibility toggle with `Eye` / `EyeOff` icons<br>**Styles**: `worker.css`, `userList.css` |
 | 🆕 **CreateUserForm.svelte** | Form for creating new users.<br>Receives input for username, email, password (with visibility toggle), and admin checkbox.<br>Calls the API to create a user and notifies the parent component (`SettingsPage`) via the `onUserCreated` callback with the new user data.<br>Resets form fields after successful creation.<br>**Styles**: `createForm.css` |
 | 📝 **TaskList.svelte**   | Displays all tasks in a detailed table with columns: Task ID, Name, Command, Worker, Workflow, Step, Status, Start, Runtime, Output, Error, Actions.<br>Uses `getJobStatusClass()`, `getJobStatusText()`, and lucide icons for restart, download, delete.<br>Shows a message if no tasks found.<br>**Styles**: `worker.css`, `jobsCompo.css` |
+| 📂 **WorkflowList.svelte** | Displays a list of workflows with expandable details.<br>Uses lucide icons for actions (Pause, Reset, Break, Clear).<br>Manages expanded state for workflows.<br>Embeds `StepList` component for detailed step display.<br>**Styles**: (to be added) |
+| 📑 **StepList.svelte**     | Shows detailed steps for a given workflow.<br>Fetches steps via `getSteps(workflowId)` on mount.<br>Displays table with step metrics and action buttons.<br>Uses lucide icons for Pause, Reset, Break, Clear.<br>**Styles**: `worker.css`, `jobsCompo.css` |
+
 
 ## 📄 Pages
 
@@ -292,7 +300,8 @@ These functions use the client generated from the `.proto` file (`taskqueue.clie
 | 🖥️ **Dashboard.svelte** | Main page after login.<br>Displays `WorkerCompo` with a list of workers retrieved on mount via `getWorkers()`.<br>Handles worker updates (`handleWorkerUpdated`) and deletions (`handleWorkerDeleted`) by syncing with the API and updating local state.<br>Includes `CreateForm` to create new workers and appends them via `onWorkerCreated` → `onWorkerAdded`.<br>Shows success messages on add/delete actions.<br>Also includes `JobCompo` for job-related UI.<br>**Styles**: `dashboard.css` |
 | 🔐 **loginPage.svelte**   | Login page with `LoginForm`.<br>Checks for token in `localStorage` and redirects to `/dashboard`.<br>Displays logo and header.<br>**Styles**: `loginPage.css` |
 | ⚙️ **SettingPage.svelte** | User and admin settings page.<br>Displays personal profile info and allows password change via modal.<br>Fetches and maintains the full list of users on mount using `getListUser()`, then passes it to `UserList`.<br>If the user is admin: shows `CreateUserForm` and `UserList`.<br>Receives new user data from `CreateUserForm` via `onUserCreated` and adds it to the local list.<br>Handles user updates (`onUserUpdated`), deletion (`onUserDeleted`), and password reset (`onForgotPassword`), updating local state and showing success alerts accordingly.<br>**Styles**: `SettingPage.css` |
-| 📝 **TaskPage.svelte**    | Task management page with dynamic filters: status, worker, workflow, and sorting.<br>Fetches tasks, workers, and workflows on mount.<br>Updates task list on URL hash change.<br>Includes filter form and status filter buttons.<br>Displays filtered tasks via `TaskList`.<br>**Styles**: `tasks.css` |
+| 📝 **TaskPage.svelte**    | Task management page with dynamic filters: status, worker, workflow, step and sorting.<br>Fetches tasks, workers, workflows and steps on mount.<br>Updates task list on URL hash change.<br>Includes filter form and status filter buttons.<br>Displays filtered tasks via `TaskList`.<br>**Styles**: `tasks.css` |
+| 🌐 **WorkflowPage.svelte** | Workflow overview page.<br>Fetches workflows on mount via `getWorkFlow()`.<br>Displays `WorkflowList` component with fetched workflows.<br>Also fetches and displays associated steps for each workflow.<br>Uses styles from `workflow.css`. |
 
 ## 📖 Event-Driven Architecture in Svelte
 This application leverages Svelte's custom event system for **surgical-precision component communication**, achieving **300-500ms faster operations** by eliminating full data reloads. The system maintains **sub-50ms UI updates** through local state management.
@@ -573,15 +582,18 @@ it('should display Setting page when clicking "Settings" in the ToolBar', async 
 |---------------------------|-------------------------------------|
 | `CreateForm.test.ts`      | Unit                                |
 | `CreateUserForm.test.ts`  | Unit                                |
+| `dashboard.test.ts`       | Integration                         |
 | `JobsCompo.test.ts`       | Unit                                |
 | `LoginPage.test.ts`       | Unit + Integration                  |
 | `Navigation.test.ts`      | Integration                         |
 | `SettingPage.test.ts`     | Unit + Integration                  |
+| `StepList.test.ts`        | Unit                                |
 | `TaskList.test.ts`        | Unit                                |
 | `TaskPage.test.ts`        | Integration                         |
 | `UserList.test.ts`        | Unit                                |
 | `WorkerCompo.test.ts`     | Unit                                |
-| `dashboard.test.ts`       | Integration                         |
+| `WorkflowList.test.ts`    | Unit                                |
+| `WorkflowPage.test.ts`    | Integration                         |
 
 
 > **Note:**

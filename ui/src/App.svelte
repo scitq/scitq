@@ -12,6 +12,7 @@
   import Dashboard from './pages/Dashboard.svelte';
   import SettingPage from './pages/SettingPage.svelte';
   import TaskPage from './pages/TaskPage.svelte';
+  import WorkflowPage from './pages/WorkflowPage.svelte';
 
   let isSidebarVisible = true;
   let logged = false;
@@ -38,7 +39,8 @@
   const routes = {
     '/': Dashboard,
     '/settings': SettingPage,
-    '/tasks': TaskPage
+    '/tasks': TaskPage,
+    '/workflows': WorkflowPage
   };
 </script>
 

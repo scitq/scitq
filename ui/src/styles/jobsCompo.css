@@ -8,23 +8,23 @@
 }
 
 .jobCompo-status-pill.pending {
-    background-color: #ff9800;
+    background-color: #d2c7e7; /* tasks pending */
 }
 
 .jobCompo-status-pill.running {
-    background-color: #4caf50;
+    background-color: #6bb2e6; /* tasks running */
 }
 
 .jobCompo-status-pill.succeeded {
-    background-color: #2196f3;
+    background-color: #5fc18b; /* tasks succeeded */
 }
 
 .jobCompo-status-pill.failed {
-    background-color: #f44336;
+    background-color: #d9534f; /* tasks failed */
 }
 
 .jobCompo-status-pill.canceled {
-    background-color: #9e9e9e;
+    background-color: #a64f69; /* tasks canceled */
 }
 
 /* Progress bar container */
