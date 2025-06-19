@@ -1,4 +1,3 @@
-// src/main.ts
 import { mount } from 'svelte';
 import './app.css';
 import './styles/worker.css';

@@ -1,19 +1,17 @@
-import { TaskQueueClient } from '../../gen/taskqueue.client'; // Assurez-vous que le chemin est correct
+import { TaskQueueClient } from '../../gen/taskqueue.client'; // Ensure the import path is correct
 import { GrpcWebFetchTransport } from '@protobuf-ts/grpcweb-transport';
 
 /**
- * Function to get the gRPC client for interacting with the TaskQueue service.
- * 
- * This function sets up a gRPC client using the `GrpcWebFetchTransport` with the specified base URL
- * and fetch options. It returns an instance of the `TaskQueueClient` that can be used to interact with
- * the backend service via gRPC.
- * 
- * @returns {TaskQueueClient} The gRPC client instance configured for the TaskQueue service.
+ * Sets up the gRPC transport layer using GrpcWebFetchTransport.
+ * Configured to use the base URL for the backend and include credentials with fetch requests.
  */
-export function getClient() {
-  const transport = new GrpcWebFetchTransport({
-    baseUrl: 'http://localhost:8081',
-    fetchInit: {credentials: 'include'},
-  });
-  return new TaskQueueClient(transport);
-}
+const transport = new GrpcWebFetchTransport({
+  baseUrl: 'http://localhost:8081',
+  fetchInit: { credentials: 'include' },
+});
+
+/**
+ * Creates an instance of the TaskQueueClient using the configured gRPC transport.
+ * This client is used to interact with the TaskQueue gRPC service.
+ */
+export const client = new TaskQueueClient(transport);

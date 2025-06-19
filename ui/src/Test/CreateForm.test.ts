@@ -1,121 +1,149 @@
-import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+vi.mock('../lib/api', () => mockApi);
+import { mockApi } from '../mocks/api_mock';
+
+import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import CreateForm from '../components/CreateForm.svelte';
-import Dashboard from '../pages/Dashboard.svelte';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../lib/api', async () => {
-  const actual = await vi.importActual<typeof import('../lib/api')>('../lib/api');
-  return {
-    ...actual,
-    getFlavors: vi.fn().mockResolvedValue([
-      { flavorName: 'small', region: 'eu-west', provider: 'aws' },
-    ]),
-    newWorker: vi.fn(),
-    getWorkers: vi.fn(),
-  };
-});
-
-import { newWorker, getWorkers } from '../lib/api';
 
 describe('CreateForm', () => {
   beforeEach(() => {
-    vi.clearAllMocks(); // Reset all mocks before each test
+    vi.clearAllMocks();
   });
 
-  it('should load flavors and display matching suggestions for flavor, region, and provider', async () => {
-    const { container } = render(CreateForm);
+  const mockFlavors = [
+    { flavorName: 'flavor1', region: 'us-east', provider: 'aws' },
+  ];
+  const mockWorkflows = [
+    { name: 'step1' },
+  ];
+  const mockNewWorkerResponse = [
+    { workerId: 'w1', workerName: 'workerOne' }
+  ];
+  const mockStatusResponse = [
+    { workerId: 'w1', status: 'running' }
+  ];
 
-    // Wait for the flavor input to appear (which implies flavors are loaded)
-    await waitFor(() => expect(container.querySelector('#flavor')).toBeInTheDocument());
+  it('should load flavors and workflows on mount', async () => {
+    // Mock API functions
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
 
-    const flavorInput = container.querySelector('#flavor') as HTMLInputElement;
-    const regionInput = container.querySelector('#region') as HTMLInputElement;
-    const providerInput = container.querySelector('#provider') as HTMLInputElement;
+    // Render the component
+    render(CreateForm);
 
-    // Test flavor autocomplete
-    await fireEvent.input(flavorInput, { target: { value: 'sma' } });
+    // Check that API functions were called
     await waitFor(() => {
-      expect(screen.getByText('small')).toBeInTheDocument();
-    });
-    await fireEvent.click(screen.getByText('small'));
-    expect(flavorInput.value).toBe('small');
-
-    // Test region autocomplete
-    await fireEvent.input(regionInput, { target: { value: 'eu' } });
-    await waitFor(() => {
-      expect(screen.getByText('eu-west')).toBeInTheDocument();
-    });
-    await fireEvent.click(screen.getByText('eu-west'));
-    expect(regionInput.value).toBe('eu-west');
-
-    // Test provider autocomplete
-    await fireEvent.input(providerInput, { target: { value: 'aw' } });
-    await waitFor(() => {
-      expect(screen.getByText('aws')).toBeInTheDocument();
-    });
-    await fireEvent.click(screen.getByText('aws'));
-    expect(providerInput.value).toBe('aws');
-  });
-
-  it('should call newWorker with form values when Add button is clicked', async () => {
-    const { getByTestId, container } = render(CreateForm);
-
-    // Wait for the form to fully render
-    await waitFor(() => container.querySelector('#flavor'));
-
-    // Get form inputs by ID
-    const concurrencyInput = container.querySelector('#concurrency') as HTMLInputElement;
-    const prefetchInput = container.querySelector('#prefetch') as HTMLInputElement;
-    const flavorInput = container.querySelector('#flavor') as HTMLInputElement;
-    const regionInput = container.querySelector('#region') as HTMLInputElement;
-    const providerInput = container.querySelector('#provider') as HTMLInputElement;
-    const numberInput = container.querySelector('#number') as HTMLInputElement;
-    const taskInput = container.querySelector('#task') as HTMLInputElement;
-
-    // Fill the form inputs
-    await fireEvent.input(concurrencyInput, { target: { value: '4' } });
-    await fireEvent.input(prefetchInput, { target: { value: '2' } });
-    await fireEvent.input(flavorInput, { target: { value: 'small' } });
-    await fireEvent.input(regionInput, { target: { value: 'eu-west' } });
-    await fireEvent.input(providerInput, { target: { value: 'aws' } });
-    await fireEvent.input(numberInput, { target: { value: '3' } });
-    await fireEvent.input(taskInput, { target: { value: 'task-xyz' } });
-
-    // Click the "Add" button
-    const addButton = getByTestId('add-worker-button');
-    await fireEvent.click(addButton);
-
-    // Mock getWorkers response after submission
-    const newWorkerData = { workerId: 'def456', name: 'worker-new', status: 'P' };
-    (getWorkers as any).mockResolvedValueOnce([
-      { workerId: 'abc123', name: 'worker-old', status: 'P' },
-      newWorkerData,
-    ]);
-
-    // Expect the newWorker API call to be made with correct arguments
-    await waitFor(() => {
-      expect(newWorker).toHaveBeenCalledWith(4, 2, 'small', 'eu-west', 'aws', 3);
+      expect(mockApi.getFlavors).toHaveBeenCalled();
+      expect(mockApi.getWorkFlow).toHaveBeenCalled();
     });
   });
 
-  it('should call newWorker and refresh the worker list', async () => {
-    // Mock creation of a new worker
-    (newWorker as any).mockResolvedValueOnce({ workerId: 'new999' });
+  it('should correctly fill and update form fields', async () => {
+    // Mock API functions
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
 
-    // Mock updated worker list
-    (getWorkers as any).mockResolvedValueOnce([
-      { workerId: 'new999', name: 'worker-added', status: 'P' },
-    ]);
+    // Render the component
+    const { getByLabelText } = render(CreateForm);
 
-    render(Dashboard);
-
-    // Click on the Add button from the dashboard
-    const addButton = await screen.findByTestId('add-worker-button');
-    await fireEvent.click(addButton);
-
-    // Wait for the new worker to appear in the DOM
+    // Wait for data to load
     await waitFor(() => {
-      expect(screen.getByTestId('worker-new999')).toBeInTheDocument();
+      expect(mockApi.getFlavors).toHaveBeenCalled();
+    });
+
+    // Fill and verify form fields
+    const concurrencyInput = getByLabelText('Concurrency:') as HTMLInputElement;
+    await fireEvent.input(concurrencyInput, { target: { value: '5' } });
+    expect(concurrencyInput.value).toBe('5');
+
+    const prefetchInput = getByLabelText('Prefetch:') as HTMLInputElement;
+    await fireEvent.input(prefetchInput, { target: { value: '10' } });
+    expect(prefetchInput.value).toBe('10');
+
+    const flavorInput = getByLabelText('Flavor:') as HTMLInputElement;
+    await fireEvent.input(flavorInput, { target: { value: 'flavor1' } });
+    expect(flavorInput.value).toBe('flavor1');
+
+    const stepInput = getByLabelText('Step (Workflow.step):') as HTMLInputElement;
+    await fireEvent.input(stepInput, { target: { value: 'step1' } });
+    expect(stepInput.value).toBe('step1');
+  });
+
+  it('should call newWorker with correct parameters when form is submitted', async () => {
+    // Mock API functions
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
+    mockApi.newWorker.mockResolvedValue(mockNewWorkerResponse);
+    mockApi.getStatus.mockResolvedValue([]);
+
+    // Render the component
+    const { getByLabelText, getByTestId } = render(CreateForm);
+
+    // Fill form fields
+    await fireEvent.input(getByLabelText('Concurrency:'), { target: { value: '5' } });
+    await fireEvent.input(getByLabelText('Prefetch:'), { target: { value: '10' } });
+    await fireEvent.input(getByLabelText('Flavor:'), { target: { value: 'flavor1' } });
+    await fireEvent.input(getByLabelText('Region:'), { target: { value: 'us-east' } });
+    await fireEvent.input(getByLabelText('Provider:'), { target: { value: 'aws' } });
+    await fireEvent.input(getByLabelText('Step (Workflow.step):'), { target: { value: 'step1' } });
+    await fireEvent.input(getByLabelText('Number:'), { target: { value: '3' } });
+
+    // Submit the form
+    await fireEvent.click(getByTestId('add-worker-button'));
+
+    // Check that newWorker was called with correct arguments
+    await waitFor(() => {
+      expect(mockApi.newWorker).toHaveBeenCalledWith(
+        5, 10, 'flavor1', 'us-east', 'aws', 3, 'step1'
+      );
+    });
+  });
+
+  it('should dispatch onWorkerCreated event with correct data', async () => {
+    // Mock API functions
+    mockApi.getFlavors.mockResolvedValue(mockFlavors);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
+    mockApi.newWorker.mockResolvedValue(mockNewWorkerResponse);
+    mockApi.getStatus.mockResolvedValue(mockStatusResponse);
+
+    // Mock the onWorkerCreated function
+    const mockOnWorkerCreated = vi.fn();
+
+    // Render the component with mock prop
+    const { getByLabelText, getByTestId } = render(CreateForm, {
+      props: {
+        onWorkerCreated: mockOnWorkerCreated
+      }
+    });
+
+    // Fill form fields and submit
+    await fireEvent.input(getByLabelText('Concurrency:'), { target: { value: '5' } });
+    await fireEvent.input(getByLabelText('Prefetch:'), { target: { value: '10' } });
+    await fireEvent.input(getByLabelText('Flavor:'), { target: { value: 'flavor1' } });
+    await fireEvent.input(getByLabelText('Region:'), { target: { value: 'us-east' } });
+    await fireEvent.input(getByLabelText('Provider:'), { target: { value: 'aws' } });
+    await fireEvent.input(getByLabelText('Step (Workflow.step):'), { target: { value: 'step1' } });
+    await fireEvent.input(getByLabelText('Number:'), { target: { value: '3' } });
+    
+    await fireEvent.click(getByTestId('add-worker-button'));
+
+    // Check that the onWorkerCreated event was dispatched with correct data
+    await waitFor(() => {
+      expect(mockOnWorkerCreated).toHaveBeenCalledWith({
+        detail: {
+          worker: {
+            workerId: 'w1',
+            name: 'workerOne',
+            concurrency: 5,
+            prefetch: 10,
+            status: 'running',
+            flavor: 'flavor1',
+            provider: 'aws',
+            region: 'us-east',
+          }
+        }
+      });
     });
   });
 });

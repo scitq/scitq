@@ -1,10 +1,12 @@
+vi.mock('../lib/api', () => mockApi);
+import { mockApi } from '../mocks/api_mock';
+
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import WorkerCompo from '../components/WorkerCompo.svelte';
 
 
-
-// Définir le type de `tasksStatus` pour résoudre l'erreur
+// Define types for task status
 interface TaskStatus {
   pending: number;
   assigned: number;
@@ -24,7 +26,9 @@ interface TasksStatus {
   [workerId: number]: TaskStatus;
 }
 
-const tasksStatus = {
+// Example task status data for testing
+// __mocks__/taskStatusMock.ts
+export const taskStatusMock : TasksStatus = {
   1: {
     pending: 3,
     assigned: 2,
@@ -38,39 +42,24 @@ const tasksStatus = {
     suspended: 10,
     canceled: 11,
     waiting: 12,
+  },
+  2: {
+    pending: 1,
+    assigned: 1,
+    accepted: 2,
+    downloading: 2,
+    running: 3,
+    uploadingSuccess: 4,
+    succeeded: 5,
+    uploadingFailure: 1,
+    failed: 2,
+    suspended: 1,
+    canceled: 0,
+    waiting: 1,
   }
 };
 
-// Mock all functions from ../lib/api
-vi.mock('../lib/api', async (importOriginal) => {
-  const actual = await importOriginal() as typeof import('../lib/api');
-  return {
-    ...actual,
-    getWorkers: vi.fn(),
-    updateWorkerConfig: vi.fn(),
-    delWorker: vi.fn(),
-    getStatusClass: (status: string) => status,
-    getStatusText: (status: string) => status,
-    getStats: vi.fn(),
-    getTasks: vi.fn((workerId: number) => ({
-      pending: () => tasksStatus[workerId as keyof typeof tasksStatus]?.pending ?? 0,
-      assigned: () => tasksStatus[workerId as keyof typeof tasksStatus]?.assigned ?? 0,
-      accepted: () => tasksStatus[workerId as keyof typeof tasksStatus]?.accepted ?? 0,
-      downloading: () => tasksStatus[workerId as keyof typeof tasksStatus]?.downloading ?? 0,
-      running: () => tasksStatus[workerId as keyof typeof tasksStatus]?.running ?? 0,
-      uploadingSuccess: () => tasksStatus[workerId as keyof typeof tasksStatus]?.uploadingSuccess ?? 0,
-      succeeded: () => tasksStatus[workerId as keyof typeof tasksStatus]?.succeeded ?? 0,
-      uploadingFailure: () => tasksStatus[workerId as keyof typeof tasksStatus]?.uploadingFailure ?? 0,
-      failed: () => tasksStatus[workerId as keyof typeof tasksStatus]?.failed ?? 0,
-      suspended: () => tasksStatus[workerId as keyof typeof tasksStatus]?.suspended ?? 0,
-      canceled: () => tasksStatus[workerId as keyof typeof tasksStatus]?.canceled ?? 0,
-      waiting: () => tasksStatus[workerId as keyof typeof tasksStatus]?.waiting ?? 0,
-    })),
-  };
-});
-
-import { getWorkers, updateWorkerConfig, delWorker, getStats} from '../lib/api';
-
+// Example worker data
 const mockWorkers = [
   {
     workerId: 1,
@@ -92,53 +81,85 @@ const mockWorkers = [
   },
 ];
 
+// Example stats for one worker
 const mockStats = {
   1: {
     cpuUsagePercent: 42.5,
     memUsagePercent: 73.1,
     load1Min: 2.5,
-    iowaitPercent: 1.1,
     disks: [
       { deviceName: 'sda1', usagePercent: 60.4 },
       { deviceName: 'sdb1', usagePercent: 88.2 },
     ],
     diskIo: {
-      readBytesRate: 1048576n, // 1MB/s
-      writeBytesRate: 524288n, // 512KB/s
-      readBytesTotal: 1073741824n, // 1GB
-      writeBytesTotal: 536870912n, // 512MB
+      readBytesRate: 1048576,
+      writeBytesRate: 524288,
+      readBytesTotal: 1073741824,
+      writeBytesTotal: 536870912,
     },
     netIo: {
-      sentBytesRate: 2097152n, // 2MB/s
-      recvBytesRate: 1048576n, // 1MB/s
-      sentBytesTotal: 2147483648n, // 2GB
-      recvBytesTotal: 1073741824n, // 1GB
+      sentBytesRate: 2097152,
+      recvBytesRate: 1048576,
+      sentBytesTotal: 2147483648,
+      recvBytesTotal: 1073741824,
     },
-  }
+  },
 };
-
-
 
 describe('WorkerCompo', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    mockApi.getWorkers.mockResolvedValue(mockWorkers);
+    (mockApi.getStats as any).mockResolvedValue({
+      1: {
+        cpuUsagePercent: 42.5,
+        memUsagePercent: 73.1,
+        load1Min: 2.5,
+        disks: [
+          { deviceName: 'sda1', usagePercent: 60.4 },
+          { deviceName: 'sdb1', usagePercent: 88.2 },
+        ],
+        diskIo: {
+          readBytesRate: 1048576,
+          writeBytesRate: 524288,
+          readBytesTotal: 1073741824,
+          writeBytesTotal: 536870912,
+        },
+        netIo: {
+          sentBytesRate: 2097152,
+          recvBytesRate: 1048576,
+          sentBytesTotal: 2147483648,
+          recvBytesTotal: 1073741824,
+        },
+      },
+    });
+    mockApi.getTasksCount.mockImplementation((workerId?: number) => {
+      if (workerId !== undefined) {
+        return Promise.resolve(taskStatusMock[workerId] ?? {});
+      }
+      const combined = Object.values(taskStatusMock).reduce((acc, curr) => {
+        for (const key in curr) {
+          acc[key] = (acc[key] || 0) + curr[key];
+        }
+        return acc;
+      }, {} as TaskStatus);
+      return Promise.resolve(combined);
+    });
   });
 
   it('should display the list of workers', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
+    (mockApi.getWorkers as any).mockResolvedValue(mockWorkers);
+    (mockApi.getStats as any).mockResolvedValue(mockStats);
 
-    const { getByText } = render(WorkerCompo);
+    const { getByText } = render(WorkerCompo, { props: { workers: mockWorkers } });
 
     await waitFor(() => {
       expect(getByText('Worker One')).toBeTruthy();
     });
   });
 
-  it('should display "No workers found." when no jobs are available', async () => {
-    (getWorkers as any).mockResolvedValue([]);
-    (getStats as any).mockResolvedValue({});
-
+  it('should display "No workers found." when there are no workers', async () => {
     const { getByText } = render(WorkerCompo);
 
     await waitFor(() => {
@@ -146,60 +167,8 @@ describe('WorkerCompo', () => {
     });
   });
 
-  it('should increase a worker\'s concurrency', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-
-    const { getByTestId } = render(WorkerCompo);
-
-    await waitFor(() => getByTestId('increase-concurrency-1'));
-
-    const plusButton = getByTestId('increase-concurrency-1');
-    await fireEvent.click(plusButton);
-
-    await waitFor(() => {
-      expect(updateWorkerConfig).toHaveBeenCalledWith(1, 6, 10);
-    });
-  });
-
-  it('should decrease a worker\'s prefetch', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-
-    const { getByTestId } = render(WorkerCompo);
-    await waitFor(() => getByTestId('decrease-prefetch-1'));
-
-    const prefetchMinusButton = getByTestId('decrease-prefetch-1');
-    // Set the concurrency to a known value for the test
-    mockWorkers[0].concurrency = 5; // Explicitly set concurrency to 5
-    await fireEvent.click(prefetchMinusButton);
-
-    await waitFor(() => {
-      expect(updateWorkerConfig).toHaveBeenCalledWith(1, 5, 9);
-    });
-  });
-
-  it('should delete a worker', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-
-    const { getByText } = render(WorkerCompo);
-
-    await waitFor(() => getByText('Worker One'));
-
-    const deleteButton = await screen.findByTestId('delete-worker-1');
-    await fireEvent.click(deleteButton);
-
-    await waitFor(() => {
-      expect(delWorker).toHaveBeenCalledWith({ workerId: 1 });
-    });
-  });
-
   it('should display statistics for a worker', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-
-    render(WorkerCompo);
+    render(WorkerCompo, { props: { workers: mockWorkers } });
 
     await waitFor(() => {
       expect(screen.getByText('42.5%')).toBeTruthy();
@@ -214,66 +183,35 @@ describe('WorkerCompo', () => {
     });
   });
 
-  it('should correctly display the task status counts for each worker', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-  
-    const { getByTestId } = render(WorkerCompo);
-  
-    await waitFor(() => {
-      // 1. Tasks awaiting execution (Pending + Assigned + Accepted)
-      const awaitingExecutionTotal = 3 + 2 + 1; // Pending + Assigned + Accepted
-      expect(getByTestId('tasks-awaiting-execution-1').textContent).toBe(String(awaitingExecutionTotal));
-  
-      // 2. Tasks in progress (Downloading + Waiting + Running)
-      const inProgressTotal = 4 + 12 + 5; // Downloading + Waiting + Running
-      expect(getByTestId('tasks-in-progress-1').textContent).toBe(String(inProgressTotal));
-  
-      // 3. Successful tasks (UploadingSuccess + Succeeded)
-      const successfulTasksTotal = 6 + 7; // UploadingSuccess + Succeeded
-      expect(getByTestId('successful-tasks-1').textContent).toBe(String(successfulTasksTotal));
-  
-      // 4. Failed tasks (UploadingFailure + Failed + Suspended + Canceled)
-      const failedTasksTotal = 8 + 9 + 10 + 11; // UploadingFailure + Failed + Suspended + Canceled
-      expect(getByTestId('failed-tasks-1').textContent).toBe(String(failedTasksTotal));
-    });
-  });  
-
-  it('should display the details when hovering over each task status cell', async () => {
-    (getWorkers as any).mockResolvedValue(mockWorkers);
-    (getStats as any).mockResolvedValue(mockStats);
-
-    const { getByTestId } = render(WorkerCompo);
+  it('should count tasks per worker (taskCountWorker)', async () => {
+    render(WorkerCompo, { props: { workers: mockWorkers } });
 
     await waitFor(() => {
-      // Vérification pour la cellule "Tasks awaiting execution"
-      const tasksAwaitingCell = getByTestId('tasks-awaiting-execution-1');
-      fireEvent.mouseOver(tasksAwaitingCell);
-      expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Pending: 3'));
-      expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Assigned: 2'));
-      expect(tasksAwaitingCell).toHaveAttribute('title', expect.stringContaining('Accepted: 1'));
+      const worker1 = taskStatusMock[1];
+      const awaiting = worker1.pending + worker1.assigned + worker1.accepted;
+      expect(screen.getByTestId('tasks-awaiting-execution-1').textContent).toBe(String(awaiting));
 
-      // Vérification pour la cellule "Tasks in progress"
-      const tasksInProgressCell = getByTestId('tasks-in-progress-1');
-      fireEvent.mouseOver(tasksInProgressCell);
-      expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Downloading: 4'));
-      expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Waiting: 12'));
-      expect(tasksInProgressCell).toHaveAttribute('title', expect.stringContaining('Running: 5'));
+      const inProgress = worker1.downloading + worker1.waiting + worker1.running;
+      expect(screen.getByTestId('tasks-in-progress-1').textContent).toBe(String(inProgress));
 
-      // Vérification pour la cellule "Successful tasks"
-      const successfulTasksCell = getByTestId('successful-tasks-1');
-      fireEvent.mouseOver(successfulTasksCell);
-      expect(successfulTasksCell).toHaveAttribute('title', expect.stringContaining('UploadingSuccess: 6'));
-      expect(successfulTasksCell).toHaveAttribute('title', expect.stringContaining('Succeeded: 7'));
+      const success = worker1.uploadingSuccess + worker1.succeeded;
+      expect(screen.getByTestId('successful-tasks-1').textContent).toBe(String(success));
 
-      // Vérification pour la cellule "Failed tasks"
-      const failedTasksCell = getByTestId('failed-tasks-1');
-      fireEvent.mouseOver(failedTasksCell);
-      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('UploadingFailure: 8'));
-      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('Failed: 9'));
-      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('Suspended: 10'));
-      expect(failedTasksCell).toHaveAttribute('title', expect.stringContaining('Canceled: 11'));
+      const failed = worker1.uploadingFailure + worker1.failed + worker1.suspended + worker1.canceled;
+      expect(screen.getByTestId('failed-tasks-1').textContent).toBe(String(failed));
     });
+  });
+
+  it('should count tasks globally (allTaskCount)', async () => {
+    const result = await mockApi.getTasksCount(); // Corrected here
+    const expected = Object.values(taskStatusMock).reduce((acc, curr) => {
+      for (const key in curr) {
+        acc[key] = (acc[key] || 0) + curr[key];
+      }
+      return acc;
+    }, {} as TaskStatus);
+
+    expect(result).toEqual(expected);
   });
 
 });

@@ -21,10 +21,12 @@
     "gen",
     "lib",
     "src/lib/api.ts",
-    "src"
+    "src",
+    "src/types/global.d.ts"
 
   ],
   "exclude": [
-    "node_modules"
+    "node_modules", 
+    "**/*.test.ts"
   ]
 }

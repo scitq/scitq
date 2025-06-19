@@ -1,0 +1,82 @@
+.wf-list {
+  margin-top: 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+
+  width: 100%;
+}
+
+.wf-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+  padding: 0.2rem 1rem;
+  border-radius: 8px;
+  border-width: 1px;
+  border-color: #192245;
+  border-style: solid;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.wf-chevron-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  margin-right: 0.5rem;
+}
+
+.wf-chevron-btn:hover {
+  background-color: #e0e7ff;
+  transform: scale(1.05);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1); 
+}
+
+.wf-chevron {
+  color: #4b5563;
+  width: 20px;
+  height: 20px;
+}
+
+.wf-info {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 1rem;
+}
+
+.wf-id {
+  font-weight: bold;
+  color: #374151;
+}
+
+.wf-name {
+  font-size: 0.95rem;
+  font-weight: bold;
+  color: #374151;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.wf-name:hover {
+  color: #9CA3AF; 
+}
+
+.wf-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  margin-left: 1rem;
+  margin-right: 1rem;
+  max-width: 300px;
+}
+
+
+.wf-steps {
+  margin-left: 2.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0 0 8px 8px;
+}

@@ -216,7 +216,7 @@ func (c *CLI) TaskOutput() error {
 	defer cancel()
 
 	req := &pb.TaskId{TaskId: c.Attr.Task.Output.ID}
-	stream, err := c.QC.Client.StreamTaskLogs(ctx, req)
+	stream, err := c.QC.Client.StreamTaskLogsOutput(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error fetching task logs: %v", err)
 	}
@@ -361,7 +361,9 @@ func (c *CLI) WorkerDeploy() error {
 		return fmt.Errorf("error deploying worker: %w", err)
 	}
 
-	fmt.Printf("✅ Worker deployed with ID: %d\n", res2.WorkerIds)
+	for _, w := range res2.WorkersDetails {
+		fmt.Printf("✅ Worker deployed with ID: %d, Name: %s\n", w.WorkerId, w.WorkerName)
+	}
 	return nil
 }
 

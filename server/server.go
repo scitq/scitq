@@ -2,10 +2,12 @@ package server
 
 import (
 	"bufio"
+	// "container/list"
 	"context"
 	"crypto/tls"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/gmtsciencedev/scitq2/server/recruitment"
 	"github.com/golang-jwt/jwt"
+	"github.com/hpcloud/tail"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
@@ -219,19 +222,184 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 	}
 }
 
-func (s *taskQueueServer) StreamTaskLogs(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsServer) error {
-	logPath := getLogPath(req.TaskId, "stdout", s.logRoot)
-	file, err := os.Open(logPath)
+func (s *taskQueueServer) StreamTaskLogsErr(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsErrServer) error {
+	var status string
+	fmt.Printf("Streaming logs for task %v\n", req.TaskId)
+	logPath := getLogPath(req.TaskId, "stderr", s.logRoot)
+
+	// Configure tail to follow the file in follow mode
+	t, err := tail.TailFile(logPath, tail.Config{
+		Follow:    true,  // keep reading new appended lines
+		ReOpen:    true,  // reopen file automatically if rotated
+		MustExist: false, // do not block if file does not exist yet
+		Poll:      true,  // use polling instead of inotify for compatibility
+	})
 	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
+		return fmt.Errorf("failed to tail file: %w", err)
+	}
+	defer t.Cleanup()
+
+	for {
+		select {
+		case line, ok := <-t.Lines:
+			if !ok {
+				fmt.Println("tail.Lines channel closed, stopping stream")
+				return nil
+			}
+
+			// Send the log line to the client
+			err := stream.Send(&pb.TaskLog{
+				TaskId:  req.TaskId,
+				LogType: "stderr",
+				LogText: line.Text,
+			})
+			if err != nil {
+				return err
+			}
+
+		case <-time.After(500 * time.Millisecond):
+			// Periodically check if the task is finished
+			err := s.db.QueryRow(`SELECT status FROM task WHERE task_id = $1`, req.TaskId).Scan(&status)
+			if err != nil {
+				return fmt.Errorf("failed to query task status: %w", err)
+			}
+			if status == "S" || status == "F" {
+				fmt.Println("Task is finished (success or failed).")
+				return nil
+			}
+		}
+	}
+}
+
+func (s *taskQueueServer) StreamTaskLogsOutput(req *pb.TaskId, stream pb.TaskQueue_StreamTaskLogsOutputServer) error {
+	var status string
+	fmt.Printf("Streaming logs for task %v\n", req.TaskId)
+	logPath := getLogPath(req.TaskId, "stdout", s.logRoot)
+
+	// Configure tail to follow the file in follow mode
+	t, err := tail.TailFile(logPath, tail.Config{
+		Follow:    true,  // keep reading new appended lines
+		ReOpen:    true,  // reopen file automatically if rotated
+		MustExist: false, // do not block if file does not exist yet
+		Poll:      true,  // use polling instead of inotify for compatibility
+	})
+	if err != nil {
+		return fmt.Errorf("failed to tail file: %w", err)
+	}
+	defer t.Cleanup()
+
+	for {
+		select {
+		case line, ok := <-t.Lines:
+			if !ok {
+				fmt.Println("tail.Lines channel closed, stopping stream")
+				return nil
+			}
+
+			// Send the log line to the client
+			err := stream.Send(&pb.TaskLog{
+				TaskId:  req.TaskId,
+				LogType: "stdout",
+				LogText: line.Text,
+			})
+			if err != nil {
+				return err
+			}
+
+		case <-time.After(500 * time.Millisecond):
+			// Periodically check if the task is finished
+			err := s.db.QueryRow(`SELECT status FROM task WHERE task_id = $1`, req.TaskId).Scan(&status)
+			if err != nil {
+				return fmt.Errorf("failed to query task status: %w", err)
+			}
+			if status == "S" || status == "F" {
+				fmt.Println("Task is finished (success or failed).")
+				return nil
+			}
+		}
+	}
+}
+
+// totalLines = number of lines to return
+// skipFromEnd = number of lines to skip from the end (for "load more")
+func tailLines(path string, totalLines int, skipFromEnd int) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer file.Close()
 
+	// Read all lines (needed to know the end)
+	var lines []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		stream.Send(&pb.TaskLog{TaskId: req.TaskId, LogType: "stdout", LogText: scanner.Text()})
+		lines = append(lines, scanner.Text())
 	}
-	return nil
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// Calculate the range to return
+	end := len(lines) - skipFromEnd
+	start := end - totalLines
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = 0
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	return lines[start:end], nil
+}
+
+func (s *taskQueueServer) GetLogsChunk(ctx context.Context, req *pb.GetLogsRequest) (*pb.LogChunkList, error) {
+	var result []*pb.LogChunk
+
+	// Iterate over each requested task ID
+	for _, taskId := range req.TaskIds {
+		skip := 0
+		// If a skip value is provided, use it to skip lines from the end of the log
+		if req.SkipFromEnd != nil {
+			skip = int(*req.SkipFromEnd)
+		}
+
+		// If the requested log type is stdout, fetch only stdout logs
+		if req.LogType != nil && *req.LogType == "stdout" {
+			stdoutPath := getLogPath(taskId, "stdout", s.logRoot)
+			stdoutTail, _ := tailLines(stdoutPath, int(req.ChunkSize), skip) // Read last chunk of stdout log lines
+			result = append(result, &pb.LogChunk{
+				TaskId: taskId,
+				Stdout: stdoutTail,
+			})
+
+			// If the requested log type is stderr, fetch only stderr logs
+		} else if req.LogType != nil && *req.LogType == "stderr" {
+			stderrPath := getLogPath(taskId, "stderr", s.logRoot)
+			stderrTail, _ := tailLines(stderrPath, int(req.ChunkSize), skip) // Read last chunk of stderr log lines
+			result = append(result, &pb.LogChunk{
+				TaskId: taskId,
+				Stderr: stderrTail,
+			})
+
+			// If no specific log type is requested, fetch both stdout and stderr logs
+		} else {
+			stdoutPath := getLogPath(taskId, "stdout", s.logRoot)
+			stderrPath := getLogPath(taskId, "stderr", s.logRoot)
+			stdoutTail, _ := tailLines(stdoutPath, int(req.ChunkSize), skip) // Read last chunk of stdout log lines
+			stderrTail, _ := tailLines(stderrPath, int(req.ChunkSize), skip) // Read last chunk of stderr log lines
+			result = append(result, &pb.LogChunk{
+				TaskId: taskId,
+				Stdout: stdoutTail,
+				Stderr: stderrTail,
+			})
+		}
+	}
+
+	// Return the list of log chunks for all requested tasks
+	return &pb.LogChunkList{Logs: result}, nil
 }
 
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
@@ -348,82 +516,121 @@ func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.Worker
 }
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
-	var workerIDs []uint32
+	var workerDetailsList []*pb.WorkerDetails
 	var jobs []Job
 
-	{
-		tx, err := s.db.Begin()
+	// Begin a new database transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback() // Ensure rollback if commit not reached
+
+	// Loop to create the requested number of workers
+	for req.Number > 0 {
+		req.Number--
+
+		var workerID uint32
+		var workerName string
+		var providerID uint32
+		var regionName string
+		var flavorName string
+		var providerName string
+		var cpu int32
+		var memory float32
+
+		// Insert a new worker row and retrieve its details joined with related tables
+		err := tx.QueryRow(`WITH insertquery AS (
+			INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
+			VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
+			RETURNING worker_id, worker_name, region_id, flavor_id
+		)
+		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem
+		FROM insertquery iq
+		JOIN region r ON iq.region_id = r.region_id
+		JOIN flavor f ON iq.flavor_id = f.flavor_id
+		JOIN provider p ON r.provider_id = p.provider_id`,
+			req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
+			&workerID, &workerName, &providerID, &providerName, &regionName, &flavorName, &cpu, &memory)
 		if err != nil {
-			log.Printf("⚠️ Failed to start transaction: %v", err)
-			return nil, fmt.Errorf("failed to start transaction: %w", err)
+			return nil, fmt.Errorf(
+				"failed to register worker [step:%d, concurrency:%d, flavor:%d, region:%d]: %w",
+				req.StepId,
+				req.Concurrency,
+				req.FlavorId,
+				req.RegionId,
+				err,
+			)
 		}
-		defer tx.Rollback()
 
-		for req.Number > 0 {
-			req.Number--
-			var workerID uint32
-			var workerName string
-			var providerId uint32
-			var regionName string
-			var flavorName string
-			var providerName string
-			var cpu int32
-			var mem float32
-			err := tx.QueryRow(`WITH insertquery AS (
-  INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
-  VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
-  RETURNING worker_id,worker_name,region_id, flavor_id
-)
-SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem
-FROM insertquery iq
-JOIN region r ON iq.region_id = r.region_id
-JOIN flavor f ON iq.flavor_id = f.flavor_id
-JOIN provider p ON r.provider_id = p.provider_id`,
-				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
-				&workerID, &workerName, &providerId, &providerName, &regionName, &flavorName, &cpu, &mem)
-			if err != nil {
-				return nil, fmt.Errorf(
-					"failed to register worker [step:%d,concurrency:%d,flavor:%d,region:%d]: %w",
-					req.StepId,
-					req.Concurrency,
-					req.FlavorId,
-					req.RegionId,
-					err,
-				)
-			}
-			workerIDs = append(workerIDs, workerID)
+		// You can replace "created" with an actual status if available (e.g., "idle", "starting", etc.)
+		workerDetailsList = append(workerDetailsList, &pb.WorkerDetails{
+			WorkerId:   workerID,
+			WorkerName: workerName,
+		})
 
-			var jobID uint32
-			tx.QueryRow("INSERT INTO job (worker_id,flavor_id,region_id,retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
-				workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
-			s.qm.RegisterLaunch(regionName, providerName, cpu, mem)
-			jobs = append(jobs, Job{
-				JobID:      jobID,
-				WorkerID:   workerID,
-				WorkerName: workerName,
-				ProviderID: providerId,
-				Region:     regionName,
-				Flavor:     flavorName,
-				Action:     'C',
-				Retry:      defaultJobRetry,
-				Timeout:    defaultJobTimeout,
-			})
+		var jobID uint32
+		// Insert a new job related to this worker and get its ID
+		tx.QueryRow("INSERT INTO job (worker_id, flavor_id, region_id, retry) VALUES ($1, $2, $3, $4) RETURNING job_id",
+			workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
 
-			if err := tx.Commit(); err != nil {
-				log.Printf("⚠️ Failed to commit worker registration: %v", err)
-				return nil, fmt.Errorf("failed to commit worker registration: %w", err)
-			}
+		// Register the resource launch in the queue manager
+		s.qm.RegisterLaunch(regionName, providerName, cpu, memory)
+
+		// Append the new job to the jobs list for further processing
+		jobs = append(jobs, Job{
+			JobID:      jobID,
+			WorkerID:   workerID,
+			WorkerName: workerName,
+			ProviderID: providerID,
+			Region:     regionName,
+			Flavor:     flavorName,
+			Action:     'C', // 'C' could mean Create or similar action
+			Retry:      defaultJobRetry,
+			Timeout:    defaultJobTimeout,
+		})
+
+		// Commit the transaction after each worker is created successfully
+		if err := tx.Commit(); err != nil {
+			log.Printf("⚠️ Failed to commit worker registration: %v", err)
+			return nil, fmt.Errorf("failed to commit worker registration: %w", err)
 		}
 	}
-	// TODO launch the jobs
+
+	// Add all created jobs to the job queue
 	for _, job := range jobs {
 		s.addJob(job)
 	}
 
-	// **Trigger task assignment**
+	// Trigger job assignment process
 	s.triggerAssign()
 
-	return &pb.WorkerIds{WorkerIds: workerIDs}, nil
+	// Return the details of all created workers
+	return &pb.WorkerIds{
+		WorkersDetails: workerDetailsList,
+	}, nil
+}
+
+func (s *taskQueueServer) GetWorkerStatuses(ctx context.Context, req *pb.WorkerStatusRequest) (*pb.WorkerStatusResponse, error) {
+	var statuses []*pb.WorkerStatus
+
+	for _, workerID := range req.WorkerIds {
+		var status string
+
+		err := s.db.QueryRow("SELECT status FROM worker WHERE worker_id = $1", workerID).Scan(&status)
+		if err != nil {
+			log.Printf("⚠️ Error retrieving status for worker_id %d: %v", workerID, err)
+			status = "unknown"
+		}
+
+		statuses = append(statuses, &pb.WorkerStatus{
+			WorkerId: workerID,
+			Status:   status,
+		})
+	}
+
+	return &pb.WorkerStatusResponse{Statuses: statuses}, nil
 }
 
 func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdateRequest) (*pb.Ack, error) {
@@ -621,6 +828,19 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 	return &pb.JobsList{Jobs: jobs}, nil
 }
 
+func (s *taskQueueServer) DeleteJob(ctx context.Context, req *pb.JobId) (*pb.Ack, error) {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM job
+		WHERE job_id = $1
+	`, req.JobId)
+
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete job: %w", err)
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
 func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
 	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2", req.Status, req.WorkerId)
 	if err != nil {
@@ -641,11 +861,15 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	}
 	defer tx.Rollback()
 
-	// **Filter by status if provided**
-	if req.StatusFilter != nil && *req.StatusFilter != "" {
-		rows, err = tx.Query(`SELECT task_id, command, container, status FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
+	// **Filter by status and worker if provided**
+	if req.StatusFilter != nil && *req.StatusFilter != "" && req.WorkerIdFilter != nil {
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
+	} else if req.StatusFilter != nil && *req.StatusFilter != "" {
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
+	} else if req.WorkerIdFilter != nil {
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
 	} else {
-		rows, err = tx.Query(`SELECT task_id, command, container, status FROM task ORDER BY task_id`)
+		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task ORDER BY task_id`)
 	}
 
 	if err != nil {
@@ -656,7 +880,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	for rows.Next() {
 		var task pb.Task
-		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status)
+		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status, &task.WorkerId, &task.StepId)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue
@@ -994,18 +1218,187 @@ func (s *taskQueueServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	return &pb.LoginResponse{Token: tokenStr}, nil
 }
 
-func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.Ack, error) {
+// NewLogin returns an HTTP handler function to process login requests.
+func NewLogin(s *taskQueueServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var loginRequest pb.LoginRequest
+
+		// Decode the JSON login request body
+		if err := json.NewDecoder(r.Body).Decode(&loginRequest); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Call the login method on the server with the request context and login details
+		loginResponse, err := s.Login(r.Context(), &loginRequest)
+		if err != nil {
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract the JWT token string from the login response
+		tokenStr := loginResponse.GetToken()
+
+		// Set a secure HTTP-only cookie with the session token
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_token",
+			Value:    tokenStr,
+			HttpOnly: true,
+			Secure:   false, // Set to true in production with HTTPS
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   3600 * 24, // 1 day expiration
+		})
+
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// fetchCookie returns an HTTP handler to retrieve the session token cookie.
+func fetchCookie() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Retrieve the session_token cookie
+		cookie, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Respond with the raw token value in JSON format
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"token": cookie.Value,
+		})
+	}
+}
+
+// Logout invalidates the user session by deleting it from the database.
+func (s *taskQueueServer) Logout(ctx context.Context, req *pb.Token) (*pb.Ack, error) {
+	// Delete the session corresponding to the provided token
+	_, err := s.db.Exec("DELETE FROM scitq_user_session WHERE session_id = $1", req.Token)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete session with token %s: %w", req.Token, err)
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
+// LogoutHandler clears the session_token cookie to log out the user.
+func LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	// Overwrite the cookie with expired max age to remove it from client
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/", // Must match original cookie path
+		HttpOnly: true,
+		Secure:   false, // Set to true with HTTPS
+		MaxAge:   -1,    // Immediate deletion
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// parseJWT verifies and parses the JWT token string using the given secret key.
+func parseJWT(tokenStr string, secretKey string) (jwt.MapClaims, error) {
+	// Parse the JWT token with validation of the signing method
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		// Ensure the signing method is HMAC-SHA256
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secretKey), nil
+	})
+
+	// Return error if token parsing fails
+	if err != nil {
+		log.Printf("Failed to parse token: %v", err)
+		return nil, err
+	}
+
+	// Assert claims type and token validity
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		log.Printf("Invalid token")
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	return claims, nil
+}
+
+// fetchWorkerTokenHandler returns an HTTP handler that provides the worker token.
+func fetchWorkerTokenHandler(s *taskQueueServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("➡️ Calling /WorkerToken")
+
+		var tokenStr string
+
+		// Attempt to retrieve the session token from cookie
+		cookie, err := r.Cookie("session_token")
+		if err == nil && cookie.Value != "" {
+			tokenStr = cookie.Value
+			log.Printf("✅ Token retrieved from cookie")
+		} else {
+			// If no cookie, try to get token from Authorization header
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+				log.Printf("✅ Token retrieved from Authorization header")
+			} else {
+				log.Println("❌ No token provided (neither cookie nor header)")
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		// Verify and parse the JWT token
+		claims, err := parseJWT(tokenStr, s.cfg.Scitq.JwtSecret)
+		if err != nil {
+			log.Println("❌ Invalid or expired JWT token")
+			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("✅ JWT decoded: %v", claims)
+
+		// Retrieve the pre-configured worker token from server config
+		workerToken := s.cfg.Scitq.WorkerToken
+		log.Printf("✅ Worker token retrieved: %s", workerToken)
+
+		// Respond with the worker token as JSON
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"worker_token": workerToken})
+	}
+}
+
+// CreateUser creates a new user in the system, requires admin privileges.
+func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.UserId, error) {
+	// Extract user from context for logging and permission check
+	user := GetUserFromContext(ctx)
+
+	if user != nil {
+		log.Printf("User '%s' (ID: %d) admin status: %v", user.Username, user.UserID, user.IsAdmin)
+	} else {
+		log.Println("No user found in context")
+	}
+
+	// Verify admin privileges
 	if !IsAdmin(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
 	}
 
-	hashedPw, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	// Hash the password using bcrypt
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to hash password")
 	}
 
-	_, err = s.db.Exec(`INSERT INTO scitq_user (username, password, email, is_admin) VALUES ($1, $2, $3, $4)`,
-		req.Username, hashedPw, req.Email, req.IsAdmin)
+	var userID uint32
+	// Insert new user record into database
+	err = s.db.QueryRow(
+		`INSERT INTO scitq_user (username, password, email, is_admin)
+		 VALUES ($1, $2, $3, $4) RETURNING user_id`,
+		req.Username, hashedPassword, req.Email, req.IsAdmin,
+	).Scan(&userID)
+
 	if err != nil {
 		if strings.Contains(err.Error(), "unique constraint") {
 			return nil, status.Error(codes.AlreadyExists, "username already exists")
@@ -1013,9 +1406,11 @@ func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequ
 		return nil, status.Error(codes.Internal, "failed to create user")
 	}
 
-	return &pb.Ack{Success: true}, nil
+	// Return the newly created user's ID
+	return &pb.UserId{UserId: userID}, nil
 }
 
+// ListUsers returns a list of all users in the system.
 func (s *taskQueueServer) ListUsers(ctx context.Context, _ *emptypb.Empty) (*pb.UsersList, error) {
 	rows, err := s.db.Query("SELECT user_id, username, email, is_admin FROM scitq_user")
 	if err != nil {
@@ -1035,14 +1430,27 @@ func (s *taskQueueServer) ListUsers(ctx context.Context, _ *emptypb.Empty) (*pb.
 	return &pb.UsersList{Users: users}, nil
 }
 
+// DeleteUser deletes a user and all their associated sessions from the system.
+// Requires admin privileges.
 func (s *taskQueueServer) DeleteUser(ctx context.Context, req *pb.UserId) (*pb.Ack, error) {
+	// Check if the caller has admin privileges
 	if !IsAdmin(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
 	}
-	_, err := s.db.Exec("DELETE FROM scitq_user WHERE user_id=$1", req.UserId)
+
+	// Delete all sessions linked to the specified user ID
+	_, err := s.db.Exec("DELETE FROM scitq_user_session WHERE user_id = $1", req.UserId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete sessions for user %d: %w", req.UserId, err)
+	}
+
+	// Delete the user record from the database
+	_, err = s.db.Exec("DELETE FROM scitq_user WHERE user_id = $1", req.UserId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete user %d: %w", req.UserId, err)
 	}
+
+	// Return success acknowledgement
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -1110,7 +1518,7 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to hash new password: %w", err)
 	}
 
-	_, err = s.db.Exec("UPDATE scitq_user SET password=$1 WHERE username=$2", hash, req.NewPassword)
+	_, err = s.db.Exec("UPDATE scitq_user SET password=$1 WHERE username=$2", hash, req.Username)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update password: %w", err)
 	}
@@ -1458,18 +1866,27 @@ func (s *taskQueueServer) Shutdown() {
 }
 
 func Serve(cfg config.Config) error {
+	// Validate the configuration before proceeding
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
+
+	// Open a PostgreSQL connection using pgx driver
 	db, err := sql.Open("pgx", cfg.Scitq.DBURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer db.Close()
+
+	// Create the main server instance
+	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+
+	// Configure database connection pool settings for concurrency
 	db.SetMaxOpenConns(cfg.Scitq.MaxDBConcurrency * 2)
 	db.SetMaxIdleConns(cfg.Scitq.MaxDBConcurrency * 2)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
+	// 🕵️‍♂️ Periodically log database connection stats every 10 seconds
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -1485,23 +1902,23 @@ func Serve(cfg config.Config) error {
 		}
 	}()
 
-	// Apply migrations on startup
+	// Apply any database migrations needed at startup
 	if err := applyMigrations(db); err != nil {
 		return fmt.Errorf("migration error: %v", err)
 	}
 
-	log.Println("Server started successfully!")
-	checkAdminUser(db)
+	log.Println("✅ Server started successfully!")
+	checkAdminUser(db) // Ensure there is at least one admin user
 
 	var creds credentials.TransportCredentials
+
+	// Load TLS certificates - embedded or from configured files
 	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
-		log.Printf("Using embedded certificates")
+		log.Printf("🔐 Using embedded TLS certificates")
 		serverCert, err := LoadEmbeddedCertificates()
 		if err != nil {
 			return fmt.Errorf("failed to load embedded TLS credentials: %v", err)
 		}
-
-		// ✅ Use `credentials.NewServerTLSFromCert()` instead of `NewServerTLSFromFile()`
 		creds = credentials.NewServerTLSFromCert(&serverCert)
 	} else {
 		creds, err = credentials.NewServerTLSFromFile(cfg.Scitq.CertificatePem, cfg.Scitq.CertificateKey)
@@ -1510,84 +1927,92 @@ func Serve(cfg config.Config) error {
 		}
 	}
 
+	// Create gRPC server with TLS and authentication interceptor
 	grpcServer := grpc.NewServer(
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
 		grpc.MaxConcurrentStreams(uint32(cfg.Scitq.MaxDBConcurrency)),
 	)
 
+	// Start the gRPC server in a goroutine
 	go func() error {
-		db, err := sql.Open("pgx", cfg.Scitq.DBURL)
-		if err != nil {
-			return fmt.Errorf("failed to initialize database: %w", err)
-		}
-		defer db.Close()
-
-		s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
 		defer s.Shutdown()
 
-		// initialize the quota manager
+		// Initialize quota manager for worker recruitment and scheduling
 		s.qm = *recruitment.NewQuotaManager(&cfg)
 		recruitment.StartRecruiterLoop(context.Background(), s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
 
-		s.checkProviders()
-		s.startJobQueue()
-		pb.RegisterTaskQueueServer(grpcServer, s)
+		s.checkProviders()                        // Verify available providers
+		s.startJobQueue()                         // Start processing jobs queue
+		pb.RegisterTaskQueueServer(grpcServer, s) // Register gRPC service
 
+		// Listen on configured TCP port
 		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
 		if err != nil {
 			return fmt.Errorf("failed to listen: %v", err)
 		}
 
-		// **Trigger task assignment**
+		// Trigger initial task assignment to workers
 		s.triggerAssign()
 
-		log.Println("Server listening on port 50051...")
+		log.Printf("🚀 Server listening on port %d...", cfg.Scitq.Port)
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatalf("failed to serve: %v", err)
 		}
 		return nil
 	}()
 
+	// Wrap the gRPC server with grpc-web for browser compatibility and CORS handling
 	grpcWebServer := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(origin string) bool {
-		log.Printf("CORS check: origin = %s", origin)
+		log.Printf("🌐 CORS check: origin = %s", origin)
+		// Allow only local dev origin - adjust as needed
 		return origin == "http://localhost:5173"
 	}))
 
-	// Logging handler
+	// Setup HTTP multiplexer for REST and grpc-web endpoints
+	mux := http.NewServeMux()
+	mux.HandleFunc("/login", NewLogin(s))
+	mux.Handle("/fetchCookie", fetchCookie())
+	mux.HandleFunc("/logout", LogoutHandler)
+	mux.HandleFunc("/WorkerToken", fetchWorkerTokenHandler(s))
+	// Uncomment and adjust the next line to serve frontend static files
+	// mux.Handle("/", http.FileServer(http.Dir("path/to/frontend/dist")))
+
+	// Logging middleware + CORS headers for HTTP server
 	loggedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		log.Printf("Received request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		log.Printf("📩 Received request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
-		// === Ajout des headers CORS ===
+		// Add CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, x-grpc-web, x-user-agent, grpc-timeout, Authorization")
 
-		// === Gérer les requêtes préflight OPTIONS ===
+		// Handle preflight OPTIONS requests quickly
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
+		// Delegate request either to grpc-web or REST mux
 		if grpcWebServer.IsGrpcWebRequest(r) || grpcWebServer.IsAcceptableGrpcCorsRequest(r) {
 			grpcWebServer.ServeHTTP(w, r)
 		} else {
-			http.NotFound(w, r)
+			mux.ServeHTTP(w, r)
 		}
 
 		duration := time.Since(start)
-		log.Printf("Handled request: %s %s in %v", r.Method, r.URL.Path, duration)
+		log.Printf("✅ Handled request: %s %s in %v", r.Method, r.URL.Path, duration)
 	})
 
-	// HTTP server
+	// Start HTTP server to serve grpc-web and REST endpoints
 	httpServer := http.Server{
 		Addr:    ":8081",
 		Handler: loggedHandler,
 	}
 
-	log.Println("gRPC-Web HTTP server listening on :8081")
+	log.Println("🌍 gRPC-Web HTTP server listening on :8081")
 	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatalf("HTTP server failed: %v", err)
 	}

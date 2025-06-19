@@ -1,29 +1,26 @@
 <script>
-    import { onMount } from 'svelte';
-    import LoginForm from '../components/LoginForm.svelte';
-    import logo from '../assets/icons/logoGMT.png';
-    import '../styles/loginPage.css';
-  
-    onMount(() => {
-      const token = localStorage.getItem('token');
-      if (token) {
-        goto('/dashboard');
-      }
-    });
-  </script>
-  
-  <!-- General wrapper -->
-  <div class="page-wrapper">
-  
-    <!-- Headers -->
-    <div class="header_login">
-      <div class="top-left">SCITQ2</div>
-      <div class="top-right">
-        <span>GMT SCIENCE</span>
-        <img src="{logo}" alt="Logo" class="login-page-logo" />
-      </div>
+  import { onMount } from 'svelte';
+  import LoginForm from '../components/LoginForm.svelte';
+  import logo from '../assets/icons/logoGMT.png';
+  import '../styles/loginPage.css';
+</script>
+
+<!--
+  General wrapper for the login page layout
+-->
+<div class="loginpage-page-wrapper" data-testid="login-page">
+
+  <!--
+    Header section with site title and branding
+  -->
+  <div class="loginpage-header_login">
+    <div class="top-left">SCITQ2</div>
+    <div class="loginpage-top-right">
+      <span>GMT SCIENCE</span>
+      <img src="{logo}" alt="Logo" class="loginpage-login-page-logo" />
     </div>
-  
-    <LoginForm />
   </div>
-  
+
+  <!-- Login form component -->
+  <LoginForm />
+</div>

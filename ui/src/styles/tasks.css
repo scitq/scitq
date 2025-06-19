@@ -1,0 +1,360 @@
+.tasks-container {
+  margin-top: 4rem;
+}
+
+.filters-form {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  align-items: center; /* vertically center align */
+}
+
+.filter-group {
+  display: flex;
+  align-items: center; /* aligns label and select on the same line */
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #444;
+  min-width: 150px;
+}
+
+.filter-group label {
+  font-weight: 600;
+  white-space: nowrap; /* prevents label from wrapping to next line */
+}
+
+.filter-group select {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+  min-width: 100px;
+}
+
+.filter-group select:hover {
+  border-color: #5fc18b;
+  outline: none;
+  box-shadow: 0 0 5px rgba(95, 193, 139, 0.5);
+}
+
+/* Status tabs button styles */
+.status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.status-tabs button {
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin: 0;
+  border-right: 1px solid #ddd;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.status-tabs button:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.status-tabs button:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  border-right: none;
+}
+
+.status-tabs button:hover {
+  filter: brightness(0.9);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
+  z-index: 1;
+  position: relative;
+}
+
+/* Status colors - reuse the same class names for .tasks-status-pill */
+.status-tabs .status-all,
+.tasks-status-pill.all {
+  background-color: #192245;
+  font-weight: bold;
+  color: #e5e7eb;
+}
+
+.status-tabs .status-suspended,
+.tasks-status-pill.suspended {
+  background-color: #c9cbd9 ;
+}
+
+.status-tabs .status-pending,
+.tasks-status-pill.pending {
+  background-color: #d2c7e7;
+}
+
+.status-tabs .status-assigned,
+.tasks-status-pill.assigned {
+  background-color: #c2afe5;
+}
+
+.status-tabs .status-accepted,
+.tasks-status-pill.accepted {
+  background-color: #a489d7;
+}
+
+.status-tabs .status-downloading,
+.tasks-status-pill.downloading {
+  background-color: #c9e2f5;
+}
+
+.status-tabs .status-waiting,
+.tasks-status-pill.waiting {
+  background-color: #99caed;
+}
+
+.status-tabs .status-running,
+.tasks-status-pill.running {
+  background-color: #6bb2e6;
+}
+
+.status-tabs .status-uploading-as,
+.tasks-status-pill.uploading-as {
+  background-color: #90d6a9;
+}
+
+.status-tabs .status-succeeded,
+.tasks-status-pill.succeeded {
+  background-color: #5fc18b;
+}
+
+.status-tabs .status-uploading-af,
+.tasks-status-pill.uploading-af {
+  background-color: #ec857b;
+
+}
+
+.status-tabs .status-failed,
+.tasks-status-pill.failed {
+  background-color: #d9534f;
+}
+
+.status-tabs .status-canceled,
+.tasks-status-pill.canceled {
+  background-color: #a64f69 ;
+}
+
+/* Pill styles */
+.tasks-status-pill {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  width: 90%;
+  max-width: 900px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+}
+
+.terminal-style {
+  background-color: #111;
+  color: #fff;
+  font-family: monospace;
+  font-size: 1.1rem;     
+  line-height: 1;        
+}
+
+.log-content {
+  background-color: #000;
+  color: #fff;
+  padding: 1rem;
+  margin-top: 1rem;
+  border-radius: 4px;
+  max-height: 60vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 1.1rem;
+  line-height: 1;        
+}
+
+.modal-close {
+  margin: 1rem auto 0 auto;   
+  display: block;            
+  background: #fff;
+  color: #111;
+  border: none;
+  padding: 0.5rem 1.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.modal.terminal-style {
+  background-color: #1e1e1e;
+  color: #ccc;
+  padding: 20px;
+  border-radius: 8px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  font-family: monospace;
+}
+
+.log-columns {
+  display: flex;
+  gap: 20px;
+  margin-top: 10px;
+}
+
+.log-output {
+  max-height: 60px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 0.8em;
+  background: #f5f5f5;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+
+.log-block {
+  flex: 1;
+  background-color: #2e2e2e;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.stdout-block h3 {
+  color: #9fdf9f;
+}
+
+.stderr-block h3 {
+  color: #ff9999;
+}
+
+.filter-group {
+  position: relative;
+}
+
+.steps-panel {
+  position: absolute;
+  right: -250px;
+  top: 0;
+  width: 240px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  z-index: 10;
+}
+
+.steps-panel h4 {
+  margin-top: 0;
+  font-size: 14px;
+  color: #333;
+}
+
+.steps-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.step-item {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.step-item:hover {
+  background-color: #f5f5f5;
+}
+
+.truncate-command {
+  max-width: 200px; /* ou autre largeur selon ton design */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-preview {
+  font-family: monospace;
+  padding: 0.5rem;
+  margin: 1rem 0 1rem;
+  border-left: 4px solid #ffffffbb;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0;
+}
+
+.output-header,
+.error-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.load-more-arrow {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  color: inherit;
+}
+
+.load-more-arrow:hover {
+  color: #007acc; /* couleur au hover, à adapter */
+}
+
+.log-pre {
+  max-height: 300px; /* ou la hauteur que tu veux */
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1;
+  padding: 0rem 0.5rem 0rem 0.5rem;
+  box-shadow: 0 0 5px 1px rgba(150, 150, 150, 0.6);
+  margin: 0;
+}

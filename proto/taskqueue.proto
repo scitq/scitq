@@ -12,18 +12,23 @@ service TaskQueue {
     rpc PingAndTakeNewTasks(PingAndGetNewTasksRequest) returns (TaskListAndOther);
     rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
     rpc SendTaskLogs(stream TaskLog) returns (Ack);
-    rpc StreamTaskLogs(TaskId) returns (stream TaskLog);
+    rpc StreamTaskLogsOutput(TaskId) returns (stream TaskLog);
+    rpc StreamTaskLogsErr(TaskId) returns (stream TaskLog);
+    rpc GetLogsChunk(GetLogsRequest) returns (LogChunkList);
     rpc ListTasks (ListTasksRequest) returns (TaskList);
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
     rpc DeleteWorker(WorkerId) returns (Ack);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
+    rpc GetWorkerStatuses (WorkerStatusRequest) returns (WorkerStatusResponse);
     rpc ListJobs (ListJobsRequest) returns (JobsList);
+    rpc DeleteJob (JobId) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
     rpc Login(LoginRequest) returns (LoginResponse);
-    rpc CreateUser(CreateUserRequest) returns (Ack);
+    rpc Logout(Token) returns (Ack);
+    rpc CreateUser(CreateUserRequest) returns (UserId);
     rpc ListUsers(google.protobuf.Empty) returns (UsersList);
     rpc DeleteUser(UserId) returns (Ack);
     rpc UpdateUser(User) returns (Ack);
@@ -86,6 +91,8 @@ message Task {
     optional float running_timeout  = 14;
     optional float upload_timeout  = 15;
     string status = 16;
+    optional uint32 worker_id = 17;
+    optional uint32 workflow_id = 18;
 }
 
 message TaskList {
@@ -139,6 +146,27 @@ message TaskLog {
     string log_text = 3;
 }
 
+message GetLogsRequest {
+  repeated uint32 taskIds = 1;
+    uint32 chunkSize = 2;
+  optional uint32 skipFromEnd = 3;
+  optional string log_type = 4;
+}
+
+message LogChunk {
+  uint32 taskId = 1;
+  repeated string stdout = 2;
+  repeated string stderr = 3;
+}
+
+message LogChunkList {
+  repeated LogChunk logs = 1;
+}
+
+message TaskIds {
+    repeated uint32 task_ids = 1;
+}
+
 message TaskId {
     uint32 task_id = 1;
 }
@@ -147,8 +175,31 @@ message WorkerId {
     uint32 worker_id = 1;
 }
 
+message WorkerStatusRequest {
+  repeated uint32 worker_ids = 1;
+}
+
+message WorkerStatus {
+  uint32 worker_id = 1;
+  string status = 2;
+}
+
+message WorkerStatusResponse {
+  repeated WorkerStatus statuses = 1;
+}
+
+message WorkerDetails {
+  uint32 worker_id = 1;
+  string worker_name = 2;
+}
+
 message WorkerIds {
-    repeated uint32 worker_ids = 1;
+  repeated WorkerDetails workers_details = 1;
+}
+
+
+message JobId {
+    uint32 job_id = 1;
 }
 
 message PingAndGetNewTasksRequest {
@@ -162,6 +213,7 @@ message Ack {
 
 message ListTasksRequest {
     optional string status_filter = 1;
+    optional uint32 worker_id_filter = 2;
 }
 
 message WorkerRequest {
@@ -182,11 +234,6 @@ message WorkerUpdateRequest {
     optional uint32 concurrency = 5;
     optional uint32 prefetch = 6;
     optional uint32 step_id = 7;
-}
-
-message WorkerStatus {
-    uint32 worker_id =1;
-    string status =2;
 }
 
 message ListFlavorsRequest {
@@ -250,6 +297,10 @@ message LoginRequest {
 }
 
 message LoginResponse {
+  string token = 1;
+}
+
+message Token {
   string token = 1;
 }
 
@@ -404,3 +455,4 @@ message FetchListRequest {
 message FetchListResponse {
   repeated string files = 1; // Absolute paths from the given URI
 }
+

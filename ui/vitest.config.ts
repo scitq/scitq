@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [svelte(), svelteTesting()],
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, 'src'),
       'grpc-web': path.resolve(__dirname, 'src/mocks/grpc-web.ts'),
     },
   },
