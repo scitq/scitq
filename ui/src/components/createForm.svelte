@@ -2,90 +2,49 @@
   import { onMount } from "svelte";
   import { getFlavors, newWorker, getWorkFlow, getStatus, getSteps } from "../lib/api";
   import "../styles/createForm.css";
-  import { WorkerDetails, Workflow } from "../../gen/taskqueue";
+  import { JobId, WorkerDetails, Workflow, Job } from "../../gen/taskqueue";
 
-  /** 
-   * Callback function type triggered when a new worker is created.
-   * @callback onWorkerCreated
-   * @param {Object} event - Event object containing detail of the new worker.
-   * @param {Object} event.detail - Detail object with worker info.
-   * @param {WorkerDetails} event.detail.worker - The created worker details.
+  /**
+   * Callback when new worker (and associated job) is created
+   * @param worker Created worker details
+   * @param job Associated job record
    */
+  export let onWorkerCreated = (event: { detail: { 
+    worker: WorkerDetails, 
+    job: Partial<Job>  
+  } }) => {};
 
-  /** @type {(event: { detail: { worker: WorkerDetails } }) => void} */
-  export let onWorkerCreated = () => {};
-
-  /** @type {string} - Provider name input value */
+  // Form state
   let provider = "";
-
-  /** @type {string} - Flavor input value */
   let flavor = "";
-
-  /** @type {string} - Region input value */
   let region = "";
-
-  /** @type {number} - Number of workers to create */
   let number = 1;
-
-  /** @type {number} - Worker concurrency value */
   let concurrency = 1;
-
-  /** @type {number} - Worker prefetch value */
   let prefetch = 1;
-
-  /** @type {string} - Workflow step in format 'Workflow.Step' */
-  let wfStep = ""; 
-
-  /** @type {string} - Selected workflow name */
+  let wfStep = "";
   let wf = "";
-
-  /** @type {string} - Selected step name */
   let step = "";
 
-  /** @type {Array<{ flavorName: string, region: string, provider: string }>} */
-  let listFlavor = [];
-
-  /** @type {Workflow[]} - List of workflow objects */
-  let listWf = [];
-
-  /** @type {Array<{name: string}>} - List of step objects for selected workflow */
+  // Data stores
+  let listFlavor: Array<{ flavorName: string, region: string, provider: string }> = [];
+  let listWf: Workflow[] = [];
   let listStep: Array<{ name: string }> = [];
 
-  /** @type {boolean} - Indicates whether workflow steps are being loaded */
+  // UI state
   let isLoadingSteps = false;
-
-  /** @type {boolean} - Flag to show/hide flavor autocomplete suggestions */
   let showFlavorSuggestions = false;
-
-  /** @type {boolean} - Flag to show/hide region autocomplete suggestions */
   let showRegionSuggestions = false;
-
-  /** @type {boolean} - Flag to show/hide provider autocomplete suggestions */
   let showProviderSuggestions = false;
-
-  /** @type {boolean} - Flag to show/hide workflow autocomplete suggestions */
   let showWfSuggestions = false;
-
-  /** @type {boolean} - Flag to show/hide workflow step suggestions */
   let showStepSuggestions = false;
-
-  /** @type {string[]} - Filtered flavor suggestions based on input */
-  let flavorSuggestions = [];
-
-  /** @type {string[]} - Filtered region suggestions based on input */
-  let regionSuggestions = [];
-
-  /** @type {string[]} - Filtered provider suggestions based on input */
-  let providerSuggestions = [];
-
-  /** @type {string[]} - Filtered workflow name suggestions */
-  let wfSuggestions = [];
-
-  /** @type {string[]} - Filtered step name suggestions */
-  let stepSuggestions = [];
-
-  /** @type {string|null} - Workflow name currently hovered to fetch steps */
   let hoveredWf: string | null = null;
+
+  // Filtered suggestions
+  let flavorSuggestions: string[] = [];
+  let regionSuggestions: string[] = [];
+  let providerSuggestions: string[] = [];
+  let wfSuggestions: string[] = [];
+  let stepSuggestions: string[] = [];
 
   /**
    * Lifecycle hook that runs on component mount.
@@ -216,13 +175,10 @@
     showWfSuggestions = false;
   }
 
+
   /**
-   * Handles form submission to add a new worker.
-   * Creates the worker via backend API, retrieves its status,
-   * and emits a `onWorkerCreated` event.
-   * Resets form fields afterward.
-   * @async
-   * @returns {Promise<void>}
+   * Create new worker and associated job
+   * Resets form on success
    */
   async function handleAddWorker(): Promise<void> {
     const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
@@ -242,9 +198,16 @@
           flavor,
           provider,
           region,
+        },
+        job: {
+          JobId: workerCreatedDetails.jobId,
+          action: 'C',
+          workerId: workerCreatedDetails.workerId,
+          modifiedAt : new Date().toLocaleString(),
         }
       }
     });
+
 
     // Reset form
     concurrency = 1;

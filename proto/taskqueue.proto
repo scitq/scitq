@@ -19,10 +19,11 @@ service TaskQueue {
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
-    rpc DeleteWorker(WorkerId) returns (Ack);
+    rpc DeleteWorker(WorkerId) returns (JobId);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
     rpc GetWorkerStatuses (WorkerStatusRequest) returns (WorkerStatusResponse);
     rpc ListJobs (ListJobsRequest) returns (JobsList);
+    rpc GetJobStatuses (JobStatusRequest) returns (JobStatusResponse);
     rpc DeleteJob (JobId) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
@@ -191,15 +192,11 @@ message WorkerStatusResponse {
 message WorkerDetails {
   uint32 worker_id = 1;
   string worker_name = 2;
+  uint32 job_id = 3;
 }
 
 message WorkerIds {
   repeated WorkerDetails workers_details = 1;
-}
-
-
-message JobId {
-    uint32 job_id = 1;
 }
 
 message PingAndGetNewTasksRequest {
@@ -283,8 +280,27 @@ message Job {
   string log = 10;
 }
 
+message JobId {
+    uint32 job_id = 1;
+}
+
+
 message JobsList {
     repeated Job jobs = 1;
+}
+
+message JobStatusRequest {
+  repeated uint32 job_ids = 1;
+}
+
+message JobStatus {
+  uint32 job_id = 1;
+  string status = 2;
+  uint32 progression = 3;
+}
+
+message JobStatusResponse {
+  repeated JobStatus statuses = 1;
 }
 
 message RcloneConfig {

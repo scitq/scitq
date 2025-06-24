@@ -110,20 +110,22 @@
       sortBy
     );
 
-    // Start streaming logs for running tasks not yet streamed
-    for (const task of latestTasks) {
-      if (['R', 'U', 'V'].includes(task.status) && !streamedTasks.has(task.taskId)) {
-        startStreaming(task);
+    if (Array.isArray(latestTasks)) {
+      for (const task of latestTasks) {
+        if (['R', 'U', 'V'].includes(task.status) && !streamedTasks.has(task.taskId)) {
+          startStreaming(task);
+        }
       }
-    }
 
-    // Update tasks if changed
-    const oldIds = tasks.map(t => t.taskId).join(',');
-    const newIds = latestTasks.map(t => t.taskId).join(',');
-    const statusChanged = tasks.some((t, i) => t.status !== latestTasks[i]?.status);
+      const oldIds = tasks.map(t => t.taskId).join(',');
+      const newIds = latestTasks.map(t => t.taskId).join(',');
+      const statusChanged = tasks.some((t, i) => t.status !== latestTasks[i]?.status);
 
-    if (oldIds !== newIds || statusChanged) {
-      tasks = latestTasks;
+      if (oldIds !== newIds || statusChanged) {
+        tasks = latestTasks;
+      }
+    } else {
+      console.error('getAllTasks() did not return an array:', latestTasks);
     }
   }
 
@@ -215,7 +217,7 @@
     }
 
     const skip = logSkipTracker[taskId][logType];
-    const logs = await getLogsBatch([taskId], CHUNK_SIZE, skip, logType);
+    const logs = await getLogsBatch([taskId], CHUNK_SIZE, skip, logType) || [];
     const chunk = logs.find(l => l.taskId === taskId);
 
     if (!chunk) return;
@@ -447,6 +449,7 @@
   <div
     class="modal-backdrop"
     role="button"
+    data-testid={`modal-log-${selectedTaskId}`}
     tabindex="0"
     aria-label="Close modal"
     on:click={closeLogModal}
@@ -478,7 +481,8 @@
                 <button
                   class="load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stdout'); scrollToTop('stdout');; }}
-                  title="Load more"
+                  title="Load more Output"
+                  data-testid={`load-more-output-${selectedTaskId}`}
                   aria-label="Load more logs"
                 >
                   <ArrowBigUp />
@@ -512,7 +516,7 @@
                 <button
                   class="load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stderr'); scrollToTop('stderr');; }}
-                  title="Load more"
+                  title="Load more Error"
                   aria-label="Load more error logs"
                 >
                   <ArrowBigUp />

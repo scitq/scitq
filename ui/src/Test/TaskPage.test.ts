@@ -3,12 +3,14 @@ import { mockApi } from '../mocks/api_mock';
 
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { tick } from 'svelte';
 import TaskPage from '../pages/TaskPage.svelte';
 
 const mockTasks = [
   { taskId: 1, name: 'Task A', status: 'P', workerId: 1, workflowId: 10 },
   { taskId: 2, name: 'Task B', status: 'S', workerId: 2, workflowId: 20 },
   { taskId: 3, name: 'Task C', status: 'R', workerId: 1, workflowId: 10 },
+  { taskId: 4, name: 'Task D', status: 'S', workerId: 4, workflowId: 30 },
 ];
 
 const mockWorkers = [
@@ -21,12 +23,26 @@ const mockWorkflows = [
   { workflowId: 20, name: 'Workflow B' },
 ];
 
+const mockLog = [
+  {taskId: 1, stdout: ['log line 1', 'log line 2'], stderr: ['error line 1']}
+]
+
 describe('TaskPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.getWorkers.mockResolvedValue(mockWorkers);
     mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
     mockApi.getAllTasks.mockResolvedValue(mockTasks);
+    mockApi.getLogsBatch.mockImplementation((taskIds, limit, skip, logType) => {
+    const logs = mockLog.filter(log => taskIds.includes(log.taskId));
+      return Promise.resolve(
+        logs.map(log => ({
+          taskId: log.taskId,
+          stdout: logType === 'stdout' ? log.stdout.slice(skip, skip + limit) : [],
+          stderr: logType === 'stderr' ? log.stderr.slice(skip, skip + limit) : [],
+        }))
+      );
+    });
     window.location.hash = '/tasks'; // reset hash
   });
 
@@ -193,35 +209,107 @@ describe('TaskPage', () => {
     });
   });
 
-  it('opens log modal when clicking on eye icon', async () => {
-    mockApi.getLogsBatch.mockResolvedValue([{
-      taskId: 1,
-      stdout: ['log line 1', 'log line 2'],
-      stderr: ['error line 1']
-    }]);
 
+  it('opens log modal when clicking on eye icon', async () => {
     render(TaskPage);
-    await waitFor(() => screen.getByText('Task A'));
-    
-    const eyeIcons = screen.getAllByTestId('eye-icon');
-    await fireEvent.click(eyeIcons[0]);
     
     await waitFor(() => {
-      expect(screen.getByText('📜 Logs for Task 1')).toBeInTheDocument();
-      expect(screen.getByText('log line 1')).toBeInTheDocument();
-      expect(screen.getByText('error line 1')).toBeInTheDocument();
+      expect(screen.getByText('Task A')).toBeInTheDocument();
+    });
+
+    const eyeIcon = screen.getByTestId("full-log-1");
+    await fireEvent.click(eyeIcon);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('modal-log-1')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText((content) => content.includes('log line 1'))).toBeInTheDocument();
+      expect(screen.getByText((content) => content.includes('log line 2'))).toBeInTheDocument();
+      expect(screen.getByText((content) => content.includes('error line 1'))).toBeInTheDocument();
     });
   });
-  
+
   it('closes log modal when clicking close button', async () => {
     render(TaskPage);
-    await fireEvent.click(screen.getByTestId('eye-icon'));
-    await waitFor(() => screen.getByText('📜 Logs for Task 1'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Task A')).toBeInTheDocument();
+    });
+
+    const eyeIcon = screen.getByTestId("full-log-1");
+    await fireEvent.click(eyeIcon);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('modal-log-1')).toBeInTheDocument();
+    });
     
     await fireEvent.click(screen.getByText('Close'));
     
     await waitFor(() => {
-      expect(screen.queryByText('📜 Logs for Task 1')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('modal-log-1')).not.toBeInTheDocument();
+    });
+  });
+
+  it('loads more logs when clicking load more button', async () => {
+    // Clear any previous mock implementations
+    mockApi.getLogsBatch.mockReset();
+    
+    // Set up sequential mock responses
+    mockApi.getLogsBatch.mockImplementation((taskIds, limit, skip, logType) => {
+      if (skip === 0) {
+        return Promise.resolve([{
+          taskId: 4,
+          stdout: ['log line 1'],
+          stderr: []
+        }]);
+      }
+      if (skip > 0) {
+        return Promise.resolve([{
+          taskId: 4,
+          stdout: ['older log line 1', 'older log line 2'],
+          stderr: []
+        }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    render(TaskPage);
+    await waitFor(() => expect(screen.getByText('Task D')).toBeInTheDocument());
+
+    // Open the log modal
+    await fireEvent.click(screen.getByTestId('full-log-4'));
+    await waitFor(() => expect(screen.getByText('log line 1')).toBeInTheDocument());
+    expect(screen.queryByText((content) => content.includes('older log line 1'))).not.toBeInTheDocument();
+    expect(screen.queryByText((content) => content.includes('older log line 2'))).not.toBeInTheDocument();
+
+    // Click load more
+    await waitFor(() => expect(screen.getByTestId('load-more-output-4')).toBeInTheDocument());
+    const loadMoreArrow = await screen.findByTestId('load-more-output-4');
+    await fireEvent.click(loadMoreArrow);
+    
+    // Wait for updates
+    await waitFor(() => {
+      expect(screen.getByText((content) => content.includes('older log line 1'))).toBeInTheDocument();
+      expect(screen.getByText((content) => content.includes('older log line 2'))).toBeInTheDocument();
+    });
+  });
+
+  it('streams logs for running tasks', async () => {
+    const mockStreamCallback = vi.fn();
+    mockApi.streamTaskLogsOutput.mockImplementation((taskId, callback) => {
+      callback({ logType: 'stdout', logText: 'streamed log' });
+      return mockStreamCallback;
+    });
+
+    render(TaskPage);
+    await waitFor(() => screen.getByText('Task C'));
+    
+    await fireEvent.click(screen.getByTestId('full-log-3'));
+    
+    await waitFor(() => {
+      expect(screen.getByText('streamed log')).toBeInTheDocument();
     });
   });
 

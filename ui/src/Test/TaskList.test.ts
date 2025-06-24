@@ -32,17 +32,18 @@ const mockTasks = [
   },
 ];
 
-const mockTaskLogsSaved = {
-  1: [
-    { logText: 'stdout log A1', logType: 'stdout', taskId: 1 },
-    { logText: 'stderr log A1', logType: 'stderr', taskId: 1 },
-  ],
-  2: [
-    { logText: 'stdout log B1', logType: 'stdout', taskId: 2 },
-    { logText: 'stdout log B2', logType: 'stdout', taskId: 2 },
-    { logText: 'stderr log B1', logType: 'stderr', taskId: 2 },
-  ],
-};
+const mockTaskLogsSaved = [
+  {
+    taskId: 1,
+    stdout: ['stdout log A1'],
+    stderr: ['stderr log A1'],
+  },
+  {
+    taskId: 2,
+    stdout: ['stdout log B1', 'stdout log B2'],
+    stderr: ['stderr log B1'],
+  },
+];
 
 describe('TaskList', () => {
   it('displays tasks with output and error logs', async () => {
@@ -73,7 +74,7 @@ describe('TaskList', () => {
   it('displays default message when no tasks are present', async () => {
     render(TaskList, {
       tasks: [],
-      taskLogsSaved: {},
+      taskLogsSaved: [],
       workers: [],
       workflows: [],
       allSteps: [],

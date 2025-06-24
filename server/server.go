@@ -564,12 +564,6 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			)
 		}
 
-		// You can replace "created" with an actual status if available (e.g., "idle", "starting", etc.)
-		workerDetailsList = append(workerDetailsList, &pb.WorkerDetails{
-			WorkerId:   workerID,
-			WorkerName: workerName,
-		})
-
 		var jobID uint32
 		// Insert a new job related to this worker and get its ID
 		tx.QueryRow("INSERT INTO job (worker_id, flavor_id, region_id, retry) VALUES ($1, $2, $3, $4) RETURNING job_id",
@@ -589,6 +583,12 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			Action:     'C', // 'C' could mean Create or similar action
 			Retry:      defaultJobRetry,
 			Timeout:    defaultJobTimeout,
+		})
+
+		workerDetailsList = append(workerDetailsList, &pb.WorkerDetails{
+			WorkerId:   workerID,
+			WorkerName: workerName,
+			JobId:      jobID,
 		})
 
 		// Commit the transaction after each worker is created successfully
@@ -700,7 +700,7 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 	return &pb.Ack{Success: true}, nil
 }
 
-func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*pb.Ack, error) {
+func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*pb.JobId, error) {
 	var job Job
 
 	tx, err := s.db.Begin()
@@ -720,7 +720,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 	WHERE w.worker_id=$1`, req.WorkerId).Scan(&workerName, &providerId, &regionId, &is_permanent, &statusStr)
 	status := rune(statusStr[0])
 	if err != nil {
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to find worker %d: %w", req.WorkerId, err)
+		return nil, fmt.Errorf("failed to find worker %d: %w", req.WorkerId, err)
 	}
 
 	if !is_permanent {
@@ -728,7 +728,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 		err = tx.QueryRow("INSERT INTO job (worker_id,action,region_id,retry) VALUES ($1,'D',$2,$3) RETURNING job_id",
 			req.WorkerId, regionId, defaultJobRetry).Scan(&jobId)
 		if err != nil {
-			return &pb.Ack{Success: false}, fmt.Errorf("failed to create job for worker %d: %w", req.WorkerId, err)
+			return nil, fmt.Errorf("failed to create job for worker %d: %w", req.WorkerId, err)
 		}
 		job = Job{
 			JobID:      jobId,
@@ -746,19 +746,19 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 		if status == 'O' || status == 'I' {
 			_, err = tx.Exec("DELETE FROM worker WHERE worker_id=$1", req.WorkerId)
 			if err != nil {
-				return &pb.Ack{Success: false}, fmt.Errorf("failed to delete worker %d: %w", req.WorkerId, err)
+				return nil, fmt.Errorf("failed to delete worker %d: %w", req.WorkerId, err)
 			}
 		} else {
-			return &pb.Ack{Success: false}, fmt.Errorf("will not delete permanent worker %d with status %c", req.WorkerId, status)
+			return nil, fmt.Errorf("will not delete permanent worker %d with status %c", req.WorkerId, status)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit worker deletion: %v", err)
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to commit worker deletion: %w", err)
+		return nil, fmt.Errorf("failed to commit worker deletion: %w", err)
 	}
 
-	return &pb.Ack{Success: true}, nil
+	return &pb.JobId{JobId: job.JobID}, nil
 }
 
 func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest) (*pb.JobsList, error) {
@@ -826,6 +826,29 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 	}
 
 	return &pb.JobsList{Jobs: jobs}, nil
+}
+
+func (s *taskQueueServer) GetJobStatuses(ctx context.Context, req *pb.JobStatusRequest) (*pb.JobStatusResponse, error) {
+	var statuses []*pb.JobStatus
+
+	for _, jobID := range req.JobIds {
+		var status string
+		var progression uint32
+
+		err := s.db.QueryRow("SELECT status, progression FROM job WHERE job_id = $1", jobID).Scan(&status, &progression)
+		if err != nil {
+			log.Printf("⚠️ Error retrieving status for worker_id %d: %v", jobID, err)
+			status = "unknown"
+		}
+
+		statuses = append(statuses, &pb.JobStatus{
+			JobId:       jobID,
+			Status:      status,
+			Progression: progression,
+		})
+	}
+
+	return &pb.JobStatusResponse{Statuses: statuses}, nil
 }
 
 func (s *taskQueueServer) DeleteJob(ctx context.Context, req *pb.JobId) (*pb.Ack, error) {

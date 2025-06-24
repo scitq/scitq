@@ -337,13 +337,15 @@ export async function newWorker(
 }
 
 /**
- * Deletes a worker by its ID.
- * @param workerId - Object containing the worker's ID.
+ * Delete a worker and return its deletion job ID
+ * @param workerId Worker ID to delete
+ * @returns ID of the deletion job or undefined if failed
  */
 export async function delWorker(workerId: { workerId: any }) {
   try {
-    await client.deleteWorker({ workerId: workerId.workerId }, callOptionsWorker);
+    const response = await client.deleteWorker({ workerId: workerId.workerId }, callOptionsWorker);
     console.log("Worker deleted successfully!");
+    return response?.response.jobId;
   } catch (error) {
     console.error(`Error while deleting the worker: ${workerId.workerId}`, error);
   }
@@ -450,6 +452,21 @@ export async function delJob(jobId: { jobId: any }) {
     } catch (error) {
         console.error(`Error while deleting the job: ${jobId.jobId}`, error);
     }
+}
+
+/**
+ * Get statuses for multiple jobs
+ * @param jobIds Array of job IDs to check
+ * @returns Array of job statuses or empty array if error
+ */
+export async function getJobStatus(jobIds: number[]): Promise<taskqueue.JobStatus[]> {
+  try {
+    const response = await client.getJobStatuses({ jobIds }, callOptionsWorker);
+    return response.response.statuses;
+  } catch (error) {
+    console.error('❌ Error fetching job statuses:', error);
+    return [];
+  }
 }
 
 

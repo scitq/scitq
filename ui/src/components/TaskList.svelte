@@ -5,7 +5,7 @@
   import { RefreshCcw, Download, Trash, Eye, Workflow } from 'lucide-svelte';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
-  import { TaskLog } from '../../gen/taskqueue';
+  import { TaskId, TaskLog } from '../../gen/taskqueue';
 
   /** 
    * List of tasks to be displayed in the table.
@@ -17,7 +17,7 @@
    * Mapping of task IDs to their saved logs.
    * @type {Record<number, TaskLog[]>}
    */
-  export let taskLogsSaved: Record<number, TaskLog[]> = {};
+  export let taskLogsSaved: LogChunk[] = [];
 
   /**
    * List of all workers available.
@@ -86,6 +86,13 @@
       if (container) container.scrollTop = container.scrollHeight;
     });
   });
+
+  function getLogsOut(taskId: number) {
+    return taskLogsSaved.find(log => log.taskId === taskId)?.stdout || [];
+  }
+  function getLogsErr(taskId: number) {
+    return taskLogsSaved.find(log => log.taskId === taskId)?.stderr || [];
+  }
 </script>
 
 
@@ -125,37 +132,23 @@
             <td> </td>
             <td>{task.runningTimeout}</td>
             <td>
-              <div style="white-space: pre-wrap;" bind:this={logContainers[task.taskId]}>
-                {#if taskLogsSaved?.find(log => log.taskId === task.taskId)?.stdout.length}
-                  {#each taskLogsSaved?.find(log => log.taskId === task.taskId)?.stdout as line, i (i)}
-{line}
-                    {#if i < taskLogsSaved?.find(log => log.taskId === task.taskId)?.stdout.length - 1}
-                      <br />
-                    {/if}
-                  {/each}
-                {:else}
-                  {task.output}
-                {/if}
+              <div style="white-space: pre-wrap;">
+                {#each getLogsOut(task.taskId) as line (line)}
+                  {line}
+                {/each}
               </div>
             </td>
 
             <td>
-            <div style="white-space: pre-wrap;" bind:this={logContainers[task.taskId]}>
-              {#if taskLogsSaved?.find(log => log.taskId === task.taskId)?.stderr.length}
-                {#each taskLogsSaved?.find(log => log.taskId === task.taskId)?.stderr as line, i (i)}
-{line}
-                  {#if i < taskLogsSaved?.find(log => log.taskId === task.taskId)?.stderr.length - 1}
-                    <br />
-                  {/if}
+              <div style="white-space: pre-wrap;">
+                {#each getLogsErr(task.taskId) as line (line)}
+                  {line}
                 {/each}
-              {:else}
-                {task.output}
-              {/if}
-            </div>
+              </div>
             </td>
 
             <td class="workerCompo-actions">
-              <button class="btn-action" title="Full Log" on:click={() => onOpenModal(task.taskId)}><Eye /></button>
+              <button class="btn-action" title="Full Log" data-testid={`full-log-${task.taskId}`} on:click={() => onOpenModal(task.taskId)}><Eye /></button>
               <button class="btn-action" title="Restart"><RefreshCcw /></button>
               <br />
               <button class="btn-action" title="Download"><Download /></button>
