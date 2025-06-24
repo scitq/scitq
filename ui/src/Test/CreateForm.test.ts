@@ -18,7 +18,7 @@ describe('CreateForm', () => {
     { name: 'step1' },
   ];
   const mockNewWorkerResponse = [
-    { workerId: 'w1', workerName: 'workerOne' }
+    { workerId: 'w1', workerName: 'workerOne', jobId: 'j1' }
   ];
   const mockStatusResponse = [
     { workerId: 'w1', status: 'running' }
@@ -141,6 +141,12 @@ describe('CreateForm', () => {
             flavor: 'flavor1',
             provider: 'aws',
             region: 'us-east',
+          },
+          job: {
+            JobId: 'j1',
+            action: 'C',
+            workerId: 'w1',
+            modifiedAt: expect.any(String),
           }
         }
       });

@@ -1,34 +1,43 @@
 vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
-import { render, screen, waitFor } from '@testing-library/svelte';
-import { describe, it, expect, vi } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import JobsCompo from '../components/JobsCompo.svelte';
 
 describe('JobsCompo', () => {
+  const mockOnJobDeleted = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('should display the job information correctly', async () => {
     const mockJobs = [
       {
         jobId: 'job-1',
-        status: 'R', // Running status
-        action: 'C', // Deploy Worker action
+        status: 'R',
+        action: 'C',
         progression: 50,
         modifiedAt: new Date('2025-03-10T21:12:30').toISOString(),
         workerId: 'worker-1',
       },
       {
         jobId: 'job-2',
-        status: 'S', // Succeeded status
-        action: 'D', // Destroy Worker action
+        status: 'S',
+        action: 'D',
         progression: 100,
         modifiedAt: new Date('2025-04-28T21:12:30').toISOString(),
         workerId: 'worker-2',
       }
     ];
 
-    mockApi.getJobs.mockResolvedValue(mockJobs);
-
-    render(JobsCompo);
+    render(JobsCompo, {
+      props: {
+        jobs: mockJobs,
+        onJobDeleted: mockOnJobDeleted
+      }
+    });
 
     const job1ModifiedDate = new Date('2025-03-10T21:12:30').toLocaleString('fr-FR');
     const job2ModifiedDate = new Date('2025-04-28T21:12:30').toLocaleString('fr-FR');
@@ -47,9 +56,12 @@ describe('JobsCompo', () => {
   });
 
   it('should show a message when there are no jobs', async () => {
-    mockApi.getJobs.mockResolvedValue([]);
-
-    render(JobsCompo);
+    render(JobsCompo, {
+      props: {
+        jobs: [],
+        onJobDeleted: mockOnJobDeleted
+      }
+    });
 
     await waitFor(() => {
       expect(screen.getByText('No jobs currently running.')).toBeInTheDocument();
@@ -68,9 +80,12 @@ describe('JobsCompo', () => {
       }
     ];
 
-    mockApi.getJobs.mockResolvedValue(mockJobs);
-
-    render(JobsCompo);
+    render(JobsCompo, {
+      props: {
+        jobs: mockJobs,
+        onJobDeleted: mockOnJobDeleted
+      }
+    });
 
     await waitFor(() => {
       const progressDiv = screen.getByTestId('progress-bar-job-1');
@@ -82,7 +97,7 @@ describe('JobsCompo', () => {
     const mockJobs = [
       {
         jobId: 'job-1',
-        status: 'F', // Failed status - refresh button should be visible
+        status: 'F',
         action: 'C',
         progression: 50,
         modifiedAt: new Date().toISOString(),
@@ -90,7 +105,7 @@ describe('JobsCompo', () => {
       },
       {
         jobId: 'job-2',
-        status: 'S', // Succeeded - no refresh button
+        status: 'S',
         action: 'D',
         progression: 100,
         modifiedAt: new Date().toISOString(),
@@ -98,63 +113,50 @@ describe('JobsCompo', () => {
       }
     ];
 
-    mockApi.getJobs.mockResolvedValue(mockJobs);
-
-    render(JobsCompo);
+    render(JobsCompo, {
+      props: {
+        jobs: mockJobs,
+        onJobDeleted: mockOnJobDeleted
+      }
+    });
 
     await waitFor(() => {
-      // Job-1 (failed) should have both Refresh and Trash buttons
       expect(screen.getByTestId('refresh-button-job-1')).toBeInTheDocument();
       expect(screen.getByTestId('trash-button-job-1')).toBeInTheDocument();
-
-      // Job-2 (succeeded) should have only Trash button
       expect(screen.queryByTestId('refresh-button-job-2')).toBeNull();
       expect(screen.getByTestId('trash-button-job-2')).toBeInTheDocument();
     });
   });
 
-  it('should delete a job when trash button is clicked', async () => {
+  it('should call onJobDeleted when delete button is clicked', async () => {
     const mockJobs = [
       {
-        jobId: 1,
+        jobId: 'job-1',
         status: 'S',
         action: 'D',
         progression: 100,
         modifiedAt: new Date().toISOString(),
         workerId: 'worker-1',
-      },
-      {
-        jobId: 2,
-        status: 'S',
-        action: 'C',
-        progression: 100,
-        modifiedAt: new Date().toISOString(),
-        workerId: 'worker-2',
       }
     ];
 
-    // Mock API responses
-    mockApi.getJobs.mockResolvedValue(mockJobs);
+    mockApi.delJob.mockResolvedValue({});
 
-    render(JobsCompo);
-
-    // Wait until jobs appear
-    await waitFor(() => {
-      expect(screen.getByTestId('job-row-1')).toBeInTheDocument();
-      expect(screen.getByTestId('job-row-2')).toBeInTheDocument();
+    render(JobsCompo, {
+      props: {
+        jobs: mockJobs,
+        onJobDeleted: mockOnJobDeleted
+      }
     });
 
-    // Click the delete button for jobId = 1
-    const deleteButton = screen.getByTestId('trash-button-1');
-    await deleteButton.click();
-
-    // Wait for DOM update
     await waitFor(() => {
-      expect(screen.queryByTestId('job-row-1')).toBeNull(); // Should be removed
-      expect(screen.queryByTestId('job-row-2')).toBeInTheDocument(); // Still present
+      fireEvent.click(screen.getByTestId('trash-button-job-1'));
     });
 
-    // Confirm delJob was called with correct jobId
-    expect(mockApi.delJob).toHaveBeenCalledWith({ jobId: 1 });
+    await waitFor(() => {
+      expect(mockOnJobDeleted).toHaveBeenCalledWith({
+        detail: { jobId: 'job-1' }
+      });
+    });
   });
 });

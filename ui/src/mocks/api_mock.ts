@@ -15,6 +15,7 @@ export const mockApi = {
   updateWorkerConfig: vi.fn().mockResolvedValue(undefined),
 
   getJobs: vi.fn().mockResolvedValue([]),
+  getJobStatus: vi.fn().mockResolvedValue([]),
   delJob: vi.fn().mockResolvedValue(undefined),
 
   getFlavors: vi.fn().mockResolvedValue([]),
@@ -32,10 +33,10 @@ export const mockApi = {
   formatBytesPair : api.formatBytesPair,
 
   getTasksCount: vi.fn().mockResolvedValue([]),
-  getAllTasks: vi.fn(),
+  getAllTasks: vi.fn().mockResolvedValue([]),
   streamTaskLogsOutput: vi.fn(),
   streamTaskLogsErr: vi.fn(),
-  getLogsBatch: vi.fn(),
+  getLogsBatch: vi.fn().mockResolvedValue([]),
   
   getSteps: vi.fn().mockResolvedValue([]),
 

@@ -378,7 +378,7 @@ func (c *CLI) WorkerDelete() error {
 		return fmt.Errorf("error deleting worker: %w", err)
 	}
 
-	if res.Success {
+	if res.JobId != 0 {
 		fmt.Printf("✅ Worker %d is being deleted\n", c.Attr.Worker.Delete.WorkerId)
 		return nil
 	} else {

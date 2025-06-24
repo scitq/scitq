@@ -1,45 +1,101 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Trash, RefreshCw } from 'lucide-svelte'; // Icons for delete and restart
-  import { getJobs, getJobStatusClass, getJobStatusText, delJob } from '../lib/api';
-  import type { Job } from '../proto/taskqueue_pb'; // Type definition for Job object
+  import { Trash, RefreshCw } from 'lucide-svelte';
+  import { getJobs, getJobStatusClass, getJobStatusText, delJob, getJobStatus } from '../lib/api';
+  import type { Job } from '../proto/taskqueue_pb';
+  import "../styles/worker.css";
+  import "../styles/jobsCompo.css";
+  import { JobId } from '../../gen/taskqueue';
 
-  import "../styles/worker.css";    // Shared table and layout styles
-  import "../styles/jobsCompo.css"; // Styles specific to job list and progress bar
+/** List of all jobs */
+export let jobs: Job[] = [];
 
-  let jobs: Job[] = [];
+/** Jobs enriched with status and progression for display */
+let displayJobs: (Job & { status?: string, progression?: number })[] = [];
 
-  // Fetch job data from backend API once component is mounted
-  onMount(async () => {
-    jobs = await getJobs();
-  });
+/** Interval reference for auto-refresh */
+let interval;
 
-  /**
-   * Deletes a job by its ID.
-   * - Optimistically removes the job from the UI immediately.
-   * - Calls the backend API to delete the job.
-   * @param {number} jobId - The ID of the job to delete.
-   * @returns {Promise<void>} Resolves when the deletion API call completes.
-   */
-  async function deleteJob(jobId: number) {
-    jobs = jobs.filter(job => job.jobId !== jobId); // Update UI immediately
-    await delJob({ jobId });                         // Perform actual API deletion
-  }
+/** Flag to track initial data load */
+let hasLoaded = false;
+
+/** Map of job statuses and progressions by job ID */
+let jobStatusMap = new Map<number, { status: string, progression?: number }>();
 
 /**
- * Handles restarting a job.
- * - Currently a placeholder with no implementation.
- * - Intended to restart jobs with status 'F' (finished).
- * @param {number} jobId - The ID of the job to restart.
- * @returns {void}
+ * Callback when job is deleted
+ * @event
+ * @param jobId ID of deleted job
  */
-  function handleRestart(jobId: number) {
-    // TODO: Implement job restart logic
+export let onJobDeleted: (event: { detail: { jobId: number } }) => void = () => {};
+
+/**
+ * Initialize component - starts auto-refresh
+ */
+onMount(() => {
+  updateJobData();
+  interval = setInterval(updateJobData, 5000);
+  return () => clearInterval(interval);
+});
+
+/**
+ * Auto-update when jobs are initialized
+ */
+$: if (jobs.length > 0 && !hasLoaded) {
+  updateJobData();
+  hasLoaded = true;
+}
+
+/**
+ * Reactive jobs list with enriched status data
+ */
+$: displayJobs = jobs.map(job => {
+  const statusInfo = jobStatusMap.get(job.jobId) || {};
+  return {
+    ...job,
+    status: statusInfo.status || job.status || 'unknown',
+    progression: statusInfo.progression ?? job.progression
+  };
+});
+
+/**
+ * Fetch latest job statuses and progressions
+ * Updates internal status map
+ */
+async function updateJobData() {
+  if (jobs.length === 0) return;
+
+  try {
+    const jobsStatus = await getJobStatus(jobs.map(j => j.jobId));
+    jobStatusMap = new Map(jobsStatus.map(s => [s.jobId, { 
+      status: s.jobStatus, 
+      progression: s.progression 
+    }]));
+  } catch (err) {
+    console.error('Error loading job data:', err);
   }
+}
+
+/**
+ * Delete a job and clean up local state
+ * @param jobId ID of job to delete
+ */
+async function deleteJob(jobId: number) {
+  onJobDeleted({ detail: { jobId } });
+  jobStatusMap.delete(jobId);
+}
+
+/**
+ * Restart a job (stub implementation)
+ * @param jobId ID of job to restart
+ */
+function handleRestart(jobId: number) {
+  console.log('Restarting job:', jobId);
+  // TODO: Implement actual restart logic
+}
 </script>
 
-
-{#if jobs && jobs.length > 0}
+{#if displayJobs && displayJobs.length > 0}
   <div class="workerCompo-table-wrapper">
     <table class="listTable">
       <thead>
@@ -52,7 +108,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each jobs as job (job.jobId)}
+        {#each displayJobs as job (job.jobId)}
           <tr data-testid={`job-row-${job.jobId}`}>
             <td>
               {#if job.action === 'C'}
@@ -83,7 +139,6 @@
             <td>{new Date(job.modifiedAt).toLocaleString()}</td>
             <td class="workerCompo-actions">
               {#if job.status === 'F'}
-                <!-- Restart button (only for finished jobs) -->
                 <button
                   class="btn-action"
                   data-testid={`refresh-button-${job.jobId}`}
@@ -94,7 +149,6 @@
                 </button>
               {/if}
 
-              <!-- Delete button -->
               <button
                 class="btn-action"
                 title="Delete"

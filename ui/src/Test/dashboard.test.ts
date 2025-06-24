@@ -4,6 +4,7 @@ import { render, fireEvent, waitFor, screen, queryByTestId } from '@testing-libr
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Dashboard from '../pages/Dashboard.svelte';
 
+
 // Define types for task status
 interface TaskStatus {
   pending: number;
@@ -42,12 +43,18 @@ const tasksStatus = {
   }
 };
 
+const mockJobs = [
+  { jobId: 1, status: 'S', action: 'D', progression: 100, modifiedAt: new Date().toISOString(), workerId: 'worker-1'},
+  { jobId: 2, status: 'S', action: 'C', progression: 100, modifiedAt: new Date().toISOString(), workerId: 'worker-2'}
+]
+
 describe('Worker integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.getWorkers.mockResolvedValue([
       { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1' }
     ]);
+    mockApi.getJobs.mockResolvedValue(mockJobs);
     mockApi.getStatus.mockResolvedValue([{ workerId: 1, status: 'online' }]);
   });
 
@@ -77,11 +84,11 @@ describe('Worker integration', () => {
     });
   });
 
-  it('deletes a worker when delete button is clicked', async () => {
+  it('deletes a worker and update Jobs when delete button is clicked', async () => {
     const { getByTestId, queryByTestId } = render(Dashboard);
 
     await waitFor(() => getByTestId('worker-1'));
-    mockApi.delWorker.mockResolvedValue({});
+    mockApi.delWorker.mockResolvedValue('3');
     const deleteBtn = getByTestId('delete-worker-1');
     await fireEvent.click(deleteBtn);
 
@@ -91,9 +98,10 @@ describe('Worker integration', () => {
 
     await waitFor(() => {
       expect(queryByTestId('worker-1')).toBeNull();
+      expect(queryByTestId('job-row-3')).toBeInTheDocument();
     });
     
-    expect(screen.getByText('Worker Deleted')).toBeInTheDocument();
+    expect(screen.getByText('Worker deleted / Job Created')).toBeInTheDocument();
   });
 
   it('should add a worker and update the worker and the jobs list', async () => {
@@ -106,24 +114,7 @@ describe('Worker integration', () => {
     ]);
 
     // Mock API responses
-    mockApi.getJobs.mockResolvedValue([
-      {
-        jobId: 1,
-        status: 'S',
-        action: 'D',
-        progression: 100,
-        modifiedAt: new Date().toISOString(),
-        workerId: 'worker-1',
-      },
-      {
-        jobId: 2,
-        status: 'S',
-        action: 'C',
-        progression: 100,
-        modifiedAt: new Date().toISOString(),
-        workerId: 'worker-2',
-      }
-    ]);
+    mockApi.getJobs.mockResolvedValue(mockJobs);
 
     // 2. Render the dashboard
     const { getByTestId, findByText, queryByText, queryByTestId } = render(Dashboard);
@@ -139,7 +130,7 @@ describe('Worker integration', () => {
 
     // 4. Fill the inputs
     await fireEvent.input(getByTestId('concurrency-createWorker'), { target: { value: '2' } });
-    await fireEvent.input(getByTestId('prefetch-createWorker'), { target: { value: '3' } });
+    await fireEvent.input(getByTestId('prefetch-createWorker'), { target: { value: '1' } });
     await fireEvent.input(getByTestId('flavor-createWorker'), { target: { value: 'flavor-a' } });
     await fireEvent.input(getByTestId('region-createWorker'), { target: { value: 'us-east' } });
     await fireEvent.input(getByTestId('provider-createWorker'), { target: { value: 'aws' } });
@@ -150,12 +141,12 @@ describe('Worker integration', () => {
     await fireEvent.click(getByTestId('add-worker-button'));
 
     // 6. Check that success message appears
-    expect(await findByText('Worker Added')).toBeInTheDocument();
+    expect(await findByText('Worker/Job Added')).toBeInTheDocument();
 
     // 7. Check that newWorker was called correctly
     expect(mockApi.newWorker).toHaveBeenCalledWith(
       2,           // concurrency
-      3,           // prefetch
+      1,           // prefetch
       'flavor-a',  // flavor
       'us-east',   // region
       'aws',       // provider
@@ -170,5 +161,39 @@ describe('Worker integration', () => {
     // 9. Check that the job is now in the DOM
     const newJob = await screen.findByText('3');
     expect(newJob).toBeInTheDocument();
+  });
+
+  it('should delete a job when trash button is clicked', async () => {
+    const mockJobs = [
+      {
+        jobId: 1,
+        status: 'S',
+        action: 'D',
+        progression: 100,
+        modifiedAt: new Date().toISOString(),
+        workerId: 'worker-1',
+      }
+    ];
+
+    // Mock API responses
+    mockApi.getJobs.mockResolvedValue(mockJobs);
+    mockApi.delJob.mockResolvedValue({});
+    
+    render(Dashboard);
+
+    // Wait until jobs appear
+    await waitFor(() => {
+      expect(screen.getByTestId('job-row-1')).toBeInTheDocument();
+    });
+
+    // Click the delete button for jobId = 1
+    const deleteButton = screen.getByTestId('trash-button-1');
+    await fireEvent.click(deleteButton);
+
+    // Wait for API call
+    await waitFor(() => {
+      expect(mockApi.delJob).toHaveBeenCalledWith({ jobId: 1 });
+      expect(screen.queryByTestId('job-row-1')).toBeNull();
+    });
   });
 });
