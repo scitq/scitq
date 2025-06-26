@@ -46,6 +46,12 @@ service TaskQueue {
     rpc DeleteStep(StepId) returns (Ack);
     rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
     rpc FetchList (FetchListRequest) returns (FetchListResponse);
+    // Template system
+    rpc UploadTemplate(UploadTemplateRequest) returns (UploadTemplateResponse);
+    rpc RunTemplate(RunTemplateRequest) returns (TemplateRun);
+    rpc ListTemplates(google.protobuf.Empty) returns (TemplateList);
+    rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
+    rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
 }   
 
 message TaskResponse {
@@ -472,3 +478,63 @@ message FetchListResponse {
   repeated string files = 1; // Absolute paths from the given URI
 }
 
+message UploadTemplateRequest {
+  string name = 1;
+  string version = 2;
+  string description = 3;
+  bytes script = 4;
+  string params_schema_json = 5;
+  bool force = 6;
+}
+
+message UploadTemplateResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 workflow_template_id = 3;
+  string name = 4;
+  string version = 5;
+  string description = 6;
+  string warnings = 7;
+}
+
+
+message RunTemplateRequest {
+  uint32 workflow_template_id = 1;
+  string param_values_json = 2;
+}
+
+message Template {
+  uint32 workflow_template_id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+  string uploaded_at = 5;
+  optional uint32 uploaded_by = 6;
+}
+
+message TemplateList {
+  repeated Template templates = 1;
+}
+
+message TemplateRun {
+  uint32 template_run_id = 1;
+  uint32 workflow_template_id = 2;
+  optional uint32 workflow_id = 3;
+  string created_at = 4;
+  string param_values_json = 5;
+  optional string error_message = 6;
+}
+
+message TemplateRunList {
+  repeated TemplateRun runs = 1;
+}
+
+message TemplateRunFilter {
+  optional uint32 workflow_template_id = 1;
+}
+
+message UpdateTemplateRunRequest {
+  uint32 template_run_id = 1;
+  optional uint32 workflow_id = 2;
+  optional string error_message = 3;
+}

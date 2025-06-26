@@ -1901,6 +1901,11 @@ func Serve(cfg config.Config) error {
 	}
 	defer db.Close()
 
+	// Check workflow template directory
+	if err := validateScriptConfig(cfg.Scitq.ScriptRoot, cfg.Scitq.ScriptInterpreter); err != nil {
+		return fmt.Errorf("invalid script config: %w", err)
+	}
+
 	// Create the main server instance
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
 

@@ -19,6 +19,9 @@ type Config struct {
 		MaxDBConcurrency     int     `yaml:"max_db_concurrency" default:"50"`
 		LogLevel             string  `yaml:"log_level" default:"info"`
 		LogRoot              string  `yaml:"log_root" default:"log"`
+		ScriptRoot           string  `yaml:"script_root" default:"scripts"`
+		ScriptInterpreter    string  `yaml:"script_interpreter" default:"python3"`
+		ScriptRunnerUser     string  `yaml:"script_runner_user" default:"nobody"`
 		ClientBinaryPath     string  `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
 		ClientDownloadToken  string  `yaml:"client_download_token"`
 		CertificateKey       string  `yaml:"certificate_key"`
