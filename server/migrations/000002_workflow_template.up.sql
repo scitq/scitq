@@ -18,3 +18,6 @@ CREATE TABLE template_run (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     error_message TEXT
 );
+
+CREATE INDEX idx_task_dependencies_by_prerequisite
+ON task_dependencies (prerequisite_task_id);

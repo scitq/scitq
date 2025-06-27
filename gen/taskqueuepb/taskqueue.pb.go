@@ -135,6 +135,7 @@ type TaskRequest struct {
 	RunningTimeout   *float32               `protobuf:"fixed32,13,opt,name=running_timeout,json=runningTimeout,proto3,oneof" json:"running_timeout,omitempty"`
 	UploadTimeout    *float32               `protobuf:"fixed32,14,opt,name=upload_timeout,json=uploadTimeout,proto3,oneof" json:"upload_timeout,omitempty"`
 	Status           string                 `protobuf:"bytes,15,opt,name=status,proto3" json:"status,omitempty"`
+	Dependency       []uint32               `protobuf:"varint,16,rep,packed,name=dependency,proto3" json:"dependency,omitempty"` // IDs of tasks that this task depends on
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -272,6 +273,13 @@ func (x *TaskRequest) GetStatus() string {
 		return x.Status
 	}
 	return ""
+}
+
+func (x *TaskRequest) GetDependency() []uint32 {
+	if x != nil {
+		return x.Dependency
+	}
+	return nil
 }
 
 type Task struct {
@@ -4831,7 +4839,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"WorkerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\vconcurrency\x18\x02 \x01(\rH\x00R\vconcurrency\x88\x01\x01B\x0e\n" +
-	"\f_concurrency\"\x99\x05\n" +
+	"\f_concurrency\"\xb9\x05\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -4849,7 +4857,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10download_timeout\x18\f \x01(\x02H\aR\x0fdownloadTimeout\x88\x01\x01\x12,\n" +
 	"\x0frunning_timeout\x18\r \x01(\x02H\bR\x0erunningTimeout\x88\x01\x01\x12*\n" +
 	"\x0eupload_timeout\x18\x0e \x01(\x02H\tR\ruploadTimeout\x88\x01\x01\x12\x16\n" +
-	"\x06status\x18\x0f \x01(\tR\x06statusB\b\n" +
+	"\x06status\x18\x0f \x01(\tR\x06status\x12\x1e\n" +
+	"\n" +
+	"dependency\x18\x10 \x03(\rR\n" +
+	"dependencyB\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +

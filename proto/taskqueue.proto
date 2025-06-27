@@ -79,6 +79,7 @@ message TaskRequest {
     optional float running_timeout  = 13;
     optional float upload_timeout  = 14;
     string status = 15;
+    repeated uint32 dependency = 16; // IDs of tasks that this task depends on
 }
 
 message Task {

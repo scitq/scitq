@@ -127,6 +127,14 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
 	var taskID int
+	// Determine initial status: "W" if dependencies, otherwise "P"
+	initialStatus := "P"
+	if req.Status != "" {
+		initialStatus = req.Status
+	} else if len(req.Dependency) > 0 {
+		initialStatus = "W"
+	}
+
 	err := s.db.QueryRow(
 		`INSERT INTO task (command, shell, container, container_options, step_id, 
 					input, resource, output, retry, is_final, uses_cache, 
@@ -134,12 +142,13 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 					status, created_at) 
 		VALUES ($1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10, $11, 
-			$12, $13, $14,
-			 'P', NOW()) 
+			$12, $13, $14, 
+			$15, NOW()) 
 		RETURNING task_id`,
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
+		initialStatus,
 	).Scan(&taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -147,8 +156,28 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 
 	log.Printf("✅ Task %d submitted (Command: %s, Container: %s)", taskID, req.Command, req.Container)
 
-	// **Trigger task assignment**
-	s.triggerAssign()
+	// Insert dependencies if any
+	if len(req.Dependency) > 0 {
+		stmt, err := s.db.PrepareContext(ctx, `
+			INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+			VALUES ($1, $2)
+		`)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare dependency insert: %w", err)
+		}
+		defer stmt.Close()
+
+		for _, depID := range req.Dependency {
+			if _, err := stmt.ExecContext(ctx, taskID, depID); err != nil {
+				return nil, fmt.Errorf("failed to insert dependency (%d -> %d): %w", depID, taskID, err)
+			}
+		}
+	}
+
+	// Trigger assignment only if task is immediately runnable
+	if initialStatus == "P" {
+		s.triggerAssign()
+	}
 
 	return &pb.TaskResponse{TaskId: uint32(taskID)}, nil
 }
@@ -159,6 +188,15 @@ func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empt
 		return nil, fmt.Errorf("failed to read rclone config: %w", err)
 	}
 	return &pb.RcloneConfig{Config: string(data)}, nil
+}
+
+func shouldTriggerAssignFor(status string) bool {
+	switch status {
+	case "P", "S", "F", "C", "R", "U", "V", "X":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
@@ -175,26 +213,80 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 
 	switch req.NewStatus {
 	case "C":
-		{
-			if !workerID.Valid {
-				log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
-			} else {
-				s.watchdog.TaskAccepted(uint32(workerID.Int32))
-			}
+		if !workerID.Valid {
+			log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
+		} else {
+			s.watchdog.TaskAccepted(uint32(workerID.Int32))
 		}
 	case "S", "F":
-		{
-			if !workerID.Valid {
-				log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
-			} else {
-				s.watchdog.TaskFinished(uint32(workerID.Int32))
+		if !workerID.Valid {
+			log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
+		} else {
+			s.watchdog.TaskFinished(uint32(workerID.Int32))
+		}
+	}
+
+	// Push logic: on success, check dependent "W" tasks
+	if req.NewStatus == "S" {
+		// Find candidate dependent tasks
+		rows, err := s.db.QueryContext(ctx, `
+            SELECT DISTINCT d.dependent_task_id
+            FROM task_dependencies d
+            JOIN task t ON d.dependent_task_id = t.task_id
+            WHERE d.prerequisite_task_id = $1
+              AND t.status = 'W'
+        `, req.TaskId)
+		if err != nil {
+			log.Printf("❌ failed to find dependent tasks: %v", err)
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var depTaskID int64
+				if err := rows.Scan(&depTaskID); err != nil {
+					log.Printf("⚠️ failed to scan dependent task: %v", err)
+					continue
+				}
+
+				// Check if all prerequisites are now 'S'
+				var allDone bool
+				err = s.db.QueryRowContext(ctx, `
+                    SELECT NOT EXISTS (
+                        SELECT 1
+                        FROM task_dependencies d
+                        JOIN task t ON d.prerequisite_task_id = t.task_id
+                        WHERE d.dependent_task_id = $1
+                          AND t.status != 'S'
+                    )
+                `, depTaskID).Scan(&allDone)
+				if err != nil {
+					log.Printf("⚠️ failed to check dependencies for task %d: %v", depTaskID, err)
+					continue
+				}
+
+				if allDone {
+					// Promote to "P"
+					res, err := s.db.ExecContext(ctx, `
+                        UPDATE task
+                        SET status = 'P'
+                        WHERE task_id = $1 AND status = 'W'
+                    `, depTaskID)
+					if err != nil {
+						log.Printf("⚠️ failed to promote task %d to 'P': %v", depTaskID, err)
+						continue
+					}
+					n, _ := res.RowsAffected()
+					if n > 0 {
+						log.Printf("✅ task %d now pending (dependencies resolved)", depTaskID)
+						s.triggerAssign()
+					}
+				}
 			}
 		}
 	}
 
-	// **Trigger task assignment**
-	s.triggerAssign()
-
+	if shouldTriggerAssignFor(req.NewStatus) {
+		s.triggerAssign()
+	}
 	return &pb.Ack{Success: true}, nil
 }
 
