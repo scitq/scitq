@@ -75,6 +75,7 @@ type taskQueueServer struct {
 	stopWatchdog       chan struct{}
 	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
 	workerStats        *sync.Map
+	sslCertificatePEM  string
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -1863,24 +1864,24 @@ func applyMigrations(db *sql.DB) error {
 	return nil
 }
 
-func LoadEmbeddedCertificates() (tls.Certificate, error) {
+func LoadEmbeddedCertificates() (tls.Certificate, string, error) {
 
 	var serverCert tls.Certificate
 	// Read server certificate & key from embedded files
 	serverCertPEM, err := embeddedCertificates.ReadFile("certificates/server.pem")
 	if err != nil {
-		return serverCert, fmt.Errorf("failed to read embedded server.pem: %w", err)
+		return serverCert, "", fmt.Errorf("failed to read embedded server.pem: %w", err)
 	}
 
 	serverKeyPEM, err := embeddedCertificates.ReadFile("certificates/server.key")
 	if err != nil {
-		return serverCert, fmt.Errorf("failed to read embedded server.key: %w", err)
+		return serverCert, string(serverCertPEM), fmt.Errorf("failed to read embedded server.key: %w", err)
 	}
 
 	// Load the certificate
 	serverCert, err = tls.X509KeyPair(serverCertPEM, serverKeyPEM)
 
-	return serverCert, err
+	return serverCert, string(serverCertPEM), err
 }
 
 func (s *taskQueueServer) Shutdown() {
@@ -1943,12 +1944,18 @@ func Serve(cfg config.Config) error {
 	// Load TLS certificates - embedded or from configured files
 	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
 		log.Printf("🔐 Using embedded TLS certificates")
-		serverCert, err := LoadEmbeddedCertificates()
+		serverCert, certPEMString, err := LoadEmbeddedCertificates()
 		if err != nil {
 			return fmt.Errorf("failed to load embedded TLS credentials: %v", err)
 		}
 		creds = credentials.NewServerTLSFromCert(&serverCert)
+		s.sslCertificatePEM = certPEMString
 	} else {
+		certPEMData, err := os.ReadFile(cfg.Scitq.CertificatePem)
+		if err != nil {
+			log.Fatalf("failed to read certificate file: %v", err)
+		}
+		s.sslCertificatePEM = string(certPEMData)
 		creds, err = credentials.NewServerTLSFromFile(cfg.Scitq.CertificatePem, cfg.Scitq.CertificateKey)
 		if err != nil {
 			return fmt.Errorf("failed to load TLS credentials: %v", err)

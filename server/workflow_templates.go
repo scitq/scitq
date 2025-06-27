@@ -123,6 +123,9 @@ func (s *taskQueueServer) scriptRunner(
 	if mode == "run" && templateRunID != 0 {
 		env = append(env, fmt.Sprintf("SCITQ_TEMPLATE_RUN_ID=%d", templateRunID))
 	}
+	if len(s.sslCertificatePEM) > 0 {
+		env = append(env, fmt.Sprintf("SCITQ_SSL_CERTIFICATE='%s'", s.sslCertificatePEM))
+	}
 	cmd.Env = append(os.Environ(), env...)
 
 	// 🔒 Drop privileges if configured
