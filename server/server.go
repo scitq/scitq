@@ -33,6 +33,7 @@ import (
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -66,11 +67,12 @@ type taskQueueServer struct {
 	cfg      config.Config
 	jobQueue chan Job
 	//jobWG     sync.WaitGroup
-	providers     map[uint32]providers.Provider
-	semaphore     chan struct{} // Semaphore to limit concurrency
-	assignTrigger uint32
-	qm            recruitment.QuotaManager
-	watchdog      *watchdog.Watchdog
+	providers      map[uint32]providers.Provider
+	namedProviders map[string]providers.Provider
+	semaphore      chan struct{} // Semaphore to limit concurrency
+	assignTrigger  uint32
+	qm             recruitment.QuotaManager
+	watchdog       *watchdog.Watchdog
 
 	stopWatchdog       chan struct{}
 	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
@@ -91,6 +93,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		jobQueue:           make(chan Job, defaultJobQueueSize),
 		semaphore:          make(chan struct{}, defaultJobConcurrency),
 		providers:          make(map[uint32]providers.Provider),
+		namedProviders:     make(map[string]providers.Provider),
 		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
 		stopWatchdog:       make(chan struct{}),
@@ -1927,6 +1930,25 @@ func (s *taskQueueServer) FetchList(ctx context.Context, req *pb.FetchListReques
 	}
 
 	return &pb.FetchListResponse{Files: files}, nil
+}
+
+func (s *taskQueueServer) GetWorkspaceRoot(ctx context.Context, req *taskqueuepb.WorkspaceRootRequest) (*taskqueuepb.WorkspaceRootResponse, error) {
+	providerName := req.GetProvider()
+	region := req.GetRegion()
+
+	provider, ok := s.namedProviders[providerName]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "unknown provider: %q", providerName)
+	}
+
+	root, ok := provider.GetWorkspaceRoot(region)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "no workspace root for region %q in provider %q", region, providerName)
+	}
+
+	return &taskqueuepb.WorkspaceRootResponse{
+		RootUri: root,
+	}, nil
 }
 
 func applyMigrations(db *sql.DB) error {

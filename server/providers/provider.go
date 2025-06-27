@@ -6,4 +6,5 @@ type Provider interface {
 	List() (map[string]string, error)
 	Restart(workerName string) error
 	Delete(workerName string) error
+	GetWorkspaceRoot(region string) (string, bool)
 }

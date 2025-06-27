@@ -50,19 +50,20 @@ type Quota struct {
 }
 
 type AzureConfig struct {
-	Name              string           `yaml:"-"`
-	DefaultRegion     string           `yaml:"default_region"`
-	SubscriptionID    string           `yaml:"subscription_id"`
-	ClientID          string           `yaml:"client_id"`
-	ClientSecret      string           `yaml:"client_secret"`
-	TenantID          string           `yaml:"tenant_id"`
-	UseSpot           bool             `yaml:"use_spot" default:"true"`
-	Username          string           `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
-	SSHPublicKey      string           `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
-	Image             AzureImage       `yaml:"image"`
-	Quotas            map[string]Quota `yaml:"quotas"` // key: region
-	Regions           []string         `yaml:"regions"`
-	UpdatePeriodicity string           `yaml:"update_periodicity"` // Update periodicity in minutes
+	Name                string            `yaml:"-"`
+	DefaultRegion       string            `yaml:"default_region"`
+	SubscriptionID      string            `yaml:"subscription_id"`
+	ClientID            string            `yaml:"client_id"`
+	ClientSecret        string            `yaml:"client_secret"`
+	TenantID            string            `yaml:"tenant_id"`
+	UseSpot             bool              `yaml:"use_spot" default:"true"`
+	Username            string            `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
+	SSHPublicKey        string            `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
+	Image               AzureImage        `yaml:"image"`
+	Quotas              map[string]Quota  `yaml:"quotas"` // key: region
+	Regions             []string          `yaml:"regions"`
+	UpdatePeriodicity   string            `yaml:"update_periodicity"` // Update periodicity in minutes
+	LocalWorkspaceRoots map[string]string `yaml:"local_workspaces"`
 }
 
 type AzureImage struct {
@@ -73,20 +74,21 @@ type AzureImage struct {
 }
 
 type OpenstackConfig struct {
-	Name              string                 `yaml:"-"`
-	AuthURL           string                 `yaml:"auth_url"`
-	Username          string                 `yaml:"username"`
-	Password          string                 `yaml:"password"`
-	DomainName        string                 `yaml:"domain_name"`
-	TenantName        string                 `yaml:"tenant_name"`
-	DefaultRegion     string                 `yaml:"region"`
-	ImageID           string                 `yaml:"image_id"`
-	FlavorID          string                 `yaml:"flavor_id"`
-	NetworkID         string                 `yaml:"network_id"`
-	Quotas            map[string]Quota       `yaml:"quotas"` // key: region
-	Regions           []string               `yaml:"regions"`
-	Custom            map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
-	UpdatePeriodicity string                 `yaml:"update_periodicity"` // Update periodicity in minutes
+	Name                string                 `yaml:"-"`
+	AuthURL             string                 `yaml:"auth_url"`
+	Username            string                 `yaml:"username"`
+	Password            string                 `yaml:"password"`
+	DomainName          string                 `yaml:"domain_name"`
+	TenantName          string                 `yaml:"tenant_name"`
+	DefaultRegion       string                 `yaml:"region"`
+	ImageID             string                 `yaml:"image_id"`
+	FlavorID            string                 `yaml:"flavor_id"`
+	NetworkID           string                 `yaml:"network_id"`
+	Quotas              map[string]Quota       `yaml:"quotas"` // key: region
+	Regions             []string               `yaml:"regions"`
+	Custom              map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
+	UpdatePeriodicity   string                 `yaml:"update_periodicity"` // Update periodicity in minutes
+	LocalWorkspaceRoots map[string]string      `yaml:"local_workspaces"`
 }
 
 func (c *Config) Validate() error {

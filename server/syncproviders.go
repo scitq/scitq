@@ -51,6 +51,9 @@ func (s *taskQueueServer) checkProviders() error {
 				if p.ConfigName == paramConfigName {
 					provider := azure.New(*config, s.cfg)
 					s.providers[p.ProviderID] = provider
+					key := fmt.Sprintf("azure.%s", paramConfigName)
+					s.namedProviders[key] = provider
+
 					if mappedConfig[p.ProviderName] == nil {
 						mappedConfig[p.ProviderName] = make(map[string]bool)
 					}
@@ -81,6 +84,8 @@ func (s *taskQueueServer) checkProviders() error {
 			}
 			provider := azure.New(*config, s.cfg)
 			s.providers[providerId] = provider
+			key := fmt.Sprintf("azure.%s", configName)
+			s.namedProviders[key] = provider
 
 			// Manage regions for this newly created provider
 			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {

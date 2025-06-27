@@ -64,6 +64,7 @@ const (
 	TaskQueue_ListTemplates_FullMethodName        = "/taskqueue.TaskQueue/ListTemplates"
 	TaskQueue_ListTemplateRuns_FullMethodName     = "/taskqueue.TaskQueue/ListTemplateRuns"
 	TaskQueue_UpdateTemplateRun_FullMethodName    = "/taskqueue.TaskQueue/UpdateTemplateRun"
+	TaskQueue_GetWorkspaceRoot_FullMethodName     = "/taskqueue.TaskQueue/GetWorkspaceRoot"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -115,6 +116,7 @@ type TaskQueueClient interface {
 	ListTemplates(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*TemplateList, error)
 	ListTemplateRuns(ctx context.Context, in *TemplateRunFilter, opts ...grpc.CallOption) (*TemplateRunList, error)
 	UpdateTemplateRun(ctx context.Context, in *UpdateTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
+	GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
 }
 
 type taskQueueClient struct {
@@ -586,6 +588,16 @@ func (c *taskQueueClient) UpdateTemplateRun(ctx context.Context, in *UpdateTempl
 	return out, nil
 }
 
+func (c *taskQueueClient) GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspaceRootResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_GetWorkspaceRoot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -635,6 +647,7 @@ type TaskQueueServer interface {
 	ListTemplates(context.Context, *emptypb.Empty) (*TemplateList, error)
 	ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error)
 	UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error)
+	GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -776,6 +789,9 @@ func (UnimplementedTaskQueueServer) ListTemplateRuns(context.Context, *TemplateR
 }
 func (UnimplementedTaskQueueServer) UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTemplateRun not implemented")
+}
+func (UnimplementedTaskQueueServer) GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceRoot not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -1565,6 +1581,24 @@ func _TaskQueue_UpdateTemplateRun_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_GetWorkspaceRoot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceRootRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetWorkspaceRoot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetWorkspaceRoot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetWorkspaceRoot(ctx, req.(*WorkspaceRootRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1735,6 +1769,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateTemplateRun",
 			Handler:    _TaskQueue_UpdateTemplateRun_Handler,
+		},
+		{
+			MethodName: "GetWorkspaceRoot",
+			Handler:    _TaskQueue_GetWorkspaceRoot_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

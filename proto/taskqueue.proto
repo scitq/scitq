@@ -52,6 +52,7 @@ service TaskQueue {
     rpc ListTemplates(google.protobuf.Empty) returns (TemplateList);
     rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
     rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
+    rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
 }   
 
 message TaskResponse {
@@ -538,4 +539,13 @@ message UpdateTemplateRunRequest {
   uint32 template_run_id = 1;
   optional uint32 workflow_id = 2;
   optional string error_message = 3;
+}
+
+message WorkspaceRootRequest {
+  string provider = 1; // e.g., "azure.default" or "openstack.ovh"
+  string region   = 2; // e.g., "northeurope"
+}
+
+message WorkspaceRootResponse {
+  string root_uri = 1; // e.g., "aznorth://workspace"
 }

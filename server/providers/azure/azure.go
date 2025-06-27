@@ -22,9 +22,10 @@ import (
 
 // AzureProvider holds global configuration for Azure.
 type AzureProvider struct {
-	az               config.AzureConfig
-	sshPublicKeyData string
-	cfg              config.Config
+	az                  config.AzureConfig
+	sshPublicKeyData    string
+	cfg                 config.Config
+	LocalWorkspaceRoots map[string]string // Local workspace roots for different regions
 }
 
 // expandPath expands a leading ~ in a file path to the user's home directory.
@@ -588,4 +589,17 @@ func (ap *AzureProvider) Restart(workerName string) error {
 	}
 	log.Printf("VM %s restarted successfully", vmName)
 	return nil
+}
+
+func (a *AzureProvider) GetWorkspaceRoot(region string) (string, bool) {
+	if a.LocalWorkspaceRoots == nil {
+		return "", false
+	}
+	if root, ok := a.LocalWorkspaceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := a.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
 }
