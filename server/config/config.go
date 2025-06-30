@@ -116,6 +116,7 @@ type ProviderConfig interface {
 	GetName() string
 	SetName(string)
 	GetDefaultRegion() string
+	GetWorkspaceRoot(region string) (string, bool)
 }
 
 func parsePeriodicity(periodicity string, name string) time.Duration {
@@ -159,6 +160,19 @@ func (a *AzureConfig) SetName(name string) {
 	a.Name = name
 }
 
+func (a *AzureConfig) GetWorkspaceRoot(region string) (string, bool) {
+	if a.LocalWorkspaceRoots == nil {
+		return "", false
+	}
+	if root, ok := a.LocalWorkspaceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := a.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
+}
+
 func (o *OpenstackConfig) GetRegions() []string {
 	return o.Regions
 }
@@ -185,6 +199,19 @@ func (o *OpenstackConfig) SetName(name string) {
 
 func (o *OpenstackConfig) GetName() string {
 	return o.Name
+}
+
+func (o *OpenstackConfig) GetWorkspaceRoot(region string) (string, bool) {
+	if o.LocalWorkspaceRoots == nil {
+		return "", false
+	}
+	if root, ok := o.LocalWorkspaceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := o.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
 }
 
 func (cfg *Config) GetProviders() []ProviderConfig {

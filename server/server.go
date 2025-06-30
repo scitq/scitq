@@ -68,7 +68,7 @@ type taskQueueServer struct {
 	jobQueue chan Job
 	//jobWG     sync.WaitGroup
 	providers      map[uint32]providers.Provider
-	namedProviders map[string]providers.Provider
+	providerConfig map[string]config.ProviderConfig
 	semaphore      chan struct{} // Semaphore to limit concurrency
 	assignTrigger  uint32
 	qm             recruitment.QuotaManager
@@ -93,7 +93,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		jobQueue:           make(chan Job, defaultJobQueueSize),
 		semaphore:          make(chan struct{}, defaultJobConcurrency),
 		providers:          make(map[uint32]providers.Provider),
-		namedProviders:     make(map[string]providers.Provider),
+		providerConfig:     make(map[string]config.ProviderConfig),
 		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
 		stopWatchdog:       make(chan struct{}),
@@ -1936,7 +1936,7 @@ func (s *taskQueueServer) GetWorkspaceRoot(ctx context.Context, req *taskqueuepb
 	providerName := req.GetProvider()
 	region := req.GetRegion()
 
-	provider, ok := s.namedProviders[providerName]
+	provider, ok := s.providerConfig[providerName]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "unknown provider: %q", providerName)
 	}
