@@ -19,5 +19,7 @@ CREATE TABLE template_run (
     error_message TEXT
 );
 
+ALTER TABLE task ADD COLUMN task_name TEXT;
+
 CREATE INDEX idx_task_dependencies_by_prerequisite
 ON task_dependencies (prerequisite_task_id);

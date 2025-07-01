@@ -81,6 +81,7 @@ message TaskRequest {
     optional float upload_timeout  = 14;
     string status = 15;
     repeated uint32 dependency = 16; // IDs of tasks that this task depends on
+    optional string task_name = 17;
 }
 
 message Task {
@@ -102,6 +103,7 @@ message Task {
     string status = 16;
     optional uint32 worker_id = 17;
     optional uint32 workflow_id = 18;
+    optional string task_name = 19;
 }
 
 message TaskList {

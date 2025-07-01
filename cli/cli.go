@@ -22,6 +22,7 @@ type Attr struct {
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
 		Create *struct {
+			Name      *string  `arg:"--name" help:"Optional name of the task"`
 			Container string   `arg:"--container,required" help:"Container to run"`
 			Command   string   `arg:"--command,required" help:"Command to execute"`
 			Shell     *string  `arg:"--shell" help:"Shell to use"`
@@ -178,6 +179,7 @@ func (c *CLI) TaskCreate() error {
 		Resource:  c.Attr.Task.Create.Resource,
 		Output:    &c.Attr.Task.Create.Output,
 		StepId:    c.Attr.Task.Create.StepId,
+		TaskName:  c.Attr.Task.Create.Name,
 	}
 	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {
@@ -204,8 +206,14 @@ func (c *CLI) TaskList() error {
 
 	fmt.Println("📋 Task List:")
 	for _, task := range res.Tasks {
-		fmt.Printf("🆔 ID: %d | Command: %s | Container: %s | Status: %s\n",
-			task.TaskId, task.Command, task.Container, task.Status)
+		var name string
+		if task.TaskName != nil {
+			name = " | Name: " + *task.TaskName
+		} else {
+			name = ""
+		}
+		fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s\n",
+			task.TaskId, name, task.Command, task.Container, task.Status)
 	}
 	return nil
 }

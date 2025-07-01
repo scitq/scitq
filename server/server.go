@@ -142,16 +142,16 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		`INSERT INTO task (command, shell, container, container_options, step_id, 
 					input, resource, output, retry, is_final, uses_cache, 
 					download_timeout, running_timeout, upload_timeout,  
-					status, created_at) 
+					status, task_name, created_at) 
 		VALUES ($1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10, $11, 
 			$12, $13, $14, 
-			$15, NOW()) 
+			$15, $16, NOW()) 
 		RETURNING task_id`,
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
-		initialStatus,
+		initialStatus, req.TaskName,
 	).Scan(&taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -982,13 +982,13 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	// **Filter by status and worker if provided**
 	if req.StatusFilter != nil && *req.StatusFilter != "" && req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
 	} else if req.StatusFilter != nil && *req.StatusFilter != "" {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
 	} else if req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
 	} else {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task ORDER BY task_id`)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task ORDER BY task_id`)
 	}
 
 	if err != nil {
@@ -999,10 +999,14 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	for rows.Next() {
 		var task pb.Task
-		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status, &task.WorkerId, &task.StepId)
+		var taskName sql.NullString
+		err := rows.Scan(&task.TaskId, &taskName, &task.Command, &task.Container, &task.Status, &task.WorkerId, &task.StepId)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue
+		}
+		if taskName.Valid {
+			task.TaskName = &taskName.String
 		}
 		tasks = append(tasks, &task)
 	}

@@ -136,6 +136,7 @@ type TaskRequest struct {
 	UploadTimeout    *float32               `protobuf:"fixed32,14,opt,name=upload_timeout,json=uploadTimeout,proto3,oneof" json:"upload_timeout,omitempty"`
 	Status           string                 `protobuf:"bytes,15,opt,name=status,proto3" json:"status,omitempty"`
 	Dependency       []uint32               `protobuf:"varint,16,rep,packed,name=dependency,proto3" json:"dependency,omitempty"` // IDs of tasks that this task depends on
+	TaskName         *string                `protobuf:"bytes,17,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -282,6 +283,13 @@ func (x *TaskRequest) GetDependency() []uint32 {
 	return nil
 }
 
+func (x *TaskRequest) GetTaskName() string {
+	if x != nil && x.TaskName != nil {
+		return *x.TaskName
+	}
+	return ""
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           uint32                 `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -302,6 +310,7 @@ type Task struct {
 	Status           string                 `protobuf:"bytes,16,opt,name=status,proto3" json:"status,omitempty"`
 	WorkerId         *uint32                `protobuf:"varint,17,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
 	WorkflowId       *uint32                `protobuf:"varint,18,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
+	TaskName         *string                `protobuf:"bytes,19,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -460,6 +469,13 @@ func (x *Task) GetWorkflowId() uint32 {
 		return *x.WorkflowId
 	}
 	return 0
+}
+
+func (x *Task) GetTaskName() string {
+	if x != nil && x.TaskName != nil {
+		return *x.TaskName
+	}
+	return ""
 }
 
 type TaskList struct {
@@ -4935,7 +4951,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"WorkerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\vconcurrency\x18\x02 \x01(\rH\x00R\vconcurrency\x88\x01\x01B\x0e\n" +
-	"\f_concurrency\"\xb9\x05\n" +
+	"\f_concurrency\"\xe9\x05\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -4956,7 +4972,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x06status\x18\x0f \x01(\tR\x06status\x12\x1e\n" +
 	"\n" +
 	"dependency\x18\x10 \x03(\rR\n" +
-	"dependencyB\b\n" +
+	"dependency\x12 \n" +
+	"\ttask_name\x18\x11 \x01(\tH\n" +
+	"R\btaskName\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -4967,7 +4985,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\v_uses_cacheB\x13\n" +
 	"\x11_download_timeoutB\x12\n" +
 	"\x10_running_timeoutB\x11\n" +
-	"\x0f_upload_timeout\"\x91\x06\n" +
+	"\x0f_upload_timeoutB\f\n" +
+	"\n" +
+	"_task_name\"\xc1\x06\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\rR\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -4990,7 +5010,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tworker_id\x18\x11 \x01(\rH\n" +
 	"R\bworkerId\x88\x01\x01\x12$\n" +
 	"\vworkflow_id\x18\x12 \x01(\rH\vR\n" +
-	"workflowId\x88\x01\x01B\b\n" +
+	"workflowId\x88\x01\x01\x12 \n" +
+	"\ttask_name\x18\x13 \x01(\tH\fR\btaskName\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -5004,7 +5025,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0f_upload_timeoutB\f\n" +
 	"\n" +
 	"_worker_idB\x0e\n" +
-	"\f_workflow_id\"1\n" +
+	"\f_workflow_idB\f\n" +
+	"\n" +
+	"_task_name\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\x83\x02\n" +
 	"\x06Worker\x12\x1b\n" +
