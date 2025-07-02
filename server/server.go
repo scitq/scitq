@@ -132,10 +132,10 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	var taskID int
 	// Determine initial status: "W" if dependencies, otherwise "P"
 	initialStatus := "P"
-	if req.Status != "" {
-		initialStatus = req.Status
-	} else if len(req.Dependency) > 0 {
+	if len(req.Dependency) > 0 {
 		initialStatus = "W"
+	} else if req.Status != "" {
+		initialStatus = req.Status
 	}
 
 	err := s.db.QueryRow(
