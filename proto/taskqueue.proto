@@ -483,22 +483,18 @@ message FetchListResponse {
 }
 
 message UploadTemplateRequest {
-  string name = 1;
-  string version = 2;
-  string description = 3;
-  bytes script = 4;
-  string params_schema_json = 5;
-  bool force = 6;
+  bytes script = 1;
+  bool force = 2;
 }
 
 message UploadTemplateResponse {
   bool success = 1;
   string message = 2;
-  uint32 workflow_template_id = 3;
-  string name = 4;
-  string version = 5;
-  string description = 6;
-  string warnings = 7;
+  optional uint32 workflow_template_id = 3;
+  optional string name = 4;
+  optional string version = 5;
+  optional string description = 6;
+  optional string param_json = 7;
 }
 
 
@@ -512,8 +508,9 @@ message Template {
   string name = 2;
   string version = 3;
   string description = 4;
-  string uploaded_at = 5;
-  optional uint32 uploaded_by = 6;
+  string param_json = 5;
+  string uploaded_at = 6;
+  optional uint32 uploaded_by = 7;
 }
 
 message TemplateList {

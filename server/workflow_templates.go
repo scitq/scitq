@@ -17,6 +17,7 @@ import (
 	"time"
 
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	"github.com/gmtsciencedev/scitq2/server/config"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -130,24 +131,49 @@ func (s *taskQueueServer) scriptRunner(
 
 	// 🔒 Drop privileges if configured
 	if userName := s.cfg.Scitq.ScriptRunnerUser; userName != "" {
-		u, err := user.Lookup(userName)
+		currentUser, err := user.Current()
 		if err != nil {
-			return "", "", -1, fmt.Errorf("failed to look up user %q: %w", userName, err)
+			return "", "", -1, fmt.Errorf("cannot get current user: %w", err)
 		}
-		uid, err := strconv.Atoi(u.Uid)
-		if err != nil {
-			return "", "", -1, fmt.Errorf("invalid UID for user %q: %w", userName, err)
+
+		if currentUser.Username != userName {
+			if os.Geteuid() != 0 {
+				log.Printf("⚠️ script_runner_user is set to a different user as the current running user and server is not run as root")
+				return "", "", -1, fmt.Errorf("cannot change to user %q because the server is not run as root", userName)
+			}
+			u, err := user.Lookup(userName)
+			if err != nil {
+				return "", "", -1, fmt.Errorf("failed to look up user %q: %w", userName, err)
+			}
+			uid, err := strconv.Atoi(u.Uid)
+			if err != nil {
+				return "", "", -1, fmt.Errorf("invalid UID for user %q: %w", userName, err)
+			}
+			gid, err := strconv.Atoi(u.Gid)
+			if err != nil {
+				return "", "", -1, fmt.Errorf("invalid GID for user %q: %w", userName, err)
+			}
+			cmd.SysProcAttr = &syscall.SysProcAttr{
+				Credential: &syscall.Credential{
+					Uid: uint32(uid),
+					Gid: uint32(gid),
+				},
+			}
 		}
-		gid, err := strconv.Atoi(u.Gid)
-		if err != nil {
-			return "", "", -1, fmt.Errorf("invalid GID for user %q: %w", userName, err)
-		}
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{
-				Uid: uint32(uid),
-				Gid: uint32(gid),
-			},
-		}
+	}
+
+	//// 🧪 Sanity check: can we exec the Python interpreter at all?
+	//checkCmd := exec.Command(s.cfg.Scitq.ScriptInterpreter, "-c", "print('SCITQ_PYTHON_OK')")
+	//checkCmd.Env = cmd.Env // Use same environment
+	//checkCmd.SysProcAttr = cmd.SysProcAttr
+	//checkOut, checkErr := checkCmd.CombinedOutput()
+	//if checkErr != nil {
+	//	return "", "", -1, fmt.Errorf("sanity check failed: cannot exec Python interpreter (%s): %v\nOutput: %s", s.cfg.Scitq.ScriptInterpreter, checkErr, string(checkOut))
+	//}
+	//log.Printf("Sanity check passes: %s", checkOut)
+
+	if err := os.Chmod(scriptPath, 0o755); err != nil {
+		log.Printf("⚠️ Failed to chmod +x on temp script: %v", err)
 	}
 
 	// 🖨️ Capture output
@@ -155,6 +181,7 @@ func (s *taskQueueServer) scriptRunner(
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 
+	log.Printf("scriptRunner: launching %s with args %v as %s", cmd.Path, cmd.Args, s.cfg.Scitq.ScriptRunnerUser)
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -167,6 +194,44 @@ func (s *taskQueueServer) scriptRunner(
 	}
 
 	return outBuf.String(), errBuf.String(), exitCode, nil
+}
+
+func transformParamSchema(rawJSON string, cfg config.Config) (string, error) {
+	type Param struct {
+		Name     string      `json:"name"`
+		Type     string      `json:"type"`
+		Required bool        `json:"required"`
+		Default  interface{} `json:"default"`
+		Choices  interface{} `json:"choices"` // can be null or []string
+		Help     string      `json:"help"`
+	}
+
+	var params []Param
+	if err := json.Unmarshal([]byte(rawJSON), &params); err != nil {
+		return "", fmt.Errorf("failed to parse param schema: %w", err)
+	}
+
+	// Collect available provider:region strings
+	var providerRegions []string
+	for _, p := range cfg.GetProviders() {
+		for _, region := range p.GetRegions() {
+			providerRegions = append(providerRegions, fmt.Sprintf("%s:%s", p.GetName(), region))
+		}
+	}
+
+	// Apply transformation
+	for i, p := range params {
+		if strings.EqualFold(p.Type, "provider_region") {
+			params[i].Type = "str"
+			params[i].Choices = providerRegions
+		}
+	}
+
+	transformed, err := json.MarshalIndent(params, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to encode transformed param schema: %w", err)
+	}
+	return string(transformed), nil
 }
 
 func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRequest) (*pb.TemplateRun, error) {
@@ -227,11 +292,12 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 }
 
 type ParamSpec struct {
-	Type        string   `json:"type"`
-	Required    bool     `json:"required"`
-	Description string   `json:"description"`
-	Choices     []string `json:"choices,omitempty"`
-	Format      string   `json:"format,omitempty"`
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Required bool     `json:"required"`
+	Default  string   `json:"default"`
+	Help     string   `json:"help"` // Or `json:"description"` if your field is named so
+	Choices  []string `json:"choices,omitempty"`
 }
 
 func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemplateRequest) (*pb.UploadTemplateResponse, error) {
@@ -259,9 +325,8 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 	)
 	if err != nil || exitCodeMeta != 0 {
 		return &pb.UploadTemplateResponse{
-			Success:  false,
-			Message:  fmt.Sprintf("script metadata execution failed: %v", err),
-			Warnings: stderrMeta,
+			Success: false,
+			Message: fmt.Sprintf("script metadata execution failed: %v\n%s", err, stderrMeta),
 		}, nil
 	}
 
@@ -273,17 +338,15 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 	}
 	if err := json.Unmarshal([]byte(stdoutMeta), &meta); err != nil {
 		return &pb.UploadTemplateResponse{
-			Success:  false,
-			Message:  fmt.Sprintf("invalid JSON output from --metadata: %v", err),
-			Warnings: stderrMeta,
+			Success: false,
+			Message: fmt.Sprintf("invalid JSON output from --metadata: %v\n%s", err, stderrMeta),
 		}, nil
 	}
 
 	if meta.Name == "" || meta.Version == "" {
 		return &pb.UploadTemplateResponse{
-			Success:  false,
-			Message:  "metadata must include 'name' and 'version'",
-			Warnings: stderrMeta,
+			Success: false,
+			Message: fmt.Sprintf("metadata must include 'name' and 'version'\n%s", stderrMeta),
 		}, nil
 	}
 
@@ -296,9 +359,8 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 
 	if err == nil && !req.Force {
 		return &pb.UploadTemplateResponse{
-			Success:  false,
-			Message:  fmt.Sprintf("template %q version %q already exists", meta.Name, meta.Version),
-			Warnings: stderrMeta,
+			Success: false,
+			Message: fmt.Sprintf("template %q version %q already exists\n%s", meta.Name, meta.Version, stderrMeta),
 		}, nil
 	}
 	if err != sql.ErrNoRows && err != nil {
@@ -316,120 +378,130 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 	)
 	if err != nil || exitCodeParams != 0 {
 		return &pb.UploadTemplateResponse{
-			Success:  false,
-			Message:  fmt.Sprintf("script params execution failed: %v", err),
-			Warnings: stderrParams,
+			Success: false,
+			Message: fmt.Sprintf("script params execution failed: %v\n%s", err, stderrMeta),
 		}, nil
 	}
 
-	var paramMap map[string]ParamSpec
-	if err := json.Unmarshal([]byte(stdoutParams), &paramMap); err != nil {
+	var paramList []ParamSpec
+	if err := json.Unmarshal([]byte(stdoutParams), &paramList); err != nil {
 		return &pb.UploadTemplateResponse{
-			Success:  false,
-			Message:  fmt.Sprintf("invalid JSON output from --params: %v", err),
-			Warnings: stderrParams,
+			Success: false,
+			Message: fmt.Sprintf("invalid JSON output from --params: %v\n%s\n%s", err, stdoutMeta, stderrMeta),
 		}, nil
+	}
+
+	paramMap := make(map[string]ParamSpec)
+	for _, p := range paramList {
+		if p.Name == "" {
+			return &pb.UploadTemplateResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid param: missing 'name'\n%s", stderrMeta),
+			}, nil
+		}
+		paramMap[p.Name] = p
 	}
 
 	// Strict validation
 	for name, param := range paramMap {
 		if param.Type == "" {
 			return &pb.UploadTemplateResponse{
-				Success:  false,
-				Message:  fmt.Sprintf("invalid param %q: missing 'type'", name),
-				Warnings: stderrParams,
+				Success: false,
+				Message: fmt.Sprintf("invalid param %q: missing 'type'\n%s", name, stderrMeta),
 			}, nil
 		}
 
-		// Must be 'string', 'enum', 'int', 'float', etc. (accept 'list'?)
+		// Must be 'string', 'enum', 'int', 'float', etc. (accept 'list'?) or special type "provider_region"
 		switch param.Type {
-		case "string", "enum", "int", "float", "list":
+		case "str", "int", "float", "bool", "provider_region":
 			// OK
 		default:
 			return &pb.UploadTemplateResponse{
-				Success:  false,
-				Message:  fmt.Sprintf("param %q has unknown type %q", name, param.Type),
-				Warnings: stderrParams,
+				Success: false,
+				Message: fmt.Sprintf("param %q has unknown type %q\n%s", name, param.Type, stderrMeta),
 			}, nil
 		}
 
-		if param.Type != "enum" && len(param.Choices) > 0 {
-			return &pb.UploadTemplateResponse{
-				Success:  false,
-				Message:  fmt.Sprintf("param %q: 'choices' only allowed with type 'enum'", name),
-				Warnings: stderrParams,
-			}, nil
-		}
-		if param.Type != "string" && param.Format != "" {
-			return &pb.UploadTemplateResponse{
-				Success:  false,
-				Message:  fmt.Sprintf("param %q: 'format' only allowed with type 'string'", name),
-				Warnings: stderrParams,
-			}, nil
-		}
 	}
 
-	// 6️⃣ Insert or replace into workflow_template
-	var templateID uint32
-	if req.Force && existingID != 0 {
-		_, err := s.db.ExecContext(ctx,
-			`UPDATE workflow_template 
-			 SET description = $1, script_path = $2, params_schema = $3, uploaded_at = NOW()
-			 WHERE workflow_template_id = $4`,
-			meta.Description, "", stdoutParams, existingID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to update existing template: %w", err)
-		}
-		templateID = existingID
-	} else {
-		err = s.db.QueryRowContext(ctx,
-			`INSERT INTO workflow_template (name, version, description, script_path, params_schema, uploaded_at)
-			 VALUES ($1, $2, $3, '', $4, NOW())
-			 RETURNING workflow_template_id`,
-			meta.Name, meta.Version, meta.Description, stdoutParams,
-		).Scan(&templateID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert new template: %w", err)
-		}
-	}
-
-	// 7️⃣ Move file to final location
-	finalPath := filepath.Join(s.cfg.Scitq.ScriptRoot, fmt.Sprintf("%d.py", templateID))
-	if err := os.MkdirAll(s.cfg.Scitq.ScriptRoot, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create script_root dir: %w", err)
-	}
-	if err := os.Rename(tempScript.Name(), finalPath); err != nil {
-		return nil, fmt.Errorf("failed to move script to final location: %w", err)
-	}
-
-	// 8️⃣ Update script_path
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE workflow_template SET script_path = $1 WHERE workflow_template_id = $2`,
-		finalPath, templateID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update script path: %w", err)
-	}
-
+	success := true
 	if stderrMeta != "" || stderrParams != "" {
+		if !req.Force {
+			success = false
+		}
 		log.Printf("📎 Template upload warnings:\n%s\n%s", stderrMeta, stderrParams)
 	}
 
-	return &pb.UploadTemplateResponse{
-		Success:            true,
-		Message:            "template uploaded successfully",
-		WorkflowTemplateId: templateID,
-		Name:               meta.Name,
-		Version:            meta.Version,
-		Description:        meta.Description,
-		Warnings:           strings.TrimSpace(stderrMeta + "\n" + stderrParams),
-	}, nil
+	if !success {
+		return &pb.UploadTemplateResponse{
+			Success: success,
+			Message: strings.TrimSpace(stderrMeta + "\n" + stderrParams),
+		}, fmt.Errorf("📎 Template upload warnings and no force:\n%s\n%s", stderrMeta, stderrParams)
+	} else {
+		// 6️⃣ Insert or replace into workflow_template
+		var templateID uint32
+		if req.Force && existingID != 0 {
+			_, err := s.db.ExecContext(ctx,
+				`UPDATE workflow_template 
+			 SET description = $1, script_path = $2, params_schema = $3, uploaded_at = NOW()
+			 WHERE workflow_template_id = $4`,
+				meta.Description, "", stdoutParams, existingID,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update existing template: %w", err)
+			}
+			templateID = existingID
+		} else {
+			err = s.db.QueryRowContext(ctx,
+				`INSERT INTO workflow_template (name, version, description, script_path, params_schema, uploaded_at)
+			 VALUES ($1, $2, $3, '', $4, NOW())
+			 RETURNING workflow_template_id`,
+				meta.Name, meta.Version, meta.Description, stdoutParams,
+			).Scan(&templateID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert new template: %w", err)
+			}
+		}
+
+		// 7️⃣ Move file to final location
+		finalPath := filepath.Join(s.cfg.Scitq.ScriptRoot, fmt.Sprintf("%d.py", templateID))
+		if err := os.MkdirAll(s.cfg.Scitq.ScriptRoot, 0o755); err != nil {
+			return nil, fmt.Errorf("failed to create script_root dir: %w", err)
+		}
+		if err := os.Rename(tempScript.Name(), finalPath); err != nil {
+			return nil, fmt.Errorf("failed to move script to final location: %w", err)
+		}
+
+		// 8️⃣ Update script_path
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE workflow_template SET script_path = $1 WHERE workflow_template_id = $2`,
+			finalPath, templateID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update script path: %w", err)
+		}
+
+		processedParams, err := transformParamSchema(stdoutParams, s.cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform params: %w", err)
+		}
+
+		return &pb.UploadTemplateResponse{
+			Success:            success,
+			Message:            strings.TrimSpace(stderrMeta + "\n" + stderrParams),
+			WorkflowTemplateId: &templateID,
+			Name:               &meta.Name,
+			Version:            &meta.Version,
+			Description:        &meta.Description,
+			ParamJson:          &processedParams,
+		}, nil
+	}
+
 }
 
 func (s *taskQueueServer) ListTemplates(ctx context.Context, _ *emptypb.Empty) (*pb.TemplateList, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT workflow_template_id, name, version, description, uploaded_at, uploaded_by
+		SELECT workflow_template_id, name, version, description, params_schema, uploaded_at, uploaded_by
 		FROM workflow_template
 		ORDER BY uploaded_at DESC
 	`)
@@ -444,8 +516,9 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, _ *emptypb.Empty) (
 		var t pb.Template
 		var uploadedBy sql.NullInt32
 		var uploadedAt time.Time
+		var rawParams sql.NullString
 
-		if err := rows.Scan(&t.WorkflowTemplateId, &t.Name, &t.Version, &t.Description, &uploadedAt, &uploadedBy); err != nil {
+		if err := rows.Scan(&t.WorkflowTemplateId, &t.Name, &t.Version, &t.Description, &rawParams, &uploadedAt, &uploadedBy); err != nil {
 			return nil, fmt.Errorf("failed to scan template: %w", err)
 		}
 
@@ -453,6 +526,16 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, _ *emptypb.Empty) (
 		if uploadedBy.Valid {
 			t.UploadedBy = proto.Uint32(uint32(uploadedBy.Int32))
 		}
+
+		if rawParams.Valid {
+			var err error
+			t.ParamJson, err = transformParamSchema(rawParams.String, s.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("template %s (id: %d) params could not be transformed %s -> %v",
+					t.Name, t.WorkflowTemplateId, rawParams.String, err)
+			}
+		}
+
 		templates = append(templates, &t)
 	}
 

@@ -4257,15 +4257,11 @@ func (x *FetchListResponse) GetFiles() []string {
 }
 
 type UploadTemplateRequest struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Version          string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	Description      string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	Script           []byte                 `protobuf:"bytes,4,opt,name=script,proto3" json:"script,omitempty"`
-	ParamsSchemaJson string                 `protobuf:"bytes,5,opt,name=params_schema_json,json=paramsSchemaJson,proto3" json:"params_schema_json,omitempty"`
-	Force            bool                   `protobuf:"varint,6,opt,name=force,proto3" json:"force,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Script        []byte                 `protobuf:"bytes,1,opt,name=script,proto3" json:"script,omitempty"`
+	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UploadTemplateRequest) Reset() {
@@ -4298,39 +4294,11 @@ func (*UploadTemplateRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{70}
 }
 
-func (x *UploadTemplateRequest) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *UploadTemplateRequest) GetVersion() string {
-	if x != nil {
-		return x.Version
-	}
-	return ""
-}
-
-func (x *UploadTemplateRequest) GetDescription() string {
-	if x != nil {
-		return x.Description
-	}
-	return ""
-}
-
 func (x *UploadTemplateRequest) GetScript() []byte {
 	if x != nil {
 		return x.Script
 	}
 	return nil
-}
-
-func (x *UploadTemplateRequest) GetParamsSchemaJson() string {
-	if x != nil {
-		return x.ParamsSchemaJson
-	}
-	return ""
 }
 
 func (x *UploadTemplateRequest) GetForce() bool {
@@ -4344,11 +4312,11 @@ type UploadTemplateResponse struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Success            bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	Message            string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	WorkflowTemplateId uint32                 `protobuf:"varint,3,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
-	Name               string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	Version            string                 `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
-	Description        string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
-	Warnings           string                 `protobuf:"bytes,7,opt,name=warnings,proto3" json:"warnings,omitempty"`
+	WorkflowTemplateId *uint32                `protobuf:"varint,3,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
+	Name               *string                `protobuf:"bytes,4,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	Version            *string                `protobuf:"bytes,5,opt,name=version,proto3,oneof" json:"version,omitempty"`
+	Description        *string                `protobuf:"bytes,6,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	ParamJson          *string                `protobuf:"bytes,7,opt,name=param_json,json=paramJson,proto3,oneof" json:"param_json,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -4398,36 +4366,36 @@ func (x *UploadTemplateResponse) GetMessage() string {
 }
 
 func (x *UploadTemplateResponse) GetWorkflowTemplateId() uint32 {
-	if x != nil {
-		return x.WorkflowTemplateId
+	if x != nil && x.WorkflowTemplateId != nil {
+		return *x.WorkflowTemplateId
 	}
 	return 0
 }
 
 func (x *UploadTemplateResponse) GetName() string {
-	if x != nil {
-		return x.Name
+	if x != nil && x.Name != nil {
+		return *x.Name
 	}
 	return ""
 }
 
 func (x *UploadTemplateResponse) GetVersion() string {
-	if x != nil {
-		return x.Version
+	if x != nil && x.Version != nil {
+		return *x.Version
 	}
 	return ""
 }
 
 func (x *UploadTemplateResponse) GetDescription() string {
-	if x != nil {
-		return x.Description
+	if x != nil && x.Description != nil {
+		return *x.Description
 	}
 	return ""
 }
 
-func (x *UploadTemplateResponse) GetWarnings() string {
-	if x != nil {
-		return x.Warnings
+func (x *UploadTemplateResponse) GetParamJson() string {
+	if x != nil && x.ParamJson != nil {
+		return *x.ParamJson
 	}
 	return ""
 }
@@ -4490,8 +4458,9 @@ type Template struct {
 	Name               string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Version            string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
 	Description        string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
-	UploadedAt         string                 `protobuf:"bytes,5,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
-	UploadedBy         *uint32                `protobuf:"varint,6,opt,name=uploaded_by,json=uploadedBy,proto3,oneof" json:"uploaded_by,omitempty"`
+	ParamJson          string                 `protobuf:"bytes,5,opt,name=param_json,json=paramJson,proto3" json:"param_json,omitempty"`
+	UploadedAt         string                 `protobuf:"bytes,6,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
+	UploadedBy         *uint32                `protobuf:"varint,7,opt,name=uploaded_by,json=uploadedBy,proto3,oneof" json:"uploaded_by,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -4550,6 +4519,13 @@ func (x *Template) GetVersion() string {
 func (x *Template) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *Template) GetParamJson() string {
+	if x != nil {
+		return x.ParamJson
 	}
 	return ""
 }
@@ -5334,33 +5310,38 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10FetchListRequest\x12\x10\n" +
 	"\x03uri\x18\x01 \x01(\tR\x03uri\")\n" +
 	"\x11FetchListResponse\x12\x14\n" +
-	"\x05files\x18\x01 \x03(\tR\x05files\"\xc3\x01\n" +
-	"\x15UploadTemplateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x16\n" +
-	"\x06script\x18\x04 \x01(\fR\x06script\x12,\n" +
-	"\x12params_schema_json\x18\x05 \x01(\tR\x10paramsSchemaJson\x12\x14\n" +
-	"\x05force\x18\x06 \x01(\bR\x05force\"\xea\x01\n" +
+	"\x05files\x18\x01 \x03(\tR\x05files\"E\n" +
+	"\x15UploadTemplateRequest\x12\x16\n" +
+	"\x06script\x18\x01 \x01(\fR\x06script\x12\x14\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\"\xd3\x02\n" +
 	"\x16UploadTemplateResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x120\n" +
-	"\x14workflow_template_id\x18\x03 \x01(\rR\x12workflowTemplateId\x12\x12\n" +
-	"\x04name\x18\x04 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x05 \x01(\tR\aversion\x12 \n" +
-	"\vdescription\x18\x06 \x01(\tR\vdescription\x12\x1a\n" +
-	"\bwarnings\x18\a \x01(\tR\bwarnings\"r\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
+	"\x14workflow_template_id\x18\x03 \x01(\rH\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
+	"\x04name\x18\x04 \x01(\tH\x01R\x04name\x88\x01\x01\x12\x1d\n" +
+	"\aversion\x18\x05 \x01(\tH\x02R\aversion\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\x06 \x01(\tH\x03R\vdescription\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"param_json\x18\a \x01(\tH\x04R\tparamJson\x88\x01\x01B\x17\n" +
+	"\x15_workflow_template_idB\a\n" +
+	"\x05_nameB\n" +
+	"\n" +
+	"\b_versionB\x0e\n" +
+	"\f_descriptionB\r\n" +
+	"\v_param_json\"r\n" +
 	"\x12RunTemplateRequest\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\rR\x12workflowTemplateId\x12*\n" +
-	"\x11param_values_json\x18\x02 \x01(\tR\x0fparamValuesJson\"\xe3\x01\n" +
+	"\x11param_values_json\x18\x02 \x01(\tR\x0fparamValuesJson\"\x82\x02\n" +
 	"\bTemplate\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\rR\x12workflowTemplateId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1f\n" +
-	"\vuploaded_at\x18\x05 \x01(\tR\n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1d\n" +
+	"\n" +
+	"param_json\x18\x05 \x01(\tR\tparamJson\x12\x1f\n" +
+	"\vuploaded_at\x18\x06 \x01(\tR\n" +
 	"uploadedAt\x12$\n" +
-	"\vuploaded_by\x18\x06 \x01(\rH\x00R\n" +
+	"\vuploaded_by\x18\a \x01(\rH\x00R\n" +
 	"uploadedBy\x88\x01\x01B\x0e\n" +
 	"\f_uploaded_by\"A\n" +
 	"\fTemplateList\x121\n" +
@@ -5687,6 +5668,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[55].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[56].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[60].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[71].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[73].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[75].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[77].OneofWrappers = []any{}

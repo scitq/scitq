@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -150,6 +152,25 @@ type Attr struct {
 			Timeout int    `arg:"--timeout" default:"30" help:"Timeout for listing files (in seconds)"`
 		} `arg:"subcommand:list" help:"List remote files"`
 	} `arg:"subcommand:file" help:"Remote file listing"`
+
+	// (Workflow) Template commands
+	Template *struct {
+		Upload *struct {
+			Path  string `arg:"--path,required" help:"Path to the Python template script"`
+			Force bool   `arg:"--force" help:"Overwrite existing template with same name/version"`
+		} `arg:"subcommand:upload" help:"Upload a new workflow template"`
+
+		Run *struct {
+			TemplateId  uint32 `arg:"--id,required" help:"ID of the template to run"`
+			ParamValues string `arg:"--params,required" help:"JSON-encoded parameters to pass"`
+		} `arg:"subcommand:run" help:"Run a workflow template"`
+
+		List *struct{} `arg:"subcommand:list" help:"List all uploaded workflow templates"`
+
+		Runs *struct {
+			TemplateId *uint32 `arg:"--template-id" help:"Filter runs by template ID"`
+		} `arg:"subcommand:runs" help:"List all template runs"`
+	} `arg:"subcommand:template" help:"Manage workflow templates"`
 
 	// Login commands
 	Login *struct {
@@ -687,6 +708,47 @@ func (c *CLI) FileList() error {
 	return nil
 }
 
+func (c *CLI) TemplateUpload() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	path := c.Attr.Template.Upload.Path
+	force := c.Attr.Template.Upload.Force
+
+	// Read script file
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("❌ Failed to read script file: %w", err)
+	}
+
+	// Call UploadTemplate RPC
+	resp, err := c.QC.Client.UploadTemplate(ctx, &pb.UploadTemplateRequest{
+		Script: data,
+		Force:  force,
+	})
+	if err != nil {
+		return fmt.Errorf("❌ UploadTemplate RPC failed: %w", err)
+	}
+
+	// Report result
+	if !resp.Success {
+		return fmt.Errorf("❌ Upload failed: %s", resp.Message)
+	}
+
+	fmt.Println("✅ Upload successful:")
+	fmt.Printf("  ID:        %d\n", resp.GetWorkflowTemplateId())
+	fmt.Printf("  Name:      %s\n", resp.GetName())
+	fmt.Printf("  Version:   %s\n", resp.GetVersion())
+	fmt.Printf("  Desc:      %s\n", resp.GetDescription())
+
+	if msg := strings.TrimSpace(resp.Message); msg != "" {
+		fmt.Println("⚠️  Warnings:")
+		fmt.Println(msg)
+	}
+
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -808,6 +870,11 @@ func Run(c CLI) error {
 		switch {
 		case c.Attr.File.List != nil:
 			err = c.FileList()
+		}
+	case c.Attr.Template != nil:
+		switch {
+		case c.Attr.Template.Upload != nil:
+			err = c.TemplateUpload()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

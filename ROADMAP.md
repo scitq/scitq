@@ -8,4 +8,6 @@
 
 [ ] implement some timeouts for workflow template scripts
 [ ] implement debug mode
+[ ] implement workflow strategy (sticky)
 [ ] add OVH support
+[ ] add run duration measurement
