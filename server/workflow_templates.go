@@ -19,7 +19,6 @@ import (
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/gmtsciencedev/scitq2/server/config"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"golang.org/x/sys/unix"
 )
@@ -118,14 +117,14 @@ func (s *taskQueueServer) scriptRunner(
 
 	// 🌍 Inject environment variables
 	env := []string{
-		fmt.Sprintf("SCITQ_SERVER=127.0.0.1:%d", s.cfg.Scitq.Port),
+		fmt.Sprintf("SCITQ_SERVER=localhost:%d", s.cfg.Scitq.Port),
 		fmt.Sprintf("SCITQ_TOKEN=%s", authToken),
 	}
 	if mode == "run" && templateRunID != 0 {
 		env = append(env, fmt.Sprintf("SCITQ_TEMPLATE_RUN_ID=%d", templateRunID))
 	}
 	if len(s.sslCertificatePEM) > 0 {
-		env = append(env, fmt.Sprintf("SCITQ_SSL_CERTIFICATE='%s'", s.sslCertificatePEM))
+		env = append(env, fmt.Sprintf("SCITQ_SSL_CERTIFICATE=%s", s.sslCertificatePEM))
 	}
 	cmd.Env = append(os.Environ(), env...)
 
@@ -499,19 +498,43 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 
 }
 
-func (s *taskQueueServer) ListTemplates(ctx context.Context, _ *emptypb.Empty) (*pb.TemplateList, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFilter) (*pb.TemplateList, error) {
+	var args []any
+	var clauses []string
+
+	query := `
 		SELECT workflow_template_id, name, version, description, params_schema, uploaded_at, uploaded_by
 		FROM workflow_template
-		ORDER BY uploaded_at DESC
-	`)
+	`
+
+	// Handle exact ID
+	if req.WorkflowTemplateId != nil {
+		clauses = append(clauses, "workflow_template_id = $1")
+		args = append(args, *req.WorkflowTemplateId)
+	} else {
+		if req.Name != nil {
+			clauses = append(clauses, fmt.Sprintf("name LIKE $%d::TEXT", len(args)+1))
+			args = append(args, *req.Name)
+		}
+		if req.Version != nil && *req.Version != "latest" {
+			clauses = append(clauses, fmt.Sprintf("version LIKE $%d::TEXT", len(args)+1))
+			args = append(args, *req.Version)
+		}
+	}
+
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+
+	query += " ORDER BY uploaded_at DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query templates: %w", err)
 	}
 	defer rows.Close()
 
 	var templates []*pb.Template
-
 	for rows.Next() {
 		var t pb.Template
 		var uploadedBy sql.NullInt32
@@ -526,17 +549,33 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, _ *emptypb.Empty) (
 		if uploadedBy.Valid {
 			t.UploadedBy = proto.Uint32(uint32(uploadedBy.Int32))
 		}
-
 		if rawParams.Valid {
-			var err error
 			t.ParamJson, err = transformParamSchema(rawParams.String, s.cfg)
 			if err != nil {
 				return nil, fmt.Errorf("template %s (id: %d) params could not be transformed %s -> %v",
 					t.Name, t.WorkflowTemplateId, rawParams.String, err)
 			}
 		}
-
 		templates = append(templates, &t)
+	}
+
+	// Handle `version = "latest"` logic (after sorting)
+	if req.Version != nil && *req.Version == "latest" {
+		latest := make(map[string]*pb.Template) // name → latest version
+		for _, t := range templates {
+			if existing, ok := latest[t.Name]; !ok {
+				latest[t.Name] = t
+			} else {
+				if t.UploadedAt > existing.UploadedAt {
+					latest[t.Name] = t
+				}
+			}
+		}
+		var latestList []*pb.Template
+		for _, t := range latest {
+			latestList = append(latestList, t)
+		}
+		templates = latestList
 	}
 
 	return &pb.TemplateList{Templates: templates}, nil

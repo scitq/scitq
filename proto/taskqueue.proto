@@ -49,7 +49,7 @@ service TaskQueue {
     // Template system
     rpc UploadTemplate(UploadTemplateRequest) returns (UploadTemplateResponse);
     rpc RunTemplate(RunTemplateRequest) returns (TemplateRun);
-    rpc ListTemplates(google.protobuf.Empty) returns (TemplateList);
+    rpc ListTemplates(TemplateFilter) returns (TemplateList);
     rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
     rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
     rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
@@ -501,6 +501,12 @@ message UploadTemplateResponse {
 message RunTemplateRequest {
   uint32 workflow_template_id = 1;
   string param_values_json = 2;
+}
+
+message TemplateFilter {
+  optional uint32 workflow_template_id = 1;
+  optional string name = 2;
+  optional string version = 3;
 }
 
 message Template {

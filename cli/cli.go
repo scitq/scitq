@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -161,11 +162,19 @@ type Attr struct {
 		} `arg:"subcommand:upload" help:"Upload a new workflow template"`
 
 		Run *struct {
-			TemplateId  uint32 `arg:"--id,required" help:"ID of the template to run"`
-			ParamValues string `arg:"--params,required" help:"JSON-encoded parameters to pass"`
+			TemplateId uint32  `arg:"--id,required" help:"ID of the template to run"`
+			ParamPairs *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
-		List *struct{} `arg:"subcommand:list" help:"List all uploaded workflow templates"`
+		List *struct {
+			Name    *string `arg:"--name" help:"Template name (can include wildcards like 'meta%')"`
+			Version *string `arg:"--version" help:"Template version (can be 'latest' or a wildcard)"`
+			Latest  bool    `arg:"--latest" help:"Show only latest version(s) for each template name"`
+		} `arg:"subcommand:list" help:"List all uploaded workflow templates"`
+
+		Detail *struct {
+			TemplateId uint32 `arg:"--id,required" help:"Show detailed information for this template ID"`
+		} `arg:"subcommand:detail" help:"Show a template's param JSON and metadata"`
 
 		Runs *struct {
 			TemplateId *uint32 `arg:"--template-id" help:"Filter runs by template ID"`
@@ -749,6 +758,160 @@ func (c *CLI) TemplateUpload() error {
 	return nil
 }
 
+func (c *CLI) TemplateList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	filter := &pb.TemplateFilter{}
+	if c.Attr.Template.List.Name != nil {
+		filter.Name = c.Attr.Template.List.Name
+	}
+	if c.Attr.Template.List.Version != nil {
+		filter.Version = c.Attr.Template.List.Version
+	}
+	if c.Attr.Template.List.Latest {
+		latest := "latest"
+		filter.Version = &latest
+	}
+
+	res, err := c.QC.Client.ListTemplates(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("failed to list templates: %w", err)
+	}
+
+	if len(res.Templates) == 0 {
+		fmt.Println("⚠️ No templates found.")
+		return nil
+	}
+
+	fmt.Println("📦 Workflow Templates:")
+	for _, t := range res.Templates {
+		uploadedBy := "-"
+		if t.UploadedBy != nil {
+			uploadedBy = fmt.Sprintf("%d", *t.UploadedBy)
+		}
+		fmt.Printf("🔹 ID: %d | Name: %s | Version: %s | Description: %s | UploadedAt: %s | UploadedBy: %s\n",
+			t.WorkflowTemplateId, t.Name, t.Version, t.Description, t.UploadedAt, uploadedBy)
+	}
+	return nil
+}
+
+func (c *CLI) TemplateDetail() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.TemplateFilter{WorkflowTemplateId: &c.Attr.Template.Detail.TemplateId}
+	res, err := c.QC.Client.ListTemplates(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to query template: %w", err)
+	}
+	if len(res.Templates) == 0 {
+		return fmt.Errorf("no template found with ID %d", c.Attr.Template.Detail.TemplateId)
+	}
+	t := res.Templates[0]
+
+	fmt.Printf("📦 Template %s (v%s) — %s\n", t.Name, t.Version, t.Description)
+	fmt.Printf("🕒 Uploaded: %s\n", t.UploadedAt)
+	if t.UploadedBy != nil {
+		fmt.Printf("👤 Uploaded by user ID: %d\n", *t.UploadedBy)
+	}
+
+	// Parse param JSON
+	var params []struct {
+		Name     string      `json:"name"`
+		Type     string      `json:"type"`
+		Required bool        `json:"required"`
+		Default  interface{} `json:"default"`
+		Choices  []string    `json:"choices"`
+		Help     string      `json:"help"`
+	}
+	if err := json.Unmarshal([]byte(t.ParamJson), &params); err != nil {
+		return fmt.Errorf("invalid param_json in template: %v\n%s", err, t.ParamJson)
+	}
+
+	if len(params) == 0 {
+		fmt.Println("⚠️  No parameters defined.")
+		return nil
+	}
+
+	// Pretty print
+	fmt.Println("\n📋 Parameters:")
+	fmt.Printf("%-15s %-10s %-8s %-15s %-20s %s\n", "Name", "Type", "Required", "Default", "Choices", "Help")
+	fmt.Println(strings.Repeat("-", 90))
+	for _, p := range params {
+		typeFriendly := map[string]string{
+			"str":   "string",
+			"int":   "integer",
+			"bool":  "boolean",
+			"float": "float",
+		}
+		typ := typeFriendly[p.Type]
+		if typ == "" {
+			typ = p.Type
+		}
+
+		defVal := fmt.Sprintf("%v", p.Default)
+		if defVal == "<nil>" {
+			defVal = "-"
+		}
+		choices := "-"
+		if len(p.Choices) > 0 {
+			choices = strings.Join(p.Choices, ",")
+		}
+		help := p.Help
+		if help == "" {
+			help = "-"
+		}
+
+		fmt.Printf("%-15s %-10s %-8t %-15s %-20s %s\n", p.Name, typ, p.Required, defVal, choices, help)
+	}
+	return nil
+}
+
+func parseCommaSeparatedParams(input string) (string, error) {
+	paramMap := make(map[string]string)
+	pairs := strings.Split(input, ",")
+	for _, pair := range pairs {
+		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid param: %q (expected key=value)", pair)
+		}
+		paramMap[parts[0]] = parts[1]
+	}
+	jsonBytes, err := json.Marshal(paramMap)
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
+}
+
+func (c *CLI) TemplateRun() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	var paramJSON string
+	var err error
+
+	if c.Attr.Template.Run.ParamPairs != nil {
+		paramJSON, err = parseCommaSeparatedParams(*c.Attr.Template.Run.ParamPairs)
+		if err != nil {
+			return err
+		}
+	}
+
+	req := &pb.RunTemplateRequest{
+		WorkflowTemplateId: c.Attr.Template.Run.TemplateId,
+		ParamValuesJson:    paramJSON,
+	}
+	res, err := c.QC.Client.RunTemplate(ctx, req)
+	if err != nil {
+		return fmt.Errorf("template run failed: %w", err)
+	}
+
+	fmt.Printf("🚀 Template run created with ID %d\n", res.TemplateRunId)
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -875,6 +1038,14 @@ func Run(c CLI) error {
 		switch {
 		case c.Attr.Template.Upload != nil:
 			err = c.TemplateUpload()
+		case c.Attr.Template.List != nil:
+			err = c.TemplateList()
+		case c.Attr.Template.Detail != nil:
+			err = c.TemplateDetail()
+		case c.Attr.Template.Run != nil:
+			err = c.TemplateRun()
+			//case c.Attr.Template.Runs != nil:
+			//	err = c.TemplateRunList()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

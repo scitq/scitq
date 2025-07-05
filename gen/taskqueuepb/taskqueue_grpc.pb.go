@@ -113,7 +113,7 @@ type TaskQueueClient interface {
 	// Template system
 	UploadTemplate(ctx context.Context, in *UploadTemplateRequest, opts ...grpc.CallOption) (*UploadTemplateResponse, error)
 	RunTemplate(ctx context.Context, in *RunTemplateRequest, opts ...grpc.CallOption) (*TemplateRun, error)
-	ListTemplates(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*TemplateList, error)
+	ListTemplates(ctx context.Context, in *TemplateFilter, opts ...grpc.CallOption) (*TemplateList, error)
 	ListTemplateRuns(ctx context.Context, in *TemplateRunFilter, opts ...grpc.CallOption) (*TemplateRunList, error)
 	UpdateTemplateRun(ctx context.Context, in *UpdateTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
@@ -558,7 +558,7 @@ func (c *taskQueueClient) RunTemplate(ctx context.Context, in *RunTemplateReques
 	return out, nil
 }
 
-func (c *taskQueueClient) ListTemplates(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*TemplateList, error) {
+func (c *taskQueueClient) ListTemplates(ctx context.Context, in *TemplateFilter, opts ...grpc.CallOption) (*TemplateList, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TemplateList)
 	err := c.cc.Invoke(ctx, TaskQueue_ListTemplates_FullMethodName, in, out, cOpts...)
@@ -644,7 +644,7 @@ type TaskQueueServer interface {
 	// Template system
 	UploadTemplate(context.Context, *UploadTemplateRequest) (*UploadTemplateResponse, error)
 	RunTemplate(context.Context, *RunTemplateRequest) (*TemplateRun, error)
-	ListTemplates(context.Context, *emptypb.Empty) (*TemplateList, error)
+	ListTemplates(context.Context, *TemplateFilter) (*TemplateList, error)
 	ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error)
 	UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error)
 	GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
@@ -781,7 +781,7 @@ func (UnimplementedTaskQueueServer) UploadTemplate(context.Context, *UploadTempl
 func (UnimplementedTaskQueueServer) RunTemplate(context.Context, *RunTemplateRequest) (*TemplateRun, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunTemplate not implemented")
 }
-func (UnimplementedTaskQueueServer) ListTemplates(context.Context, *emptypb.Empty) (*TemplateList, error) {
+func (UnimplementedTaskQueueServer) ListTemplates(context.Context, *TemplateFilter) (*TemplateList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTemplates not implemented")
 }
 func (UnimplementedTaskQueueServer) ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error) {
@@ -1528,7 +1528,7 @@ func _TaskQueue_RunTemplate_Handler(srv interface{}, ctx context.Context, dec fu
 }
 
 func _TaskQueue_ListTemplates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
+	in := new(TemplateFilter)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -1540,7 +1540,7 @@ func _TaskQueue_ListTemplates_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: TaskQueue_ListTemplates_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TaskQueueServer).ListTemplates(ctx, req.(*emptypb.Empty))
+		return srv.(TaskQueueServer).ListTemplates(ctx, req.(*TemplateFilter))
 	}
 	return interceptor(ctx, in, info, handler)
 }
