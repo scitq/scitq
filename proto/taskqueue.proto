@@ -52,6 +52,7 @@ service TaskQueue {
     rpc ListTemplates(TemplateFilter) returns (TemplateList);
     rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
     rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
+    rpc DeleteTemplateRun(DeleteTemplateRunRequest) returns (Ack);
     rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
 }   
 
@@ -526,10 +527,16 @@ message TemplateList {
 message TemplateRun {
   uint32 template_run_id = 1;
   uint32 workflow_template_id = 2;
-  optional uint32 workflow_id = 3;
-  string created_at = 4;
-  string param_values_json = 5;
-  optional string error_message = 6;
+  optional string template_name = 3;
+  optional string template_version = 4;
+  optional string workflow_name = 5;
+  optional uint32 run_by = 6;
+  string status = 7;
+  optional uint32 workflow_id = 8;
+  string created_at = 9;
+  string param_values_json = 10;
+  optional string error_message = 11;
+  optional string run_by_username = 12;
 }
 
 message TemplateRunList {
@@ -553,4 +560,8 @@ message WorkspaceRootRequest {
 
 message WorkspaceRootResponse {
   string root_uri = 1; // e.g., "aznorth://workspace"
+}
+
+message DeleteTemplateRunRequest {
+  uint32 template_run_id = 1;
 }

@@ -243,11 +243,18 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 
 	var templateRunId uint32
 	var createdAt time.Time
+	user := GetUserFromContext(ctx)
+
+	var userId *uint32
+	if user != nil {
+		uid := uint32(user.UserID)
+		userId = &uid
+	}
 
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO template_run (workflow_template_id, param_values, created_at)
-		 VALUES ($1, $2, NOW()) RETURNING template_run_id, created_at`,
-		req.WorkflowTemplateId, req.ParamValuesJson,
+		`INSERT INTO template_run (workflow_template_id, param_values, run_by, created_at)
+		 VALUES ($1, $2, $3, NOW()) RETURNING template_run_id, created_at`,
+		req.WorkflowTemplateId, req.ParamValuesJson, userId,
 	).Scan(&templateRunId, &createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert template_run: %w", err)
@@ -269,7 +276,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		log.Printf("⚠️ RunTemplate script error: %s", errMsg)
 
 		_, _ = s.db.ExecContext(ctx, `
-			UPDATE template_run SET error_message = $1 WHERE template_run_id = $2
+			UPDATE template_run SET error_message = $1, status = 'F' WHERE template_run_id = $2
 		`, errMsg, templateRunId)
 
 		return &pb.TemplateRun{
@@ -278,7 +285,12 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 			CreatedAt:          createdAt.Format(time.RFC3339),
 			ParamValuesJson:    req.ParamValuesJson,
 			ErrorMessage:       proto.String(errMsg),
+			Status:             "F",
 		}, nil
+	} else {
+		_, _ = s.db.ExecContext(ctx, `
+			UPDATE template_run SET status = 'S' WHERE template_run_id = $1
+		`, templateRunId)
 	}
 
 	// ✅ Script ran successfully (but workflow_id will be updated later by Python)
@@ -287,6 +299,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		WorkflowTemplateId: req.WorkflowTemplateId,
 		CreatedAt:          createdAt.Format(time.RFC3339),
 		ParamValuesJson:    req.ParamValuesJson,
+		Status:             "S",
 	}, nil
 }
 
@@ -583,8 +596,23 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 
 func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.TemplateRunFilter) (*pb.TemplateRunList, error) {
 	query := `
-		SELECT template_run_id, workflow_template_id, workflow_id, created_at, param_values, error_message
-		FROM template_run
+		SELECT
+			r.template_run_id,
+			r.workflow_template_id,
+			t.name AS template_name,
+			t.version AS template_version,
+			w.workflow_name,
+			r.run_by,
+			u.username,
+			r.status,
+			r.workflow_id,
+			r.created_at,
+			r.param_values,
+			r.error_message
+		FROM template_run r
+		JOIN workflow_template t ON r.workflow_template_id = t.workflow_template_id
+		LEFT JOIN workflow w ON r.workflow_id = w.workflow_id
+		LEFT JOIN scitq_user u ON r.run_by = u.user_id
 	`
 	args := []interface{}{}
 	if req.WorkflowTemplateId != nil {
@@ -607,7 +635,8 @@ func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.Template
 		var errorMsg sql.NullString
 		var createdAt time.Time
 
-		if err := rows.Scan(&r.TemplateRunId, &r.WorkflowTemplateId, &workflowID, &createdAt, &r.ParamValuesJson, &errorMsg); err != nil {
+		if err := rows.Scan(&r.TemplateRunId, &r.WorkflowTemplateId, &r.TemplateName, &r.TemplateVersion,
+			&r.WorkflowName, &r.RunBy, &r.RunByUsername, &r.Status, &workflowID, &createdAt, &r.ParamValuesJson, &errorMsg); err != nil {
 			return nil, fmt.Errorf("failed to scan template run: %w", err)
 		}
 
@@ -622,4 +651,27 @@ func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.Template
 	}
 
 	return &pb.TemplateRunList{Runs: runs}, nil
+}
+
+func (s *taskQueueServer) DeleteTemplateRun(ctx context.Context, req *pb.DeleteTemplateRunRequest) (*pb.Ack, error) {
+	if req.GetTemplateRunId() == 0 {
+		return &pb.Ack{Success: false}, fmt.Errorf("template_run_id is required")
+	}
+
+	const query = `DELETE FROM template_run WHERE template_run_id = $1`
+
+	result, err := s.db.ExecContext(ctx, query, req.TemplateRunId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete template_run: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("could not determine if delete succeeded: %w", err)
+	}
+	if rows == 0 {
+		return &pb.Ack{Success: false}, fmt.Errorf("template_run %d not found", req.TemplateRunId)
+	}
+
+	return &pb.Ack{Success: true}, nil
 }

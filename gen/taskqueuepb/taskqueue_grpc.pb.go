@@ -64,6 +64,7 @@ const (
 	TaskQueue_ListTemplates_FullMethodName        = "/taskqueue.TaskQueue/ListTemplates"
 	TaskQueue_ListTemplateRuns_FullMethodName     = "/taskqueue.TaskQueue/ListTemplateRuns"
 	TaskQueue_UpdateTemplateRun_FullMethodName    = "/taskqueue.TaskQueue/UpdateTemplateRun"
+	TaskQueue_DeleteTemplateRun_FullMethodName    = "/taskqueue.TaskQueue/DeleteTemplateRun"
 	TaskQueue_GetWorkspaceRoot_FullMethodName     = "/taskqueue.TaskQueue/GetWorkspaceRoot"
 )
 
@@ -116,6 +117,7 @@ type TaskQueueClient interface {
 	ListTemplates(ctx context.Context, in *TemplateFilter, opts ...grpc.CallOption) (*TemplateList, error)
 	ListTemplateRuns(ctx context.Context, in *TemplateRunFilter, opts ...grpc.CallOption) (*TemplateRunList, error)
 	UpdateTemplateRun(ctx context.Context, in *UpdateTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
+	DeleteTemplateRun(ctx context.Context, in *DeleteTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
 }
 
@@ -588,6 +590,16 @@ func (c *taskQueueClient) UpdateTemplateRun(ctx context.Context, in *UpdateTempl
 	return out, nil
 }
 
+func (c *taskQueueClient) DeleteTemplateRun(ctx context.Context, in *DeleteTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_DeleteTemplateRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkspaceRootResponse)
@@ -647,6 +659,7 @@ type TaskQueueServer interface {
 	ListTemplates(context.Context, *TemplateFilter) (*TemplateList, error)
 	ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error)
 	UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error)
+	DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error)
 	GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
@@ -789,6 +802,9 @@ func (UnimplementedTaskQueueServer) ListTemplateRuns(context.Context, *TemplateR
 }
 func (UnimplementedTaskQueueServer) UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTemplateRun not implemented")
+}
+func (UnimplementedTaskQueueServer) DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteTemplateRun not implemented")
 }
 func (UnimplementedTaskQueueServer) GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceRoot not implemented")
@@ -1581,6 +1597,24 @@ func _TaskQueue_UpdateTemplateRun_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_DeleteTemplateRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteTemplateRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DeleteTemplateRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DeleteTemplateRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DeleteTemplateRun(ctx, req.(*DeleteTemplateRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_GetWorkspaceRoot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WorkspaceRootRequest)
 	if err := dec(in); err != nil {
@@ -1769,6 +1803,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateTemplateRun",
 			Handler:    _TaskQueue_UpdateTemplateRun_Handler,
+		},
+		{
+			MethodName: "DeleteTemplateRun",
+			Handler:    _TaskQueue_DeleteTemplateRun_Handler,
 		},
 		{
 			MethodName: "GetWorkspaceRoot",

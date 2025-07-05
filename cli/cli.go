@@ -175,12 +175,18 @@ type Attr struct {
 		Detail *struct {
 			TemplateId uint32 `arg:"--id,required" help:"Show detailed information for this template ID"`
 		} `arg:"subcommand:detail" help:"Show a template's param JSON and metadata"`
-
-		Runs *struct {
-			TemplateId *uint32 `arg:"--template-id" help:"Filter runs by template ID"`
-		} `arg:"subcommand:runs" help:"List all template runs"`
 	} `arg:"subcommand:template" help:"Manage workflow templates"`
 
+	// (Workflow) Template run commands
+	Run *struct {
+		List *struct {
+			TemplateId *uint32 `arg:"--template-id" help:"Filter runs by template ID"`
+		} `arg:"subcommand:list" help:"List template runs"`
+
+		Delete *struct {
+			RunId uint32 `arg:"--id,required" help:"ID of the template run to delete"`
+		} `arg:"subcommand:delete" help:"Delete a template run"`
+	} `arg:"subcommand:run" help:"Manage template runs"`
 	// Login commands
 	Login *struct {
 	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
@@ -912,6 +918,72 @@ func (c *CLI) TemplateRun() error {
 	return nil
 }
 
+func (c *CLI) RunList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	filter := &pb.TemplateRunFilter{WorkflowTemplateId: c.Attr.Run.List.TemplateId}
+
+	res, err := c.QC.Client.ListTemplateRuns(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("failed to list template runs: %w", err)
+	}
+
+	if len(res.Runs) == 0 {
+		fmt.Println("⚠️ No template runs found.")
+		return nil
+	}
+
+	fmt.Println("🏃 Template Runs:")
+	for _, r := range res.Runs {
+		username := "-"
+		if r.RunByUsername != nil {
+			username = *r.RunByUsername
+		}
+
+		templateName := "-"
+		if r.TemplateName != nil {
+			templateName = *r.TemplateName
+		}
+		templateVersion := "-"
+		if r.TemplateVersion != nil {
+			templateVersion = *r.TemplateVersion
+		}
+		workflowName := "-"
+		if r.WorkflowName != nil {
+			workflowName = *r.WorkflowName
+		}
+
+		fmt.Printf("🔸 ID: %d | Template: %s v%s | Workflow: %s | Created: %s | Status: %s | User: %s\n",
+			r.TemplateRunId,
+			templateName,
+			templateVersion,
+			workflowName,
+			r.CreatedAt,
+			r.Status,
+			username,
+		)
+	}
+	return nil
+}
+
+func (c *CLI) RunDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.DeleteTemplateRunRequest{
+		TemplateRunId: c.Attr.Run.Delete.RunId,
+	}
+
+	_, err := c.QC.Client.DeleteTemplateRun(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to delete template run %d: %w", c.Attr.Run.Delete.RunId, err)
+	}
+
+	fmt.Printf("🗑️ Deleted template run with ID %d\n", c.Attr.Run.Delete.RunId)
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -1044,8 +1116,13 @@ func Run(c CLI) error {
 			err = c.TemplateDetail()
 		case c.Attr.Template.Run != nil:
 			err = c.TemplateRun()
-			//case c.Attr.Template.Runs != nil:
-			//	err = c.TemplateRunList()
+		}
+	case c.Attr.Run != nil:
+		switch {
+		case c.Attr.Run.List != nil:
+			err = c.RunList()
+		case c.Attr.Run.Delete != nil:
+			err = c.RunDelete()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

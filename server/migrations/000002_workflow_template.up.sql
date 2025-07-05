@@ -16,6 +16,8 @@ CREATE TABLE template_run (
     param_values JSONB NOT NULL,
     workflow_id INTEGER REFERENCES workflow(workflow_id) ON DELETE SET NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    status CHAR NOT NULL DEFAULT 'P', -- (P: Pending, S: Success, F: Failed)
+    run_by INTEGER REFERENCES scitq_user(user_id) ON DELETE SET NULL,
     error_message TEXT
 );
 
