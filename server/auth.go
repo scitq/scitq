@@ -142,3 +142,30 @@ func checkAdminUser(db *sql.DB) {
 	}
 
 }
+
+func grpcMetadataFromContext(ctx context.Context) (map[string][]string, bool) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	return md, ok
+}
+
+func extractTokenFromContext(ctx context.Context) string {
+	md, ok := grpcMetadataFromContext(ctx)
+	if !ok {
+		return ""
+	}
+
+	// Prefer "authorization: Bearer TOKEN"
+	authHeaders := md["authorization"]
+	for _, h := range authHeaders {
+		if strings.HasPrefix(h, "Bearer ") {
+			return strings.TrimSpace(h[len("Bearer "):])
+		}
+	}
+
+	// Fallback: raw token in header (if stored differently)
+	if tokenList, ok := md["scitq-token"]; ok && len(tokenList) > 0 {
+		return tokenList[0]
+	}
+
+	return ""
+}

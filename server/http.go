@@ -13,13 +13,14 @@ import (
 //go:embed public/*
 var publicFiles embed.FS
 
-func HttpServer(cfg config.Config) error {
+func HttpServer(cfg config.Config) (string, error) {
 	// Retrieve certificate data from environment, if provided.
 	var tlsCert tls.Certificate
+	var certPEMstring string
 	var err error
 	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
 		log.Printf("Using embedded certificates")
-		tlsCert, err = LoadEmbeddedCertificates()
+		tlsCert, certPEMstring, err = LoadEmbeddedCertificates()
 		if err != nil {
 			log.Fatalf("failed to load embedded TLS credentials: %v", err)
 		}
@@ -29,6 +30,7 @@ func HttpServer(cfg config.Config) error {
 		if err != nil {
 			log.Fatalf("failed to read certificate file: %v", err)
 		}
+		certPEMstring = string(certPEMData)
 		certKeyData, err := os.ReadFile(cfg.Scitq.CertificateKey)
 		if err != nil {
 			log.Fatalf("failed to read certificate key file: %v", err)
@@ -69,5 +71,5 @@ func HttpServer(cfg config.Config) error {
 	}
 
 	log.Printf("Starting HTTPS server")
-	return server.ListenAndServeTLS("", "")
+	return certPEMstring, server.ListenAndServeTLS("", "")
 }

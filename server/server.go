@@ -33,6 +33,7 @@ import (
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -66,15 +67,17 @@ type taskQueueServer struct {
 	cfg      config.Config
 	jobQueue chan Job
 	//jobWG     sync.WaitGroup
-	providers     map[uint32]providers.Provider
-	semaphore     chan struct{} // Semaphore to limit concurrency
-	assignTrigger uint32
-	qm            recruitment.QuotaManager
-	watchdog      *watchdog.Watchdog
+	providers      map[uint32]providers.Provider
+	providerConfig map[string]config.ProviderConfig
+	semaphore      chan struct{} // Semaphore to limit concurrency
+	assignTrigger  uint32
+	qm             recruitment.QuotaManager
+	watchdog       *watchdog.Watchdog
 
 	stopWatchdog       chan struct{}
 	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
 	workerStats        *sync.Map
+	sslCertificatePEM  string
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -90,6 +93,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		jobQueue:           make(chan Job, defaultJobQueueSize),
 		semaphore:          make(chan struct{}, defaultJobConcurrency),
 		providers:          make(map[uint32]providers.Provider),
+		providerConfig:     make(map[string]config.ProviderConfig),
 		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
 		stopWatchdog:       make(chan struct{}),
@@ -126,19 +130,28 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
 	var taskID int
+	// Determine initial status: "W" if dependencies, otherwise "P"
+	initialStatus := "P"
+	if len(req.Dependency) > 0 {
+		initialStatus = "W"
+	} else if req.Status != "" {
+		initialStatus = req.Status
+	}
+
 	err := s.db.QueryRow(
 		`INSERT INTO task (command, shell, container, container_options, step_id, 
 					input, resource, output, retry, is_final, uses_cache, 
 					download_timeout, running_timeout, upload_timeout,  
-					status, created_at) 
+					status, task_name, created_at) 
 		VALUES ($1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10, $11, 
-			$12, $13, $14,
-			 'P', NOW()) 
+			$12, $13, $14, 
+			$15, $16, NOW()) 
 		RETURNING task_id`,
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
+		initialStatus, req.TaskName,
 	).Scan(&taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -146,8 +159,28 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 
 	log.Printf("✅ Task %d submitted (Command: %s, Container: %s)", taskID, req.Command, req.Container)
 
-	// **Trigger task assignment**
-	s.triggerAssign()
+	// Insert dependencies if any
+	if len(req.Dependency) > 0 {
+		stmt, err := s.db.PrepareContext(ctx, `
+			INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+			VALUES ($1, $2)
+		`)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare dependency insert: %w", err)
+		}
+		defer stmt.Close()
+
+		for _, depID := range req.Dependency {
+			if _, err := stmt.ExecContext(ctx, taskID, depID); err != nil {
+				return nil, fmt.Errorf("failed to insert dependency (%d -> %d): %w", depID, taskID, err)
+			}
+		}
+	}
+
+	// Trigger assignment only if task is immediately runnable
+	if initialStatus == "P" {
+		s.triggerAssign()
+	}
 
 	return &pb.TaskResponse{TaskId: uint32(taskID)}, nil
 }
@@ -158,6 +191,15 @@ func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empt
 		return nil, fmt.Errorf("failed to read rclone config: %w", err)
 	}
 	return &pb.RcloneConfig{Config: string(data)}, nil
+}
+
+func shouldTriggerAssignFor(status string) bool {
+	switch status {
+	case "P", "S", "F", "C", "R", "U", "V", "X":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
@@ -174,26 +216,80 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 
 	switch req.NewStatus {
 	case "C":
-		{
-			if !workerID.Valid {
-				log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
-			} else {
-				s.watchdog.TaskAccepted(uint32(workerID.Int32))
-			}
+		if !workerID.Valid {
+			log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
+		} else {
+			s.watchdog.TaskAccepted(uint32(workerID.Int32))
 		}
 	case "S", "F":
-		{
-			if !workerID.Valid {
-				log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
-			} else {
-				s.watchdog.TaskFinished(uint32(workerID.Int32))
+		if !workerID.Valid {
+			log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
+		} else {
+			s.watchdog.TaskFinished(uint32(workerID.Int32))
+		}
+	}
+
+	// Push logic: on success, check dependent "W" tasks
+	if req.NewStatus == "S" {
+		// Find candidate dependent tasks
+		rows, err := s.db.QueryContext(ctx, `
+            SELECT DISTINCT d.dependent_task_id
+            FROM task_dependencies d
+            JOIN task t ON d.dependent_task_id = t.task_id
+            WHERE d.prerequisite_task_id = $1
+              AND t.status = 'W'
+        `, req.TaskId)
+		if err != nil {
+			log.Printf("❌ failed to find dependent tasks: %v", err)
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var depTaskID int64
+				if err := rows.Scan(&depTaskID); err != nil {
+					log.Printf("⚠️ failed to scan dependent task: %v", err)
+					continue
+				}
+
+				// Check if all prerequisites are now 'S'
+				var allDone bool
+				err = s.db.QueryRowContext(ctx, `
+                    SELECT NOT EXISTS (
+                        SELECT 1
+                        FROM task_dependencies d
+                        JOIN task t ON d.prerequisite_task_id = t.task_id
+                        WHERE d.dependent_task_id = $1
+                          AND t.status != 'S'
+                    )
+                `, depTaskID).Scan(&allDone)
+				if err != nil {
+					log.Printf("⚠️ failed to check dependencies for task %d: %v", depTaskID, err)
+					continue
+				}
+
+				if allDone {
+					// Promote to "P"
+					res, err := s.db.ExecContext(ctx, `
+                        UPDATE task
+                        SET status = 'P'
+                        WHERE task_id = $1 AND status = 'W'
+                    `, depTaskID)
+					if err != nil {
+						log.Printf("⚠️ failed to promote task %d to 'P': %v", depTaskID, err)
+						continue
+					}
+					n, _ := res.RowsAffected()
+					if n > 0 {
+						log.Printf("✅ task %d now pending (dependencies resolved)", depTaskID)
+						s.triggerAssign()
+					}
+				}
 			}
 		}
 	}
 
-	// **Trigger task assignment**
-	s.triggerAssign()
-
+	if shouldTriggerAssignFor(req.NewStatus) {
+		s.triggerAssign()
+	}
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -886,13 +982,13 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	// **Filter by status and worker if provided**
 	if req.StatusFilter != nil && *req.StatusFilter != "" && req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
 	} else if req.StatusFilter != nil && *req.StatusFilter != "" {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
 	} else if req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
 	} else {
-		rows, err = tx.Query(`SELECT task_id, command, container, status, worker_id, step_id FROM task ORDER BY task_id`)
+		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task ORDER BY task_id`)
 	}
 
 	if err != nil {
@@ -903,10 +999,14 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	for rows.Next() {
 		var task pb.Task
-		err := rows.Scan(&task.TaskId, &task.Command, &task.Container, &task.Status, &task.WorkerId, &task.StepId)
+		var taskName sql.NullString
+		err := rows.Scan(&task.TaskId, &taskName, &task.Command, &task.Container, &task.Status, &task.WorkerId, &task.StepId)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue
+		}
+		if taskName.Valid {
+			task.TaskName = &taskName.String
 		}
 		tasks = append(tasks, &task)
 	}
@@ -1836,6 +1936,25 @@ func (s *taskQueueServer) FetchList(ctx context.Context, req *pb.FetchListReques
 	return &pb.FetchListResponse{Files: files}, nil
 }
 
+func (s *taskQueueServer) GetWorkspaceRoot(ctx context.Context, req *taskqueuepb.WorkspaceRootRequest) (*taskqueuepb.WorkspaceRootResponse, error) {
+	providerName := req.GetProvider()
+	region := req.GetRegion()
+
+	provider, ok := s.providerConfig[providerName]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "unknown provider: %q", providerName)
+	}
+
+	root, ok := provider.GetWorkspaceRoot(region)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "no workspace root for region %q in provider %q", region, providerName)
+	}
+
+	return &taskqueuepb.WorkspaceRootResponse{
+		RootUri: root,
+	}, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -1863,24 +1982,24 @@ func applyMigrations(db *sql.DB) error {
 	return nil
 }
 
-func LoadEmbeddedCertificates() (tls.Certificate, error) {
+func LoadEmbeddedCertificates() (tls.Certificate, string, error) {
 
 	var serverCert tls.Certificate
 	// Read server certificate & key from embedded files
 	serverCertPEM, err := embeddedCertificates.ReadFile("certificates/server.pem")
 	if err != nil {
-		return serverCert, fmt.Errorf("failed to read embedded server.pem: %w", err)
+		return serverCert, "", fmt.Errorf("failed to read embedded server.pem: %w", err)
 	}
 
 	serverKeyPEM, err := embeddedCertificates.ReadFile("certificates/server.key")
 	if err != nil {
-		return serverCert, fmt.Errorf("failed to read embedded server.key: %w", err)
+		return serverCert, string(serverCertPEM), fmt.Errorf("failed to read embedded server.key: %w", err)
 	}
 
 	// Load the certificate
 	serverCert, err = tls.X509KeyPair(serverCertPEM, serverKeyPEM)
 
-	return serverCert, err
+	return serverCert, string(serverCertPEM), err
 }
 
 func (s *taskQueueServer) Shutdown() {
@@ -1900,6 +2019,11 @@ func Serve(cfg config.Config) error {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer db.Close()
+
+	// Check workflow template directory
+	if err := validateScriptConfig(cfg.Scitq.ScriptRoot, cfg.Scitq.ScriptInterpreter); err != nil {
+		return fmt.Errorf("invalid script config: %w", err)
+	}
 
 	// Create the main server instance
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
@@ -1938,12 +2062,18 @@ func Serve(cfg config.Config) error {
 	// Load TLS certificates - embedded or from configured files
 	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
 		log.Printf("🔐 Using embedded TLS certificates")
-		serverCert, err := LoadEmbeddedCertificates()
+		serverCert, certPEMString, err := LoadEmbeddedCertificates()
 		if err != nil {
 			return fmt.Errorf("failed to load embedded TLS credentials: %v", err)
 		}
 		creds = credentials.NewServerTLSFromCert(&serverCert)
+		s.sslCertificatePEM = certPEMString
 	} else {
+		certPEMData, err := os.ReadFile(cfg.Scitq.CertificatePem)
+		if err != nil {
+			log.Fatalf("failed to read certificate file: %v", err)
+		}
+		s.sslCertificatePEM = string(certPEMData)
 		creds, err = credentials.NewServerTLSFromFile(cfg.Scitq.CertificatePem, cfg.Scitq.CertificateKey)
 		if err != nil {
 			return fmt.Errorf("failed to load TLS credentials: %v", err)

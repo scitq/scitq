@@ -39,7 +39,7 @@ func main() {
 	// Launch the HTTP server as a goroutine.
 	go func() {
 		defer wg.Done()
-		if err := server.HttpServer(*cfg); err != nil {
+		if _, err := server.HttpServer(*cfg); err != nil {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()

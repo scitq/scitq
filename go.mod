@@ -14,6 +14,7 @@ require (
 	github.com/docker/go-connections v0.5.0
 	github.com/golang-jwt/jwt v3.2.1+incompatible
 	github.com/golang-migrate/migrate/v4 v4.18.2
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.6.0
 	github.com/hpcloud/tail v1.0.0
 	github.com/improbable-eng/grpc-web v0.15.0

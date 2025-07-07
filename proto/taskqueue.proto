@@ -46,6 +46,14 @@ service TaskQueue {
     rpc DeleteStep(StepId) returns (Ack);
     rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
     rpc FetchList (FetchListRequest) returns (FetchListResponse);
+    // Template system
+    rpc UploadTemplate(UploadTemplateRequest) returns (UploadTemplateResponse);
+    rpc RunTemplate(RunTemplateRequest) returns (TemplateRun);
+    rpc ListTemplates(TemplateFilter) returns (TemplateList);
+    rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
+    rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
+    rpc DeleteTemplateRun(DeleteTemplateRunRequest) returns (Ack);
+    rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
 }   
 
 message TaskResponse {
@@ -73,6 +81,8 @@ message TaskRequest {
     optional float running_timeout  = 13;
     optional float upload_timeout  = 14;
     string status = 15;
+    repeated uint32 dependency = 16; // IDs of tasks that this task depends on
+    optional string task_name = 17;
 }
 
 message Task {
@@ -94,6 +104,7 @@ message Task {
     string status = 16;
     optional uint32 worker_id = 17;
     optional uint32 workflow_id = 18;
+    optional string task_name = 19;
 }
 
 message TaskList {
@@ -472,3 +483,85 @@ message FetchListResponse {
   repeated string files = 1; // Absolute paths from the given URI
 }
 
+message UploadTemplateRequest {
+  bytes script = 1;
+  bool force = 2;
+}
+
+message UploadTemplateResponse {
+  bool success = 1;
+  string message = 2;
+  optional uint32 workflow_template_id = 3;
+  optional string name = 4;
+  optional string version = 5;
+  optional string description = 6;
+  optional string param_json = 7;
+}
+
+
+message RunTemplateRequest {
+  uint32 workflow_template_id = 1;
+  string param_values_json = 2;
+}
+
+message TemplateFilter {
+  optional uint32 workflow_template_id = 1;
+  optional string name = 2;
+  optional string version = 3;
+}
+
+message Template {
+  uint32 workflow_template_id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+  string param_json = 5;
+  string uploaded_at = 6;
+  optional uint32 uploaded_by = 7;
+}
+
+message TemplateList {
+  repeated Template templates = 1;
+}
+
+message TemplateRun {
+  uint32 template_run_id = 1;
+  uint32 workflow_template_id = 2;
+  optional string template_name = 3;
+  optional string template_version = 4;
+  optional string workflow_name = 5;
+  optional uint32 run_by = 6;
+  string status = 7;
+  optional uint32 workflow_id = 8;
+  string created_at = 9;
+  string param_values_json = 10;
+  optional string error_message = 11;
+  optional string run_by_username = 12;
+}
+
+message TemplateRunList {
+  repeated TemplateRun runs = 1;
+}
+
+message TemplateRunFilter {
+  optional uint32 workflow_template_id = 1;
+}
+
+message UpdateTemplateRunRequest {
+  uint32 template_run_id = 1;
+  optional uint32 workflow_id = 2;
+  optional string error_message = 3;
+}
+
+message WorkspaceRootRequest {
+  string provider = 1; // e.g., "azure.default" or "openstack.ovh"
+  string region   = 2; // e.g., "northeurope"
+}
+
+message WorkspaceRootResponse {
+  string root_uri = 1; // e.g., "aznorth://workspace"
+}
+
+message DeleteTemplateRunRequest {
+  uint32 template_run_id = 1;
+}

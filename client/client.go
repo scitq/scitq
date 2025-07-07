@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/shlex"
+
 	"github.com/gmtsciencedev/scitq2/client/install"
 	"github.com/gmtsciencedev/scitq2/client/workerstats"
 	"github.com/gmtsciencedev/scitq2/fetch"
@@ -130,7 +132,15 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 	if task.Shell != nil {
 		command = append(command, task.Container, *task.Shell, "-c", task.Command)
 	} else {
-		command = append(command, task.Container, task.Command)
+		args, err := shlex.Split(task.Command)
+		if err != nil {
+			log.Printf("❌ Failed to analyze command %s: %v", task.Command, err)
+			task.Status = "F"                          // Mark as failed
+			updateTaskStatus(client, task.TaskId, "V") // Mark as failed
+			return
+		}
+		command = append(command, task.Container)
+		command = append(command, args...)
 	}
 
 	log.Printf("🛠️  Running command: docker %s", strings.Join(command, " "))

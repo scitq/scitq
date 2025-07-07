@@ -19,6 +19,9 @@ type Config struct {
 		MaxDBConcurrency     int     `yaml:"max_db_concurrency" default:"50"`
 		LogLevel             string  `yaml:"log_level" default:"info"`
 		LogRoot              string  `yaml:"log_root" default:"log"`
+		ScriptRoot           string  `yaml:"script_root" default:"scripts"`
+		ScriptInterpreter    string  `yaml:"script_interpreter" default:"python3"`
+		ScriptRunnerUser     string  `yaml:"script_runner_user" default:"nobody"`
 		ClientBinaryPath     string  `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
 		ClientDownloadToken  string  `yaml:"client_download_token"`
 		CertificateKey       string  `yaml:"certificate_key"`
@@ -47,19 +50,20 @@ type Quota struct {
 }
 
 type AzureConfig struct {
-	Name              string           `yaml:"-"`
-	DefaultRegion     string           `yaml:"default_region"`
-	SubscriptionID    string           `yaml:"subscription_id"`
-	ClientID          string           `yaml:"client_id"`
-	ClientSecret      string           `yaml:"client_secret"`
-	TenantID          string           `yaml:"tenant_id"`
-	UseSpot           bool             `yaml:"use_spot" default:"true"`
-	Username          string           `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
-	SSHPublicKey      string           `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
-	Image             AzureImage       `yaml:"image"`
-	Quotas            map[string]Quota `yaml:"quotas"` // key: region
-	Regions           []string         `yaml:"regions"`
-	UpdatePeriodicity string           `yaml:"update_periodicity"` // Update periodicity in minutes
+	Name                string            `yaml:"-"`
+	DefaultRegion       string            `yaml:"default_region"`
+	SubscriptionID      string            `yaml:"subscription_id"`
+	ClientID            string            `yaml:"client_id"`
+	ClientSecret        string            `yaml:"client_secret"`
+	TenantID            string            `yaml:"tenant_id"`
+	UseSpot             bool              `yaml:"use_spot" default:"true"`
+	Username            string            `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
+	SSHPublicKey        string            `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
+	Image               AzureImage        `yaml:"image"`
+	Quotas              map[string]Quota  `yaml:"quotas"` // key: region
+	Regions             []string          `yaml:"regions"`
+	UpdatePeriodicity   string            `yaml:"update_periodicity"` // Update periodicity in minutes
+	LocalWorkspaceRoots map[string]string `yaml:"local_workspaces"`
 }
 
 type AzureImage struct {
@@ -70,20 +74,21 @@ type AzureImage struct {
 }
 
 type OpenstackConfig struct {
-	Name              string                 `yaml:"-"`
-	AuthURL           string                 `yaml:"auth_url"`
-	Username          string                 `yaml:"username"`
-	Password          string                 `yaml:"password"`
-	DomainName        string                 `yaml:"domain_name"`
-	TenantName        string                 `yaml:"tenant_name"`
-	DefaultRegion     string                 `yaml:"region"`
-	ImageID           string                 `yaml:"image_id"`
-	FlavorID          string                 `yaml:"flavor_id"`
-	NetworkID         string                 `yaml:"network_id"`
-	Quotas            map[string]Quota       `yaml:"quotas"` // key: region
-	Regions           []string               `yaml:"regions"`
-	Custom            map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
-	UpdatePeriodicity string                 `yaml:"update_periodicity"` // Update periodicity in minutes
+	Name                string                 `yaml:"-"`
+	AuthURL             string                 `yaml:"auth_url"`
+	Username            string                 `yaml:"username"`
+	Password            string                 `yaml:"password"`
+	DomainName          string                 `yaml:"domain_name"`
+	TenantName          string                 `yaml:"tenant_name"`
+	DefaultRegion       string                 `yaml:"region"`
+	ImageID             string                 `yaml:"image_id"`
+	FlavorID            string                 `yaml:"flavor_id"`
+	NetworkID           string                 `yaml:"network_id"`
+	Quotas              map[string]Quota       `yaml:"quotas"` // key: region
+	Regions             []string               `yaml:"regions"`
+	Custom              map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
+	UpdatePeriodicity   string                 `yaml:"update_periodicity"` // Update periodicity in minutes
+	LocalWorkspaceRoots map[string]string      `yaml:"local_workspaces"`
 }
 
 func (c *Config) Validate() error {
@@ -111,6 +116,7 @@ type ProviderConfig interface {
 	GetName() string
 	SetName(string)
 	GetDefaultRegion() string
+	GetWorkspaceRoot(region string) (string, bool)
 }
 
 func parsePeriodicity(periodicity string, name string) time.Duration {
@@ -154,6 +160,19 @@ func (a *AzureConfig) SetName(name string) {
 	a.Name = name
 }
 
+func (a *AzureConfig) GetWorkspaceRoot(region string) (string, bool) {
+	if a.LocalWorkspaceRoots == nil {
+		return "", false
+	}
+	if root, ok := a.LocalWorkspaceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := a.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
+}
+
 func (o *OpenstackConfig) GetRegions() []string {
 	return o.Regions
 }
@@ -180,6 +199,19 @@ func (o *OpenstackConfig) SetName(name string) {
 
 func (o *OpenstackConfig) GetName() string {
 	return o.Name
+}
+
+func (o *OpenstackConfig) GetWorkspaceRoot(region string) (string, bool) {
+	if o.LocalWorkspaceRoots == nil {
+		return "", false
+	}
+	if root, ok := o.LocalWorkspaceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := o.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
 }
 
 func (cfg *Config) GetProviders() []ProviderConfig {
