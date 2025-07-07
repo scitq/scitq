@@ -911,7 +911,15 @@ func (c *CLI) TemplateRun() error {
 	}
 	res, err := c.QC.Client.RunTemplate(ctx, req)
 	if err != nil {
-		return fmt.Errorf("template run failed: %w", err)
+		return err
+	}
+
+	if res.Status != "S" {
+		errMsg := "<unknown error>"
+		if res.ErrorMessage != nil {
+			errMsg = *res.ErrorMessage
+		}
+		return fmt.Errorf("template run failed: %s", errMsg)
 	}
 
 	fmt.Printf("🚀 Template run created with ID %d\n", res.TemplateRunId)

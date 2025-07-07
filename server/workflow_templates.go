@@ -288,9 +288,71 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 			Status:             "F",
 		}, nil
 	} else {
-		_, _ = s.db.ExecContext(ctx, `
+		var err error
+		_, err = s.db.ExecContext(ctx, `
 			UPDATE template_run SET status = 'S' WHERE template_run_id = $1
 		`, templateRunId)
+		if err != nil {
+			log.Printf("⚠️ failed to update template_run status: %v", err)
+		}
+		var workflowID sql.NullInt64
+		var tasksActivated int64
+
+		err = s.db.QueryRowContext(ctx, `
+				WITH run_info AS (
+					SELECT workflow_id FROM template_run WHERE template_run_id = $1
+				),
+				updated AS (
+					UPDATE task
+					SET status = 'P'
+					WHERE status = 'O'
+						AND step_id IN (
+						SELECT step_id FROM step WHERE workflow_id = (SELECT workflow_id FROM run_info)
+						)
+					RETURNING 1
+				)
+				SELECT (SELECT workflow_id FROM run_info), COUNT(*) FROM updated
+			`, templateRunId).Scan(&workflowID, &tasksActivated)
+
+		if err != nil {
+			msg := fmt.Sprintf("⚠️ failed to update task statuses: %v", err)
+			log.Println(msg)
+			_, _ = s.db.ExecContext(ctx, `
+				UPDATE template_run SET status = 'F', error_message = $1 WHERE template_run_id = $2
+			`, msg, templateRunId)
+
+			return &pb.TemplateRun{
+				TemplateRunId:      templateRunId,
+				WorkflowTemplateId: req.WorkflowTemplateId,
+				CreatedAt:          createdAt.Format(time.RFC3339),
+				ParamValuesJson:    req.ParamValuesJson,
+				Status:             "F",
+				ErrorMessage:       proto.String(msg),
+			}, nil
+		}
+
+		if !workflowID.Valid {
+			msg := "⚠️ workflow_id is NULL — cannot activate tasks"
+			log.Println(msg)
+			_, _ = s.db.ExecContext(ctx, `
+						UPDATE template_run SET status = 'F', error_message = $1 WHERE template_run_id = $2
+					`, msg, templateRunId)
+
+			return &pb.TemplateRun{
+				TemplateRunId:      templateRunId,
+				WorkflowTemplateId: req.WorkflowTemplateId,
+				CreatedAt:          createdAt.Format(time.RFC3339),
+				ParamValuesJson:    req.ParamValuesJson,
+				Status:             "F",
+				ErrorMessage:       proto.String(msg),
+			}, nil
+		}
+
+		if tasksActivated == 0 {
+			log.Printf("⚠️ No tasks activated for workflow_id=%d (template_run_id=%d)", uint32(workflowID.Int64), templateRunId)
+		} else {
+			log.Printf("✅ %d tasks activated for workflow_id=%d (template_run_id=%d)", tasksActivated, uint32(workflowID.Int64), templateRunId)
+		}
 	}
 
 	// ✅ Script ran successfully (but workflow_id will be updated later by Python)
