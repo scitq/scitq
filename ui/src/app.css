@@ -1,89 +1,108 @@
-/* === Root Styles === */
-
+/* === Global Variables === */
 :root {
+  /* Fixed colors (common to both themes) */
+  --primary-text: white;
+  
+  /* Default light theme */
+  --primary-color: #192245; /* Dark blue for light mode */
+  --primary-hover: #0f1736;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --text-primary: #213547;
+  --text-secondary: #5a5a5a;
+  --border-color: #dddddd;
+  --table-header: var(--primary-color);
+  --table-header-text: var(--primary-text);
+  --table-row-even: #f8f8f8;
+  --link-color: #1a56db;
+  --link-hover: #0d47a1;
+  --toolbar-bg: var(--primary-color);
+  --toolbar-text: white;
+  
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* === Login Forgot Password Link === */
+[data-theme="dark"] {
+  /* Dark theme */
+  --primary-color: #3a4b8c; /* Lighter blue for dark mode */
+  --primary-hover: #4a5ca4; 
+  --bg-primary: #121212;
+  --bg-secondary: #1e1e1e;
+  --text-primary: #f0f0f0;
+  --text-secondary: #cccccc;
+  --border-color: #444444;
+  --table-header: var(--primary-color);
+  --table-header-text: var(--primary-text);
+  --table-row-even: #252525;
+  --link-color: #64b5f6;
+  --link-hover: #42a5f5;
+  --toolbar-bg: var(--primary-color);
+  --toolbar-text: white;
+}
 
+/* === Common Elements === */
 .link {
   background: transparent;
   border: none;
   padding: 0;
   margin: 0;
-  color: black;
+  color: var(--link-color);
   text-decoration: underline;
   cursor: pointer;
   display: inline;
+  transition: color 0.2s;
 }
 
 .link:hover {
-  color: blue;
+  color: var(--link-hover);
 }
 
 /* === Buttons === */
-
-.btn-validate {
-  font-size: 1.1em;
-  padding: 0.75em 1.5em;
-  background-color: #192245;
-  color: white;
+.btn-validate, .btn-action {
+  background-color: var(--primary-color);
+  color: var(--primary-text);
   border: none;
   border-radius: 8px;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, transform 0.2s;
 }
 
-.btn-validate:hover {
-  background-color: #0f1736;
-  border-color: transparent;
+.btn-validate {
+  font-size: 1.1em;
+  padding: 0.75em 1.5em;
 }
 
 .btn-action {
   font-size: 0.75rem;
   padding: 0.25rem 0.50rem;
   margin: 2px;
-  background-color: #192245;
-  border: 1px solid #444;
-  color: white;
-  border-radius: 8px; /* as before */
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
+  border: 1px solid var(--border-color);
   box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.6);
-  transition: background 0.3s, transform 0.2s, color 0.2s;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   line-height: 1;
 }
 
-/* Hover effect for action buttons */
-.btn-action:hover {
-  background-color: #333;
-  transform: scale(1.1);
+.btn-validate:hover, .btn-action:hover {
+  background-color: var(--primary-hover);
+  transform: scale(1.02);
 }
 
-/* Active (click) effect */
 .btn-action:active {
   transform: scale(0.97);
-  background-color: #0a1125;
 }
 
-/* SVG inside buttons */
 .btn-action svg {
   width: 14px;
   height: 14px;
@@ -95,47 +114,47 @@
   color: #ffeb3b;
 }
 
-/* === Global Table Styles === */
-
+/* === Tables === */
 .listTable {
   width: auto;
   min-width: 100%;
   border-collapse: collapse;
-  color: black;
+  color: var(--text-primary);
   font-size: 0.85rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .listTable th,
 .listTable td {
-  padding: 0.1rem 0.5rem;
-  border: 1px solid #333;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
   text-align: center;
   vertical-align: middle;
   white-space: nowrap;
 }
 
 .listTable th {
-  background-color: grey;
-  color: black;
+  background-color: var(--table-header);
+  color: var(--table-header-text);
 }
 
 .listTable tr:nth-child(even) {
-  background-color: #f2f2f2;
+  background-color: var(--table-row-even);
 }
 
-/* === Toolbar Styles === */
-
+/* === Toolbar === */
 .toolbar {
   display: flex;
   gap: 1rem;
   padding: 0.5rem 1rem;
-  background-color: #242424;
-  color: #E6DDBA;
+  background-color: var(--toolbar-bg);
+  color: var(--toolbar-text);
   align-items: center;
 }
 
-/* === Login Page Styles === */
-
+/* === Pages === */
 .body-login {
   margin: 0;
   padding: 0;
@@ -143,8 +162,6 @@
   background: url('/path/to/background.jpg') no-repeat center center fixed;
   background-size: cover;
 }
-
-/* === Dashboard Page Styles === */
 
 .body-dashboard {
   margin: 0;
@@ -154,8 +171,30 @@
   min-height: 100vh;
 }
 
+/* === Layout === */
+.app-container {
+  display: flex;
+  height: 100vh;
+  background-color: var(--bg-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  width: 100%;
+}
+
+.main-content {
+  flex: 1;
+  overflow-x: auto;
+  width: 100%;
+  padding: 0 1rem 1rem 1rem;
+  position: relative;
+  background-color: var(--bg-primary);
+}
+
 .card {
+  width: 100%;
+  margin: 1rem auto;
   padding: 2em;
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
 }
 
 #app {
@@ -163,62 +202,7 @@
   width: 100%;
 }
 
-/* === Light Mode Styles === */
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-
-  .link {
-    color: #213547;
-  }
-
-  .link:hover {
-    color: blue;
-  }
-
-  .btn-validate {
-    background-color: #3355aa;
-    color: white;
-  }
-
-  .btn-validate:hover {
-    background-color: #223377;
-  }
-
-  .table-common th {
-    background-color: #3355aa;
-    color: white;
-  }
-
-  .toolbar {
-    background-color: #f0f0f0;
-    color: #213547;
-  }
-}
-
-/* === App Container Styles === */
-
-.app-container {
-  display: flex;
-  height: 100vh;
-  transition: all 0.3s ease;
-}
-
-.main-content {
-  flex: 1;
-  overflow-x: auto;
-  transition: all 0.3s ease;
-  padding: 0 1rem 1rem 1rem;
-  position: relative;
-}
-
-.sidebar-hidden .main-content {
-  margin-left: 0;
-}
-
+/* === UI Elements === */
 .hamburger-button {
   z-index: 100;
   background: transparent;
@@ -239,18 +223,24 @@
 .hamburger-icon {
   width: 100%;
   height: 3px;
-  background-color: #333;
+  background-color: var(--text-primary);
   border-radius: 4px;
   transition: all 0.3s ease;
 }
 
-/* Success alert message */
+/* Alerts */
 .alert-success {
-    background-color: #e6ffed;
-    color: #2c662d;
-    border: 1px solid #2c662d;
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-    border-radius: 4px;
-    font-weight: bold;
+  background-color: #e6ffed;
+  color: #2c662d;
+  border: 1px solid #2c662d;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 4px;
+  font-weight: bold;
+}
+
+[data-theme="dark"] .alert-success {
+  background-color: #1a3a1a;
+  color: #a5d6a7;
+  border-color: #a5d6a7;
 }

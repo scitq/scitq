@@ -1,0 +1,234 @@
+/* workflowTemplate.css */
+.wfTemp-container {
+  padding: 2rem 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.wfTemp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 3rem 0 1.5rem 2rem;
+  gap: 1rem;
+}
+
+.wfTemp-sort-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wfTemp-sort-group label {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.wfTemp-sort-group select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wfTemp-file-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  min-width: 200px;
+}
+
+.wfTemp-file-action-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wfTemp-file-display {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  min-width: 200px;
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wfTemp-button-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.wfTemp-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wfTemp-add-button {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+[data-theme="dark"] .add-button {
+  background-color: #3a4b8c; 
+}
+
+.wfTemp-validate-button {
+  background-color: #4CAF50; 
+  color: white;
+}
+
+.wfTemp-add-button:hover {
+  background-color: var(--primary-hover);
+  transform: scale(1.05);
+}
+
+[data-theme="dark"] .wfTemp-add-button:hover {
+  background-color: #4a5ca4; 
+}
+
+.wfTemp-validate-button:hover {
+  background-color: #43A047; 
+  transform: scale(1.05);
+}
+
+.wfTemp-action-button:active {
+  transform: scale(0.98);
+}
+
+.wfTemp-file-info {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.wfTemp-edit-description {
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-left: 0.5rem;
+  color: var(--text-secondary);
+  transition: color 0.2s;
+}
+
+.wfTemp-edit-description:hover {
+  color: var(--primary-color);
+}
+
+.wfTemp-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.wfTemp-description-modal {
+  background: var(--bg-primary);
+  padding: 1.5rem;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.wfTemp-description-modal h3 {
+  margin-top: 0;
+  color: var(--text-primary);
+}
+
+.wfTemp-description-modal textarea {
+  width: 95%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  margin: 1rem 0;
+  resize: vertical;
+  min-height: 100px;
+}
+  
+.wfTemp-description-modal textarea::placeholder {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+
+.wfTemp-modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.wfTemp-cancel-button, .confirm-button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.wfTemp-cancel-button {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.wfTemp-confirm-button {
+  background: var(--primary-color);
+  color: white;
+  border: none;
+}
+
+.wfTemp-confirm-button:hover {
+  background: var(--primary-hover);
+}
+
+.wfTemp-validate-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wfTemp-skip-button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.wfTemp-clear-file {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 2rem;
+  margin-left: 0.5rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.wfTemp-clear-file:hover {
+  color: #e00;
+}

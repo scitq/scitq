@@ -358,8 +358,8 @@
 <div class="tasks-container" data-testid="tasks-page">
 
   <!-- Filters -->
-  <form class="filters-form" on:submit|preventDefault={() => handleStatusClick()}>
-    <div class="filter-group">
+  <form class="tasks-filters-form" on:submit|preventDefault={() => handleStatusClick()}>
+    <div class="tasks-filter-group">
       <label for="sortBy">Sort by</label>
       <select id="sortBy" bind:value={sortBy} on:change={() => handleStatusClick()}>
         <option value="task">Task</option>
@@ -369,7 +369,7 @@
       </select>
     </div>
 
-    <div class="filter-group">
+    <div class="tasks-filter-group">
       <label for="workerSelect">Worker</label>
       <select
         id="workerSelect"
@@ -386,7 +386,7 @@
       </select>
     </div>
 
-    <div class="filter-group">
+    <div class="tasks-filter-group">
       <label for="wfSelect">Workflow</label>
       <select 
         id="wfSelect" 
@@ -404,7 +404,7 @@
     </div>
 
     {#if workflowSteps.length > 0}
-      <div class="filter-group">
+      <div class="tasks-filter-group">
         <label for="stepSelect">Step</label>
         <select
           id="stepSelect"
@@ -425,20 +425,20 @@
   </form>
 
   <!-- Status buttons -->
-  <div class="status-filters-bar status-tabs">
-    <button class="status-all" on:click={() => handleStatusClick()}>All</button>
-    <button class="status-suspended" on:click={() => handleStatusClick('Z')}>Suspended</button>
-    <button class="status-pending" on:click={() => handleStatusClick('P')}>Pending</button>
-    <button class="status-assigned" on:click={() => handleStatusClick('A')}>Assigned</button>
-    <button class="status-accepted" on:click={() => handleStatusClick('C')}>Accepted</button>
-    <button class="status-downloading" on:click={() => handleStatusClick('D')}>Downloading</button>
-    <button class="status-waiting" on:click={() => handleStatusClick('W')}>Waiting</button>
-    <button class="status-running" on:click={() => handleStatusClick('R')}>Running</button>
-    <button class="status-uploading-as" on:click={() => handleStatusClick('U')}>Uploading (AS)</button>
-    <button class="status-succeeded" on:click={() => handleStatusClick('S')}>Succeeded</button>
-    <button class="status-uploading-af" on:click={() => handleStatusClick('V')}>Uploading (AF)</button>
-    <button class="status-failed" on:click={() => handleStatusClick('F')}>Failed</button>
-    <button class="status-canceled" on:click={() => handleStatusClick('X')}>Canceled</button>
+  <div class="tasks-status-filters-bar tasks-status-tabs">
+    <button class="tasks-status-all" on:click={() => handleStatusClick()}>All</button>
+    <button class="tasks-status-pending" on:click={() => handleStatusClick('P')}>Pending</button>
+    <button class="tasks-status-assigned" on:click={() => handleStatusClick('A')}>Assigned</button>
+    <button class="tasks-status-accepted" on:click={() => handleStatusClick('C')}>Accepted</button>
+    <button class="tasks-status-downloading" on:click={() => handleStatusClick('D')}>Downloading</button>
+    <button class="tasks-status-running" on:click={() => handleStatusClick('R')}>Running</button>
+    <button class="tasks-status-uploading-as" on:click={() => handleStatusClick('U')}>Uploading (AS)</button>
+    <button class="tasks-status-succeeded" on:click={() => handleStatusClick('S')}>Succeeded</button>
+    <button class="tasks-status-uploading-af" on:click={() => handleStatusClick('V')}>Uploading (AF)</button>
+    <button class="tasks-status-failed" on:click={() => handleStatusClick('F')}>Failed</button>
+    <button class="tasks-status-waiting" on:click={() => handleStatusClick('W')}>Waiting</button>
+    <button class="tasks-status-suspended" on:click={() => handleStatusClick('Z')}>Suspended</button>
+    <button class="tasks-status-canceled" on:click={() => handleStatusClick('X')}>Canceled</button>
   </div>
 
   <!-- Filtered task list -->
@@ -447,7 +447,7 @@
 
 {#if showLogModal && selectedTaskId !== null}
   <div
-    class="modal-backdrop"
+    class="tasks-modal-backdrop"
     role="button"
     data-testid={`modal-log-${selectedTaskId}`}
     tabindex="0"
@@ -458,7 +458,7 @@
     }}
   >
     <div
-      class="modal terminal-style"
+      class="tasks-modal terminal-style"
       role="dialog"
       aria-modal="true"
       tabindex="0"
@@ -471,15 +471,15 @@
       <h2 id="modal-title" class="modal-title">
         📜 Logs for Task {selectedTaskId}:
       </h2>
-      <p class="command-preview"> {selectedCommand}</p>
-      <div class="log-columns">
+      <p class="tasks-command-preview"> {selectedCommand}</p>
+      <div class="tasks-log-columns">
         {#if logsToShowOut.length > 0}
-          <div class="log-block stdout-block">
-            <h3 class="output-header">
+          <div class="tasks-log-block tasks-stdout-block">
+            <h3 class="tasks-output-header">
               🟢 Output
               {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedStatus) && hasMoreStdout}
                 <button
-                  class="load-more-arrow"
+                  class="tasks-load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stdout'); scrollToTop('stdout');; }}
                   title="Load more Output"
                   data-testid={`load-more-output-${selectedTaskId}`}
@@ -491,7 +491,7 @@
             </h3>
               <pre
                 bind:this={stdoutPre}
-                class="log-pre"
+                class="tasks-log-pre"
                 on:scroll={() => {
                   if (!stdoutPre) return;
                   // Threshold to consider if scrolled to bottom (e.g., 10px from bottom)
@@ -509,12 +509,12 @@
         {/if}
 
         {#if logsToShowErr.length > 0}
-          <div class="log-block stderr-block">
-            <h3 class="error-header">
+          <div class="tasks-log-block tasks-stderr-block">
+            <h3 class="tasks-error-header">
               🔴 Error
               {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedStatus) && hasMoreStderr}
                 <button
-                  class="load-more-arrow"
+                  class="tasks-load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stderr'); scrollToTop('stderr');; }}
                   title="Load more Error"
                   aria-label="Load more error logs"
@@ -525,7 +525,7 @@
             </h3>
               <pre
                 bind:this={stderrPre}
-                class="log-pre"
+                class="tasks-log-pre"
                 on:scroll={() => {
                   if (!stderrPre) return;
                   // Threshold to consider if scrolled to bottom (e.g., 10px from bottom)
@@ -542,7 +542,7 @@
           </div>
         {/if}
       </div>
-      <button class="modal-close" on:click={closeLogModal}>Close</button>
+      <button class="tasks-modal-close" on:click={closeLogModal}>Close</button>
     </div>
   </div>
 {/if}

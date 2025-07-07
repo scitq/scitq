@@ -1,8 +1,6 @@
-import { callOptionsWorkerToken, callOptionsUserToken } from './auth';
+import { callOptionsUserToken } from './auth';
 import { client } from './grpcClient';
 import * as taskqueue from '../../gen/taskqueue';
-
-let callOptionsWorker = await callOptionsWorkerToken();
 
 /* -------------------------------- USERS -------------------------------- */ 
 
@@ -45,7 +43,7 @@ export async function getUser(tokenToFind: string): Promise<taskqueue.User | nul
  */
 export async function getListUser(): Promise<taskqueue.User[]> {
   try {
-    const jobUnary = await client.listUsers({}, callOptionsWorker);
+    const jobUnary = await client.listUsers({}, await callOptionsUserToken());
     return jobUnary.response?.users || [];
   } catch (error) {
     console.error("Error while retrieving users:", error);
@@ -118,7 +116,7 @@ export async function changepswd(username: string, oldPassword: string,newPasswo
   try {
     await client.changePassword(
       { username, oldPassword, newPassword },
-      callOptionsWorker
+      await callOptionsUserToken()
     );
   } catch (error) {
     console.error("Update password error: ", error);
@@ -175,7 +173,7 @@ function parseJwt(token: string): any {
  */
 export async function getWorkers(): Promise<taskqueue.Worker[]> {
   try {
-    const workerUnary = await client.listWorkers(taskqueue.ListWorkersRequest, callOptionsWorker);
+    const workerUnary = await client.listWorkers(taskqueue.ListWorkersRequest, await callOptionsUserToken());
     return workerUnary.response?.workers || [];
   } catch (error) {
     console.error("Error while retrieving workers:", error);
@@ -191,7 +189,7 @@ export async function getWorkers(): Promise<taskqueue.Worker[]> {
 export async function getStats(workerIds: number[]): Promise<Record<number, taskqueue.WorkerStats>> {
   try {
     const request: taskqueue.GetWorkerStatsRequest = { workerIds };
-    const workerStatsUnary = await client.getWorkerStats(request, callOptionsWorker);
+    const workerStatsUnary = await client.getWorkerStats(request, await callOptionsUserToken());
     const statsMap = workerStatsUnary.response?.workerStats ?? {};
 
     return workerIds.reduce((map, workerId) => {
@@ -236,10 +234,7 @@ export function formatBytesPair(a: number | bigint, b: number | bigint, decimals
  */
 export async function updateWorkerConfig(workerId: number, updates: Partial<{ concurrency: number; prefetch: number }>) {
   try {
-    await client.updateWorker(
-      { workerId, ...updates },
-      callOptionsWorker
-    );
+    await client.updateWorker({ workerId, ...updates }, await callOptionsUserToken());
   } catch (error) {
     console.error("Update Worker Config error:", error);
     throw error;
@@ -252,7 +247,7 @@ export async function updateWorkerConfig(workerId: number, updates: Partial<{ co
  */
 export async function getFlavors(): Promise<taskqueue.Flavor[]> {
   try {
-    const flavorUnary = await client.listFlavors({ limit: 1000, filter: `` }, callOptionsWorker);
+    const flavorUnary = await client.listFlavors({ limit: 1000, filter: `` }, await callOptionsUserToken());
     return flavorUnary.response?.flavors || [];
   } catch (error) {
     console.error("Error while retrieving flavors:", error);
@@ -287,7 +282,7 @@ export async function newWorker(
       filter: ""
     };
 
-    const flavorsListResponse = await client.listFlavors(listReq, callOptionsWorker);
+    const flavorsListResponse = await client.listFlavors(listReq, await callOptionsUserToken());
     const flavorList = flavorsListResponse.response;
     const selectedFlavor = flavorList.flavors.find(f =>
       f.flavorName === flavor &&
@@ -307,7 +302,7 @@ export async function newWorker(
 
       const stepListUnary = await client.listSteps(
         { workflowId: matchedWorkflow?.workflowId ?? 0 },
-        callOptionsWorker
+        await callOptionsUserToken()
       );
       const stepList = stepListUnary.response?.steps || [];
       const matchedStep = stepList.find(st => st.name === stepName);
@@ -324,7 +319,7 @@ export async function newWorker(
       ...(stepId !== null && { stepId })
     };
 
-    const response = await client.createWorker(workerReq, callOptionsWorker);
+    const response = await client.createWorker(workerReq, await callOptionsUserToken());
 
     return response.response.workersDetails.map(w => ({
       workerId: w.workerId,
@@ -343,7 +338,7 @@ export async function newWorker(
  */
 export async function delWorker(workerId: { workerId: any }) {
   try {
-    const response = await client.deleteWorker({ workerId: workerId.workerId }, callOptionsWorker);
+    const response = await client.deleteWorker({ workerId: workerId.workerId }, await callOptionsUserToken());
     console.log("Worker deleted successfully!");
     return response?.response.jobId;
   } catch (error) {
@@ -368,7 +363,7 @@ export async function getTasksCount(workerId?: number): Promise<Record<string, n
       request.workerIdFilter = workerId;
     }
 
-    const taskUnary = await client.listTasks(request, callOptionsWorker);
+    const taskUnary = await client.listTasks(request, await callOptionsUserToken());
     const workerTasks = taskUnary.response?.tasks || [];
 
     // Initialize counts for each status to zero
@@ -431,7 +426,7 @@ export async function getTasksCount(workerId?: number): Promise<Record<string, n
  */
 export async function getJobs(): Promise<taskqueue.Job[]> {
     try {
-        const jobUnary = await client.listJobs(taskqueue.ListJobsRequest, callOptionsWorker);
+        const jobUnary = await client.listJobs(taskqueue.ListJobsRequest, await callOptionsUserToken());
         return jobUnary.response?.jobs || [];
     } catch (error) {
         console.error("Error while retrieving jobs:", error);
@@ -447,7 +442,7 @@ export async function getJobs(): Promise<taskqueue.Job[]> {
  */
 export async function delJob(jobId: { jobId: any }) {
     try {
-        await client.deleteJob({ jobId: jobId.jobId }, callOptionsWorker);
+        await client.deleteJob({ jobId: jobId.jobId }, await callOptionsUserToken());
         console.log("Job deleted successfully!");
     } catch (error) {
         console.error(`Error while deleting the job: ${jobId.jobId}`, error);
@@ -461,7 +456,7 @@ export async function delJob(jobId: { jobId: any }) {
  */
 export async function getJobStatus(jobIds: number[]): Promise<taskqueue.JobStatus[]> {
   try {
-    const response = await client.getJobStatuses({ jobIds }, callOptionsWorker);
+    const response = await client.getJobStatuses({ jobIds }, await callOptionsUserToken());
     return response.response.statuses;
   } catch (error) {
     console.error('❌ Error fetching job statuses:', error);
@@ -482,8 +477,8 @@ export async function getJobStatus(jobIds: number[]): Promise<taskqueue.JobStatu
 export async function getWorkFlow(name?: string): Promise<taskqueue.Workflow[]> {
   try {
     const wfUnary = name
-      ? await client.listWorkflows({ nameLike: name }, callOptionsWorker)
-      : await client.listWorkflows({}, callOptionsWorker);
+      ? await client.listWorkflows({ nameLike: name }, await callOptionsUserToken())
+      : await client.listWorkflows({}, await callOptionsUserToken());
     return wfUnary.response?.workflows || [];
   } catch (error) {
     console.error("Error while retrieving workflows:", error);
@@ -499,7 +494,7 @@ export async function getWorkFlow(name?: string): Promise<taskqueue.Workflow[]> 
  */
 export async function getSteps(workflowId: number): Promise<taskqueue.Step[]> {
   try {
-    const stepUnary = await client.listSteps({ workflowId }, callOptionsWorker);
+    const stepUnary = await client.listSteps({ workflowId }, await callOptionsUserToken());
     return stepUnary.response?.steps || [];
   } catch (error) {
     console.error("Error while retrieving steps:", error);
@@ -539,7 +534,7 @@ export async function getAllTasks(
       request.workerIdFilter = workerId;
     }
 
-    const taskUnary = await client.listTasks(request, callOptionsWorker);
+    const taskUnary = await client.listTasks(request, await callOptionsUserToken());
     let allTasks = taskUnary.response?.tasks || [];
 
     // Filter tasks by worflowId if provided
@@ -591,7 +586,7 @@ export async function streamTaskLogsOutput(
 ): Promise<void> {
   try {
     const TaskId: taskqueue.TaskId = { taskId: taskIdNumber };
-    const taskLogStream = client.streamTaskLogsOutput(TaskId, callOptionsWorker);
+    const taskLogStream = client.streamTaskLogsOutput(TaskId, await callOptionsUserToken());
     
     for await (const log of taskLogStream.responses) {
       onNewLog(log);
@@ -615,7 +610,7 @@ export async function streamTaskLogsErr(
 ): Promise<void> {
   try {
     const TaskId: taskqueue.TaskId = { taskId: taskIdNumber };
-    const taskLogStream = client.streamTaskLogsErr(TaskId, callOptionsWorker);
+    const taskLogStream = client.streamTaskLogsErr(TaskId, await callOptionsUserToken());
     
     for await (const log of taskLogStream.responses) {
       onNewLog(log);
@@ -640,7 +635,7 @@ export async function getLogsBatch(taskIds: number[], chunkSize: number, skip?: 
       request.logType = type;
     }
 
-    const response = await client.getLogsChunk(request, callOptionsWorker);
+    const response = await client.getLogsChunk(request, await callOptionsUserToken());
     return response.response?.logs || [];
   } catch (error) {
     console.error("Error while retrieving logs:", error);
@@ -659,7 +654,7 @@ export async function getLogsBatch(taskIds: number[], chunkSize: number, skip?: 
  */
 export async function getStatus(workerIds: number[]): Promise<taskqueue.WorkerStatus[]> {
   try {
-    const response = await client.getWorkerStatuses({ workerIds }, callOptionsWorker);
+    const response = await client.getWorkerStatuses({ workerIds }, await callOptionsUserToken());
     return response.response.statuses;
   } catch (error) {
     console.error('❌ Error while fetching worker statuses:', error);

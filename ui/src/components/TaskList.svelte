@@ -121,7 +121,7 @@
             <td>{task.taskId}</td>
             <td>{task.name}</td>
             <td>
-              <div class="truncate-command" title={task.command}>{task.command}</div>
+              <div class="tasks-truncate-command" title={task.command}>{task.command}</div>
             </td>
             <td> <a href="#/" class="link">{getName(task.workerId)}</a></td>
             <td> <a href={`#/workflows?open=${1}`} class="link">{getName(undefined, task.workflowId, undefined)}</a></td>

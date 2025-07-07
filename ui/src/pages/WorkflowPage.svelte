@@ -19,6 +19,5 @@
 </script>
 
 <div class="wf-container" data-testid="wf-page">
-  <!-- Filtered task list -->
   <WorkflowList {workflows} />
 </div>

@@ -3,6 +3,7 @@
   import LoginPage from './pages/LoginPage.svelte';
   import './app.css';
 
+  import { theme } from './lib/Stores/theme';
   import { getToken } from './lib/auth';
   import { isLoggedIn, userInfo } from './lib/Stores/user';
   import { onMount } from 'svelte';
@@ -13,6 +14,7 @@
   import SettingPage from './pages/SettingPage.svelte';
   import TaskPage from './pages/TaskPage.svelte';
   import WorkflowPage from './pages/WorkflowPage.svelte';
+  import WfTemplatePage from './pages/WfTemplatePage.svelte';
 
   let isSidebarVisible = true;
   let logged = false;
@@ -25,7 +27,8 @@
   };
 
   onMount(async () => {
-    const tokenCookie = await getToken();
+    document.documentElement.setAttribute('data-theme', $theme);
+    const tokenCookie = await getToken(); 
     if (tokenCookie) {
       isLoggedIn.set(true);
       userInfo.set({ token: tokenCookie });
@@ -40,7 +43,8 @@
     '/': Dashboard,
     '/settings': SettingPage,
     '/tasks': TaskPage,
-    '/workflows': WorkflowPage
+    '/workflows': WorkflowPage,
+    '/workflowsTemplate': WfTemplatePage
   };
 </script>
 

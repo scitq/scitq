@@ -10,6 +10,19 @@ vi.mock('grpc-web', () => {
   };
 });
 
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = vi.fn().mockImplementation((query) => ({
+    matches: query === '(prefers-color-scheme: dark)', // or false depending on your needs
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(), // legacy support
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
 // Global API mock
 vi.mock('../lib/api', () => mockApi);
 vi.mock('../lib/auth', () => mockAuth);

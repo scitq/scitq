@@ -212,6 +212,25 @@
     </div>
     <button class="link settings-change-password" data-testid="change-pswd-button" on:click={openModal}>Change your password here</button>
   {/if}
+
+    <!-- Admin section: user creation and user list -->
+  {#if user && user.isAdmin}
+    <div class="settings-admin-user-grid">
+      <div class="settings-list-user-box">
+        <h2 class="settings-myProfile">List of Users :</h2>
+        <UserList
+          {users}
+          onUserDeleted={handleDeleteUser}
+          onUserUpdated={handleUpdateUser}
+          onForgotPassword={handleForgotPassword}
+        />
+      </div>
+      <div class="settings-create-user-box">
+        <h2 class="settings-myProfile">Create User :</h2>
+        <CreateUserForm onUserCreated={handleUserCreated} />
+      </div>
+    </div>
+  {/if}
 </div>
 
 <!-- Password change modal -->
@@ -246,24 +265,6 @@
   </div>
 {/if}
 
-<!-- Admin section: user creation and user list -->
-{#if user && user.isAdmin}
-  <div class="settings-admin-user-grid">
-    <div class="settings-list-user-box">
-      <h2 class="settings-myProfile">List of Users :</h2>
-      <UserList
-        {users}
-        onUserDeleted={handleDeleteUser}
-        onUserUpdated={handleUpdateUser}
-        onForgotPassword={handleForgotPassword}
-      />
-    </div>
-    <div class="settings-create-user-box">
-      <h2 class="settings-myProfile">Create User :</h2>
-      <CreateUserForm onUserCreated={handleUserCreated} />
-    </div>
-  </div>
-{/if}
 
 <!-- Success message alert -->
 {#if successMessage}

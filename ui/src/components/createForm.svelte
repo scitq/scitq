@@ -130,7 +130,7 @@
    */
   function selectWf(suggestion: string) {
     wfStep = suggestion;
-    wf = suggestion;
+    wf = "";
     showWfSuggestions = false;
   }
 
@@ -140,27 +140,34 @@
    * @param {string} wfName - Workflow name hovered by the user
    * @returns {Promise<void>}
    */
+  let isHandlingHover = false;
+
   async function handleWfHover(wfName: string): Promise<void> {
-    hoveredWf = wfName;
-    const selectedWf = listWf.find(w => w.name === wfName);
+      if (isHandlingHover) return;
+      isHandlingHover = true;
+      
+      hoveredWf = wfName;
+      const selectedWf = listWf.find(w => w.name === wfName);
 
-    if (!selectedWf?.workflowId) {
-      console.error("No workflow ID found for", wfName);
-      listStep = [];
-      return;
-    }
+      if (!selectedWf?.workflowId) {
+          console.error("No workflow ID found for", wfName);
+          listStep = [];
+          isHandlingHover = false;
+          return;
+      }
 
-    isLoadingSteps = true;
-    try {
-      listStep = await getSteps(selectedWf.workflowId) || [];
-      showStepSuggestions = listStep.length > 0;
-    } catch (error) {
-      console.error("Failed to load steps:", error);
-      listStep = [];
-      showStepSuggestions = false;
-    } finally {
-      isLoadingSteps = false;
-    }
+      isLoadingSteps = true;
+      try {
+          listStep = await getSteps(selectedWf.workflowId) || [];
+          showStepSuggestions = listStep.length > 0;
+      } catch (error) {
+          console.error("Failed to load steps:", error);
+          listStep = [];
+          showStepSuggestions = false;
+      } finally {
+          isLoadingSteps = false;
+          isHandlingHover = false;
+      }
   }
 
   /**
@@ -168,12 +175,18 @@
    * Updates the combined wfStep value and hides step suggestions.
    * @param {string} suggestion - Step name selected
    */
-  function selectStep(suggestion: string) {
-    wfStep = `${hoveredWf}.${suggestion}`;
-    step = suggestion;
-    showStepSuggestions = false;
-    showWfSuggestions = false;
-  }
+function selectStep(suggestion: string) {
+    const selectedWf = hoveredWf || wfStep.split('.')[0];
+    if (selectedWf) {
+        wfStep = `${selectedWf}.${suggestion}`;
+        step = suggestion;
+        showStepSuggestions = false;
+        showWfSuggestions = false;
+    } else {
+        console.error("No workflow selected");
+    }
+    hoveredWf = null; // Reset après sélection
+}
 
 
   /**
@@ -321,7 +334,7 @@
   </div>
 
   <!-- Workflow step autocomplete -->
-  <div class="createForm-form-group createForm-autocomplete">
+  <div class="createForm-form-group">
     <label class="createForm-label" for="step">Step (Workflow.step):</label>
     <input
       data-testid="wfStep-createWorker"
@@ -332,19 +345,22 @@
       autocomplete="off"
       placeholder="Type to search..."
       on:focus={() => showWfSuggestions = true}
-      on:input={() => showWfSuggestions = true}
+      on:input={(e) => {
+        wf = e.target.value.split('.')[0];
+        showWfSuggestions = true;
+      }}
       on:blur={() => setTimeout(() => {
         showWfSuggestions = false;
         showStepSuggestions = false;
         hoveredWf = null;
-      }, 150)}
+      }, 200)}
     />
 
-    <div class="suggestions-container">
-      {#if showWfSuggestions && wfSuggestions.length > 0}
+    {#if showWfSuggestions && wfSuggestions.length > 0}
+      <div class="suggestions-container">
         <div class="workflow-steps-columns">
           <!-- Workflows -->
-          <ul class="createForm-suggestions workflow-list">
+          <ul class="workflow-list">
             {#each wfSuggestions as suggestionWf}
               <li>
                 <button 
@@ -361,12 +377,9 @@
 
           <!-- Steps -->
           {#if hoveredWf}
-            <ul 
-              class="createForm-suggestions steps-list" 
-              style:max-height={listStep.length > 5 ? '150px' : (listStep.length * 30 + 10) + 'px'}
-            >
+            <ul class="steps-list">
               {#if isLoadingSteps}
-                <li class="createForm-suggestion-item">Loading steps...</li>
+                <li class="loading-message">Loading steps...</li>
               {:else if listStep.length > 0}
                 {#each listStep as stepObj (stepObj.name)}
                   <li>
@@ -380,13 +393,13 @@
                   </li>
                 {/each}
               {:else}
-                <li class="createForm-suggestion-item">No steps available</li>
+                <li class="no-steps-message">No steps available</li>
               {/if}
             </ul>
           {/if}
         </div>
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 
   <!-- Number of workers to create -->

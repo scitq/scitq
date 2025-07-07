@@ -1,6 +1,6 @@
 vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
-import { render, fireEvent, waitFor, screen, queryByTestId } from '@testing-library/svelte';
+import { render, fireEvent, waitFor, screen, queryByTestId, getByTestId } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Dashboard from '../pages/Dashboard.svelte';
 
@@ -196,4 +196,5 @@ describe('Worker integration', () => {
       expect(screen.queryByTestId('job-row-1')).toBeNull();
     });
   });
+
 });

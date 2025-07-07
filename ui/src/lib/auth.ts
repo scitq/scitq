@@ -65,7 +65,7 @@ export async function getToken(): Promise<string | null> {
 
 /**
  * Logs out the current user by calling the gRPC logout method and the REST logout endpoint.
- * Clears user info and login status after successful logout.
+ * Clears user info, login status and window theme after successful logout.
  */
 export async function logout() {
   const token = get(userInfo).token;
@@ -93,6 +93,7 @@ export async function logout() {
 
     userInfo.set({ token: null });
     isLoggedIn.set(false);
+    localStorage.removeItem('theme'); 
   } catch (error) {
     console.error('Cookie delete error:', error);
   }

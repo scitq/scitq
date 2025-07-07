@@ -1,4 +1,4 @@
-/* Status pill styles */
+/* Status indicator styles (circular pills) */
 .jobCompo-status-pill {
     display: inline-block;
     width: 12px;
@@ -7,40 +7,57 @@
     cursor: pointer;
 }
 
+/* Pending state style */
 .jobCompo-status-pill.pending {
-    background-color: #d2c7e7; /* tasks pending */
+    background-color: #d2c7e7; /* Light purple for pending tasks */
 }
 
+/* Running state style */
 .jobCompo-status-pill.running {
-    background-color: #6bb2e6; /* tasks running */
+    background-color: #6bb2e6; /* Light blue for running tasks */
 }
 
+/* Success state style */
 .jobCompo-status-pill.succeeded {
-    background-color: #5fc18b; /* tasks succeeded */
+    background-color: #5fc18b; /* Green for successful tasks */
 }
 
+/* Failed state style */
 .jobCompo-status-pill.failed {
-    background-color: #d9534f; /* tasks failed */
+    background-color: #d9534f; /* Red for failed tasks */
 }
 
+/* Canceled state style */
 .jobCompo-status-pill.canceled {
-    background-color: #a64f69; /* tasks canceled */
+    background-color: #a64f69; /* Dark pink for canceled tasks */
 }
 
-/* Progress bar container */
+/* === Progress Bar Container === */
 .jobCompo-progress-bar {
-    background-color: #f3f3f3;
+    background-color: var(--border-color);
     border-radius: 5px;
     width: 100%;
     height: 5px;
     margin-top: 1px;
     margin-bottom: 2px;
-    box-shadow: 0px 0.75px 1.5px rgba(0, 0, 0, 0.5);
+    box-shadow: 0px 0.75px 1.5px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
 }
 
-/* Progress bar fill */
+/* Progress bar fill element */
 .jobCompo-progress {
-    background-color: #4caf50;
+    background-color: var(--primary-color);
     height: 100%;
     border-radius: 5px;
+    transition: width 0.5s ease; /* Smooth width transition */
+}
+
+/* Dark theme adjustments for progress bar container */
+[data-theme="dark"] .jobCompo-progress-bar {
+    box-shadow: 0px 0.75px 1.5px rgba(0, 0, 0, 0.4); /* Darker shadow in dark mode */
+}
+
+/* Dark theme adjustments for progress bar fill */
+[data-theme="dark"] .jobCompo-progress {
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.1); /* Subtle inner glow in dark mode */
 }

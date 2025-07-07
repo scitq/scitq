@@ -8,6 +8,7 @@ import App from '../App.svelte';
 import { isLoggedIn, userInfo } from '../lib/Stores/user';
 
 
+
 const mockTasks = [
   { taskId: 1, name: 'Task A', status: 'P', workerId: 1, workflowId: 30, stepId: 100 },
   { taskId: 2, name: 'Task B', status: 'S', workerId: 2, workflowId: 10, stepId: 200 },
@@ -75,13 +76,13 @@ describe('Navigation integration', () => {
     });
   });
 
-  it('should navigate to Pending tasks when clicking through Starting > Pending', async () => {
+  it('should navigate to Pending tasks when clicking through Starting chevron > Pending', async () => {
     (mockApi.getAllTasks as any).mockImplementation(
         async (_wId: number, _wfId: number, _stepId: number, status: string) =>
         mockTasks.filter((t) => !status || t.status === status)
     );
 
-    const { queryByText, getByText, getByTestId } = render(App);
+    const { queryByText, getByTestId } = render(App);
 
     // Wait for "Tasks" to appear
     await waitFor(() => {
@@ -89,11 +90,11 @@ describe('Navigation integration', () => {
     });
 
     // 1. Wait for "Tasks" to be clickable
-    const tasksButton = getByTestId('tasks-button');
-    await fireEvent.click(tasksButton);
+    const tasksChev = getByTestId('tasks-chevron');
+    await fireEvent.click(tasksChev);
 
     await waitFor(() => {
-        expect(getByText('Starting')).toBeInTheDocument();
+        expect(queryByText('Starting')).toBeInTheDocument();
     });
 
     // 2. Click on "Starting"
@@ -285,4 +286,31 @@ describe('Navigation integration', () => {
     });
   });
 
+  it('should display Workflow Template page when clicking "Templates" in the ToolBar', async () => {
+    const { getByTestId, getByText, queryByText } = render(App);
+
+    await waitFor(() => {
+      expect(queryByText('Templates')).toBeInTheDocument();
+    });
+
+    const wfTempButton = getByText('Templates');
+    await fireEvent.click(wfTempButton);
+
+    await waitFor(() => {
+      expect(getByTestId('wfTemp-page')).toBeInTheDocument();
+    });
+  });
+
+  it('should switch between light and dark modes', async () => {
+    const { getByTestId } = render(App);
+    const toggle = getByTestId("theme-button");
+    
+    // Initial state (dark mode from mock)
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    
+    // Click to toggle
+    await fireEvent.click(toggle);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+  
 });

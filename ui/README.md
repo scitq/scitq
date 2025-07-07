@@ -25,16 +25,19 @@ ui/
 │   ├── components/
 │   │   ├── CreateForm.svelte
 │   │   ├── CreateUserForm.ts
+│   │   ├── LineChart.svelte
 │   │   ├── JobsCompo.svelte
-│   │   ├── JoginForm.svelte
+│   │   ├── LoginForm.svelte
 │   │   ├── Sidebar.svelte
 │   │   ├── StepList.svelte
 │   │   ├── TaskList.svelte
 │   │   ├── UserList.svelte
+│   │   ├── WfTemplateList.svelte
 │   │   ├── WorkerCompo.svelte
 │   │   └── WorkflowList.svelte
 │   ├── lib/
 │   │   ├── Stores/
+│   │   ├── theme.ts
 │   │   ├── api.ts
 │   │   ├── auth.ts
 │   │   └── grpcClient.ts
@@ -47,6 +50,7 @@ ui/
 │   │   ├── LoginPage.svelte
 │   │   ├── SettingPage.svelte
 │   │   ├── TaskPage.svelte
+│   │   └── WfTemplatePage.svelte
 │   │   └── WorkflowPage.svelte
 │   ├── styles/
 │   │   ├── createForm.css
@@ -243,7 +247,7 @@ import * as taskqueue from '../../gen/taskqueue';
  */
 export async function getWorkers(): Promise<taskqueue.Worker[]> {
   try {
-    const workerUnary = await client.listWorkers(taskqueue.ListWorkersRequest, callOptionsWorker);
+    const workerUnary = await client.listWorkers(taskqueue.ListWorkersRequest, await callOptionsUserToken());
     return workerUnary.response?.workers || [];
   } catch (error) {
     console.error("Error while retrieving workers:", error);
@@ -285,12 +289,14 @@ These functions use the client generated from the `.proto` file (`taskqueue.clie
 | 📋 **jobsCompo.svelte**  | Displays a live-updating list of current and past jobs.<br>Uses `onMount()` to periodically refresh job status and progression every 5 seconds via `getJobStatus(...)`.<br>Jobs are rendered with status badges (`getJobStatusClass()`), progress bars, and action icons (🔁 Restart / 🗑️ Delete).<br>Maintains a reactive `jobStatusMap` to sync latest job info.<br>Emits a `jobId` via `onJobDeleted` when a job is removed.<br>Supports graceful unmounting by clearing the refresh interval.<br>**Styles**: `worker.css`, `jobsCompo.css` |
 | 🔐 **loginForm.svelte**  | Simple login form.<br>Uses `getClient().login()` for authentication.<br>Handles loading (`isLoading`) and errors.<br>**Styles**: `loginForm.css` |
 | 📚 **Sidebar.svelte**    | Sidebar navigation with dropdowns and icons via lucide-svelte (Dashboard, Tasks, Batch, Settings, Logout).<br>Handles `tasksOpen` for submenus.<br>`isSidebarVisible` and `toggleSidebar()` passed as props.<br>**Styles**: `dashboard.css` |
-| 👷 **workerCompo.svelte** | Displays all workers with metrics and modifiable actions.<br>🧩 Receives the preloaded list of workers from the parent page (`dashboard.svelte`).<br>🔁 Periodically refreshes only dynamic data: stats (`getStats()`), statuses (`getStatus()`), and task counts (`getTasksCount()`).<br>🔧 Buttons to change concurrency/prefetch (+/-) and inline edit for workflow/step name.<br>🛠️ Emits updates via `onWorkerUpdated` and deletions via `onWorkerDeleted`.<br>📊 Shows metrics: CPU%, RAM, Load, Disk, Network, and detailed task status counts.<br>**Styles**: `worker.css`, `jobsCompo.css` |
+| 👷 **workerCompo.svelte** | **Enhanced worker dashboard with dual display modes**:<br>📊 **Table Mode**: Classic tabular view with all metrics<br>📈 **Chart Mode**: Visual analytics with:<br>- Real-time **Disk I/O** and **Network I/O** line charts (via `LineChart` component)<br>- Interactive zoom controls (in/out/reset) and auto-zoom<br>- System metrics visualization (CPU, RAM, Load, IOWait)<br>- Disk usage bars with warning thresholds<br><br>**Key Features**:<br>- Toggle between table/chart views<br>- Aggregates metrics across all workers<br>- 30-point history tracking for trend visualization<br>- Responsive design adapts to data intensity<br>- Smart auto-zoom calculates optimal view<br>- Manual zoom override available<br><br>**Data Flow**:<br>- Receives preloaded workers list<br>- Periodically refreshes stats/status (5s interval)<br>- Emits update/deletion events<br>**Styles**: `worker.css`, `jobsCompo.css` |
 | 📋 **UserList.svelte** | Displays a table of users with columns: Username, Email, Admin status, and Actions.<br>Receives the `users` list as a prop from the parent component (`SettingsPage`).<br>Provides modals for editing user info and resetting passwords.<br>Supports user deletion with confirmation.<br>Dispatches events: `onUserUpdated`, `onUserDeleted`, and `onForgotPassword`.<br>Includes password visibility toggle with `Eye` / `EyeOff` icons<br>**Styles**: `worker.css`, `userList.css` |
 | 🆕 **CreateUserForm.svelte** | Form for creating new users.<br>Receives input for username, email, password (with visibility toggle), and admin checkbox.<br>Calls the API to create a user and notifies the parent component (`SettingsPage`) via the `onUserCreated` callback with the new user data.<br>Resets form fields after successful creation.<br>**Styles**: `createForm.css` |
 | 📝 **TaskList.svelte**   | Displays all tasks in a detailed table with columns: Task ID, Name, Command, Worker, Workflow, Step, Status, Start, Runtime, Output, Error, Actions.<br>Uses `getJobStatusClass()`, `getJobStatusText()`, and lucide icons for restart, download, delete.<br>Shows a message if no tasks found.<br>**Styles**: `worker.css`, `jobsCompo.css` |
 | 📂 **WorkflowList.svelte** | Displays a list of workflows with expandable details.<br>Uses lucide icons for actions (Pause, Reset, Break, Clear).<br>Manages expanded state for workflows.<br>Embeds `StepList` component for detailed step display.<br>**Styles**: (to be added) |
 | 📑 **StepList.svelte**     | Shows detailed steps for a given workflow.<br>Fetches steps via `getSteps(workflowId)` on mount.<br>Displays table with step metrics and action buttons.<br>Uses lucide icons for Pause, Reset, Break, Clear.<br>**Styles**: `worker.css`, `jobsCompo.css` |
+| 📈 **LineChart.svelte**    | **Reusable SVG-based line chart component**<br>Features:<br>- Dual-line visualization with customizable colors<br>- Dynamic stroke width based on zoom intensity<br>- Auto/manual zoom controls<br>- Legend display with real-time values<br>- Total metrics summary<br>- Responsive SVG rendering<br>Used by `workerCompo` for Disk/Network I/O visualization<br>**Props**:<br>- `line1/line2`: Data points arrays<br>- `color1/color2`: Line colors<br>- `title1/title2`: Metric names<br>- `value1/value2`: Current values<br>- `total1/total2`: Aggregate totals<br>- `zoomLevel`: Current zoom factor<br>- `autoZoom`: Auto-scaling toggle<br>**Styles**: Embedded component CSS |
+
 
 
 ## 📄 Pages
@@ -441,6 +447,96 @@ This section explains how the authentication flow is implemented in the applicat
 | 🔓 Logout flow           | Calls gRPC logout, clears cookies on the server, and resets token and login status locally.      |
 | 📡 Authorization headers | JWT tokens are attached to gRPC calls via metadata for secure authenticated requests.             |
 
+## 🌓 Dark/Light Theme Management
+The application features a system-wide dark/light theme toggle with automatic detection based on user preferences.
+
+### 🛠 Implementation
+1. Theme Store (`src/lib/Stores/theme.ts`):
+- Uses a Svelte writable store to manage the current theme
+- Automatically detects preferred theme:
+```ts
+function initializeTheme() {
+  if (typeof window === 'undefined') return 'light';
+  
+  const savedTheme = localStorage.getItem('theme');
+  const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  
+  return savedTheme || (systemPrefersDark ? 'dark' : 'light');
+}
+```
+1. Theme Persistence:
+- Saves user preference in localStorage during session
+- Automatically resets to OS preference on logout
+- Applies theme via data-theme attribute on <html>
+```ts
+theme.subscribe(currentTheme => {
+  localStorage.setItem('theme', currentTheme);
+  document.documentElement.setAttribute('data-theme', currentTheme);
+});
+
+// In logout function:
+localStorage.removeItem('theme'); // Reset to OS preference next login
+```
+4. Session Behavior:
+- Theme preferences persist during the user session
+- On logout:
+* Theme preference is cleared from localStorage
+* Next login will default to OS preference
+* User can set a new preference for the new session
+
+4. CSS Variables (app.css):
+- Uses CSS variables for theme-specific colors
+- Dark theme overrides light theme variables:
+```css
+:root {
+  /* Light theme variables */
+  --primary-color: #192245;
+  --bg-primary: #ffffff;
+  --text-primary: #213547;
+}
+
+[data-theme="dark"] {
+  /* Dark theme overrides */
+  --primary-color: #3a4b8c;
+  --bg-primary: #121212;
+  --text-primary: #f0f0f0;
+}
+```
+
+### 🔄 Theme Switching
+Toggle the theme in `sidebar.svelte` available anywhere in your app:
+```ts
+  function toggleTheme() {
+    theme.update(current => current === 'dark' ? 'light' : 'dark');
+  }
+```
+```svelte
+<button on:click={toggleTheme} class="theme-toggle" title="Toggle theme">
+  {#if $theme === 'dark'}
+    <SunMoon class="theme-icon" color="#fbbf24" />
+  {:else}
+    <SunMoon class="theme-icon" color="#9ca3af" />
+  {/if}
+</button>
+```
+
+### 🎨 Theming Components
+Component styles automatically adapt using CSS variables:
+```css
+/* In component CSS */
+.my-component {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+```
+The system provides:
+- Automatic OS preference detection
+- Persistent user preference during session
+- Clean reset on logout
+- Smooth transitions between themes
+- Easy theming of new components
+
+
 ## 🔗 Libs & Dependencies
 
 - `svelte`: Main UI framework (v5+)
@@ -471,7 +567,7 @@ To simplify mocking, all mocked API and auth functions are centralized in the `s
 - `src/types/mocks/api_mock.ts`  
 - `src/types/mocks/auth_mock.ts`  
 
-These mocks are globally applied in `src/setupTests.ts`:
+These mocks are globally applied in `src/setupTests.ts` with additional theme support:
 
 ```ts
 // src/setupTests.ts
@@ -480,7 +576,22 @@ import { vi } from 'vitest';
 import { mockApi } from './mocks/api_mock';
 import { mockAuth } from './mocks/auth_mock';
 
+// Mock gRPC
 vi.mock('grpc-web', () => ({ grpc: {} }));
+
+// Mock window.matchMedia for theme detection
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = vi.fn().mockImplementation((query) => ({
+    matches: query === '(prefers-color-scheme: dark)', // Default to dark mode in tests
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(), // legacy support
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
 
 // Global mocks for API and Auth modules
 vi.mock('../lib/api', () => mockApi);
@@ -494,6 +605,27 @@ In individual test files, you simply import `mockApi` to redefine or spy on spec
 ```ts
 import { mockApi } from '../mocks/api_mock';
 vi.mock('../lib/api', () => mockApi);
+```
+
+### Theme Testing Support
+The test setup includes:
+- Mock for window.matchMedia to simulate OS theme preferences
+- Default dark mode preference in test environment
+- Support for testing theme-related functionality
+
+To test theme-dependent components:
+```ts
+  it('should switch between light and dark modes', async () => {
+    const { getByTestId } = render(App);
+    const toggle = getByTestId("theme-button");
+    
+    // Initial state (dark mode from mock)
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    
+    // Click to toggle
+    await fireEvent.click(toggle);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
 ```
 
 ### Running Tests

@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { Home, ListChecks, Package, Settings, Power, ChevronDown} from 'lucide-svelte';
+  import { Home, ListChecks, Package, Settings, Power, ChevronDown, SunMoon, Copy} from 'lucide-svelte';
   import logo from '../assets/icons/logoGMT.png';
   import '../styles/dashboard.css';
+  import { theme } from '../lib/Stores/theme';
   import { isLoggedIn } from '../lib/Stores/user';
   import { logout } from '../lib/auth';
   import Router from 'svelte-spa-router';
@@ -9,12 +10,14 @@
   import SettingPage from '../pages/SettingPage.svelte';
   import TaskPage from '../pages/TaskPage.svelte';
   import WorkflowPage from '../pages/WorkflowPage.svelte';
+  import WfTemplatePage from '../pages/WfTemplatePage.svelte';
 
   let tasksOpen = false;
   let awaitingExecutionOpen = false;
   let inProgressOpen = false;
   let successfulTasksOpen = false;
   let failsTasksOpen = false;
+  let inactiveTasksOpen = false;
 
   let showLogoutPopup = false;
 
@@ -22,8 +25,13 @@
     '/dashboard' : Dashboard,
     '/settings': SettingPage,
     '/tasks' : TaskPage,
-    '/worflows' : WorkflowPage
+    '/worflows' : WorkflowPage,
+    '/workflowsTemplate' : WfTemplatePage
   };
+
+  function toggleTheme() {
+    theme.update(current => current === 'dark' ? 'light' : 'dark');
+  }
 
   /**
    * Shows the logout confirmation popup.
@@ -53,7 +61,7 @@
   /**
    * Toggles the visibility of a specified submenu.
    * @param {string} submenu - The identifier of the submenu to toggle.
-   * Can be one of 'awaitingExecution', 'inProgress', 'successfulTasks', or 'failsTasks'.
+   * Can be one of 'awaitingExecution', 'inProgress', 'successfulTasks', 'failsTasks' or 'inactiveTasks'.
    * @returns {void}
    */
   function toggleSubMenu(submenu: string) {
@@ -61,6 +69,7 @@
     if (submenu === 'inProgress') inProgressOpen = !inProgressOpen;
     if (submenu === 'successfulTasks') successfulTasksOpen = !successfulTasksOpen;
     if (submenu === 'failsTasks') failsTasksOpen = !failsTasksOpen;
+    if (submenu === 'inactiveTasks') inactiveTasksOpen = !inactiveTasksOpen;
   }
 </script>
 
@@ -76,13 +85,18 @@
     </a>
 
     <div class="dashboard-nav-section">
-    <a href="#/tasks" class="dashboard-nav-link" data-testid="tasks-button" on:click={() => (tasksOpen = !tasksOpen)}>
-      <div class="dashboard-left">
-        <ListChecks class="dashboard-icon" />
-        Tasks
+      <div class="dashboard-nav-link-container">
+        <a href="#/tasks" class="dashboard-nav-link" data-testid="tasks-button">
+          <div class="dashboard-left">
+            <ListChecks class="dashboard-icon" />
+            Tasks
+          </div>
+        </a>
+        <button data-testid="tasks-chevron" class="dashboard-chevron-button {tasksOpen ? 'rotate' : ''}" 
+                on:click={() => (tasksOpen = !tasksOpen)}>
+          <ChevronDown class="dashboard-chevron" />
+        </button>
       </div>
-      <ChevronDown class="dashboard-chevron {tasksOpen ? 'rotate' : ''}" />
-    </a>
 
       {#if tasksOpen}
         <div class="dashboard-submenu" id="task-submenu">
@@ -110,7 +124,6 @@
             {#if inProgressOpen}
               <div class="dashboard-submenu-items">
                 <a href="#/tasks?status=D">Downloading</a>
-                <a href="#/tasks?status=W">Waiting</a>
                 <a href="#/tasks?status=R">Running</a>
               </div>
             {/if}
@@ -119,7 +132,7 @@
           <!-- Successful -->
           <div>
             <button class="dashboard-submenu-header" on:click={() => toggleSubMenu('successfulTasks')}>
-              Successful
+              Success
               <ChevronDown class="dashboard-chevron {successfulTasksOpen ? 'rotate' : ''}" />
             </button>
             {#if successfulTasksOpen}
@@ -133,13 +146,25 @@
           <!-- Fails -->
           <div>
             <button class="dashboard-submenu-header" on:click={() => toggleSubMenu('failsTasks')}>
-              Fails
+              Fail
               <ChevronDown class="dashboard-chevron {failsTasksOpen ? 'rotate' : ''}" />
             </button>
             {#if failsTasksOpen}
               <div class="dashboard-submenu-items">
                 <a href="#/tasks?status=V">Uploading (after failure)</a>
                 <a href="#/tasks?status=F">Failed</a>
+              </div>
+            {/if}
+          </div>
+
+          <div>
+            <button class="dashboard-submenu-header" on:click={() => toggleSubMenu('inactiveTasks')}>
+              Inactive
+              <ChevronDown class="dashboard-chevron {inactiveTasksOpen ? 'rotate' : ''}" />
+            </button>
+            {#if inactiveTasksOpen}
+              <div class="dashboard-submenu-items">
+                <a href="#/tasks?status=W">Waiting</a>
                 <a href="#/tasks?status=Z">Suspended</a>
                 <a href="#/tasks?status=X">Canceled</a>
               </div>
@@ -153,6 +178,10 @@
       <Package class="dashboard-icon" /> Workflows
     </a>
 
+    <a class="dashboard-nav-link" href="#/workflowsTemplate">
+      <Copy class="dashboard-icon" /> Templates
+    </a>
+
     <a class="dashboard-nav-link" href="#/settings">
       <Settings class="dashboard-icon" /> Settings
     </a>
@@ -161,6 +190,17 @@
       <Power class="dashboard-icon" /> Log Out
     </button>
   </nav>
+
+  <div class="theme-toggle-container">
+    <button on:click={toggleTheme} class="theme-toggle" title="Toggle theme" data-testid="theme-button">
+      {#if $theme === 'dark'}
+        <SunMoon class="theme-icon" color="#fbbf24" />
+      {:else}
+        <SunMoon class="theme-icon" color="#9ca3af" />
+      {/if}
+    </button>
+  </div>
+
 </aside>
 
 {#if showLogoutPopup}
