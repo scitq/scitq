@@ -23,6 +23,9 @@ CREATE TABLE template_run (
 
 ALTER TABLE task ADD COLUMN task_name TEXT;
 
+ALTER TABLE provider ADD CONSTRAINT provider_unique_name_config UNIQUE (provider_name, config_name);
+ALTER TABLE region ADD CONSTRAINT region_unique_provider_region_name UNIQUE (provider_id, region_name);
+
 -- fix recruiter cascade
 ALTER TABLE recruiter
 DROP CONSTRAINT recruiter_step_id_fkey;

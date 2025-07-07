@@ -9,6 +9,9 @@ ALTER TABLE recruiter
 ADD CONSTRAINT recruiter_step_id_fkey
 FOREIGN KEY (step_id) REFERENCES step(step_id);
 
+ALTER TABLE provider DROP CONSTRAINT provider_unique_name_config;
+ALTER TABLE region DROP CONSTRAINT region_unique_provider_region_name;
+
 -- unfix task cascade
 ALTER TABLE task DROP CONSTRAINT IF EXISTS task_step_id_fkey;
 ALTER TABLE task

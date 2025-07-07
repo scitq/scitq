@@ -1955,6 +1955,111 @@ func (s *taskQueueServer) GetWorkspaceRoot(ctx context.Context, req *taskqueuepb
 	}, nil
 }
 
+func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskqueuepb.ResourceSpec) (*taskqueuepb.Ack, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Step 1: get the worker
+	var currentFlavorId sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT flavor_id FROM worker WHERE worker_id = $1`, req.WorkerId).Scan(&currentFlavorId)
+	if err == sql.ErrNoRows {
+		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("worker %s not found", req.WorkerId)
+	} else if err != nil {
+		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to fetch worker: %w", err)
+	}
+
+	// Step 2: get the local provider_id
+	var providerId uint32
+	err = tx.QueryRowContext(ctx, `SELECT provider_id FROM provider WHERE provider_name = 'local' AND config_name = 'local'`).Scan(&providerId)
+	if err != nil {
+		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to get local provider: %w", err)
+	}
+
+	// Step 3: if no flavor, create one and attach to worker
+	if !currentFlavorId.Valid {
+		var newFlavorId uint32
+		err = tx.QueryRowContext(ctx, `
+			INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk)
+			VALUES ($1, (SELECT worker_name FROM worker WHERE worker_id=$2), $3, $4, $5)
+			RETURNING flavor_id
+		`, providerId, req.WorkerId, req.Cpu, req.Mem, req.Disk).Scan(&newFlavorId)
+		if err != nil {
+			return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to create flavor: %w", err)
+		}
+
+		// Fetch region_id for 'local' region of local provider
+		var localRegionId uint32
+		err = tx.QueryRowContext(ctx, `
+			SELECT region_id FROM region WHERE region_name = 'local' AND provider_id = $1
+		`, providerId).Scan(&localRegionId)
+		if err != nil {
+			log.Printf("failed to get local region_id: %v", err)
+			return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to get local region_id: %w", err)
+		}
+
+		// Now insert flavor_region with known region_id
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO flavor_region (flavor_id, region_id, cost)
+			VALUES ($1, $2, 0.0)
+			ON CONFLICT DO NOTHING
+		`, newFlavorId, localRegionId)
+		if err != nil {
+			return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to create flavor region: %w", err)
+		}
+
+		// Now add the new region to the worker
+		_, err = tx.ExecContext(ctx, `
+			UPDATE worker SET region_id=$1,recyclable_scope='G' WHERE worker_id=$2
+		`, localRegionId, req.WorkerId)
+		if err != nil {
+			return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to associate worker with flavor region: %w", err)
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE worker SET flavor_id = $1 WHERE worker_id = $2
+		`, newFlavorId, req.WorkerId)
+		if err != nil {
+			return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to update worker flavor: %w", err)
+		}
+
+		log.Printf("✅ Assigned new local flavor %d to worker %s", newFlavorId, req.WorkerId)
+	} else {
+		// Step 4: check if the flavor belongs to local provider
+		var existingProviderId uint32
+		var existingCpu int32
+		var existingMem, existingDisk float32
+
+		err = tx.QueryRowContext(ctx, `
+			SELECT provider_id, cpu, mem, disk FROM flavor WHERE flavor_id = $1
+		`, currentFlavorId.Int64).Scan(&existingProviderId, &existingCpu, &existingMem, &existingDisk)
+		if err != nil {
+			return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to fetch existing flavor: %w", err)
+		}
+
+		if existingProviderId != providerId {
+			log.Printf("⚠️ Worker %s has non-local flavor %d, skipping update", req.WorkerId, currentFlavorId.Int64)
+			// Optional: compare and log mismatch
+		} else if existingCpu != req.Cpu || existingMem != req.Mem || existingDisk != req.Disk {
+			_, err = tx.ExecContext(ctx, `
+				UPDATE flavor SET cpu = $1, mem = $2, disk = $3 WHERE flavor_id = $4
+			`, req.Cpu, req.Mem, req.Disk, currentFlavorId.Int64)
+			if err != nil {
+				return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to update local flavor: %w", err)
+			}
+			log.Printf("🔄 Updated local flavor %d for worker %s", currentFlavorId.Int64, req.WorkerId)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &taskqueuepb.Ack{Success: true}, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -2095,7 +2200,10 @@ func Serve(cfg config.Config) error {
 		s.qm = *recruitment.NewQuotaManager(&cfg)
 		recruitment.StartRecruiterLoop(context.Background(), s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
 
-		s.checkProviders()                        // Verify available providers
+		err = s.checkProviders() // Verify available providers
+		if err != nil {
+			return fmt.Errorf("failed to check providers: %v", err)
+		}
 		s.startJobQueue()                         // Start processing jobs queue
 		pb.RegisterTaskQueueServer(grpcServer, s) // Register gRPC service
 
