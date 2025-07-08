@@ -3,7 +3,7 @@ import { client } from './grpcClient';
 import * as taskqueue from '../../gen/taskqueue';
 
 /* -------------------------------- USERS -------------------------------- */ 
-
+ 
 /**
  * Retrieves a user based on the provided JWT token.
  *
@@ -464,6 +464,43 @@ export async function getJobStatus(jobIds: number[]): Promise<taskqueue.JobStatu
   }
 }
 
+/* -------------------------------- WORKFLOWS TEMPLATES -------------------------------- */ 
+
+export async function getTemplates(TemplateId?: number, name?: string, version?: string): Promise<taskqueue.Template[]> {
+  try {
+    const requestParams: taskqueue.TemplateFilter = {};
+    if (name) requestParams.name = name;
+    if (TemplateId) requestParams.workflowTemplateId = TemplateId;
+    if (version) requestParams.version = version;
+
+    const tempUnary = await client.listTemplates(requestParams, await callOptionsUserToken());
+    return tempUnary.response?.templates || [];
+  } catch (error) {
+    console.error("Error while retrieving templates:", error);
+    return [];
+  }
+}
+
+export async function UploadTemplates(script: Uint8Array, force: boolean): Promise<taskqueue.UploadTemplateResponse> {
+  try {
+    const uplTempUnary = await client.uploadTemplate({ script, force }, await callOptionsUserToken());
+    return uplTempUnary.response!;
+  } catch (error) {
+    console.error("Error while uploading templates:", error);
+    throw error;
+  }
+}
+
+
+export async function runTemp(workflowTemplateId: number, paramValuesJson: string): Promise<taskqueue.TemplateRun> {
+  try {
+    const runTempUnary = await client.runTemplate({ workflowTemplateId, paramValuesJson }, await callOptionsUserToken());
+    return runTempUnary.response!;
+  } catch (error) {
+    console.error("Error while uploading templates:", error);
+    throw error;
+  }
+}
 
 /* -------------------------------- WORKFLOWS -------------------------------- */ 
 

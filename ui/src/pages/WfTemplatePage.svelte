@@ -1,15 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import Plus from 'lucide-svelte/icons/plus';
-  import Check from 'lucide-svelte/icons/check';
+  import { Plus, Check } from 'lucide-svelte';
+  import { getTemplates, UploadTemplates, runTemp } from '../lib/api';
   import WfTemplateList from '../components/WfTemplateList.svelte';
   import '../styles/wfTemplate.css';
+  import type { UploadTemplateResponse } from '../lib/types'; // adjust the import if needed
+  import { Template } from '../../gen/taskqueue';
 
   let workflowsTemp = [];
   let sortBy: 'name' | 'version' = 'name';
   let selectedFile: File | null = null;
   let fileInput: HTMLInputElement;
-  let selectedFileContent: ArrayBuffer | null = null;
+  let fileContent: Uint8Array | null = null;
+  let uploadResponse: UploadTemplateResponse = {};
+  let showErrorModal = false;
+  let errorMessage = '';
+  let showParamModal = false;
+  let selectedTemplate: Template | null = null;
+  let userParams: Record<string, any> = {};
+
+  onMount(async () => {
+    workflowsTemp = await getTemplates();
+  });
 
   function handleSortBy() {}
 
@@ -24,37 +36,105 @@
     }
   }
 
-  function handleValidate() {
+  function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (reader.result instanceof ArrayBuffer) {
+          resolve(reader.result);
+        } else {
+          reject(new Error("Unexpected file read result type."));
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  async function handleValidate(force = false) {
     if (!selectedFile) return;
 
-    const reader = new FileReader();
+    try {
+      fileContent = new Uint8Array(await readFileAsArrayBuffer(selectedFile));
+      uploadResponse = await UploadTemplates(fileContent, force);
 
-    reader.onload = (event) => {
-      selectedFileContent = event.target?.result as ArrayBuffer;
+      if (!uploadResponse.success) {
+        errorMessage = uploadResponse.message || "Unknown error occurred during upload.";
+        showErrorModal = true;
+      } else {
+        resetFileSelection();
 
-      // Log binary content to the console
-      console.log('Binary content (ArrayBuffer):', selectedFileContent);
-      console.log('Content as bytes:', new Uint8Array(selectedFileContent));
+        // Build a new Template object
+        const temp: Template = {
+          workflowTemplateId: uploadResponse.workflowTemplateId ?? 0,
+          name: uploadResponse.name ?? '',
+          version: uploadResponse.version ?? '',
+          description: uploadResponse.description ?? '',
+          paramJson: uploadResponse.paramJson ?? '',
+          uploadedAt: new Date().toISOString()
+        };
 
-      const text = new TextDecoder().decode(selectedFileContent);
-      console.log('Text content:\n', text);
+        // Add to the local list
+        workflowsTemp = [...workflowsTemp, temp];
+        openParamModal(temp);
 
-      resetFileSelection();
-    };
+      }
 
-    reader.onerror = (event) => {
-      console.error('Read error:', event);
-    };
-
-    reader.readAsArrayBuffer(selectedFile);
+    } catch (error) {
+      console.error("Error during file upload:", error);
+      errorMessage = error.message || "Unknown error occurred.";
+      showErrorModal = true;
+    }
   }
+
+  function openParamModal(template: Template) {
+    selectedTemplate = template;
+
+    try {
+      const parsedParams = JSON.parse(template.paramJson || '{}');
+      userParams = { ...parsedParams }; // Initialize userParams with the default params
+    } catch (error) {
+      console.error("Invalid paramJson", error);
+      userParams = {};
+    }
+
+    showParamModal = true;
+  }
+
+
+  async function handleRunTemplate() {
+    try {
+      if (!selectedTemplate) return;
+
+      await runTemp(selectedTemplate.workflowTemplateId, userParams);
+      console.log("Template run successfully");
+
+    } catch (error) {
+      console.error("Failed to run template:", error);
+    } finally {
+      showParamModal = false;
+    }
+  }
+
+
 
   function resetFileSelection() {
     selectedFile = null;
     fileInput.value = '';
+    fileContent = null;
+    uploadResponse = {};
+    showErrorModal = false;
+    errorMessage = '';
   }
+
+  function handleForceUpload() {
+    showErrorModal = false;
+    handleValidate(true);
+  }
+
 </script>
 
+<!-- ----------- MAIN UI ---------- -->
 <div class="wfTemp-container" data-testid="wfTemp-page">
   <div class="wfTemp-header">
     <form class="wfTemp-sort-form" on:submit|preventDefault={() => handleSortBy()}>
@@ -69,7 +149,7 @@
 
     <input 
       type="file" 
-      accept=".json,.xml,.txt" 
+      accept=".json,.xml,.txt,.py" 
       bind:this={fileInput} 
       on:change={handleFileChange}
       style="display: none;" 
@@ -97,7 +177,7 @@
         </button>
         <button 
           class="wfTemp-action-button wfTemp-validate-button" 
-          on:click={handleValidate}
+          on:click={() => handleValidate(false)}
           disabled={!selectedFile}
         >
           <Check size={20} title="Validate" />
@@ -108,3 +188,69 @@
 
   <WfTemplateList {workflowsTemp} />
 </div>
+
+<!-- ----------- ERROR MODAL ---------- -->
+{#if showErrorModal}
+  <div class="modal-backdrop">
+    <div class="modal">
+      <h2>Upload Error</h2>
+      <p>{errorMessage}</p>
+      <div class="modal-actions">
+        <button on:click={resetFileSelection}>Cancel</button>
+        <button on:click={handleForceUpload}>Force Upload</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- {#if showParamModal}
+  <div class="modal-backdrop">
+    <div class="modal">
+      <h2>Run "{selectedTemplate?.name}"</h2>
+
+      {#each Object.keys(userParams) as param}
+        <div class="form-group">
+          <label>{param}</label>
+          <input 
+            type="text" 
+            bind:value={userParams[param]}
+            placeholder="Enter value"
+          />
+        </div>
+      {/each}
+
+
+      <div class="modal-actions">
+        <button on:click={() => showParamModal = false}>Cancel</button>
+        <button on:click={handleRunTemplate}>Run</button>
+      </div>
+    </div>
+  </div>
+{/if} -->
+
+
+<!-- ----------- BASIC MODAL STYLE ---------- -->
+<style>
+  .modal-backdrop {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .modal {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    min-width: 300px;
+  }
+
+  .modal-actions {
+    margin-top: 1rem;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+</style>
