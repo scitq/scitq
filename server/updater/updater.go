@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/scitq/scitq/server/config"
 )
 
 // Session is an interface abstracting DB operations.

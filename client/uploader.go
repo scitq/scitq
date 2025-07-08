@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gmtsciencedev/scitq2/fetch"
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	"github.com/scitq/scitq/fetch"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
 const (

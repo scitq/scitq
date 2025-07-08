@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/term"
 
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
-	"github.com/gmtsciencedev/scitq2/lib"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/lib"
 )
 
 func promptCredentials() (string, string, error) {

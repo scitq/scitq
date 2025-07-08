@@ -23,8 +23,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-	"github.com/gmtsciencedev/scitq2/server/config" // Adjust the import path to where generic.go is located.
-	"github.com/gmtsciencedev/scitq2/server/updater"
+	"github.com/scitq/scitq/server/config" // Adjust the import path to where generic.go is located.
+	"github.com/scitq/scitq/server/updater"
 )
 
 // loggingPolicy is a custom pipeline policy for logging HTTP requests and responses.

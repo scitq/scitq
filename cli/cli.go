@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/alexflint/go-arg"
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
-	"github.com/gmtsciencedev/scitq2/lib"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/lib"
 	"golang.org/x/term"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

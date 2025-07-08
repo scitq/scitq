@@ -18,12 +18,12 @@ import (
 
 	"github.com/google/shlex"
 
-	"github.com/gmtsciencedev/scitq2/client/install"
-	"github.com/gmtsciencedev/scitq2/client/workerstats"
-	"github.com/gmtsciencedev/scitq2/fetch"
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
-	"github.com/gmtsciencedev/scitq2/lib"
-	"github.com/gmtsciencedev/scitq2/utils"
+	"github.com/scitq/scitq/client/install"
+	"github.com/scitq/scitq/client/workerstats"
+	"github.com/scitq/scitq/fetch"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/lib"
+	"github.com/scitq/scitq/utils"
 
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )

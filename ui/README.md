@@ -85,7 +85,7 @@ Before you start, ensure you have the following tools installed:
 
 1. Clone the project.
 ```bash
-git clone https://github.com/gmtsciencedev/scitq2
+git clone https://github.com/scitq/scitq
 cd ui
 ```
 

@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
-	"github.com/gmtsciencedev/scitq2/server/config"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/server/config"
 	"google.golang.org/protobuf/proto"
 
 	"golang.org/x/sys/unix"

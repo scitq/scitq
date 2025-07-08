@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gmtsciencedev/scitq2/client"
-	"github.com/gmtsciencedev/scitq2/client/install"
 	"github.com/google/uuid"
+	"github.com/scitq/scitq/client"
+	"github.com/scitq/scitq/client/install"
 )
 
 // main initializes the client.

@@ -27,7 +27,7 @@ This is done once, so I do not need to redo it:
 
 ```sh
 brew install go golang-migrate protoc-gen-doc
-go mod init  github.com/gmtsciencedev/scitq2
+go mod init  github.com/scitq/scitq
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 migrate create -ext sql -dir migrations -seq init_schema

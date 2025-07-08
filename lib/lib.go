@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
 type QueueClient struct {

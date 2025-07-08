@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gmtsciencedev/scitq2/server"
-	"github.com/gmtsciencedev/scitq2/server/config"
-	"github.com/gmtsciencedev/scitq2/server/updater/run"
+	"github.com/scitq/scitq/server"
+	"github.com/scitq/scitq/server/config"
+	"github.com/scitq/scitq/server/updater/run"
 )
 
 // runUpdater wraps the updater call with a recover() so that panics don't crash the application.

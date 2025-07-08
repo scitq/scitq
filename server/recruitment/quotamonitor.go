@@ -3,7 +3,7 @@ package recruitment
 import (
 	"sync"
 
-	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/scitq/scitq/server/config"
 )
 
 type RegionalQuota struct {

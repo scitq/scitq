@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/alexflint/go-arg"
-	"github.com/gmtsciencedev/scitq2/fetch"
+	"github.com/scitq/scitq/fetch"
 )
 
 // Define CLI arguments
