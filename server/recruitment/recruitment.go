@@ -11,9 +11,9 @@ import (
 
 	"github.com/lib/pq"
 
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
-	"github.com/gmtsciencedev/scitq2/server/memory"
-	"github.com/gmtsciencedev/scitq2/server/protofilter"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/server/memory"
+	"github.com/scitq/scitq/server/protofilter"
 )
 
 type RecruiterKey struct {

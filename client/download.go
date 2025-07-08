@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gmtsciencedev/scitq2/fetch"
+	"github.com/scitq/scitq/fetch"
 
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
 	"github.com/google/uuid"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
 const (

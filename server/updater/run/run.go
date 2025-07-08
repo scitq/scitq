@@ -3,9 +3,9 @@ package run
 import (
 	"fmt"
 
-	"github.com/gmtsciencedev/scitq2/server/config"
-	"github.com/gmtsciencedev/scitq2/server/updater/azure"
-	//"github.com/gmtsciencedev/scitq2/server/updater/openstack"
+	"github.com/scitq/scitq/server/config"
+	"github.com/scitq/scitq/server/updater/azure"
+	//"github.com/scitq/scitq/server/updater/openstack"
 )
 
 func Run(cfg config.Config, providerCfg config.ProviderConfig) error {

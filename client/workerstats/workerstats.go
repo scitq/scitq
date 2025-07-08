@@ -9,7 +9,7 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
 
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
 // WorkerStats matches your proto definition

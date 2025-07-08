@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/scitq/scitq/server/config"
 )
 
 // PostgresSession implements the Session interface using a PostgreSQL database.

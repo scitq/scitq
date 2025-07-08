@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/gmtsciencedev/scitq2/server/providers/azure"
+	"github.com/scitq/scitq/server/providers/azure"
 )
 
 func (s *taskQueueServer) checkProviders() error {

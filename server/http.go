@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/scitq/scitq/server/config"
 )
 
 //go:embed public/*

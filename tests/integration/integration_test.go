@@ -12,16 +12,16 @@ import (
 	"time"
 
 	"github.com/docker/go-connections/nat"
-	"github.com/gmtsciencedev/scitq2/cli"
-	"github.com/gmtsciencedev/scitq2/client"
-	"github.com/gmtsciencedev/scitq2/lib"
-	"github.com/gmtsciencedev/scitq2/server"
-	"github.com/gmtsciencedev/scitq2/server/config"
+	"github.com/scitq/scitq/cli"
+	"github.com/scitq/scitq/client"
+	"github.com/scitq/scitq/lib"
+	"github.com/scitq/scitq/server"
+	"github.com/scitq/scitq/server/config"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	pb "github.com/gmtsciencedev/scitq2/gen/taskqueuepb"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 
 	"database/sql"
 

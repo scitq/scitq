@@ -1,4 +1,4 @@
-module github.com/gmtsciencedev/scitq2
+module github.com/scitq/scitq
 
 go 1.23.5
 

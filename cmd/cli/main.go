@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/gmtsciencedev/scitq2/cli"
+	"github.com/scitq/scitq/cli"
 )
 
 func main() {
