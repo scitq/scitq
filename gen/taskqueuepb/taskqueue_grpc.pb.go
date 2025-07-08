@@ -20,52 +20,53 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TaskQueue_SubmitTask_FullMethodName           = "/taskqueue.TaskQueue/SubmitTask"
-	TaskQueue_RegisterWorker_FullMethodName       = "/taskqueue.TaskQueue/RegisterWorker"
-	TaskQueue_PingAndTakeNewTasks_FullMethodName  = "/taskqueue.TaskQueue/PingAndTakeNewTasks"
-	TaskQueue_UpdateTaskStatus_FullMethodName     = "/taskqueue.TaskQueue/UpdateTaskStatus"
-	TaskQueue_SendTaskLogs_FullMethodName         = "/taskqueue.TaskQueue/SendTaskLogs"
-	TaskQueue_StreamTaskLogsOutput_FullMethodName = "/taskqueue.TaskQueue/StreamTaskLogsOutput"
-	TaskQueue_StreamTaskLogsErr_FullMethodName    = "/taskqueue.TaskQueue/StreamTaskLogsErr"
-	TaskQueue_GetLogsChunk_FullMethodName         = "/taskqueue.TaskQueue/GetLogsChunk"
-	TaskQueue_ListTasks_FullMethodName            = "/taskqueue.TaskQueue/ListTasks"
-	TaskQueue_ListWorkers_FullMethodName          = "/taskqueue.TaskQueue/ListWorkers"
-	TaskQueue_CreateWorker_FullMethodName         = "/taskqueue.TaskQueue/CreateWorker"
-	TaskQueue_UpdateWorkerStatus_FullMethodName   = "/taskqueue.TaskQueue/UpdateWorkerStatus"
-	TaskQueue_DeleteWorker_FullMethodName         = "/taskqueue.TaskQueue/DeleteWorker"
-	TaskQueue_UpdateWorker_FullMethodName         = "/taskqueue.TaskQueue/UpdateWorker"
-	TaskQueue_GetWorkerStatuses_FullMethodName    = "/taskqueue.TaskQueue/GetWorkerStatuses"
-	TaskQueue_ListJobs_FullMethodName             = "/taskqueue.TaskQueue/ListJobs"
-	TaskQueue_GetJobStatuses_FullMethodName       = "/taskqueue.TaskQueue/GetJobStatuses"
-	TaskQueue_DeleteJob_FullMethodName            = "/taskqueue.TaskQueue/DeleteJob"
-	TaskQueue_ListFlavors_FullMethodName          = "/taskqueue.TaskQueue/ListFlavors"
-	TaskQueue_GetRcloneConfig_FullMethodName      = "/taskqueue.TaskQueue/GetRcloneConfig"
-	TaskQueue_Login_FullMethodName                = "/taskqueue.TaskQueue/Login"
-	TaskQueue_Logout_FullMethodName               = "/taskqueue.TaskQueue/Logout"
-	TaskQueue_CreateUser_FullMethodName           = "/taskqueue.TaskQueue/CreateUser"
-	TaskQueue_ListUsers_FullMethodName            = "/taskqueue.TaskQueue/ListUsers"
-	TaskQueue_DeleteUser_FullMethodName           = "/taskqueue.TaskQueue/DeleteUser"
-	TaskQueue_UpdateUser_FullMethodName           = "/taskqueue.TaskQueue/UpdateUser"
-	TaskQueue_ChangePassword_FullMethodName       = "/taskqueue.TaskQueue/ChangePassword"
-	TaskQueue_ListRecruiters_FullMethodName       = "/taskqueue.TaskQueue/ListRecruiters"
-	TaskQueue_CreateRecruiter_FullMethodName      = "/taskqueue.TaskQueue/CreateRecruiter"
-	TaskQueue_UpdateRecruiter_FullMethodName      = "/taskqueue.TaskQueue/UpdateRecruiter"
-	TaskQueue_DeleteRecruiter_FullMethodName      = "/taskqueue.TaskQueue/DeleteRecruiter"
-	TaskQueue_ListWorkflows_FullMethodName        = "/taskqueue.TaskQueue/ListWorkflows"
-	TaskQueue_CreateWorkflow_FullMethodName       = "/taskqueue.TaskQueue/CreateWorkflow"
-	TaskQueue_DeleteWorkflow_FullMethodName       = "/taskqueue.TaskQueue/DeleteWorkflow"
-	TaskQueue_ListSteps_FullMethodName            = "/taskqueue.TaskQueue/ListSteps"
-	TaskQueue_CreateStep_FullMethodName           = "/taskqueue.TaskQueue/CreateStep"
-	TaskQueue_DeleteStep_FullMethodName           = "/taskqueue.TaskQueue/DeleteStep"
-	TaskQueue_GetWorkerStats_FullMethodName       = "/taskqueue.TaskQueue/GetWorkerStats"
-	TaskQueue_FetchList_FullMethodName            = "/taskqueue.TaskQueue/FetchList"
-	TaskQueue_UploadTemplate_FullMethodName       = "/taskqueue.TaskQueue/UploadTemplate"
-	TaskQueue_RunTemplate_FullMethodName          = "/taskqueue.TaskQueue/RunTemplate"
-	TaskQueue_ListTemplates_FullMethodName        = "/taskqueue.TaskQueue/ListTemplates"
-	TaskQueue_ListTemplateRuns_FullMethodName     = "/taskqueue.TaskQueue/ListTemplateRuns"
-	TaskQueue_UpdateTemplateRun_FullMethodName    = "/taskqueue.TaskQueue/UpdateTemplateRun"
-	TaskQueue_DeleteTemplateRun_FullMethodName    = "/taskqueue.TaskQueue/DeleteTemplateRun"
-	TaskQueue_GetWorkspaceRoot_FullMethodName     = "/taskqueue.TaskQueue/GetWorkspaceRoot"
+	TaskQueue_SubmitTask_FullMethodName             = "/taskqueue.TaskQueue/SubmitTask"
+	TaskQueue_RegisterWorker_FullMethodName         = "/taskqueue.TaskQueue/RegisterWorker"
+	TaskQueue_PingAndTakeNewTasks_FullMethodName    = "/taskqueue.TaskQueue/PingAndTakeNewTasks"
+	TaskQueue_UpdateTaskStatus_FullMethodName       = "/taskqueue.TaskQueue/UpdateTaskStatus"
+	TaskQueue_SendTaskLogs_FullMethodName           = "/taskqueue.TaskQueue/SendTaskLogs"
+	TaskQueue_StreamTaskLogsOutput_FullMethodName   = "/taskqueue.TaskQueue/StreamTaskLogsOutput"
+	TaskQueue_StreamTaskLogsErr_FullMethodName      = "/taskqueue.TaskQueue/StreamTaskLogsErr"
+	TaskQueue_GetLogsChunk_FullMethodName           = "/taskqueue.TaskQueue/GetLogsChunk"
+	TaskQueue_ListTasks_FullMethodName              = "/taskqueue.TaskQueue/ListTasks"
+	TaskQueue_ListWorkers_FullMethodName            = "/taskqueue.TaskQueue/ListWorkers"
+	TaskQueue_CreateWorker_FullMethodName           = "/taskqueue.TaskQueue/CreateWorker"
+	TaskQueue_UpdateWorkerStatus_FullMethodName     = "/taskqueue.TaskQueue/UpdateWorkerStatus"
+	TaskQueue_DeleteWorker_FullMethodName           = "/taskqueue.TaskQueue/DeleteWorker"
+	TaskQueue_UpdateWorker_FullMethodName           = "/taskqueue.TaskQueue/UpdateWorker"
+	TaskQueue_GetWorkerStatuses_FullMethodName      = "/taskqueue.TaskQueue/GetWorkerStatuses"
+	TaskQueue_ListJobs_FullMethodName               = "/taskqueue.TaskQueue/ListJobs"
+	TaskQueue_GetJobStatuses_FullMethodName         = "/taskqueue.TaskQueue/GetJobStatuses"
+	TaskQueue_DeleteJob_FullMethodName              = "/taskqueue.TaskQueue/DeleteJob"
+	TaskQueue_ListFlavors_FullMethodName            = "/taskqueue.TaskQueue/ListFlavors"
+	TaskQueue_GetRcloneConfig_FullMethodName        = "/taskqueue.TaskQueue/GetRcloneConfig"
+	TaskQueue_Login_FullMethodName                  = "/taskqueue.TaskQueue/Login"
+	TaskQueue_Logout_FullMethodName                 = "/taskqueue.TaskQueue/Logout"
+	TaskQueue_CreateUser_FullMethodName             = "/taskqueue.TaskQueue/CreateUser"
+	TaskQueue_ListUsers_FullMethodName              = "/taskqueue.TaskQueue/ListUsers"
+	TaskQueue_DeleteUser_FullMethodName             = "/taskqueue.TaskQueue/DeleteUser"
+	TaskQueue_UpdateUser_FullMethodName             = "/taskqueue.TaskQueue/UpdateUser"
+	TaskQueue_ChangePassword_FullMethodName         = "/taskqueue.TaskQueue/ChangePassword"
+	TaskQueue_ListRecruiters_FullMethodName         = "/taskqueue.TaskQueue/ListRecruiters"
+	TaskQueue_CreateRecruiter_FullMethodName        = "/taskqueue.TaskQueue/CreateRecruiter"
+	TaskQueue_UpdateRecruiter_FullMethodName        = "/taskqueue.TaskQueue/UpdateRecruiter"
+	TaskQueue_DeleteRecruiter_FullMethodName        = "/taskqueue.TaskQueue/DeleteRecruiter"
+	TaskQueue_ListWorkflows_FullMethodName          = "/taskqueue.TaskQueue/ListWorkflows"
+	TaskQueue_CreateWorkflow_FullMethodName         = "/taskqueue.TaskQueue/CreateWorkflow"
+	TaskQueue_DeleteWorkflow_FullMethodName         = "/taskqueue.TaskQueue/DeleteWorkflow"
+	TaskQueue_ListSteps_FullMethodName              = "/taskqueue.TaskQueue/ListSteps"
+	TaskQueue_CreateStep_FullMethodName             = "/taskqueue.TaskQueue/CreateStep"
+	TaskQueue_DeleteStep_FullMethodName             = "/taskqueue.TaskQueue/DeleteStep"
+	TaskQueue_GetWorkerStats_FullMethodName         = "/taskqueue.TaskQueue/GetWorkerStats"
+	TaskQueue_FetchList_FullMethodName              = "/taskqueue.TaskQueue/FetchList"
+	TaskQueue_UploadTemplate_FullMethodName         = "/taskqueue.TaskQueue/UploadTemplate"
+	TaskQueue_RunTemplate_FullMethodName            = "/taskqueue.TaskQueue/RunTemplate"
+	TaskQueue_ListTemplates_FullMethodName          = "/taskqueue.TaskQueue/ListTemplates"
+	TaskQueue_ListTemplateRuns_FullMethodName       = "/taskqueue.TaskQueue/ListTemplateRuns"
+	TaskQueue_UpdateTemplateRun_FullMethodName      = "/taskqueue.TaskQueue/UpdateTemplateRun"
+	TaskQueue_DeleteTemplateRun_FullMethodName      = "/taskqueue.TaskQueue/DeleteTemplateRun"
+	TaskQueue_GetWorkspaceRoot_FullMethodName       = "/taskqueue.TaskQueue/GetWorkspaceRoot"
+	TaskQueue_RegisterSpecifications_FullMethodName = "/taskqueue.TaskQueue/RegisterSpecifications"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -119,6 +120,7 @@ type TaskQueueClient interface {
 	UpdateTemplateRun(ctx context.Context, in *UpdateTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
 	DeleteTemplateRun(ctx context.Context, in *DeleteTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
+	RegisterSpecifications(ctx context.Context, in *ResourceSpec, opts ...grpc.CallOption) (*Ack, error)
 }
 
 type taskQueueClient struct {
@@ -610,6 +612,16 @@ func (c *taskQueueClient) GetWorkspaceRoot(ctx context.Context, in *WorkspaceRoo
 	return out, nil
 }
 
+func (c *taskQueueClient) RegisterSpecifications(ctx context.Context, in *ResourceSpec, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_RegisterSpecifications_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -661,6 +673,7 @@ type TaskQueueServer interface {
 	UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error)
 	DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error)
 	GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
+	RegisterSpecifications(context.Context, *ResourceSpec) (*Ack, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -808,6 +821,9 @@ func (UnimplementedTaskQueueServer) DeleteTemplateRun(context.Context, *DeleteTe
 }
 func (UnimplementedTaskQueueServer) GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceRoot not implemented")
+}
+func (UnimplementedTaskQueueServer) RegisterSpecifications(context.Context, *ResourceSpec) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterSpecifications not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -1633,6 +1649,24 @@ func _TaskQueue_GetWorkspaceRoot_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_RegisterSpecifications_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResourceSpec)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).RegisterSpecifications(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_RegisterSpecifications_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).RegisterSpecifications(ctx, req.(*ResourceSpec))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1811,6 +1845,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkspaceRoot",
 			Handler:    _TaskQueue_GetWorkspaceRoot_Handler,
+		},
+		{
+			MethodName: "RegisterSpecifications",
+			Handler:    _TaskQueue_RegisterSpecifications_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

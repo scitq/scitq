@@ -8,9 +8,13 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/mem"
 
 	"github.com/google/shlex"
 
@@ -54,6 +58,51 @@ type WorkerConfig struct {
 	Token       string
 }
 
+// auto detect self specs
+func (w *WorkerConfig) registerSpecs(client pb.TaskQueueClient) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 1. CPU
+	cpuCount := int32(runtime.NumCPU())
+
+	// 2. Memory
+	vmem, err := mem.VirtualMemory()
+	if err != nil {
+		log.Printf("⚠️ Could not detect memory: %v", err)
+		return
+	}
+	totalMem := float32(vmem.Total) / (1024 * 1024 * 1024)
+
+	// 3. Disk under store path
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(w.Store, &stat); err != nil {
+		log.Printf("⚠️ Could not statfs %s: %v", w.Store, err)
+		return
+	}
+	freeDisk := float32(stat.Bavail) * float32(stat.Bsize) / (1024 * 1024 * 1024)
+
+	// 4. Send
+	req := &pb.ResourceSpec{
+		WorkerId: fmt.Sprintf("%d", w.WorkerId),
+		Cpu:      cpuCount,
+		Mem:      totalMem,
+		Disk:     freeDisk,
+	}
+	res, err := client.RegisterSpecifications(ctx, req)
+	if err != nil {
+		log.Printf("⚠️ Failed to register specs: %v", err)
+		return
+	}
+	if res.Success {
+		log.Printf("📦 Registered specs: CPU=%d MEM=%.1f GiB DISK=%.1f GiB",
+			req.Cpu,
+			req.Mem,
+			req.Disk,
+		)
+	}
+}
+
 // registerWorker registers the client worker with the server.
 func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -65,6 +114,7 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	} else {
 		w.WorkerId = uint32(res.WorkerId)
 	}
+	w.registerSpecs(client)
 	log.Printf("✅ Worker %s registered with concurrency %d", w.Name, w.Concurrency)
 }
 

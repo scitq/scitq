@@ -16,6 +16,26 @@ func (s *taskQueueServer) checkProviders() error {
 	}
 	defer tx.Rollback()
 
+	// Ensure "local" provider and region exist unconditionally
+	var localProviderId uint32
+	err = tx.QueryRow(`INSERT INTO provider (provider_name, config_name)
+                   VALUES ('local', 'local')
+                   ON CONFLICT (provider_name, config_name)
+                   DO UPDATE SET provider_name = EXCLUDED.provider_name
+                   RETURNING provider_id`).Scan(&localProviderId)
+	if err != nil {
+		log.Printf("⚠️ Failed to insert or get local provider: %v", err)
+		return fmt.Errorf("failed to ensure local provider: %w", err)
+	}
+
+	_, err = tx.Exec(`INSERT INTO region (provider_id, region_name, is_default)
+					  VALUES ($1, 'local', true)
+					  ON CONFLICT (provider_id, region_name) DO UPDATE SET is_default = true`, localProviderId)
+	if err != nil {
+		log.Printf("⚠️ Failed to insert or update local region: %v", err)
+		return fmt.Errorf("failed to ensure local region: %w", err)
+	}
+
 	// First scanning for known providers
 	rows, err := tx.Query(`SELECT provider_id, provider_name, config_name FROM provider ORDER BY provider_id`)
 	if err != nil {
@@ -65,6 +85,9 @@ func (s *taskQueueServer) checkProviders() error {
 				}
 				log.Printf("Azure provider %s: %v", p.ProviderName, paramConfigName)
 			}
+		case "local":
+			// Do nothing: local is registered unconditionally
+			log.Printf("✅ Detected local provider in DB: %q", p.ConfigName)
 		default:
 			return fmt.Errorf("unknown provider %s", p.ProviderName)
 		}
