@@ -4,6 +4,7 @@
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { TaskQueue } from "./taskqueue";
+import type { ResourceSpec } from "./taskqueue";
 import type { WorkspaceRootResponse } from "./taskqueue";
 import type { WorkspaceRootRequest } from "./taskqueue";
 import type { DeleteTemplateRunRequest } from "./taskqueue";
@@ -23,6 +24,7 @@ import type { GetWorkerStatsRequest } from "./taskqueue";
 import type { StepId } from "./taskqueue";
 import type { StepRequest } from "./taskqueue";
 import type { StepList } from "./taskqueue";
+import type { StepFilter } from "./taskqueue";
 import type { WorkflowId } from "./taskqueue";
 import type { WorkflowRequest } from "./taskqueue";
 import type { WorkflowList } from "./taskqueue";
@@ -217,9 +219,9 @@ export interface ITaskQueueClient {
      */
     deleteWorkflow(input: WorkflowId, options?: RpcOptions): UnaryCall<WorkflowId, Ack>;
     /**
-     * @generated from protobuf rpc: ListSteps(taskqueue.WorkflowId) returns (taskqueue.StepList);
+     * @generated from protobuf rpc: ListSteps(taskqueue.StepFilter) returns (taskqueue.StepList);
      */
-    listSteps(input: WorkflowId, options?: RpcOptions): UnaryCall<WorkflowId, StepList>;
+    listSteps(input: StepFilter, options?: RpcOptions): UnaryCall<StepFilter, StepList>;
     /**
      * @generated from protobuf rpc: CreateStep(taskqueue.StepRequest) returns (taskqueue.StepId);
      */
@@ -266,6 +268,10 @@ export interface ITaskQueueClient {
      * @generated from protobuf rpc: GetWorkspaceRoot(taskqueue.WorkspaceRootRequest) returns (taskqueue.WorkspaceRootResponse);
      */
     getWorkspaceRoot(input: WorkspaceRootRequest, options?: RpcOptions): UnaryCall<WorkspaceRootRequest, WorkspaceRootResponse>;
+    /**
+     * @generated from protobuf rpc: RegisterSpecifications(taskqueue.ResourceSpec) returns (taskqueue.Ack);
+     */
+    registerSpecifications(input: ResourceSpec, options?: RpcOptions): UnaryCall<ResourceSpec, Ack>;
 }
 /**
  * @generated from protobuf service taskqueue.TaskQueue
@@ -515,11 +521,11 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
         return stackIntercept<WorkflowId, Ack>("unary", this._transport, method, opt, input);
     }
     /**
-     * @generated from protobuf rpc: ListSteps(taskqueue.WorkflowId) returns (taskqueue.StepList);
+     * @generated from protobuf rpc: ListSteps(taskqueue.StepFilter) returns (taskqueue.StepList);
      */
-    listSteps(input: WorkflowId, options?: RpcOptions): UnaryCall<WorkflowId, StepList> {
+    listSteps(input: StepFilter, options?: RpcOptions): UnaryCall<StepFilter, StepList> {
         const method = this.methods[34], opt = this._transport.mergeOptions(options);
-        return stackIntercept<WorkflowId, StepList>("unary", this._transport, method, opt, input);
+        return stackIntercept<StepFilter, StepList>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: CreateStep(taskqueue.StepRequest) returns (taskqueue.StepId);
@@ -599,5 +605,12 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
     getWorkspaceRoot(input: WorkspaceRootRequest, options?: RpcOptions): UnaryCall<WorkspaceRootRequest, WorkspaceRootResponse> {
         const method = this.methods[45], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkspaceRootRequest, WorkspaceRootResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: RegisterSpecifications(taskqueue.ResourceSpec) returns (taskqueue.Ack);
+     */
+    registerSpecifications(input: ResourceSpec, options?: RpcOptions): UnaryCall<ResourceSpec, Ack> {
+        const method = this.methods[46], opt = this._transport.mergeOptions(options);
+        return stackIntercept<ResourceSpec, Ack>("unary", this._transport, method, opt, input);
     }
 }

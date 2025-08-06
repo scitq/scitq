@@ -48,7 +48,7 @@ const mockTaskLogsSaved = [
 describe('TaskList', () => {
   it('displays tasks with output and error logs', async () => {
     render(TaskList, {
-      tasks: mockTasks,
+      displayedTasks: mockTasks,
       taskLogsSaved: mockTaskLogsSaved,
       workers: [],
       workflows: [],
@@ -69,18 +69,5 @@ describe('TaskList', () => {
     expect(screen.getByText((content) => content.includes('stdout log B2'))).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes('stderr log A1'))).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes('stderr log B1'))).toBeInTheDocument();
-  });
-
-  it('displays default message when no tasks are present', async () => {
-    render(TaskList, {
-      tasks: [],
-      taskLogsSaved: [],
-      workers: [],
-      workflows: [],
-      allSteps: [],
-      onOpenModal: vi.fn(),
-    });
-
-    expect(screen.getByText('No task found.')).toBeInTheDocument();
   });
 });

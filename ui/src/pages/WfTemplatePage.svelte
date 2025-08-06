@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { wsClient } from '../lib/wsClient';
   import { Plus, Check } from 'lucide-svelte';
   import { getTemplates, UploadTemplates, runTemp } from '../lib/api';
   import WfTemplateList from '../components/WfTemplateList.svelte';
   import '../styles/wfTemplate.css';
-  import type { UploadTemplateResponse } from '../lib/types'; // adjust the import if needed
+  import type { UploadTemplateResponse } from '../lib/types';
   import { Template } from '../../gen/taskqueue';
 
   let workflowsTemp = [];
-  let sortBy: 'name' | 'version' = 'name';
+  let sortBy: 'template' | 'name' = 'template';
   let selectedFile: File | null = null;
   let fileInput: HTMLInputElement;
   let fileContent: Uint8Array | null = null;
@@ -18,17 +19,58 @@
   let showParamModal = false;
   let selectedTemplate: Template | null = null;
   let userParams: Record<string, any> = {};
+  let paramErrors: Record<string, string> = {};
+  let showParamErrors = false;
+  let showHelp: Record<string, boolean> = {};
+  let unsubscribeWS: () => void;
+
+  function handleMessage(message) {
+    if (message.type === 'template-uploaded') {
+      if (!workflowsTemp.some(t => t.workflowTemplateId === message.payload.ID)) {
+        workflowsTemp = [...workflowsTemp, message.payload];
+      }
+      console.log('Template created via WebSocket:', message.payload);
+    }
+  }
 
   onMount(async () => {
     workflowsTemp = await getTemplates();
+    unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
   });
 
-  function handleSortBy() {}
+  onDestroy(() => {
+    unsubscribeWS?.();
+  });
 
+  /**
+   * Sorts the workflow templates based on the selected sort criteria
+   */
+  function handleSortBy() {
+      if (!workflowsTemp) return [];
+
+      workflowsTemp  = [...workflowsTemp].sort((a, b) => {
+          switch (sortBy) {
+              case 'template':
+                  return (b.workflowTemplateId ?? 0) - (a.workflowTemplateId ?? 0);
+              case 'name':
+                  return (a.name || '').localeCompare(b.name || '');
+              default:
+                  return 0;
+          }
+      });
+  }
+
+  /**
+   * Triggers file input click to select a file
+   */
   function handleAdd() {
     fileInput.click();
   }
 
+  /**
+   * Handles file selection change event
+   * @param {Event} event - The file input change event
+   */
   function handleFileChange(event: Event) {
     const files = (event.target as HTMLInputElement).files;
     if (files?.length) {
@@ -36,6 +78,11 @@
     }
   }
 
+  /**
+   * Reads file content as ArrayBuffer
+   * @param {File} file - The file to read
+   * @returns {Promise<ArrayBuffer>} Promise that resolves with file content
+   */
   function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -51,6 +98,10 @@
     });
   }
 
+  /**
+   * Validates and uploads the selected template file
+   * @param {boolean} [force=false] - Whether to force upload despite warnings
+   */
   async function handleValidate(force = false) {
     if (!selectedFile) return;
 
@@ -63,23 +114,7 @@
         showErrorModal = true;
       } else {
         resetFileSelection();
-
-        // Build a new Template object
-        const temp: Template = {
-          workflowTemplateId: uploadResponse.workflowTemplateId ?? 0,
-          name: uploadResponse.name ?? '',
-          version: uploadResponse.version ?? '',
-          description: uploadResponse.description ?? '',
-          paramJson: uploadResponse.paramJson ?? '',
-          uploadedAt: new Date().toISOString()
-        };
-
-        // Add to the local list
-        workflowsTemp = [...workflowsTemp, temp];
-        openParamModal(temp);
-
       }
-
     } catch (error) {
       console.error("Error during file upload:", error);
       errorMessage = error.message || "Unknown error occurred.";
@@ -87,37 +122,86 @@
     }
   }
 
+  /**
+   * Toggles help text visibility for a parameter
+   * @param {string} paramName - The parameter name to toggle help for
+   */
+  function toggleHelp(paramName: string) {
+    showHelp = {...showHelp, [paramName]: !showHelp[paramName]};
+  }
+
+  /**
+   * Opens the parameter modal and initializes parameter states
+   * @param {Template} template - The template to run
+   */
   function openParamModal(template: Template) {
     selectedTemplate = template;
-
+    paramErrors = {};
+    showParamErrors = false;
+    showHelp = {};
     try {
-      const parsedParams = JSON.parse(template.paramJson || '{}');
-      userParams = { ...parsedParams }; // Initialize userParams with the default params
+      const parsedParams = JSON.parse(template.paramJson || '[]');
+
+      if (!Array.isArray(parsedParams)) {
+        throw new Error('paramJson should be an array');
+      }
+
+      userParams = {};
+      parsedParams.forEach(param => {
+        if (param.name) {
+          userParams[param.name] = param.default ?? '';
+          showHelp[param.name] = false;
+          if (param.required && !param.default) {
+            paramErrors[param.name] = 'This field is required';
+          }
+        }
+      });
+
     } catch (error) {
-      console.error("Invalid paramJson", error);
+      console.error("Error parsing paramJson:", error);
       userParams = {};
     }
 
     showParamModal = true;
   }
 
-
+  /**
+   * Validates parameters and runs the selected template
+   */
   async function handleRunTemplate() {
+    showParamErrors = false;
+    paramErrors = {};
+    
     try {
+      const parsedParams = JSON.parse(selectedTemplate?.paramJson || '[]');
+      let hasErrors = false;
+      
+      parsedParams.forEach(param => {
+        if (param.required && (!userParams[param.name] || userParams[param.name].trim() === '')) {
+          paramErrors[param.name] = 'This field is required';
+          hasErrors = true;
+        }
+      });
+
+      if (hasErrors) {
+        showParamErrors = true;
+        return;
+      }
+
       if (!selectedTemplate) return;
 
-      await runTemp(selectedTemplate.workflowTemplateId, userParams);
-      console.log("Template run successfully");
+      const paramJson = JSON.stringify(userParams);
+      await runTemp(selectedTemplate.workflowTemplateId, paramJson);
+      showParamModal = false;
 
     } catch (error) {
       console.error("Failed to run template:", error);
-    } finally {
-      showParamModal = false;
     }
   }
 
-
-
+  /**
+   * Resets file selection state
+   */
   function resetFileSelection() {
     selectedFile = null;
     fileInput.value = '';
@@ -127,11 +211,13 @@
     errorMessage = '';
   }
 
+  /**
+   * Forces file upload despite warnings
+   */
   function handleForceUpload() {
     showErrorModal = false;
     handleValidate(true);
   }
-
 </script>
 
 <!-- ----------- MAIN UI ---------- -->
@@ -141,18 +227,18 @@
       <div class="wfTemp-sort-group">
         <label for="sortBy">Sort by</label>
         <select id="sortBy" bind:value={sortBy} on:change={() => handleSortBy()}>
+          <option value="template">Template</option>
           <option value="name">Name</option>
-          <option value="version">Version</option>
         </select>
       </div>
     </form>
 
     <input 
-      type="file" 
-      accept=".json,.xml,.txt,.py" 
-      bind:this={fileInput} 
+      type="file"
+      aria-label="File upload"
+      bind:this={fileInput}
       on:change={handleFileChange}
-      style="display: none;" 
+      style="display: none;"
     />
 
     <div class="wfTemp-file-action-group">
@@ -186,71 +272,114 @@
     </div>
   </div>
 
-  <WfTemplateList {workflowsTemp} />
+  <WfTemplateList {workflowsTemp} openParamModal={openParamModal}/>
 </div>
 
 <!-- ----------- ERROR MODAL ---------- -->
 {#if showErrorModal}
-  <div class="modal-backdrop">
-    <div class="modal">
+  <div class="wfTemp-modal-backdrop">
+    <div class="wfTemp-modal">
       <h2>Upload Error</h2>
       <p>{errorMessage}</p>
-      <div class="modal-actions">
-        <button on:click={resetFileSelection}>Cancel</button>
+      <div class="wfTemp-modal-actions">
         <button on:click={handleForceUpload}>Force Upload</button>
+        <button on:click={resetFileSelection}>Cancel</button>
       </div>
     </div>
   </div>
 {/if}
 
-<!-- {#if showParamModal}
-  <div class="modal-backdrop">
-    <div class="modal">
-      <h2>Run "{selectedTemplate?.name}"</h2>
+<!-- ----------- PARAM MODAL ---------- -->
+{#if showParamModal}
+  <div class="wfTemp-modal-backdrop">
+    <div class="wfTemp-modal">
+      <div class="wfTemp-modal-content">
+        <h2>Run "{selectedTemplate?.name}"</h2>
+        
+        {#if showParamErrors}
+          <div class="wfTemp-error-message">
+            Please fill in all required fields
+          </div>
+        {/if}
+        
+        {#each JSON.parse(selectedTemplate?.paramJson || '[]') as param (param.name)}
+          <div class="wfTemp-form-group">
+            <label 
+              for={param.name}
+              class:required={param.required}
+              class:error={showParamErrors && param.required && !userParams[param.name]}
+            >
+              {param.name}
+            </label>
+            
+            <div class="wfTemp-input-container">
+              {#if param.choices}
+                <div class="wfTemp-select-wrapper">
+                  <select
+                    id={param.name}
+                    bind:value={userParams[param.name]}
+                    class:error={showParamErrors && param.required && !userParams[param.name]}
+                  >
+                    {#if !param.required}
+                      <option value="">-- Select --</option>
+                    {/if}
+                    {#each param.choices as choice}
+                      <option value={choice}>{choice}</option>
+                    {/each}
+                  </select>
+                </div>
+              
+              {:else if param.type === 'bool'}
+                <label class="wfTemp-checkbox-label">
+                  <input
+                    type="checkbox"
+                    id={param.name}
+                    bind:checked={userParams[param.name]}
+                    class:error={showParamErrors && param.required && !userParams[param.name]}
+                  />
+                </label>
+              
+              {:else if param.type === 'int'}
+                <input
+                  type="number"
+                  id={param.name}
+                  bind:value={userParams[param.name]}
+                  class:error={showParamErrors && param.required && !userParams[param.name]}
+                  placeholder="Enter number"
+                />
+              
+              {:else}
+                <input
+                  type="text"
+                  id={param.name}
+                  bind:value={userParams[param.name]}
+                  class:error={showParamErrors && param.required && !userParams[param.name]}
+                  placeholder={param.help || 'Enter value'}
+                />
+              {/if}
+              
+              {#if param.help}
+                <button class="wfTemp-help-button" on:click={() => toggleHelp(param.name)}>
+                  ?
+                </button>
+              {/if}
+            </div>
+            
+            {#if showHelp[param.name] && param.help}
+              <div class="wfTemp-help-text">{param.help}</div>
+            {/if}
+            
+            {#if showParamErrors && param.required && !userParams[param.name]}
+              <div class="wfTemp-field-error">This field is required</div>
+            {/if}
+          </div>
+        {/each}
+      </div>
 
-      {#each Object.keys(userParams) as param}
-        <div class="form-group">
-          <label>{param}</label>
-          <input 
-            type="text" 
-            bind:value={userParams[param]}
-            placeholder="Enter value"
-          />
-        </div>
-      {/each}
-
-
-      <div class="modal-actions">
-        <button on:click={() => showParamModal = false}>Cancel</button>
+      <div class="wfTemp-modal-actions">
         <button on:click={handleRunTemplate}>Run</button>
+        <button on:click={() => showParamModal = false}>Cancel</button>
       </div>
     </div>
   </div>
-{/if} -->
-
-
-<!-- ----------- BASIC MODAL STYLE ---------- -->
-<style>
-  .modal-backdrop {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .modal {
-    background: white;
-    padding: 1.5rem;
-    border-radius: 8px;
-    min-width: 300px;
-  }
-
-  .modal-actions {
-    margin-top: 1rem;
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-  }
-</style>
+{/if} 

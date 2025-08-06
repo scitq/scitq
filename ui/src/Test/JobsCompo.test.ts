@@ -39,8 +39,8 @@ describe('JobsCompo', () => {
       }
     });
 
-    const job1ModifiedDate = new Date('2025-03-10T21:12:30').toLocaleString('fr-FR');
-    const job2ModifiedDate = new Date('2025-04-28T21:12:30').toLocaleString('fr-FR');
+    const job1ModifiedDate = new Date('2025-03-10T21:12:30').toLocaleString();
+    const job2ModifiedDate = new Date('2025-04-28T21:12:30').toLocaleString();
 
     await waitFor(() => {
       expect(screen.getByText('Deploy Worker')).toBeInTheDocument();

@@ -1,25 +1,35 @@
 // Navigation.test.ts
 vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
-
-import { render, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import App from '../App.svelte';
-import { isLoggedIn, userInfo } from '../lib/Stores/user';
-
-
+import { isLoggedIn } from '../lib/Stores/user';
 
 const mockTasks = [
-  { taskId: 1, name: 'Task A', status: 'P', workerId: 1, workflowId: 30, stepId: 100 },
-  { taskId: 2, name: 'Task B', status: 'S', workerId: 2, workflowId: 10, stepId: 200 },
-  { taskId: 3, name: 'Task C', status: 'R', workerId: 1, workflowId: 10, stepId: 100  },
+  { taskId: 1, name: 'Task A', status: 'P', workerId: 1, workflowId: 30, stepId: 100, command: 'cmd1' },
+  { taskId: 2, name: 'Task B', status: 'S', workerId: 2, workflowId: 10, stepId: 200, command: 'cmd2' },
+  { taskId: 3, name: 'Task C', status: 'R', workerId: 1, workflowId: 10, stepId: 100, command: 'cmd3' },
+];
+
+const mockWorkers = [
+  { workerId: 1, name: 'Worker 1' },
+  { workerId: 2, name: 'Worker 2' }
+];
+
+const mockWorkflows = [
+  { workflowId: 10, name: 'Workflow A' },
+  { workflowId: 20, name: 'Workflow B' },
+  { workflowId: 30, name: 'Workflow C' }
 ];
 
 describe('Navigation integration', () => {
   beforeEach(() => {
-    // Reset stores before each test
+    vi.clearAllMocks();
     isLoggedIn.set(true);
-    userInfo.set({ token: 'token' });
+    mockApi.getWorkers.mockResolvedValue(mockWorkers);
+    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
+    mockApi.getAllTasks.mockResolvedValue(mockTasks);
   });
 
   it('should display Dashboard page when clicking "Dashboard" in the ToolBar', async () => {
@@ -77,84 +87,72 @@ describe('Navigation integration', () => {
   });
 
   it('should navigate to Pending tasks when clicking through Starting chevron > Pending', async () => {
-    (mockApi.getAllTasks as any).mockImplementation(
-        async (_wId: number, _wfId: number, _stepId: number, status: string) =>
-        mockTasks.filter((t) => !status || t.status === status)
-    );
-
-    const { queryByText, getByTestId } = render(App);
-
-    // Wait for "Tasks" to appear
-    await waitFor(() => {
-        expect(queryByText('Tasks')).toBeInTheDocument();
+    mockApi.getAllTasks.mockImplementation((workerId, wfId, stepId, status, sortBy, command, limit, offset) => {
+      if (status === 'P') {
+        return Promise.resolve(mockTasks.filter(t => t.status === 'P'));
+      }
+      return Promise.resolve(mockTasks);
     });
 
-    // 1. Wait for "Tasks" to be clickable
-    const tasksChev = getByTestId('tasks-chevron');
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByText('Tasks')).toBeInTheDocument();
+    });
+
+    const tasksChev = screen.getByTestId('tasks-chevron');
     await fireEvent.click(tasksChev);
 
     await waitFor(() => {
-        expect(queryByText('Starting')).toBeInTheDocument();
+      expect(screen.getByText('Starting')).toBeInTheDocument();
     });
 
-    // 2. Click on "Starting"
-    const startingButton = getByTestId('starting-button');
+    const startingButton = screen.getByTestId('starting-button');
     await fireEvent.click(startingButton);
 
-    // Wait for the "Pending" link to be visible in the DOM
     await waitFor(() => {
-        expect(getByTestId('pending-link')).toBeInTheDocument();
+      expect(screen.getByTestId('pending-link')).toBeInTheDocument();
     });
 
-    // 3. Wait for "Pending" to be visible
-    const pendingLink = getByTestId('pending-link');
+    const pendingLink = screen.getByTestId('pending-link');
     await fireEvent.click(pendingLink);
 
-    // 4. Verify the filtered tasks are displayed correctly
     await waitFor(() => {
-        expect(mockApi.getAllTasks).toHaveBeenCalledWith(undefined, undefined, undefined, 'P', 'task');
-        expect(queryByText('Task A')).toBeInTheDocument();
-        expect(queryByText('Task B')).not.toBeInTheDocument();
-        expect(queryByText('Task C')).not.toBeInTheDocument();
+      expect(mockApi.getAllTasks).toHaveBeenCalledWith(
+        undefined, undefined, undefined, 'P', 'task', undefined, 25, 0
+      );
+      expect(screen.getByText('Task A')).toBeInTheDocument();
+      expect(screen.queryByText('Task B')).not.toBeInTheDocument();
+      expect(screen.queryByText('Task C')).not.toBeInTheDocument();
     });
   });
 
   it('should navigate to worker tasks when clicking through worker name in dashboard', async () => {
-    
-    (mockApi.getAllTasks as any).mockImplementation(
-      async (workerId : number) =>
-        mockTasks.filter((t) => !workerId || t.workerId === workerId)
-    );
-    
-    mockApi.getWorkers.mockResolvedValue([
-      { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1' }
-    ]);
-    window.location.hash = '#/tasks?workerId=1';
-    const { queryByText, getByText, getByTestId } = render(App);
-
-    // Wait for "Dashboard" to appear
-    await waitFor(() => {
-        expect(queryByText('Dashboard')).toBeInTheDocument();
+    mockApi.getAllTasks.mockImplementation((workerId) => {
+      return Promise.resolve(mockTasks.filter(t => t.workerId === workerId));
     });
 
-    // Click the "Dashboard" button
-    const dashboardButton = getByText('Dashboard');
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    });
+
+    const dashboardButton = screen.getByText('Dashboard');
     await fireEvent.click(dashboardButton);
 
     await waitFor(() => {
-        expect(getByText('Worker 1')).toBeInTheDocument();
+      expect(screen.getByTestId('worker-name-1')).toBeInTheDocument();
     });
 
-    // 2. Click on "Worker 1"
-    const workerLink = getByText('Worker 1');
+    const workerLink = screen.getByTestId('worker-name-1');
     await fireEvent.click(workerLink);
 
-    // 4. Verify the filtered tasks are displayed correctly
     await waitFor(() => {
-        expect(mockApi.getAllTasks).toHaveBeenCalledWith(1, undefined, undefined, undefined, 'task');
-        expect(queryByText('Task A')).toBeInTheDocument();
-        expect(queryByText('Task B')).not.toBeInTheDocument();
-        expect(queryByText('Task C')).toBeInTheDocument();
+      expect(mockApi.getAllTasks).toHaveBeenCalledWith(1, undefined, undefined, undefined, 'task', undefined, 25, 0);
+      expect(screen.getByText('Task A')).toBeInTheDocument();
+      expect(screen.queryByText('Task B')).not.toBeInTheDocument();
+      expect(screen.getByText('Task C')).toBeInTheDocument();
     });
   });
 
@@ -165,6 +163,13 @@ describe('Navigation integration', () => {
     );
 
     const { queryByText, getByTestId } = render(App);
+    
+    await waitFor(() => {
+      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    });
+
+    const dashboardButton = screen.getByText('Dashboard');
+    await fireEvent.click(dashboardButton);
 
     await waitFor(() => {
       expect(getByTestId('dashboard-page')).toBeInTheDocument();
@@ -174,7 +179,7 @@ describe('Navigation integration', () => {
     const pendingDashboard = getByTestId('pending-link-dashboard');
     await fireEvent.click(pendingDashboard);
     await waitFor(() => {
-        expect(mockApi.getAllTasks).toHaveBeenCalledWith(undefined, undefined, undefined, 'P', 'task');
+        expect(mockApi.getAllTasks).toHaveBeenCalledWith(undefined, undefined, undefined, 'P', 'task', undefined, 25, 0);
         expect(queryByText('Task A')).toBeInTheDocument();
         expect(queryByText('Task B')).not.toBeInTheDocument();
         expect(queryByText('Task C')).not.toBeInTheDocument();
@@ -197,95 +202,79 @@ describe('Navigation integration', () => {
   });
 
   it('should navigate to workflow tasks when clicking through workflow name in Workflows', async () => {
-  
-    (mockApi.getAllTasks as any).mockImplementation(
-        async (_wId: number, _wfId: number, _stepId: number, status: string) =>
-        mockTasks.filter((t) => !_wfId || t.workflowId === _wfId)
-    );
-    
-    mockApi.getWorkFlow.mockResolvedValue([
-      { workflowId: 10, name: 'Workflow A' },
-      { workflowId: 20, name: 'Workflow B' },
-    ]);
-    window.location.hash = '#/tasks?workflowId=10';
-    const { queryByText, getByText, getByTestId } = render(App);
-
-    await waitFor(() => {
-        expect(queryByText('Workflows')).toBeInTheDocument();
+    mockApi.getAllTasks.mockImplementation((workerId, wfId) => {
+      return Promise.resolve(mockTasks.filter(t => t.workflowId === wfId));
     });
 
-    const workflowsButton = getByText('Workflows');
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByText('Workflows')).toBeInTheDocument();
+    });
+
+    const workflowsButton = screen.getByText('Workflows');
     await fireEvent.click(workflowsButton);
 
     await waitFor(() => {
-        expect(getByText('Workflow A')).toBeInTheDocument();
+      expect(screen.getByText('Workflow A')).toBeInTheDocument();
     });
 
-    const workflowName = getByText('Workflow A');
+    const workflowName = screen.getByText('Workflow A');
     await fireEvent.click(workflowName);
 
     await waitFor(() => {
-        expect(mockApi.getAllTasks).toHaveBeenCalledWith(undefined, 10, undefined, undefined, 'task');
-        expect(queryByText('Task A')).not.toBeInTheDocument();
-        expect(queryByText('Task B')).toBeInTheDocument();
-        expect(queryByText('Task C')).toBeInTheDocument();
+      expect(mockApi.getAllTasks).toHaveBeenCalledWith(
+        undefined, 10, undefined, undefined, 'task', undefined, 25, 0
+      );
+      expect(screen.queryByText('Task A')).not.toBeInTheDocument();
+      expect(screen.getByText('Task B')).toBeInTheDocument();
+      expect(screen.getByText('Task C')).toBeInTheDocument();
     });
   });
 
   it('should navigate to step tasks when clicking through step name in Workflows', async () => {
-  
-    (mockApi.getAllTasks as any).mockImplementation(
-        async (_wId: number, _wfId: number, _stepId: number, status: string) =>
-        mockTasks.filter((t) => !_stepId || t.stepId === _stepId)
-    );
-    
-    mockApi.getWorkFlow.mockResolvedValue([
-      { workflowId: 10, name: 'Workflow A' },
-      { workflowId: 20, name: 'Workflow B' },
+    mockApi.getSteps.mockResolvedValue([
+      { stepId: 100, name: 'Step A', workflowId: 10 },
+      { stepId: 200, name: 'Step B', workflowId: 10 }
     ]);
-        
-      mockApi.getSteps.mockImplementation(async (workflowId) => {
-        if (workflowId === 10) {
-          return [
-            { stepId: 100, name: 'Step A', workflowId: 10 },
-            { stepId: 200, name: 'Step B', workflowId: 10 },
-          ];
-        }
-        return [];
-      });
-    window.location.hash = '#/tasks?workflowId=10&stepId=1';
-    const { queryByText, getByText, getByTestId } = render(App);
 
-    await waitFor(() => {
-        expect(queryByText('Workflows')).toBeInTheDocument();
+    mockApi.getAllTasks.mockImplementation((workerId, wfId, stepId) => {
+      return Promise.resolve(mockTasks.filter(t => t.stepId === stepId));
     });
 
-    const workflowsButton = getByText('Workflows');
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByText('Workflows')).toBeInTheDocument();
+    });
+
+    const workflowsButton = screen.getByText('Workflows');
     await fireEvent.click(workflowsButton);
 
     await waitFor(() => {
-        expect(getByTestId('chevronRight-10')).toBeInTheDocument();
+      expect(screen.getByTestId('chevronRight-10')).toBeInTheDocument();
     });
 
-    const chevronBtn = getByTestId('chevronRight-10');
+    const chevronBtn = screen.getByTestId('chevronRight-10');
     await fireEvent.click(chevronBtn);
 
     await waitFor(() => {
-        expect(queryByText('Step A')).toBeInTheDocument();
-        expect(queryByText('Step B')).toBeInTheDocument();
+      expect(screen.getByText('Step A')).toBeInTheDocument();
     });
 
-    const stepBtn = getByText('Step A');
+    const stepBtn = screen.getByText('Step A');
     await fireEvent.click(stepBtn);
 
     await waitFor(() => {
-        expect(mockApi.getAllTasks).toHaveBeenCalledWith(undefined, 10, 100, undefined, 'task');
-        expect(queryByText('Task A')).toBeInTheDocument();
-        expect(queryByText('Task B')).not.toBeInTheDocument();
-        expect(queryByText('Task C')).toBeInTheDocument();
+      expect(mockApi.getAllTasks).toHaveBeenCalledWith(
+        undefined, 10, 100, undefined, 'task', undefined, 25, 0
+      );
+      expect(screen.getByText('Task A')).toBeInTheDocument();
+      expect(screen.queryByText('Task B')).not.toBeInTheDocument();
+      expect(screen.getByText('Task C')).toBeInTheDocument();
     });
   });
-
+  
   it('should display Workflow Template page when clicking "Templates" in the ToolBar', async () => {
     const { getByTestId, getByText, queryByText } = render(App);
 

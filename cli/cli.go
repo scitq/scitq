@@ -662,7 +662,7 @@ func (c *CLI) StepList() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	res, err := c.QC.Client.ListSteps(ctx, &pb.WorkflowId{WorkflowId: c.Attr.Step.List.WorkflowId})
+	res, err := c.QC.Client.ListSteps(ctx, &pb.StepFilter{WorkflowId: c.Attr.Step.List.WorkflowId})
 	if err != nil {
 		return fmt.Errorf("failed to list steps: %w", err)
 	}

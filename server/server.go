@@ -23,6 +23,7 @@ import (
 	"github.com/scitq/scitq/server/protofilter"
 	"github.com/scitq/scitq/server/providers"
 	"github.com/scitq/scitq/server/watchdog"
+	ws "github.com/scitq/scitq/server/websocket"
 
 	"github.com/scitq/scitq/fetch"
 
@@ -182,6 +183,54 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		s.triggerAssign()
 	}
 
+	// 🔔 Broadcast WebSocket after task creation
+	payload := struct {
+		Type    string `json:"type"`
+		Payload struct {
+			TaskId     uint32  `json:"taskId"`
+			Command    string  `json:"command"`
+			StepId     *uint32 `json:"stepId,omitempty"`
+			Output     string  `json:"output,omitempty"`
+			Status     string  `json:"status"`
+			TaskName   string `json:"taskName,omitempty"`
+		} `json:"payload"`
+	}{
+		Type: "task-created",
+		Payload: struct {
+			TaskId     uint32  `json:"taskId"`
+			Command    string  `json:"command"`
+			StepId     *uint32 `json:"stepId,omitempty"`
+			Output     string  `json:"output,omitempty"`
+			Status     string  `json:"status"`
+			TaskName   string `json:"taskName,omitempty"`
+		}{
+            TaskId:  uint32(taskID),
+            Command: req.Command,
+            Status:  initialStatus,
+        },
+    }
+
+    // Gérer les champs optionnels
+    if req.StepId != nil {
+        payload.Payload.StepId = req.StepId
+    }
+    if req.Output != nil {
+        payload.Payload.Output = *req.Output
+    }
+    if req.TaskName != nil {
+        payload.Payload.TaskName = *req.TaskName
+    }
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("⚠️ Failed to marshal WebSocket task-created: %v", err)
+	} else {
+		ws.Broadcast(jsonData)
+	}
+
+
+
+
 	return &pb.TaskResponse{TaskId: uint32(taskID)}, nil
 }
 
@@ -290,6 +339,38 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	if shouldTriggerAssignFor(req.NewStatus) {
 		s.triggerAssign()
 	}
+
+	// 🔔 Broadcast WebSocket
+    payload := struct {
+        Type    string `json:"type"`
+        Payload struct {
+            TaskId     uint32 `json:"taskId"`
+            Status     string `json:"status"`
+            WorkerId   uint32 `json:"workerId,omitempty"`
+        } `json:"payload"`
+    }{
+        Type: "task-updated",
+        Payload: struct {
+            TaskId     uint32 `json:"taskId"`
+            Status     string `json:"status"`
+            WorkerId   uint32 `json:"workerId,omitempty"`
+        }{
+            TaskId: req.TaskId,
+            Status: req.NewStatus,
+        },
+    }
+
+    if workerID.Valid {
+        payload.Payload.WorkerId = uint32(workerID.Int32)
+    }
+
+    jsonData, err := json.Marshal(payload)
+    if err != nil {
+        log.Printf("⚠️ Failed to marshal WebSocket task-updated: %v", err)
+    } else {
+        ws.Broadcast(jsonData)
+    }
+
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -615,17 +696,14 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 	var workerDetailsList []*pb.WorkerDetails
 	var jobs []Job
 
-	// Begin a new database transaction
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to start transaction: %v", err)
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback() // Ensure rollback if commit not reached
-
-	// Loop to create the requested number of workers
 	for req.Number > 0 {
 		req.Number--
+
+		tx, err := s.db.Begin()
+		if err != nil {
+			log.Printf("⚠️ Failed to start transaction: %v", err)
+			return nil, fmt.Errorf("failed to start transaction: %w", err)
+		}
 
 		var workerID uint32
 		var workerName string
@@ -636,8 +714,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var cpu int32
 		var memory float32
 
-		// Insert a new worker row and retrieve its details joined with related tables
-		err := tx.QueryRow(`WITH insertquery AS (
+		err = tx.QueryRow(`WITH insertquery AS (
 			INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
 			VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
 			RETURNING worker_id, worker_name, region_id, flavor_id
@@ -650,36 +727,30 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
 			&workerID, &workerName, &providerID, &providerName, &regionName, &flavorName, &cpu, &memory)
 		if err != nil {
+			tx.Rollback()
 			return nil, fmt.Errorf(
 				"failed to register worker [step:%d, concurrency:%d, flavor:%d, region:%d]: %w",
-				req.StepId,
-				req.Concurrency,
-				req.FlavorId,
-				req.RegionId,
-				err,
-			)
+				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, err)
 		}
 
 		var jobID uint32
-		// Insert a new job related to this worker and get its ID
 		tx.QueryRow("INSERT INTO job (worker_id, flavor_id, region_id, retry) VALUES ($1, $2, $3, $4) RETURNING job_id",
 			workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
 
-		// Register the resource launch in the queue manager
 		s.qm.RegisterLaunch(regionName, providerName, cpu, memory)
 
-		// Append the new job to the jobs list for further processing
-		jobs = append(jobs, Job{
+		job := Job{
 			JobID:      jobID,
 			WorkerID:   workerID,
 			WorkerName: workerName,
 			ProviderID: providerID,
 			Region:     regionName,
 			Flavor:     flavorName,
-			Action:     'C', // 'C' could mean Create or similar action
+			Action:     'C',
 			Retry:      defaultJobRetry,
 			Timeout:    defaultJobTimeout,
-		})
+		}
+		jobs = append(jobs, job)
 
 		workerDetailsList = append(workerDetailsList, &pb.WorkerDetails{
 			WorkerId:   workerID,
@@ -687,26 +758,68 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			JobId:      jobID,
 		})
 
-		// Commit the transaction after each worker is created successfully
 		if err := tx.Commit(); err != nil {
 			log.Printf("⚠️ Failed to commit worker registration: %v", err)
 			return nil, fmt.Errorf("failed to commit worker registration: %w", err)
 		}
+
+
+		type workerPayload struct {
+			WorkerId    uint32 `json:"workerId"`
+			Name        string `json:"name"`
+			Concurrency uint32 `json:"concurrency"`
+			Prefetch    uint32 `json:"prefetch"`
+			Status      string `json:"status"`
+		}
+
+		type jobPayload struct {
+			JobId      uint32    `json:"jobId"`
+			Action     string    `json:"action,omitempty"`
+			Status     string    `json:"status,omitempty"`
+			WorkerID   uint32    `json:"workerId,omitempty"`
+			ModifiedAt time.Time `json:"modifiedAt,omitempty"`
+		}
+
+		jsonData, err := json.Marshal(struct {
+			Type          string        `json:"type"`
+			PayloadWorker workerPayload `json:"payloadWorker"`
+			PayloadJob    jobPayload    `json:"payloadJob"`
+		}{
+			Type: "worker-created",
+			PayloadWorker: workerPayload{
+				WorkerId:    workerID,
+				Name:        workerName,
+				Concurrency: req.Concurrency,
+				Prefetch:    req.Concurrency, 
+				Status:      "P",
+			},
+			PayloadJob: jobPayload{
+				JobId:      jobID,
+				Action:     "C",
+				Status:     "P",
+				WorkerID:   workerID,
+				ModifiedAt: time.Now(),
+			},
+		})
+		if err != nil {
+			log.Printf("❌ Failed to marshal JSON: %v", err)
+			continue
+		}
+
+		ws.Broadcast(jsonData)
 	}
 
-	// Add all created jobs to the job queue
 	for _, job := range jobs {
 		s.addJob(job)
 	}
 
-	// Trigger job assignment process
 	s.triggerAssign()
 
-	// Return the details of all created workers
 	return &pb.WorkerIds{
 		WorkersDetails: workerDetailsList,
 	}, nil
 }
+
 
 func (s *taskQueueServer) GetWorkerStatuses(ctx context.Context, req *pb.WorkerStatusRequest) (*pb.WorkerStatusResponse, error) {
 	var statuses []*pb.WorkerStatus
@@ -854,74 +967,129 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 		return nil, fmt.Errorf("failed to commit worker deletion: %w", err)
 	}
 
+	type workerPayload struct {
+		WorkerId uint32 `json:"workerId"`
+	}
+
+	type jobPayload struct {
+		JobId      uint32    `json:"jobId"`
+		Action     string    `json:"action,omitempty"`
+		Status     string    `json:"status,omitempty"`
+		WorkerID   uint32    `json:"workerId,omitempty"`
+		ModifiedAt time.Time `json:"modifiedAt,omitempty"`
+	}
+
+	jsonData, err := json.Marshal(struct {
+		Type          string        `json:"type"`
+		PayloadWorker workerPayload `json:"payloadWorker"`
+		PayloadJob    jobPayload    `json:"payloadJob"`
+	}{
+		Type: "worker-deleted",
+		PayloadWorker: workerPayload{
+			WorkerId: req.WorkerId,
+		},
+		PayloadJob: jobPayload{
+			JobId:      job.JobID,
+			Action:     "D",
+			Status:     "P",
+			WorkerID:   req.WorkerId,
+			ModifiedAt: time.Now(),
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal json: %w", err)
+	}
+
+	ws.Broadcast(jsonData)
+
+
 	return &pb.JobId{JobId: job.JobID}, nil
 }
 
 func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest) (*pb.JobsList, error) {
-	var jobs []*pb.Job
+    // Set default values
+    var limit *int // nil means no limit
+    offset := 0
 
-	query := `
-		SELECT 
-			job_id,
-			status,
-			COALESCE(flavor_id, 0) AS flavor_id,
-			retry,
-			COALESCE(worker_id, 0) AS worker_id,
-			action,
-			created_at,
-			modified_at,
-			progression,
-			COALESCE(log, '')  -- pour éviter les NULL
-		FROM job
-		ORDER BY job_id;
-	`
+    // Override defaults if values are provided in the request
+    if req.Limit != nil {
+        l := int(*req.Limit)
+        if l < 1 {
+            l = 1 // Minimum 1 result
+        }
+        limit = &l
+    }
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to start transaction: %v", err)
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback()
+    if req.Offset != nil {
+        offset = int(*req.Offset)
+        if offset < 0 {
+            offset = 0 // No negative offset
+        }
+    }
 
-	rows, err := tx.Query(query)
-	if err != nil {
-		log.Printf("⚠️ Failed to list jobs: %v", err)
-		return nil, fmt.Errorf("failed to list jobs: %w", err)
-	}
-	defer rows.Close()
+    // Build base SQL query
+    query := `
+        SELECT 
+            job_id,
+            status,
+            COALESCE(flavor_id, 0) AS flavor_id,
+            retry,
+            COALESCE(worker_id, 0) AS worker_id,
+            action,
+            created_at,
+            modified_at,
+            progression,
+            COALESCE(log, '')
+        FROM job
+    `
 
-	for rows.Next() {
-		var job pb.Job
-		err := rows.Scan(
-			&job.JobId,
-			&job.Status,
-			&job.FlavorId,
-			&job.Retry,
-			&job.WorkerId,
-			&job.Action,
-			&job.CreatedAt,
-			&job.ModifiedAt,
-			&job.Progression,
-			&job.Log,
-		)
-		if err != nil {
-			log.Printf("⚠️ Failed to scan job: %v", err)
-			continue
-		}
-		jobs = append(jobs, &job)
-	}
+    // Add pagination clauses
+    var rows *sql.Rows
+    var err error
+    
+    if limit != nil {
+        query += " LIMIT $1 OFFSET $2"
+        rows, err = s.db.Query(query, *limit, offset)
+    } else {
+        query += " OFFSET $1"
+        rows, err = s.db.Query(query, offset)
+    }
 
-	if err := rows.Err(); err != nil {
-		log.Printf("⚠️ Error iterating jobs: %v", err)
-		return nil, fmt.Errorf("error iterating jobs: %w", err)
-	}
+    if err != nil {
+        log.Printf("⚠️ Failed to query jobs: %v", err)
+        return nil, fmt.Errorf("failed to query jobs: %w", err)
+    }
+    defer rows.Close()
 
-	if err := tx.Commit(); err != nil {
-		log.Printf("⚠️ Failed to commit job listing: %v", err)
-		return nil, fmt.Errorf("failed to commit job listing: %w", err)
-	}
+    // Process query results
+    var jobs []*pb.Job
+    for rows.Next() {
+        var job pb.Job
+        err := rows.Scan(
+            &job.JobId,
+            &job.Status,
+            &job.FlavorId,
+            &job.Retry,
+            &job.WorkerId,
+            &job.Action,
+            &job.CreatedAt,
+            &job.ModifiedAt,
+            &job.Progression,
+            &job.Log,
+        )
+        if err != nil {
+            log.Printf("⚠️ Failed to scan job: %v", err)
+            continue
+        }
+        jobs = append(jobs, &job)
+    }
 
-	return &pb.JobsList{Jobs: jobs}, nil
+    if err := rows.Err(); err != nil {
+        log.Printf("⚠️ Error iterating jobs: %v", err)
+        return nil, fmt.Errorf("error iterating jobs: %w", err)
+    }
+
+    return &pb.JobsList{Jobs: jobs}, nil
 }
 
 func (s *taskQueueServer) GetJobStatuses(ctx context.Context, req *pb.JobStatusRequest) (*pb.JobStatusResponse, error) {
@@ -957,6 +1125,27 @@ func (s *taskQueueServer) DeleteJob(ctx context.Context, req *pb.JobId) (*pb.Ack
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete job: %w", err)
 	}
 
+	payload := struct {
+		Type    string `json:"type"`
+		Payload struct {
+			JobId uint32 `json:"jobId"`
+		} `json:"payload"`
+	}{
+		Type: "job-deleted",
+		Payload: struct {
+			JobId uint32 `json:"jobId"`
+		}{
+			JobId: req.JobId,
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
+	}
+
+	ws.Broadcast(jsonData)
+
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -969,60 +1158,132 @@ func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.Worker
 }
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
-	var tasks []*pb.Task
-	var rows *sql.Rows
-	var err error
+    // Parameter validation and default values
+    params := struct {
+        Status   string
+        WorkerID int
+        StepID   int
+        Command  string
+        Limit    *int
+        Offset   int
+    }{
+        Status:   "",  // Default: no status filter
+        WorkerID: 0,   // Default: no worker filter
+        StepID:   0,   // Default: no step filter
+        Command:  "",  // Default: no command filter
+        Limit:    nil, // Default: no limit
+        Offset:   0,   // Default: start from first record
+    }
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("⚠️ Failed to start transaction: %v", err)
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback()
+    // Apply filters from request if they exist
+    if req.StatusFilter != nil {
+        params.Status = *req.StatusFilter
+    }
+    if req.WorkerIdFilter != nil {
+        params.WorkerID = int(*req.WorkerIdFilter)
+    }
+    if req.StepIdFilter != nil {
+        params.StepID = int(*req.StepIdFilter)
+    }
+    if req.CommandFilter != nil {
+        params.Command = *req.CommandFilter
+    }
+    if req.Limit != nil {
+        limit := int(*req.Limit)
+        params.Limit = &limit
+    }
+    if req.Offset != nil {
+        params.Offset = int(*req.Offset)
+    }
 
-	// **Filter by status and worker if provided**
-	if req.StatusFilter != nil && *req.StatusFilter != "" && req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE status = $1 AND worker_id = $2 ORDER BY task_id`, *req.StatusFilter, *req.WorkerIdFilter)
-	} else if req.StatusFilter != nil && *req.StatusFilter != "" {
-		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE status = $1 ORDER BY task_id`, *req.StatusFilter)
-	} else if req.WorkerIdFilter != nil {
-		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task WHERE worker_id = $1 ORDER BY task_id`, *req.WorkerIdFilter)
-	} else {
-		rows, err = tx.Query(`SELECT task_id, task_name, command, container, status, worker_id, step_id FROM task ORDER BY task_id`)
-	}
+    // Build SQL query with safe parameterized queries
+    query := `
+        SELECT t.task_id, t.task_name, t.command, t.container, t.status, 
+               t.worker_id, t.step_id
+        FROM task t
+        WHERE ($1 = '' OR t.status = $1)          -- Status filter (if provided)
+        AND ($2 = 0 OR t.worker_id = $2)          -- Worker filter (if provided)
+        AND ($3 = 0 OR t.step_id = $3)            -- Step filter (if provided)
+        AND ($4 = '' OR t.command LIKE '%' || $4 || '%')  -- Command filter (substring match)
+        ORDER BY t.task_id DESC                   -- Always sort by task_id DESC
+    `
 
-	if err != nil {
-		log.Printf("⚠️ Failed to list tasks: %v", err)
-		return nil, fmt.Errorf("failed to list tasks: %w", err)
-	}
-	defer rows.Close()
+    // Execute query with pagination
+    var rows *sql.Rows
+    var err error
+    
+    if params.Limit != nil {
+        // Query with limit and offset
+        query += " LIMIT $5 OFFSET $6"
+        rows, err = s.db.Query(query,
+            params.Status,
+            params.WorkerID,
+            params.StepID,
+            params.Command,
+            *params.Limit,
+            params.Offset,
+        )
+    } else {
+        // Query with offset only
+        query += " OFFSET $5"
+        rows, err = s.db.Query(query,
+            params.Status,
+            params.WorkerID,
+            params.StepID,
+            params.Command,
+            params.Offset,
+        )
+    }
 
-	for rows.Next() {
-		var task pb.Task
-		var taskName sql.NullString
-		err := rows.Scan(&task.TaskId, &taskName, &task.Command, &task.Container, &task.Status, &task.WorkerId, &task.StepId)
-		if err != nil {
-			log.Printf("⚠️ Failed to scan task: %v", err)
-			continue
-		}
-		if taskName.Valid {
-			task.TaskName = &taskName.String
-		}
-		tasks = append(tasks, &task)
-	}
+    if err != nil {
+        return nil, fmt.Errorf("failed to query tasks: %w", err)
+    }
+    defer rows.Close()
 
-	if err := rows.Err(); err != nil {
-		log.Printf("⚠️ Error iterating tasks: %v", err)
-		return nil, fmt.Errorf("error iterating tasks: %w", err)
-	}
+    // Process query results
+    var tasks []*pb.Task
 
-	if err := tx.Commit(); err != nil {
-		log.Printf("⚠️ Failed to commit task listing: %v", err)
-		return nil, fmt.Errorf("failed to commit task listing: %w", err)
-	}
+    for rows.Next() {
+        var task pb.Task
+        var (
+            taskName sql.NullString
+            stepID   sql.NullInt32
+        )
 
-	return &pb.TaskList{Tasks: tasks}, nil
+        // Scan row into variables
+        err := rows.Scan(
+            &task.TaskId,
+            &taskName,
+            &task.Command,
+            &task.Container,
+            &task.Status,
+            &task.WorkerId,
+            &stepID,
+        )
+
+        if err != nil {
+            continue // Skip rows with errors
+        }
+
+        // Handle NULL values
+        if taskName.Valid {
+            task.TaskName = &taskName.String
+        }
+        if stepID.Valid {
+            task.StepId = proto.Uint32(uint32(stepID.Int32))
+        }
+
+        tasks = append(tasks, &task)
+    }
+
+    // Check for errors during iteration
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("error reading tasks: %w", err)
+    }
+
+    return &pb.TaskList{Tasks: tasks}, nil
 }
+
 
 func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingAndGetNewTasksRequest) (*pb.TaskListAndOther, error) {
 	var (
@@ -1367,9 +1628,9 @@ func NewLogin(s *taskQueueServer) http.HandlerFunc {
 			Name:     "session_token",
 			Value:    tokenStr,
 			HttpOnly: true,
-			Secure:   false, // Set to true in production with HTTPS
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   3600 * 24, // 1 day expiration
+			Secure:   true, // Set to true in production with HTTPS
+			SameSite: http.SameSiteNoneMode,
+			MaxAge:   3600 * 24, 
 		})
 
 		w.WriteHeader(http.StatusOK)
@@ -1494,7 +1755,6 @@ func fetchWorkerTokenHandler(s *taskQueueServer) http.HandlerFunc {
 
 // CreateUser creates a new user in the system, requires admin privileges.
 func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.UserId, error) {
-	// Extract user from context for logging and permission check
 	user := GetUserFromContext(ctx)
 
 	if user != nil {
@@ -1503,19 +1763,16 @@ func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequ
 		log.Println("No user found in context")
 	}
 
-	// Verify admin privileges
 	if !IsAdmin(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
 	}
 
-	// Hash the password using bcrypt
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to hash password")
 	}
 
 	var userID uint32
-	// Insert new user record into database
 	err = s.db.QueryRow(
 		`INSERT INTO scitq_user (username, password, email, is_admin)
 		 VALUES ($1, $2, $3, $4) RETURNING user_id`,
@@ -1529,9 +1786,36 @@ func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequ
 		return nil, status.Error(codes.Internal, "failed to create user")
 	}
 
-	// Return the newly created user's ID
+	type userCreatePayload struct {
+		UserId   uint32  `json:"userId"`
+		Username *string `json:"username,omitempty"`
+		Email    *string `json:"email,omitempty"`
+		IsAdmin  *bool   `json:"isAdmin,omitempty"`
+	}
+
+	payload := struct {
+		Type    string            `json:"type"`
+		Payload userCreatePayload `json:"payload"`
+	}{
+		Type: "user-created",
+		Payload: userCreatePayload{
+			UserId:   userID,
+			Username: &req.Username,
+			Email:    &req.Email,
+			IsAdmin:  &req.IsAdmin,
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal json: %w", err)
+	}
+
+	ws.Broadcast(jsonData)
+
 	return &pb.UserId{UserId: userID}, nil
 }
+
 
 // ListUsers returns a list of all users in the system.
 func (s *taskQueueServer) ListUsers(ctx context.Context, _ *emptypb.Empty) (*pb.UsersList, error) {
@@ -1572,6 +1856,8 @@ func (s *taskQueueServer) DeleteUser(ctx context.Context, req *pb.UserId) (*pb.A
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete user %d: %w", req.UserId, err)
 	}
+
+	ws.Broadcast([]byte(fmt.Sprintf(`{"type":"user-deleted","userId":%d}`, req.UserId)))
 
 	// Return success acknowledgement
 	return &pb.Ack{Success: true}, nil
@@ -1626,6 +1912,32 @@ func (s *taskQueueServer) UpdateUser(ctx context.Context, req *pb.User) (*pb.Ack
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update user %d: %w", req.UserId, err)
 	}
+	
+	type userUpdatePayload struct {
+		UserId   uint32  `json:"userId"`
+		Username *string `json:"username,omitempty"`
+		Email    *string `json:"email,omitempty"`
+		IsAdmin  *bool   `json:"isAdmin,omitempty"`
+	}
+	payload := struct {
+		Type    string            `json:"type"`
+		Payload userUpdatePayload `json:"payload"`
+	}{
+		Type: "user-updated",
+		Payload: userUpdatePayload{
+			UserId:   req.UserId,
+			Username: req.Username,
+			Email:    req.Email,
+			IsAdmin:  req.IsAdmin,
+		},
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
+	}
+	ws.Broadcast(jsonData)
+
+
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -1779,29 +2091,66 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
-	query := `SELECT workflow_id, workflow_name, run_strategy, maximum_workers FROM workflow`
-	var rows *sql.Rows
-	var err error
-	if req.NameLike != nil {
-		rows, err = s.db.Query(query+" WHERE workflow_name ILIKE $1", req.NameLike)
-	} else {
-		rows, err = s.db.Query(query)
-	}
+    // Base query to select workflow fields
+    query := `
+        SELECT workflow_id, workflow_name, run_strategy, maximum_workers 
+        FROM workflow
+    `
+    var args []interface{}
+    
+    // Add name filter if provided
+    if req.NameLike != nil {
+        query += " WHERE workflow_name ILIKE $1"
+        args = append(args, req.NameLike)
+    }
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to query workflows: %w", err)
-	}
-	defer rows.Close()
+    // Handle pagination parameters
+    paramCount := len(args)
+    
+    // Add LIMIT clause if provided
+    if req.Limit != nil {
+        limit := int(*req.Limit)
+        if limit < 1 {
+            limit = 1 // Ensure at least 1 result
+        }
+        args = append(args, limit)
+        query += fmt.Sprintf(" LIMIT $%d", paramCount+1)
+        paramCount++
+    }
 
-	var workflows []*pb.Workflow
-	for rows.Next() {
-		var wf pb.Workflow
-		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
-			return nil, fmt.Errorf("failed to scan workflow: %w", err)
-		}
-		workflows = append(workflows, &wf)
-	}
-	return &pb.WorkflowList{Workflows: workflows}, nil
+    // Add OFFSET clause if provided
+    if req.Offset != nil {
+        offset := int(*req.Offset)
+        if offset < 0 {
+            offset = 0 // No negative offset
+        }
+        args = append(args, offset)
+        query += fmt.Sprintf(" OFFSET $%d", paramCount+1)
+    }
+
+    // Execute the query with context
+    rows, err := s.db.QueryContext(ctx, query, args...)
+    if err != nil {
+        return nil, fmt.Errorf("failed to query workflows: %w", err)
+    }
+    defer rows.Close()
+
+    // Process query results
+    var workflows []*pb.Workflow
+    for rows.Next() {
+        var wf pb.Workflow
+        if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
+            return nil, fmt.Errorf("failed to scan workflow: %w", err)
+        }
+        workflows = append(workflows, &wf)
+    }
+
+    // Check for errors during iteration
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("error iterating workflows: %w", err)
+    }
+
+    return &pb.WorkflowList{Workflows: workflows}, nil
 }
 
 func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRequest) (*pb.WorkflowId, error) {
@@ -1834,6 +2183,27 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 		return nil, fmt.Errorf("failed to insert workflow: %w", err)
 	}
 
+	type workflowPayload struct {
+		WorkflowId uint32  `json:"workflowId"`
+		Name       *string `json:"name,omitempty"`
+	}
+
+	jsonData, err := json.Marshal(struct {
+		Type    string          `json:"type"`
+		Payload workflowPayload `json:"payload"`
+	}{
+		Type: "workflow-created",
+		Payload: workflowPayload{
+			WorkflowId: workflowID,
+			Name:       &req.Name,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal json: %w", err)
+	}
+
+	ws.Broadcast(jsonData)
+
 	return &pb.WorkflowId{WorkflowId: workflowID}, nil
 }
 
@@ -1842,12 +2212,64 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
 	}
+
+	payload := struct {
+		Type    string `json:"type"`
+		Payload struct {
+			WorkflowId uint32 `json:"workflowId"`
+		} `json:"payload"`
+	}{
+		Type: "workflow-deleted",
+		Payload: struct {
+			WorkflowId uint32 `json:"workflowId"`
+		}{
+			WorkflowId: req.WorkflowId,
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
+	}
+
+	ws.Broadcast(jsonData)
+
+
+	ws.Broadcast(jsonData)
 	return &pb.Ack{Success: true}, nil
 }
 
-func (s *taskQueueServer) ListSteps(ctx context.Context, req *pb.WorkflowId) (*pb.StepList, error) {
-	rows, err := s.db.Query(`SELECT step_id, workflow_name, step_name FROM step s 
-		JOIN workflow w ON w.workflow_id=s.workflow_id WHERE s.workflow_id = $1`, req.WorkflowId)
+func (s *taskQueueServer) ListSteps(ctx context.Context, req *pb.StepFilter) (*pb.StepList, error) {
+	query := `
+		SELECT step_id, workflow_name, step_name 
+		FROM step s 
+		JOIN workflow w ON w.workflow_id = s.workflow_id 
+		WHERE s.workflow_id = $1
+	`
+	args := []interface{}{req.WorkflowId}
+	paramCount := 1
+
+	if req.Limit != nil {
+		limit := int(*req.Limit)
+		if limit < 1 {
+			limit = 1
+		}
+		args = append(args, limit)
+		paramCount++
+		query += fmt.Sprintf(" LIMIT $%d", paramCount)
+	}
+
+	if req.Offset != nil {
+		offset := int(*req.Offset)
+		if offset < 0 {
+			offset = 0
+		}
+		args = append(args, offset)
+		paramCount++
+		query += fmt.Sprintf(" OFFSET $%d", paramCount)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query steps: %w", err)
 	}
@@ -1861,6 +2283,11 @@ func (s *taskQueueServer) ListSteps(ctx context.Context, req *pb.WorkflowId) (*p
 		}
 		steps = append(steps, &st)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating steps: %w", err)
+	}
+
 	return &pb.StepList{Steps: steps}, nil
 }
 
@@ -1869,21 +2296,24 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 		return nil, fmt.Errorf("step name is required")
 	}
 
+	type stepPayload struct {
+		StepId       uint32  `json:"stepId"`
+		Name         *string `json:"name,omitempty"`
+		WorkflowId   *uint32 `json:"workflowId,omitempty"`
+		WorkflowName *string `json:"workflowName,omitempty"`
+	}
+
+	var stepID uint32
+	var err error
+
 	if req.WorkflowId != nil && *req.WorkflowId != 0 {
-		var stepID uint32
-		err := s.db.QueryRow(`
+		err = s.db.QueryRow(`
 			INSERT INTO step (step_name, workflow_id)
 			VALUES ($1, $2)
 			RETURNING step_id
 		`, req.Name, *req.WorkflowId).Scan(&stepID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert step with workflow id %d: %w", *req.WorkflowId, err)
-		}
-		return &pb.StepId{StepId: stepID}, nil
-
 	} else if req.WorkflowName != nil {
-		var stepID uint32
-		err := s.db.QueryRow(`
+		err = s.db.QueryRow(`
 			WITH wf AS (
 				SELECT w.workflow_id FROM workflow w WHERE w.workflow_name = $1
 			)
@@ -1891,16 +2321,35 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 			SELECT $2, wf.workflow_id FROM wf
 			RETURNING step_id
 		`, *req.WorkflowName, req.Name).Scan(&stepID)
-
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("workflow with name %q not found", *req.WorkflowName)
-		} else if err != nil {
-			return nil, fmt.Errorf("failed to query workflow %q: %w", *req.WorkflowName, err)
-		}
-		return &pb.StepId{StepId: stepID}, nil
+	} else {
+		return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
 	}
 
-	return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("workflow not found")
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to insert step: %w", err)
+	}
+
+	jsonData, err := json.Marshal(struct {
+		Type    string      `json:"type"`
+		Payload stepPayload `json:"payload"`
+	}{
+		Type: "step-created",
+		Payload: stepPayload{
+			StepId:       stepID,
+			Name:         &req.Name,
+			WorkflowId:   req.WorkflowId,
+			WorkflowName: req.WorkflowName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal json: %w", err)
+	}
+
+	ws.Broadcast(jsonData)
+
+	return &pb.StepId{StepId: stepID}, nil
 }
 
 func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.Ack, error) {
@@ -1908,6 +2357,28 @@ func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.A
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete step: %w", err)
 	}
+
+	type stepPayload struct {
+		StepId       uint32  `json:"stepId"`
+		Name         *string `json:"name,omitempty"`
+		WorkflowId   *uint32 `json:"workflowId,omitempty"`
+		WorkflowName *string `json:"workflowName,omitempty"`
+	}
+
+	jsonData, err := json.Marshal(struct {
+		Type    string      `json:"type"`
+		Payload stepPayload `json:"payload"`
+	}{
+		Type: "step-deleted",
+		Payload: stepPayload{
+			StepId: req.StepId,
+		},
+	})
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
+	}
+
+	ws.Broadcast(jsonData)
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -2113,169 +2584,133 @@ func (s *taskQueueServer) Shutdown() {
 }
 
 func Serve(cfg config.Config) error {
-	// Validate the configuration before proceeding
+	// ✅ 1. Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	// Open a PostgreSQL connection using pgx driver
+	// ✅ 2. Connect to the database
 	db, err := sql.Open("pgx", cfg.Scitq.DBURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer db.Close()
 
-	// Check workflow template directory
-	if err := validateScriptConfig(cfg.Scitq.ScriptRoot, cfg.Scitq.ScriptInterpreter); err != nil {
-		return fmt.Errorf("invalid script config: %w", err)
-	}
-
-	// Create the main server instance
-	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
-
-	// Configure database connection pool settings for concurrency
 	db.SetMaxOpenConns(cfg.Scitq.MaxDBConcurrency * 2)
 	db.SetMaxIdleConns(cfg.Scitq.MaxDBConcurrency * 2)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	// 🕵️‍♂️ Periodically log database connection stats every 10 seconds
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			stats := db.Stats()
-			log.Printf("🔎 DB connections - Open: %d, InUse: %d, Idle: %d, WaitCount: %d, WaitDuration: %s",
-				stats.OpenConnections,
-				stats.InUse,
-				stats.Idle,
-				stats.WaitCount,
-				stats.WaitDuration,
-			)
-		}
-	}()
+	// 🛠️ 3. Configure scripts
+	if err := validateScriptConfig(cfg.Scitq.ScriptRoot, cfg.Scitq.ScriptInterpreter); err != nil {
+		return fmt.Errorf("invalid script config: %w", err)
+	}
 
-	// Apply any database migrations needed at startup
+	// 🔧 4. Create the server
+	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+
+	// 🧪 5. Apply migrations
 	if err := applyMigrations(db); err != nil {
 		return fmt.Errorf("migration error: %v", err)
 	}
 
-	log.Println("✅ Server started successfully!")
-	checkAdminUser(db) // Ensure there is at least one admin user
+	checkAdminUser(db)
 
-	var creds credentials.TransportCredentials
-
-	// Load TLS certificates - embedded or from configured files
-	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
-		log.Printf("🔐 Using embedded TLS certificates")
-		serverCert, certPEMString, err := LoadEmbeddedCertificates()
-		if err != nil {
-			return fmt.Errorf("failed to load embedded TLS credentials: %v", err)
-		}
-		creds = credentials.NewServerTLSFromCert(&serverCert)
-		s.sslCertificatePEM = certPEMString
-	} else {
-		certPEMData, err := os.ReadFile(cfg.Scitq.CertificatePem)
-		if err != nil {
-			log.Fatalf("failed to read certificate file: %v", err)
-		}
-		s.sslCertificatePEM = string(certPEMData)
-		creds, err = credentials.NewServerTLSFromFile(cfg.Scitq.CertificatePem, cfg.Scitq.CertificateKey)
-		if err != nil {
-			return fmt.Errorf("failed to load TLS credentials: %v", err)
-		}
+	// 🔐 6. TLS + static files via HttpServer
+	serverCert, certPEMString, staticHandler, err := HttpServer(cfg)
+	if err != nil {
+		return fmt.Errorf("TLS/static server error: %v", err)
 	}
+	s.sslCertificatePEM = certPEMString
 
-	// Create gRPC server with TLS and authentication interceptor
+	// 🔌 7. gRPC Server
+	creds := credentials.NewServerTLSFromCert(&serverCert)
 	grpcServer := grpc.NewServer(
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
 		grpc.MaxConcurrentStreams(uint32(cfg.Scitq.MaxDBConcurrency)),
 	)
 
-	// Start the gRPC server in a goroutine
-	go func() error {
+	// 🚦 8. Start gRPC + job manager
+	go func() {
 		defer s.Shutdown()
 
-		// Initialize quota manager for worker recruitment and scheduling
 		s.qm = *recruitment.NewQuotaManager(&cfg)
 		recruitment.StartRecruiterLoop(context.Background(), s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
 
-		err = s.checkProviders() // Verify available providers
-		if err != nil {
-			return fmt.Errorf("failed to check providers: %v", err)
+		if err := s.checkProviders(); err != nil {
+			log.Fatalf("failed to check providers: %v", err)
 		}
-		s.startJobQueue()                         // Start processing jobs queue
-		pb.RegisterTaskQueueServer(grpcServer, s) // Register gRPC service
 
-		// Listen on configured TCP port
+		s.startJobQueue()
+		pb.RegisterTaskQueueServer(grpcServer, s)
+
 		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
 		if err != nil {
-			return fmt.Errorf("failed to listen: %v", err)
+			log.Fatalf("failed to listen: %v", err)
 		}
 
-		// Trigger initial task assignment to workers
 		s.triggerAssign()
+		log.Printf("🚀 gRPC server listening on port %d...", cfg.Scitq.Port)
 
-		log.Printf("🚀 Server listening on port %d...", cfg.Scitq.Port)
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatalf("failed to serve: %v", err)
 		}
-		return nil
 	}()
 
-	// Wrap the gRPC server with grpc-web for browser compatibility and CORS handling
+	// 🌐 9. gRPC-Web wrapper
 	grpcWebServer := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(origin string) bool {
 		log.Printf("🌐 CORS check: origin = %s", origin)
-		// Allow only local dev origin - adjust as needed
-		return origin == "http://localhost:5173"
+		return origin == "https://alpha2.gmt.bio:5173"
 	}))
 
-	// Setup HTTP multiplexer for REST and grpc-web endpoints
+	// 📦 10. HTTP/REST mux
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", NewLogin(s))
 	mux.Handle("/fetchCookie", fetchCookie())
 	mux.HandleFunc("/logout", LogoutHandler)
 	mux.HandleFunc("/WorkerToken", fetchWorkerTokenHandler(s))
-	// Uncomment and adjust the next line to serve frontend static files
-	// mux.Handle("/", http.FileServer(http.Dir("path/to/frontend/dist")))
+	mux.HandleFunc("/ws", ws.Handler)
 
-	// Logging middleware + CORS headers for HTTP server
-	loggedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		log.Printf("📩 Received request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+	// 🧲 Static files and binary client
+	mux.Handle("/scitq-client", staticHandler)
+	mux.Handle("/", staticHandler)
 
-		// Add CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, x-grpc-web, x-user-agent, grpc-timeout, Authorization")
-
-		// Handle preflight OPTIONS requests quickly
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// Delegate request either to grpc-web or REST mux
+	// 🔄 11. Final handler with gRPC-Web + fallback
+	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📩 %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		if grpcWebServer.IsGrpcWebRequest(r) || grpcWebServer.IsAcceptableGrpcCorsRequest(r) {
 			grpcWebServer.ServeHTTP(w, r)
 		} else {
 			mux.ServeHTTP(w, r)
 		}
-
-		duration := time.Since(start)
-		log.Printf("✅ Handled request: %s %s in %v", r.Method, r.URL.Path, duration)
 	})
 
-	// Start HTTP server to serve grpc-web and REST endpoints
-	httpServer := http.Server{
-		Addr:    ":8081",
-		Handler: loggedHandler,
+	// 🔄 CORS middleware wrapper
+	corsMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "https://alpha2.gmt.bio:5173")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-grpc-web, x-user-agent, grpc-timeout")
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
 	}
 
-	log.Println("🌍 gRPC-Web HTTP server listening on :8081")
-	if err := httpServer.ListenAndServe(); err != nil {
-		log.Fatalf("HTTP server failed: %v", err)
+	// 🌍 13. Unified HTTPS server
+	httpsServer := &http.Server{
+		Addr:      ":443",
+		Handler:   corsMiddleware(finalHandler),
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{serverCert}},
+	}
+
+	log.Println("🌍 Unified HTTPS server listening on :443")
+	if err := httpsServer.ListenAndServeTLS("", ""); err != nil {
+		log.Fatalf("HTTPS server failed: %v", err)
 	}
 
 	return nil

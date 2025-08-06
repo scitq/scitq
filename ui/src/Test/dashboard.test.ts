@@ -198,3 +198,156 @@ describe('Worker integration', () => {
   });
 
 });
+
+// Mock data
+const mockJobsFirstPage = [
+  { jobId: 1, status: 'S', action: 'D', progression: 100, modifiedAt: '2023-01-01T00:00:00Z', workerId: 'worker-1' },
+  { jobId: 2, status: 'P', action: 'C', progression: 0, modifiedAt: '2023-01-01T00:01:00Z', workerId: 'worker-2' },
+  { jobId: 3, status: 'F', action: 'C', progression: 50, modifiedAt: '2023-01-01T00:02:00Z', workerId: 'worker-1' }
+];
+
+const mockJobsSecondPage = [
+  { jobId: 4, status: 'S', action: 'D', progression: 100, modifiedAt: '2023-01-01T00:03:00Z', workerId: 'worker-2' },
+  { jobId: 5, status: 'P', action: 'C', progression: 0, modifiedAt: '2023-01-01T00:04:00Z', workerId: 'worker-1' }
+];
+
+const mockNewJobs = [
+  { jobId: 6, status: 'S', action: 'C', progression: 100, modifiedAt: '2023-01-01T00:05:00Z', workerId: 'worker-3' }
+];
+
+describe('Job Pagination and Notifications', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getWorkers.mockResolvedValue([
+      { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1' }
+    ]);
+    mockApi.getJobs.mockResolvedValue(mockJobsFirstPage);
+    mockApi.getStatus.mockResolvedValue([{ workerId: 1, status: 'online' }]);
+  });
+
+  it('should load initial jobs', async () => {
+    render(Dashboard);
+    
+    await waitFor(() => {
+      expect(screen.getByTestId('job-row-1')).toBeInTheDocument();
+      expect(screen.getByTestId('job-row-2')).toBeInTheDocument();
+      expect(screen.getByTestId('job-row-3')).toBeInTheDocument();
+    });
+  });
+
+  it('should load more jobs when scrolling to bottom', async () => {
+    let callCount = 0;
+    mockApi.getJobs.mockImplementation((limit, offset) => {
+      if (callCount === 0) {
+        callCount++;
+        return Promise.resolve(mockJobsFirstPage);
+      }
+      return Promise.resolve(mockJobsSecondPage);
+    });
+
+    const { getByTestId } = render(Dashboard);
+    
+    await waitFor(() => getByTestId('job-row-1'));
+    
+    const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
+    if (!jobsContainer) throw new Error('Jobs container not found');
+
+    // Mock scroll properties
+    Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(jobsContainer, 'scrollTop', { value: 950 });
+    Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
+
+    fireEvent.scroll(jobsContainer);
+
+    await waitFor(() => {
+      expect(getByTestId('job-row-4')).toBeInTheDocument();
+      expect(getByTestId('job-row-5')).toBeInTheDocument();
+    }, { timeout: 3000 });
+  });
+
+  // it('should show notification when new jobs are added', async () => {
+  //   // First call - initial jobs
+  //   mockApi.getJobs.mockImplementationOnce(() => 
+  //     Promise.resolve(mockJobsFirstPage)
+  //   );
+    
+  //   // Subsequent calls - new jobs
+  //   mockApi.getJobs.mockImplementation(() => 
+  //     Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
+  //   );
+
+  //   const { getByTestId, getByText } = render(Dashboard);
+    
+  //   await waitFor(() => getByTestId('job-row-1'));
+    
+  //   const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
+  //   if (!jobsContainer) throw new Error('Container not found');
+    
+  //   // Simulate scroll down
+  //   Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
+  //   Object.defineProperty(jobsContainer, 'scrollTop', { value: 800 });
+  //   Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
+    
+  //   await waitFor(() => {
+  //     expect(getByText('1 new job available')).toBeInTheDocument();
+  //   }, { timeout: 3000 });
+  // });
+
+  // it('should load new jobs when clicking notification', async () => {
+  //   // First call - initial jobs
+  //   mockApi.getJobs.mockImplementationOnce(() => 
+  //     Promise.resolve(mockJobsFirstPage)
+  //   );
+    
+  //   // Subsequent calls - new jobs
+  //   mockApi.getJobs.mockImplementation(() => 
+  //     Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
+  //   );
+
+  //   const { getByTestId, getByText, queryByText } = render(Dashboard);
+    
+  //   await waitFor(() => getByTestId('job-row-1'));
+    
+  //   const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
+  //   if (!jobsContainer) throw new Error('Container not found');
+    
+  //   // Create mock scrollTop
+  //   let mockScrollTop = 800;
+    
+  //   // Mock scrollTo method
+  //   jobsContainer.scrollTo = vi.fn((options) => {
+  //     mockScrollTop = options.top;
+  //     fireEvent.scroll(jobsContainer);
+  //   });
+    
+  //   // Make scrollTop configurable
+  //   Object.defineProperty(jobsContainer, 'scrollTop', {
+  //     get: () => mockScrollTop,
+  //     set: (value) => { mockScrollTop = value; },
+  //     configurable: true
+  //   });
+    
+  //   Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
+  //   Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
+    
+  //   await waitFor(() => {
+  //     expect(getByText('1 new job available')).toBeInTheDocument();
+  //   }, { timeout: 3000 });
+
+  //   const notification = getByText('1 new job available');
+  //   await fireEvent.click(notification);
+
+  //   await waitFor(() => {
+  //     expect(jobsContainer.scrollTo).toHaveBeenCalledWith({
+  //       top: 0,
+  //       behavior: 'smooth'
+  //     });
+  //     expect(mockScrollTop).toBe(0);
+  //   });
+
+  //   await waitFor(() => {
+  //     expect(getByTestId('job-row-6')).toBeInTheDocument();
+  //     expect(queryByText('1 new job available')).not.toBeInTheDocument();
+  //   });
+  // });
+});

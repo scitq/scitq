@@ -4,7 +4,15 @@ import { mockApi } from '../mocks/api_mock';
 import { render, fireEvent, waitFor, getByTestId } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SettingPage from '../pages/SettingPage.svelte';
-import { userInfo } from '../lib/Stores/user';
+import * as auth from '../lib/auth';
+
+vi.mock('../lib/auth', async () => {
+  const actual = await vi.importActual<typeof import('../lib/auth')>('../lib/auth');
+  return {
+    ...actual,
+    getToken: vi.fn(),
+  };
+});
 
 describe('SettingPage', () => {
   const mockUser = { userId: '1', username: 'admin', email: 'admin@example.com', isAdmin: true };
@@ -15,7 +23,7 @@ describe('SettingPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    userInfo.set({ token: 'test-token' });
+    vi.mocked(auth.getToken).mockResolvedValue('test-token');
 
     mockApi.getUser.mockResolvedValue(mockUser);
     mockApi.getListUser.mockResolvedValue(mockUsers);

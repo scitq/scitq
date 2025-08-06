@@ -75,8 +75,8 @@
 
 <aside class="dashboard-sidebar">
   <div class="dashboard-sidebar-header">
-    <img src={logo} alt="Logo" class="dashboard-logo" />
     <span>SCITQ2</span>
+    <span class="dashboard-sidebar-version">V2.0.0</span>
   </div>
 
   <nav class="dashboard-sidebar-nav">

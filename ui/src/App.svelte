@@ -5,8 +5,9 @@
 
   import { theme } from './lib/Stores/theme';
   import { getToken } from './lib/auth';
-  import { isLoggedIn, userInfo } from './lib/Stores/user';
-  import { onMount } from 'svelte';
+  import { isLoggedIn } from './lib/Stores/user';
+  import { onMount, onDestroy } from 'svelte';
+  import { wsClient } from './lib/wsClient';
   import Router from 'svelte-spa-router';
 
   // Pages
@@ -27,11 +28,11 @@
   };
 
   onMount(async () => {
+    wsClient.connect();
     document.documentElement.setAttribute('data-theme', $theme);
     const tokenCookie = await getToken(); 
     if (tokenCookie) {
       isLoggedIn.set(true);
-      userInfo.set({ token: tokenCookie });
     }
   });
 

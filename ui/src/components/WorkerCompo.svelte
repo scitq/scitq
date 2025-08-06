@@ -1,14 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {getWorkerStatusClass, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus} from '../lib/api';
-  import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit } from 'lucide-svelte';
+  import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
 
   export let workers = [];
   export let onWorkerUpdated: (event: { detail: { workerId: number; updates: Partial<Worker> } }) => void = () => {};
-  export let onWorkerDeleted: (event: { detail: { workerId: number } }) => void = () => {};
-
+    
   // State management
   let displayWorkers = [];
   let workersStatsMap: Record<number, taskqueue.WorkerStats> = {};
@@ -18,6 +17,7 @@
   let displayMode: 'table' | 'charts' = 'table';
   let hasLoaded = false;
   let interval;
+  let showAdvancedMetrics = false;
 
   // Chart data
   const MAX_HISTORY = 30;
@@ -308,7 +308,7 @@
    * @param {number} workerId - ID of worker to delete
    */
   async function deleteWorker(workerId: number) {
-    onWorkerDeleted({ detail: { workerId } });
+    await delWorker({ workerId });
     delete workersStatsMap[workerId];
     delete tasksCount[workerId];
   }
@@ -333,291 +333,327 @@
   </div>
 
   <div class="workerCompo-table-wrapper">
-    <table class="listTable workerCompo-table">
-      <thead>
-        <tr>
-          {#if displayMode === 'table'}
-            <!-- Table mode - show all columns -->
-            <th>Name</th>
-            <th>Wf.Step</th>
-            <th>Status</th>
-            <th>Concurrency</th>
-            <th>Prefetch</th>
-            <th>Starting</th>
-            <th>Progress</th>
-            <th>Success</th>
-            <th>Fail</th>
-            <th>Inactive</th>
-            <th>CPU%</th>
-            <th>Mem%</th>
-            <th>Load</th>
-            <th>IOWait</th>
-            <th>Disk Usage%</th>
-            <th>Disk R/W</th>
-            <th>Network Sent/Recv</th>
-            <th>Actions</th>
-          {:else}
-            <th>Name</th>
-            <th>Wf.Step</th>
-            <th>Status</th>
-            <th>Concurrency</th>
-            <th>Prefetch</th>
-            <th>Starting</th>
-            <th>Progress</th>
-            <th>Success</th>
-            <th>Fail</th>
-            <th>Inactive</th>
-            <th colspan="7">Metrics</th>
-            <th>Actions</th>
-          {/if}
-        </tr>
-      </thead>
-      <tbody>
-        {#each workers as worker (worker.workerId)}
-          <tr data-testid={`worker-${worker.workerId}`}>
-            <td> <a href="#/tasks?workerId={worker.workerId}" class="workerCompo-clickable">{worker.name}</a> </td>
-            <td class="workerCompo-actions">
-              <button class="btn-action" title="Edit"><Edit /></button>
-            </td>
-            <td>
-              <div class="workerCompo-status-pill {getWorkerStatusClass(worker.status)}" title={getWorkerStatusText(worker.status)}></div>
-            </td>
-
-            <td>
-              <button class="small-btn" data-testid={`decrease-concurrency-${worker.workerId}`} on:click={() => updateValue(worker, 'concurrency', -1)}>-</button>
-              {worker.concurrency}
-              <button class="small-btn" data-testid={`increase-concurrency-${worker.workerId}`} on:click={() => updateValue(worker, 'concurrency', 1)}>+</button>
-            </td>
-
-            <td>
-              <button class="small-btn" data-testid={`decrease-prefetch-${worker.workerId}`} on:click={() => updateValue(worker, 'prefetch', -1)}>-</button>
-              {worker.prefetch}
-              <button class="small-btn" data-testid={`increase-prefetch-${worker.workerId}`} on:click={() => updateValue(worker, 'prefetch', 1)}>+</button>
-            </td>
-
-            <td
-              data-testid={`tasks-awaiting-execution-${worker.workerId}`}
-              title={`Pending: ${tasksCount[worker.workerId]?.pending}, Assigned: ${tasksCount[worker.workerId]?.assigned}, Accepted: ${tasksCount[worker.workerId]?.accepted}`}
-            >
-              {(tasksCount[worker.workerId]?.pending ?? 0)
-              + (tasksCount[worker.workerId]?.assigned ?? 0)
-              + (tasksCount[worker.workerId]?.accepted ?? 0)}
-            </td>
-            <td
-              data-testid={`tasks-in-progress-${worker.workerId}`}
-              title={`Downloading: ${tasksCount[worker.workerId]?.downloading}, Running: ${tasksCount[worker.workerId]?.running}`}
-            >
-              {(tasksCount[worker.workerId]?.downloading ?? 0)
-              + (tasksCount[worker.workerId]?.running ?? 0)}
-            </td>
-
-            <td
-              data-testid={`successful-tasks-${worker.workerId}`}
-              title={`UploadingSuccess: ${tasksCount[worker.workerId]?.uploadingSuccess}, Succeeded: ${tasksCount[worker.workerId]?.succeeded}`}
-            >
-              {(tasksCount[worker.workerId]?.uploadingSuccess ?? 0) + (tasksCount[worker.workerId]?.succeeded ?? 0)}
-            </td>
-
-            <td
-              data-testid={`failed-tasks-${worker.workerId}`}
-              title={`UploadingFailure: ${tasksCount[worker.workerId]?.uploadingFailure}, Failed: ${tasksCount[worker.workerId]?.failed}`}
-            >
-              {(tasksCount[worker.workerId]?.uploadingFailure ?? 0) 
-              + (tasksCount[worker.workerId]?.failed ?? 0)}
-            </td>
-
-            <td
-              data-testid={`inactive-tasks-${worker.workerId}`}
-              title={`Waiting: ${tasksCount[worker.workerId]?.waiting}, Suspended: ${tasksCount[worker.workerId]?.suspended}, Canceled: ${tasksCount[worker.workerId]?.canceled}`}
-            >
-              {(tasksCount[worker.workerId]?.waiting ?? 0) 
-              + (tasksCount[worker.workerId]?.suspended ?? 0) 
-              + (tasksCount[worker.workerId]?.canceled ?? 0)}
-            </td>
-
-          <!-- Conditional columns based on display mode -->
-          {#if workersStatsMap[worker.workerId]}
+    <div class="workerCompo-table-scroll-container">
+      <table class="listTable workerCompo-table">
+        <thead>
+          <tr>
             {#if displayMode === 'table'}
-              <!-- Table mode -->
-              <td>{workersStatsMap[worker.workerId]?.cpuUsagePercent?.toFixed(1) ?? 'N/A'}%</td>
-              <td>{workersStatsMap[worker.workerId]?.memUsagePercent?.toFixed(1) ?? 'N/A'}%</td>
-              <td>{workersStatsMap[worker.workerId]?.load1Min?.toFixed(1) ?? 'N/A'}</td>
-              <td>{workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%</td>
-              <td>
-                {#each workersStatsMap[worker.workerId].disks as disk (disk.deviceName)}
-                  <div>{disk.deviceName}: {disk.usagePercent.toFixed(1)}%</div>
-                {/each}
-              </td>
-              <td>
-                {#if workersStatsMap[worker.workerId].diskIo}
-                  <div>{formatBytesPair(workersStatsMap[worker.workerId].diskIo.readBytesRate, workersStatsMap[worker.workerId].diskIo.writeBytesRate)}/s</div>
-                  <div>{formatBytesPair(workersStatsMap[worker.workerId].diskIo.readBytesTotal, workersStatsMap[worker.workerId].diskIo.writeBytesTotal)}</div>
-                {:else}
-                  <div>N/A</div>
-                {/if}
-              </td>
-              <td>
-                {#if workersStatsMap[worker.workerId].netIo}
-                  <div>{formatBytesPair(workersStatsMap[worker.workerId].netIo.sentBytesRate, workersStatsMap[worker.workerId].netIo.recvBytesRate)}/s</div>
-                  <div>{formatBytesPair(workersStatsMap[worker.workerId].netIo.sentBytesTotal, workersStatsMap[worker.workerId].netIo.recvBytesTotal)}</div>
-                {:else}
-                  <div>N/A</div>
-                {/if}
-              </td>
+              <!-- Table mode - show all columns -->
+              <th>Name</th>
+              <th>Wf.Step</th>
+              <th>Status</th>
+              <th>Concu</th>
+              <th>Pref</th>
+              <th>Starting</th>
+              <th>Progress</th>
+              <th>Success</th>
+              <th>Fail</th>
+              <th>Inactive</th>
+              <th>CPU</th>
+              <th>Mem</th>
+              <th>Disk Usage</th>
+              {#if showAdvancedMetrics}
+                <th>Disk R/W</th>
+                <th>Network Sent/Recv</th>
+              {/if}
+              <th>Actions</th>
             {:else}
-              <!-- Chart mode -->
-              <td colspan="7">
-                <div class="combined-metrics-container">
-                  <!-- Left side - CPU, Load, RAM metrics -->
-                  <div class="system-metrics">
-                    <div class="metrics-charts">
-                      <!-- First row - CPU and Load -->
-                      <div class="metrics-row">
-                        <!-- CPU -->
-                        <div class="metric-chart">
-                          <div class="chart-title">CPU: {workersStatsMap[worker.workerId].cpuUsagePercent?.toFixed(1) ?? 0}%</div>
-                          <div class="chart-bar-container">
-                            <div class="chart-bar" style={`width: ${workersStatsMap[worker.workerId].cpuUsagePercent ?? 0}%`}></div>
-                          </div>
-                        </div>
+              <th>Name</th>
+              <th>Wf.Step</th>
+              <th>Status</th>
+              <th>Concurrency</th>
+              <th>Prefetch</th>
+              <th>Starting</th>
+              <th>Progress</th>
+              <th>Success</th>
+              <th>Fail</th>
+              <th>Inactive</th>
+              <th colspan="7">Metrics</th>
+              <th>Actions</th>
+            {/if}
+          </tr>
+        </thead>
+        <tbody>
+          {#each workers as worker (worker.workerId)}
+            <tr data-testid={`worker-${worker.workerId}`}>
+              <td> <a href="#/tasks?workerId={worker.workerId}" data-testid={`worker-name-${worker.workerId}`} class="workerCompo-clickable">{worker.name}</a> </td>
+              <td class="workerCompo-actions">
+                <button class="btn-action" title="Edit"><Edit /></button>
+              </td>
+              <td>
+                <div class="workerCompo-status-pill {getWorkerStatusClass(worker.status)}" title={getWorkerStatusText(worker.status)}></div>
+              </td>
 
-                        <!-- Load -->
-                        <div class="metric-chart">
-                          <div class="chart-title">Load: {workersStatsMap[worker.workerId].load1Min?.toFixed(1) ?? 0}</div>
-                          <div class="chart-bar-container">
-                            <div class="chart-bar" style={`width: ${Math.min(100, (workersStatsMap[worker.workerId].load1Min ?? 0) * 33.3)}%`}></div>
+              <td class="value-cell">
+                <div class="value-with-controls">
+                  <span class="value">{worker.concurrency}</span>
+                  <div class="controls">
+                    <button class="small-btn" on:click={() => updateValue(worker, 'concurrency', 1)}>+</button>
+                    <button class="small-btn" on:click={() => updateValue(worker, 'concurrency', -1)}>-</button>
+                  </div>
+                </div>
+              </td>
+
+              <td class="value-cell">
+                <div class="value-with-controls">
+                  <span class="value">{worker.prefetch}</span>
+                  <div class="controls">
+                    <button class="small-btn" on:click={() => updateValue(worker, 'prefetch', 1)}>+</button>
+                    <button class="small-btn" on:click={() => updateValue(worker, 'prefetch', -1)}>-</button>
+                  </div>
+                </div>
+              </td>
+              <td
+                data-testid={`tasks-awaiting-execution-${worker.workerId}`}
+                title={`Pending: ${tasksCount[worker.workerId]?.pending}, Assigned: ${tasksCount[worker.workerId]?.assigned}, Accepted: ${tasksCount[worker.workerId]?.accepted}`}
+              >
+                {(tasksCount[worker.workerId]?.pending ?? 0)
+                + (tasksCount[worker.workerId]?.assigned ?? 0)
+                + (tasksCount[worker.workerId]?.accepted ?? 0)}
+              </td>
+              <td
+                data-testid={`tasks-in-progress-${worker.workerId}`}
+                title={`Downloading: ${tasksCount[worker.workerId]?.downloading}, Running: ${tasksCount[worker.workerId]?.running}`}
+              >
+                {(tasksCount[worker.workerId]?.downloading ?? 0)
+                + (tasksCount[worker.workerId]?.running ?? 0)}
+              </td>
+
+              <td
+                data-testid={`successful-tasks-${worker.workerId}`}
+                title={`UploadingSuccess: ${tasksCount[worker.workerId]?.uploadingSuccess}, Succeeded: ${tasksCount[worker.workerId]?.succeeded}`}
+              >
+                {(tasksCount[worker.workerId]?.uploadingSuccess ?? 0) + (tasksCount[worker.workerId]?.succeeded ?? 0)}
+              </td>
+
+              <td
+                data-testid={`failed-tasks-${worker.workerId}`}
+                title={`UploadingFailure: ${tasksCount[worker.workerId]?.uploadingFailure}, Failed: ${tasksCount[worker.workerId]?.failed}`}
+              >
+                {(tasksCount[worker.workerId]?.uploadingFailure ?? 0) 
+                + (tasksCount[worker.workerId]?.failed ?? 0)}
+              </td>
+
+              <td
+                data-testid={`inactive-tasks-${worker.workerId}`}
+                title={`Waiting: ${tasksCount[worker.workerId]?.waiting}, Suspended: ${tasksCount[worker.workerId]?.suspended}, Canceled: ${tasksCount[worker.workerId]?.canceled}`}
+              >
+                {(tasksCount[worker.workerId]?.waiting ?? 0) 
+                + (tasksCount[worker.workerId]?.suspended ?? 0) 
+                + (tasksCount[worker.workerId]?.canceled ?? 0)}
+              </td>
+
+            <!-- Conditional columns based on display mode -->
+            {#if workersStatsMap[worker.workerId]}
+              {#if displayMode === 'table'}
+                <!-- Table mode -->
+                <td title={`IOWait: ${workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%` + '\n' + `Load: ${workersStatsMap[worker.workerId]?.load1Min?.toFixed(1) ?? 'N/A'}`}>
+                  {workersStatsMap[worker.workerId]?.cpuUsagePercent?.toFixed(1) ?? 'N/A'}%
+                  {#if workersStatsMap[worker.workerId]?.iowaitPercent > 1}
+                    <div style="color: red;">{workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%</div>
+                  {/if}
+                </td>
+                <td>{workersStatsMap[worker.workerId]?.memUsagePercent?.toFixed(1) ?? 'N/A'}%</td>
+                <td>
+                  <div class="scrollable-cell">
+                    {#each workersStatsMap[worker.workerId].disks as disk, i (i)}
+                      <div>{disk.deviceName}: {disk.usagePercent.toFixed(1) ?? 'N/A'}%</div>
+                    {/each}
+                  </div>
+                </td>
+                {#if showAdvancedMetrics}
+                  <!-- Disk R/W column -->
+                  <td>
+                    {#if workersStatsMap[worker.workerId].diskIo}
+                      <div>{formatBytesPair(workersStatsMap[worker.workerId].diskIo.readBytesRate, workersStatsMap[worker.workerId].diskIo.writeBytesRate) ?? 'N/A'}/s</div>
+                      <div>{formatBytesPair(workersStatsMap[worker.workerId].diskIo.readBytesTotal, workersStatsMap[worker.workerId].diskIo.writeBytesTotal) ?? 'N/A'}</div>
+                    {:else}
+                      <div>N/A</div>
+                    {/if}
+                  </td>
+
+                  <!-- Network Sent/Recv column -->
+                  <td>
+                    {#if workersStatsMap[worker.workerId].netIo}
+                      <div>{formatBytesPair(workersStatsMap[worker.workerId].netIo.sentBytesRate, workersStatsMap[worker.workerId].netIo.recvBytesRate) ?? 'N/A'}/s</div>
+                      <div>{formatBytesPair(workersStatsMap[worker.workerId].netIo.sentBytesTotal, workersStatsMap[worker.workerId].netIo.recvBytesTotal) ?? 'N/A'}</div>
+                    {:else}
+                      <div>N/A</div>
+                    {/if}
+                  </td>
+                {/if}
+              {:else}
+                <!-- Chart mode -->
+                <td colspan="7">
+                  <div class="combined-metrics-container">
+                    <!-- Left side - CPU, Load, RAM metrics -->
+                    <div class="system-metrics">
+                      <div class="metrics-charts">
+                        <!-- First row - CPU and Load -->
+                        <div class="metrics-row">
+                          <!-- CPU -->
+                          <div class="metric-chart">
+                            <div class="chart-title">CPU: {workersStatsMap[worker.workerId].cpuUsagePercent?.toFixed(1) ?? 0}%</div>
+                            <div class="chart-bar-container">
+                              <div class="chart-bar" style={`width: ${workersStatsMap[worker.workerId].cpuUsagePercent ?? 0}%`}></div>
+                            </div>
+                          </div>
+
+                          <!-- Load -->
+                          <div class="metric-chart">
+                            <div class="chart-title">Load: {workersStatsMap[worker.workerId].load1Min?.toFixed(1) ?? 0}</div>
+                            <div class="chart-bar-container">
+                              <div class="chart-bar" style={`width: ${Math.min(100, (workersStatsMap[worker.workerId].load1Min ?? 0) * 33.3)}%`}></div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    
-                      <!-- Second row - RAM and IOWait -->
-                      <div class="metrics-row">
-                        <!-- RAM -->
-                        <div class="metric-chart">
-                          <div class="chart-title">RAM: {workersStatsMap[worker.workerId].memUsagePercent?.toFixed(1) ?? 0}%</div>
-                          <div class="chart-bar-container">
-                            <div class="chart-bar" style={`width: ${workersStatsMap[worker.workerId].memUsagePercent ?? 0}%`}></div>
+                      
+                        <!-- Second row - RAM and IOWait -->
+                        <div class="metrics-row">
+                          <!-- RAM -->
+                          <div class="metric-chart">
+                            <div class="chart-title">RAM: {workersStatsMap[worker.workerId].memUsagePercent?.toFixed(1) ?? 0}%</div>
+                            <div class="chart-bar-container">
+                              <div class="chart-bar" style={`width: ${workersStatsMap[worker.workerId].memUsagePercent ?? 0}%`}></div>
+                            </div>
+                          </div>
+                          
+                          <!-- IOWait -->
+                          <div class="metric-chart">
+                            <div class="chart-title">IOWait: {workersStatsMap[worker.workerId].iowaitPercent?.toFixed(1) ?? 0}%</div>
+                            <div class="chart-bar-container">
+                              <div class="chart-bar" style={`width: ${workersStatsMap[worker.workerId].iowaitPercent ?? 0}%`}></div>
+                            </div>
                           </div>
                         </div>
                         
-                        <!-- IOWait -->
-                        <div class="metric-chart">
-                          <div class="chart-title">IOWait: {workersStatsMap[worker.workerId].iowaitPercent?.toFixed(1) ?? 0}%</div>
-                          <div class="chart-bar-container">
-                            <div class="chart-bar" style={`width: ${workersStatsMap[worker.workerId].iowaitPercent ?? 0}%`}></div>
-                          </div>
+                        <!-- Disk Usage -->
+                        <div class="disk-chart-container">
+                          <div class="chart-title">Disk Usage</div>
+                          {#if workersStatsMap[worker.workerId]?.disks?.length > 0}
+                            <div class="disk-bars scrollable-disks">
+                              {#each workersStatsMap[worker.workerId].disks as disk, i (i)}
+                                <div class="disk-bar-container">
+                                  <div class="disk-info">
+                                    <span class="disk-name">{disk.deviceName}</span>
+                                    <span class="disk-percent">{disk.usagePercent.toFixed(1)}%</span>
+                                  </div>
+                                  <div class="disk-bar-background">
+                                    <div class="disk-bar-fill {disk.usagePercent > 80 ? 'warning' : ''}" 
+                                        style={`width: ${disk.usagePercent}%`}>
+                                    </div>
+                                  </div>
+                                </div>
+                              {/each}
+                            </div>
+                            {:else}
+                            <div class="no-data">No disk usage data</div>
+                          {/if}
                         </div>
+
                       </div>
-                      
-                      <!-- Disk Usage -->
-                      <div class="disk-chart-container">
-                        <div class="chart-title">Disk Usage</div>
-                        {#if workersStatsMap[worker.workerId]?.disks?.length > 0}
-                          <div class="disk-bars">
-                            {#each workersStatsMap[worker.workerId].disks as disk, i (disk.deviceName)}
-                              <div class="disk-bar-container">
-                                <div class="disk-info">
-                                  <span class="disk-name">{disk.deviceName}</span>
-                                  <span class="disk-percent">{disk.usagePercent.toFixed(1)}%</span>
-                                </div>
-                                <div class="disk-bar-background">
-                                  <div class="disk-bar-fill {disk.usagePercent > 80 ? 'warning' : ''}" 
-                                       style={`width: ${disk.usagePercent}%`}></div>
-                                </div>
-                              </div>
-                            {/each}
-                          </div>
+                    </div>
+
+                    <!-- Right side - Disk I/O and Network I/O charts -->
+                    <div class="io-charts">
+                      <div class="io-chart-container">
+                        <div class="chart-title">Disk I/O</div>
+                        {#if workersStatsMap[worker.workerId]?.diskIo}
+                          <LineChart
+                            data-testid="disk-chart"
+                            line1={diskChartData.line1}
+                            line2={diskChartData.line2}
+                            color1="#36A2EB"
+                            color2="#FF6384"
+                            title1="Read" 
+                            title2="Write"
+                            value1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesRate || 0) + "/s"}
+                            value2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesRate || 0) + "/s"}
+                            total1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesTotal || 0)}
+                            total2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesTotal || 0)}
+                            zoomLevel={diskZoom}
+                            autoZoom={diskAutoZoom}
+                            onZoom={handleDiskZoom}
+                            onToggleAutoZoom={() => toggleAutoZoom('disk')}
+                            zoomIntensity={diskAutoZoom ? diskZoom/5 : 1}
+                          />
+                        {:else}
+                          <div class="no-data">No disk data</div>
+                        {/if}
+                      </div>
+
+                      <div class="io-chart-container" data-testid={`I/O-chart-${worker.workerId}`} >
+                        <div class="chart-title">Network I/O</div>
+                        {#if workersStatsMap[worker.workerId]?.netIo}
+                          <LineChart 
+                            data-testid="network-chart"
+                            line1={networkChartData.line1}
+                            line2={networkChartData.line2}
+                            color1="#36A2EB"
+                            color2="#FF6384"
+                            title1="Sent" 
+                            title2="Received"
+                            value1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesRate || 0) + "/s"}
+                            value2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesRate || 0) + "/s"}
+                            total1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesTotal || 0)}
+                            total2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesTotal || 0)}
+                            zoomLevel={networkZoom}
+                            autoZoom={networkAutoZoom}
+                            onZoom={handleNetworkZoom}
+                            onToggleAutoZoom={() => toggleAutoZoom('network')}
+                            zoomIntensity={networkAutoZoom ? networkZoom/5 : 1}
+                          />
+                        {:else}
+                          <div class="no-data">No network data</div>
                         {/if}
                       </div>
                     </div>
                   </div>
+                </td>
+              {/if}
+            {:else}
+              {#if showAdvancedMetrics}
+                <td colspan="5">No statistics available</td>
+              {:else}
+                <td colspan="3">No statistics available</td>
+              {/if}
+            {/if}
 
-                  <!-- Right side - Disk I/O and Network I/O charts -->
-                  <div class="io-charts">
-                    <div class="io-chart-container">
-                      <div class="chart-title">Disk I/O</div>
-                      {#if workersStatsMap[worker.workerId]?.diskIo}
-                        <LineChart
-                          data-testid="disk-chart"
-                          line1={diskChartData.line1}
-                          line2={diskChartData.line2}
-                          color1="#36A2EB"
-                          color2="#FF6384"
-                          title1="Read" 
-                          title2="Write"
-                          value1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesRate || 0) + "/s"}
-                          value2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesRate || 0) + "/s"}
-                          total1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesTotal || 0)}
-                          total2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesTotal || 0)}
-                          zoomLevel={diskZoom}
-                          autoZoom={diskAutoZoom}
-                          onZoom={handleDiskZoom}
-                          onToggleAutoZoom={() => toggleAutoZoom('disk')}
-                          zoomIntensity={diskAutoZoom ? diskZoom/5 : 1}
-                        />
-                      {:else}
-                        <div class="no-data">No disk data</div>
-                      {/if}
-                    </div>
-
-                    <div class="io-chart-container" data-testid={`I/O-chart-${worker.workerId}`} >
-                      <div class="chart-title">Network I/O</div>
-                      {#if workersStatsMap[worker.workerId]?.netIo}
-                        <LineChart 
-                          data-testid="network-chart"
-                          line1={networkChartData.line1}
-                          line2={networkChartData.line2}
-                          color1="#36A2EB"
-                          color2="#FF6384"
-                          title1="Sent" 
-                          title2="Received"
-                          value1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesRate || 0) + "/s"}
-                          value2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesRate || 0) + "/s"}
-                          total1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesTotal || 0)}
-                          total2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesTotal || 0)}
-                          zoomLevel={networkZoom}
-                          autoZoom={networkAutoZoom}
-                          onZoom={handleNetworkZoom}
-                          onToggleAutoZoom={() => toggleAutoZoom('network')}
-                          zoomIntensity={networkAutoZoom ? networkZoom/5 : 1}
-                        />
-                      {:else}
-                        <div class="no-data">No network data</div>
-                      {/if}
-                    </div>
-                  </div>
+              <td class="workerCompo-actions">
+                <div class="action-row">
+                  <button class="btn-action" title="Pause"><PauseCircle /></button>
+                  <button class="btn-action" title="Clean"><Eraser /></button>
+                </div>
+                <div class="action-row">
+                  <button class="btn-action" title="Restart"><RefreshCw /></button>
+                  <button class="btn-action" title="Delete" on:click={() => { deleteWorker(worker.workerId); }} data-testid={`delete-worker-${worker.workerId}`}><Trash /></button>
+                </div>
+                <div class="action-row">
+                    {#if displayMode == 'charts'}
+                      <button data-testid={`table-worker-${worker.workerId}`} class="btn-action" on:click={() => displayMode = 'table'} title="Numbers">
+                        <FileDigit />
+                      </button>
+                    {:else if displayMode == 'table'}
+                      <button data-testid={`charts-worker-${worker.workerId}`} class="btn-action"  on:click={() => displayMode = 'charts'} title="Charts">
+                        <BarChart/>
+                      </button>
+                      <button class="btn-action" 
+                      on:click={() => showAdvancedMetrics = !showAdvancedMetrics}
+                      title={showAdvancedMetrics ? 'Hide advanced metrics' : 'Show advanced metrics'}>
+                        {#if showAdvancedMetrics}
+                          <ChevronUp/>
+                        {:else}
+                          <ChevronDown/>
+                        {/if}
+                      </button>
+                    {/if}
                 </div>
               </td>
-            {/if}
-          {:else}
-            <td colspan="7">No statistics available</td>
-          {/if}
-
-            <td class="workerCompo-actions">
-              <div class="action-row">
-                <button class="btn-action" title="Pause"><PauseCircle /></button>
-                <button class="btn-action" title="Clean"><Eraser /></button>
-              </div>
-              <div class="action-row">
-                <button class="btn-action" title="Restart"><RefreshCw /></button>
-                <button class="btn-action" title="Delete" on:click={() => { deleteWorker(worker.workerId); }} data-testid={`delete-worker-${worker.workerId}`}><Trash /></button>
-              </div>
-              <div class="action-row">
-                {#if displayMode == 'charts'}
-                  <button data-testid={`table-worker-${worker.workerId}`} class="btn-action" on:click={() => displayMode = 'table'} title="Numbers">
-                    <FileDigit />
-                  </button>
-                {:else if displayMode == 'table'}
-                  <button data-testid={`charts-worker-${worker.workerId}`} class="btn-action"  on:click={() => displayMode = 'charts'} title="Charts">
-                    <BarChart/>
-                  </button>
-                {/if}
-              </div>
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </div>
 {:else}
   <p class="workerCompo-empty-state">No workers found.</p>

@@ -5,12 +5,6 @@ function initializeTheme() {
   
   const savedTheme = localStorage.getItem('theme');
   const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  
-  console.log('Initial theme detection:', {
-    savedTheme,
-    systemPrefersDark,
-    finalTheme: savedTheme || (systemPrefersDark ? 'dark' : 'light')
-  });
 
   return savedTheme || (systemPrefersDark ? 'dark' : 'light');
 }

@@ -36,13 +36,13 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Launch the HTTP server as a goroutine.
-	go func() {
-		defer wg.Done()
-		if _, err := server.HttpServer(*cfg); err != nil {
-			log.Fatalf("HTTP server error: %v", err)
-		}
-	}()
+	// // Launch the HTTP server as a goroutine.
+	// go func() {
+	// 	defer wg.Done()
+	// 	if _, err := server.HttpServer(*cfg); err != nil {
+	// 		log.Fatalf("HTTP server error: %v", err)
+	// 	}
+	// }()
 
 	// Launch the gRPC server as a goroutine.
 	go func() {

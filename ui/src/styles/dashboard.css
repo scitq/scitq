@@ -2,7 +2,7 @@
 .dashboard-sidebar {
   width: 220px;
   height: 100vh;
-  overflow-y: auto;
+  overflow: auto; 
   background-color: #192245;
   color: var(--primary-text); 
   display: flex;
@@ -28,6 +28,12 @@
   font-weight: bold;
   margin-bottom: 2rem;
   color: #f3f4f6;
+  justify-content: space-between;
+}
+
+.dashboard-sidebar-version {
+  font-size: 1.1rem;
+  font-weight: 100;
 }
 
 /* Logo styling */
@@ -201,56 +207,76 @@
   border: none;
 }
 
-/* Main content area */
+/* Main content container */
 .dashboard-content {
-  position: relative;
-  padding: 1rem;
-  height: 100vh;
-  box-sizing: border-box;
+  height: 100%;
+  flex: 1;
+  min-height: min-content;
+  overflow: visible;
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
+  justify-content: center;
 }
 
-/* Bottom section container */
+/* Worker section styling */
+.dashboard-worker-section {
+  flex: 0 0 auto;
+  height: auto;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 5px 0;
+  transition: max-height 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Bottom container section */
 .dashboard-bottom-div {
+  min-height: 0;
   display: flex;
   gap: 20px;
-  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  height: auto; 
   align-items: flex-start;
-  border-radius: 8px;
-  height: calc(100vh - 150px);
-  box-sizing: border-box;
 }
 
 /* Job section styling */
 .dashboard-job-section {
   flex: 3;
-  text-align: center;
-  border-radius: 8px;
-  max-height: 100%;
-  overflow-y: auto;
-  background: none;
+  align-self: flex-start;
+  margin-top: -0.1rem;
+  height: 0; /* Reset */
+  position: relative;
+  min-height: 100%;
+  max-height: none;
   box-sizing: border-box;
+  border-radius: 8px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-job-section > div:first-child {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
 }
 
 /* Add worker section styling */
 .dashboard-add-worker-section {
   flex: 1;
-  border-radius: 8px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
-  max-height: 100%;
-  overflow-y: auto;
-  background: none;
   box-sizing: border-box;
-}
-
-/* Worker section styling */
-.dashboard-worker-section {
-  margin-top: 2rem;
-  margin-bottom: 1rem;
-  background: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: fit-content;
+  height: auto;
+  max-height: none;
 }
 
 /* Popup overlay styling */
@@ -292,7 +318,7 @@
 }
 
 /* ==================== */
-/* POPUP BUTTONS - LIGHT/DARK VARIATIONS */
+/* POPUP BUTTON STYLES */
 /* ==================== */
 
 /* Confirm button styling */
@@ -362,4 +388,38 @@
 .theme-icon {
   width: 24px;
   height: 24px;
+}
+
+/* New jobs notification styling */
+.new-jobs-notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--primary-color);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 20px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1000;
+  animation: pulse 2s infinite;
+}
+
+.new-jobs-notification:focus {
+  outline: 2px solid #ffbe0b;
+  outline-offset: 2px;
+}
+
+/* Show new jobs button styling */
+.show-new-btn {
+  background: white;
+  color: var(--primary-color);
+  border: none;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-weight: bold;
 }

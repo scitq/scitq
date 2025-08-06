@@ -1,34 +1,70 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import { wsClient } from '../lib/wsClient';
+  import { getListUser, updateUser, delUser, forgotPassword } from '../lib/api';
+  import type { User } from '../lib/Stores/user';
   import { Trash, Pencil, Lock, Eye, EyeOff } from 'lucide-svelte';
   import "../styles/worker.css";
+  import "../styles/SettingPage.css";
   import "../styles/userList.css";
 
-  export let users: User[] = [];
+  let users: User[] = [];
 
-  // Callbacks passed from parent component
-  export let onUserUpdated: (event: { detail: { user: User } }) => void = () => {};
-  export let onUserDeleted: (event: { detail: { userId: number } }) => void = () => {};
-  export let onForgotPassword: (event: { detail: { user: User; newPswd: string } }) => void = () => {};
-
-  // Edit modal state
   let editingUser: User = null;
   let showEditModal = false;
   let editedUsername = '';
   let editedEmail = '';
   let editedIsAdmin = false;
 
-  // Password modal state
   let showPasswordModal = false;
   let passwordUser: User = null;
   let newPassword = '';
   let showForgotPassword = false;
 
-  /**
-   * Opens the edit modal for a given user.
-   * Initializes the form fields with the user's current data.
-   * @param {User} user - The user to be edited.
-   * @returns {void}
-   */
+  let successMessage: string = '';
+  let alertTimeout;
+
+  function handleMessage(message) {
+    if (message.type === 'user-deleted') {
+      users = users.filter(u => u.userId !== message.userId);
+      console.log('User removed via WebSocket:', message.userId);
+    }
+
+    if (message.type === 'user-updated') {
+      users = users.map(u =>
+        u.userId === message.payload.userId
+          ? { ...u, ...message.payload }
+          : u
+      );
+      console.log('User updated via WebSocket:', message.payload);
+    }
+
+    if (message.type === 'user-created') {
+      if (!users.some(u => u.userId === message.payload.userId)) {
+        users = [...users, message.payload];
+      }
+      console.log('User created via WebSocket:', message.payload);
+    }
+  }
+
+  let unsubscribeWS: () => void;
+
+  onMount(async () => {
+    try {
+      users = await getListUser();
+
+      // 🔄 Subscribe to messages (connection already opened globally)
+      unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
+    } catch (err) {
+      console.error("Error loading user data:", err);
+    }
+  });
+
+  onDestroy(() => {
+    // ❌ Unsubscribe from messages only, not from the connection
+    unsubscribeWS?.();
+  });
+
   function openEditModal(user: User) {
     editingUser = user;
     editedUsername = user.username;
@@ -37,94 +73,83 @@
     showEditModal = true;
   }
 
-  /**
-   * Closes the edit modal and resets the editing user.
-   * @returns {void}
-   */
   function closeEditModal() {
     showEditModal = false;
     editingUser = null;
   }
 
-  /**
-   * Confirms the changes made to the user.
-   * Prepares an object containing only the updated fields and triggers the onUserUpdated event.
-   * Then closes the edit modal.
-   * @returns {void}
-   */
-  function confirmEdit() {
+  async function confirmEdit() {
     const updates: Partial<User> = {};
     
     if (editedUsername !== editingUser.username) updates.username = editedUsername;
     if (editedEmail !== editingUser.email) updates.email = editedEmail;
     if (editedIsAdmin !== editingUser.isAdmin) updates.isAdmin = editedIsAdmin;
 
-    if (Object.keys(updates).length > 0) {
-      onUserUpdated({
-        detail: {
-          userId: editingUser.userId,
-          updates
-        }
-      });
+    try {
+      await updateUser(editingUser.userId, updates);
+      successMessage = "User Updated";
+      clearTimeout(alertTimeout);
+      alertTimeout = setTimeout(() => successMessage = '', 5000);
+    } catch (error) {
+      console.error("Update error:", error);
+      alert("Error updating user.");
     }
     
     closeEditModal();
   }
 
-  /**
-   * Opens the password change modal for a given user.
-   * Initializes the new password field.
-   * @param {User} user - The user whose password will be changed.
-   * @returns {void}
-   */
   function openPasswordModal(user: User) {
     passwordUser = user;
     newPassword = '';
     showPasswordModal = true;
   }
 
-  /**
-   * Closes the password change modal and resets related fields.
-   * @returns {void}
-   */
   function closePasswordModal() {
     showPasswordModal = false;
     passwordUser = null;
     newPassword = '';
   }
 
-  /**
-   * Confirms the password change.
-   * Triggers the onForgotPassword event with the user and new password,
-   * then closes the modal.
-   * @returns {void}
-   */
-  function confirmPasswordChange() {
-    onForgotPassword({
-      detail: {
-        user: passwordUser,
-        newPswd: newPassword
-      }
-    });
+  async function confirmPasswordChange() {
+    try {
+      await forgotPassword(
+        passwordUser.userId,
+        passwordUser.username,
+        passwordUser.newPassword,
+        passwordUser.email,
+        passwordUser.isAdmin
+      );
+      successMessage = "Password Reset";
+      clearTimeout(alertTimeout);
+      alertTimeout = setTimeout(() => successMessage = '', 5000);
+    } catch (error) {
+      alert("Error changing password.");
+    }
     closePasswordModal();
   }
 
-  /**
-   * Handles user deletion by triggering the onUserDeleted event.
-   * @param {number} userId - The ID of the user to delete.
-   * @returns {void}
-   */
-  function handleDeleteUser(userId: number) {
-    onUserDeleted({
-      detail: { userId }
-    });
+  async function handleDeleteUser(userId: number) {
+    try {
+      await delUser(userId);
+      successMessage = "User Deleted";
+      clearTimeout(alertTimeout);
+      alertTimeout = setTimeout(() => successMessage = '', 5000);
+    } catch (error) {
+      console.error("Error deleting user:", error);
+    }
   }
 </script>
 
 
+<!-- Success message alert -->
+{#if successMessage}
+  <div class="alert-success">
+    {successMessage}
+  </div>
+{/if}
 
 {#if users && users.length > 0}
-  <div class="workerCompo-table-wrapper">
+  <div class="user-list-container">
     <table class="listTable">
       <thead>
         <tr>

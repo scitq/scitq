@@ -61,6 +61,17 @@
   transition: color 0.2s;
 }
 
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: visible; 
+}
+
+body{
+  overflow: auto !important;
+}
+
 .link:hover {
   color: var(--link-hover);
 }
@@ -83,14 +94,14 @@
 }
 
 .btn-action {
-  font-size: 0.75rem;
-  padding: 0.25rem 0.50rem;
-  margin: 2px;
+  font-size: 0.3rem;
+  padding: 0.1rem 0.25rem;
+  margin: 1px;
   border: 1px solid var(--border-color);
   box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.6);
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   line-height: 1;
 }
 
@@ -120,7 +131,7 @@
   min-width: 100%;
   border-collapse: collapse;
   color: var(--text-primary);
-  font-size: 0.85rem;
+  font-size: 0.7rem;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -138,6 +149,16 @@
 .listTable th {
   background-color: var(--table-header);
   color: var(--table-header-text);
+  font-weight: 600;
+  z-index: 1;
+}
+
+.listTable thead {
+  position: sticky;
+  top: 0;
+  background-color: var(--table-header);
+  color: var(--table-header-text);
+  z-index: 100 !important;
 }
 
 .listTable tr:nth-child(even) {
@@ -164,7 +185,6 @@
 }
 
 .body-dashboard {
-  margin: 0;
   display: flex;
   place-items: center;
   min-width: 320px;
@@ -174,25 +194,27 @@
 /* === Layout === */
 .app-container {
   display: flex;
+  z-index: 1;
   height: 100vh;
   background-color: var(--bg-primary);
   transition: background-color 0.3s ease, color 0.3s ease;
-  width: 100%;
+  width: 100vw;
+  overflow: auto;
+  min-height: 0;
 }
 
 .main-content {
   flex: 1;
-  overflow-x: auto;
+  overflow: auto;
   width: 100%;
-  padding: 0 1rem 1rem 1rem;
+  padding: 0 0.5rem;
   position: relative;
   background-color: var(--bg-primary);
 }
 
 .card {
-  width: 100%;
-  margin: 1rem auto;
-  padding: 2em;
+  max-height: 100%;
+  overflow: auto;
   background-color: var(--bg-secondary);
   border-radius: 8px;
 }
@@ -204,14 +226,13 @@
 
 /* === UI Elements === */
 .hamburger-button {
-  z-index: 100;
-  background: transparent;
+  z-index: 1000; 
+  background-color: var(--background-primary); 
   border: none;
   padding: 0.5rem;
   cursor: pointer;
-  position: absolute;
+  position: fixed;
   top: 1rem;
-  left: 1rem;
   display: flex;
   flex-direction: column;
   justify-content: center;

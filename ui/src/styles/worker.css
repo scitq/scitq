@@ -3,22 +3,30 @@
 /* ==================== */
 .status-count-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 8px;
+  flex-wrap: nowrap; /* Force single line */
+  align-items: center;
+  gap: 1px;
   border-radius: 6px;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 0.90rem;
+  font-size: 0.65rem;
   user-select: none;
-  margin-bottom: 1rem;
+  margin: 1.25rem 0 0.5rem 2rem; /* Maintain other margins */
+  overflow: hidden; /* Hide overflow */
 }
 
 .status-count-bar a {
+  flex: 1 0 auto; /* Stretch but don't shrink below content width */
+  min-width: min-content; /* Minimum width based on content */
+  padding: 0 4px; /* Minimum padding */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis; /* Show ... if text is too long */
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  padding: 2px 8px;
+  padding: 0 4px;
   border-radius: 12px;
   font-weight: 600;
   text-decoration: none;
@@ -37,45 +45,86 @@
 .status-count-bar a::before {
   content: '';
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
   background-color: var(--primary-color);
   border-radius: 50%;
-  margin-right: 4px;
+  margin-right: 2px;
 }
 
 /* ==================== */
 /* TABLE STYLES */
 /* ==================== */
+
 .workerCompo-table-wrapper {
   max-width: 100%;
   margin: auto;
-  overflow-x: auto;
+  overflow: auto; /* Add scroll if needed */
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   border-radius: 8px;
-  margin-bottom: 1.5rem;
   background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  max-height: 100%; /* Take all available height */
+  flex: 1; /* Fill all space in dashboard-worker-section */
+}
+
+.workerCompo-table-scroll-container {
+  overflow: auto;
+  flex: 1;
+}
+
+.workerCompo-table-container {
+  overflow: auto;
+  flex: 1;
 }
 
 .workerCompo-table {
   width: 100%;
+  max-height: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   color: var(--text-primary);
-  font-size: 0.85rem;
-  min-width: 1200px;
+  font-size: 0.7rem;
+  flex: 1;
+  margin-bottom: 0; /* Important to avoid unwanted spaces */
+}
+
+/* Fixed header */
+.workerCompo-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .workerCompo-table th,
 .workerCompo-table td {
   border: 1px solid var(--border-color);
   text-align: center;
+  overflow: hidden;
 }
 
 .workerCompo-table td {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  height: 100%; /* Fixed cell height */
+  padding: 0;
+}
+
+.scrollable-cell {
+  max-height: 40px;
+  overflow-y: auto;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
+
+/* Scrollbar style for cells */
+.workerCompo-table td::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.workerCompo-table td::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 2px;
 }
 
 .workerCompo-table th {
@@ -90,27 +139,25 @@
   background-color: var(--table-row-even);
 }
 
-.workerCompo-table th:nth-child(1) { width: 150px; } /* Name */
-.workerCompo-table th:nth-child(2) { width: 150px; } /* Wf.Step */
-.workerCompo-table th:nth-child(3) { width: 40px; } /* Status */
-.workerCompo-table th:nth-child(4) { width: 90px; } /* Concurrency */
-.workerCompo-table th:nth-child(5) { width: 90px; } /* Prefetch */
-.workerCompo-table th:nth-child(6) { width: 50px; } /* Starting */
-.workerCompo-table th:nth-child(7) { width: 50px; } /* Progress */
-.workerCompo-table th:nth-child(8) { width: 55px; } /* Successes */
-.workerCompo-table th:nth-child(9) { width: 50px; } /* Fails */
-.workerCompo-table th:nth-child(10) { width: 50px; } /* Inactive */
-.workerCompo-table th:nth-child(11) { width: 80px; } /* CPU% */
-.workerCompo-table th:nth-child(12) { width: 70px; } /* Mem% */
-.workerCompo-table th:nth-child(13) { width: 70px; } /* Load */
-.workerCompo-table th:nth-child(14) { width: 70px; } /* IOWait */
-.workerCompo-table th:nth-child(15) { width: 180px; } /* Disk Usage% */
-.workerCompo-table th:nth-child(16) { width: 115px; } /* Disk R/W */
-.workerCompo-table th:nth-child(17) { width: 115px; } /* Network Sent/Recv */
-.workerCompo-table th:nth-child(18) { width: 80px; } /* Actions */
+.workerCompo-table th:nth-child(1) { width: 90px; } /* Name */
+.workerCompo-table th:nth-child(2) { width: 90px; } /* Wf.Step */
+.workerCompo-table th:nth-child(3) { width: 30px; } /* Status */
+.workerCompo-table th:nth-child(4) { width: 40px; } /* Concurrency */
+.workerCompo-table th:nth-child(5) { width: 40px; } /* Prefetch */
+.workerCompo-table th:nth-child(6) { width: 45px; } /* Starting */
+.workerCompo-table th:nth-child(7) { width: 45px; } /* Progress */
+.workerCompo-table th:nth-child(8) { width: 45px; } /* Successes */
+.workerCompo-table th:nth-child(9) { width: 45px; } /* Fails */
+.workerCompo-table th:nth-child(10) { width: 45px; } /* Inactive */
+.workerCompo-table th:nth-child(11) { width: 45px; } /* CPU% */
+.workerCompo-table th:nth-child(12) { width: 45px; } /* Mem% */
+.workerCompo-table th:nth-child(13) { width: 115px; } /* Disk Usage% */
+.workerCompo-table th:nth-child(14) { width: 115px; } /* Disk R/W */
+.workerCompo-table th:nth-child(15) { width: 115px; } /* Network Sent/Recv */
+.workerCompo-table th:nth-child(16) { width: 45px; } /* Actions */
 
 .workerCompo-table th[colspan="7"] {
-  width: 500px;
+  width: 400px;
 }
 
 /* ==================== */
@@ -128,18 +175,38 @@
   text-decoration: underline;
 }
 
+.value-with-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.value {
+  min-width: 20px;
+  text-align: center;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
 .small-btn {
-  padding: 0.15rem 0.5rem;
-  margin: 0 0.15rem;
+  margin: 0;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 3px;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 0.8rem;
-  transition: all 0.2s ease;
-  min-width: 24px;
-  text-align: center;
+  font-size: 0.7rem;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .small-btn:hover {
@@ -447,6 +514,23 @@
   background: var(--status-failing);
 }
 
+.scrollable-disks {
+  max-height: 120px;
+  overflow-y: auto;
+  padding-right: 4px; 
+}
+
+
+.scrollable-disks::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollable-disks::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 2px;
+}
+
+
 /* ==================== */
 /* UTILITY CLASSES */
 /* ==================== */
@@ -476,6 +560,7 @@
 }
 
 @media (max-width: 1200px) {
+
   .combined-metrics-container {
     flex-direction: column;
   }

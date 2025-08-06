@@ -420,14 +420,34 @@ export async function getTasksCount(workerId?: number): Promise<Record<string, n
 /* -------------------------------- JOB -------------------------------- */ 
 
 /**
- * Retrieves the list of jobs.
+ * Retrieves a paginated list of jobs from the server with optional limit and offset
  * 
- * @returns A promise that resolves to an array of jobs.
+ * @param {number} [limit] - Maximum number of jobs to return (for pagination)
+ * @param {number} [offset] - Number of jobs to skip (for pagination)
+ * @returns {Promise<taskqueue.Job[]>} Promise that resolves to an array of Job objects.
+ *         Returns empty array if no jobs found or if an error occurs.
+ * @throws {Error} Logs errors to console but returns empty array instead of throwing
+ * 
+ * @example
+ * // Get first 10 jobs
+ * const jobs = await getJobs(10);
+ * 
+ * @example
+ * // Get next 10 jobs (pagination)
+ * const jobs = await getJobs(10, 10);
  */
-export async function getJobs(): Promise<taskqueue.Job[]> {
+export async function getJobs(limit?: number, offset?: number): Promise<taskqueue.Job[]> {
     try {
-        const jobUnary = await client.listJobs(taskqueue.ListJobsRequest, await callOptionsUserToken());
-        return jobUnary.response?.jobs || [];
+      const request: taskqueue.ListJobsRequest = {};
+
+      if (limit) {
+        request.limit = limit;
+      }
+      if (offset) {
+        request.offset = offset;
+      }
+      const jobUnary = await client.listJobs(request, await callOptionsUserToken());
+      return jobUnary.response?.jobs || [];
     } catch (error) {
         console.error("Error while retrieving jobs:", error);
         return [];  // Return an empty array in case of error
@@ -466,6 +486,13 @@ export async function getJobStatus(jobIds: number[]): Promise<taskqueue.JobStatu
 
 /* -------------------------------- WORKFLOWS TEMPLATES -------------------------------- */ 
 
+/**
+ * Retrieves templates from the server with optional filtering
+ * @param {number} [TemplateId] - Optional template ID to filter by
+ * @param {string} [name] - Optional template name to filter by
+ * @param {string} [version] - Optional version to filter by
+ * @returns {Promise<taskqueue.Template[]>} Promise resolving to array of templates
+ */
 export async function getTemplates(TemplateId?: number, name?: string, version?: string): Promise<taskqueue.Template[]> {
   try {
     const requestParams: taskqueue.TemplateFilter = {};
@@ -481,6 +508,13 @@ export async function getTemplates(TemplateId?: number, name?: string, version?:
   }
 }
 
+/**
+ * Uploads a new template to the server
+ * @param {Uint8Array} script - The template script/content to upload
+ * @param {boolean} force - Whether to force upload if template exists
+ * @returns {Promise<taskqueue.UploadTemplateResponse>} Promise resolving to upload response
+ * @throws {Error} If upload fails
+ */
 export async function UploadTemplates(script: Uint8Array, force: boolean): Promise<taskqueue.UploadTemplateResponse> {
   try {
     const uplTempUnary = await client.uploadTemplate({ script, force }, await callOptionsUserToken());
@@ -491,13 +525,19 @@ export async function UploadTemplates(script: Uint8Array, force: boolean): Promi
   }
 }
 
-
+/**
+ * Executes a template with specified parameters
+ * @param {number} workflowTemplateId - ID of the template to run
+ * @param {string} paramValuesJson - JSON string of parameter values
+ * @returns {Promise<taskqueue.TemplateRun>} Promise resolving to template run response
+ * @throws {Error} If template execution fails
+ */
 export async function runTemp(workflowTemplateId: number, paramValuesJson: string): Promise<taskqueue.TemplateRun> {
   try {
     const runTempUnary = await client.runTemplate({ workflowTemplateId, paramValuesJson }, await callOptionsUserToken());
     return runTempUnary.response!;
   } catch (error) {
-    console.error("Error while uploading templates:", error);
+    console.error("Error while running templates:", error);
     throw error;
   }
 }
@@ -505,17 +545,26 @@ export async function runTemp(workflowTemplateId: number, paramValuesJson: strin
 /* -------------------------------- WORKFLOWS -------------------------------- */ 
 
 /**
- * Retrieves a list of workflows from the server.
- * If a `name` is provided, only workflows whose names match or partially match the given string will be returned.
- *
- * @param {string} [name] - Optional string to filter workflows by name (case-insensitive, partial match).
- * @returns {Promise<taskqueue.Workflow[]>} A promise resolving to an array of workflows. Returns an empty array on error.
+ * Retrieves a list of workflows from the server
+ * @param {string} [name] - Optional name filter (case-insensitive partial match)
+ * @param {number} [limit] - Optional pagination limit
+ * @param {number} [offset] - Optional pagination offset
+ * @returns {Promise<taskqueue.Workflow[]>} Promise resolving to array of workflows
  */
-export async function getWorkFlow(name?: string): Promise<taskqueue.Workflow[]> {
+export async function getWorkFlow(name?: string, limit?: number, offset?: number): Promise<taskqueue.Workflow[]> {
   try {
-    const wfUnary = name
-      ? await client.listWorkflows({ nameLike: name }, await callOptionsUserToken())
-      : await client.listWorkflows({}, await callOptionsUserToken());
+    const request: taskqueue.WorkflowFilter = {};
+
+    if (name) {
+      request.nameLike = name;
+    }
+    if (limit) {
+      request.limit = limit;
+    }
+    if (offset) {
+      request.offset = offset;
+    }
+    const wfUnary = await client.listWorkflows(request, await callOptionsUserToken());
     return wfUnary.response?.workflows || [];
   } catch (error) {
     console.error("Error while retrieving workflows:", error);
@@ -523,15 +572,39 @@ export async function getWorkFlow(name?: string): Promise<taskqueue.Workflow[]> 
   }
 }
 
+
 /**
- * Retrieves all steps associated with a specific workflow.
+ * Deletes a workflow by their ID.
  *
- * @param {number} workflowId - The ID of the workflow for which to retrieve steps.
- * @returns {Promise<taskqueue.Step[]>} A promise resolving to an array of steps. Returns an empty array on error.
+ * @param WorkflowId - The ID of the workflow to delete.
  */
-export async function getSteps(workflowId: number): Promise<taskqueue.Step[]> {
+export async function delWorkflow(WorkflowId: number) {
   try {
-    const stepUnary = await client.listSteps({ workflowId }, await callOptionsUserToken());
+    await client.deleteWorkflow({ workflowId: WorkflowId }, await callOptionsUserToken());
+    console.log("Workflow deleted successfully!");
+  } catch (error) {
+    console.error("Error deleting workflow: ", error);
+  }
+}
+
+
+/**
+ * Retrieves all steps associated with a specific workflow
+ * @param {number} workflowId - The workflow ID to get steps for
+ * @param {number} [limit] - Optional pagination limit
+ * @param {number} [offset] - Optional pagination offset
+ * @returns {Promise<taskqueue.Step[]>} Promise resolving to array of steps
+ */
+export async function getSteps(workflowId: number, limit?: number, offset?: number): Promise<taskqueue.Step[]> {
+  try {
+    const request: taskqueue.StepFilter = {workflowId: workflowId};
+    if (limit) {
+      request.limit = limit;
+    }
+    if (offset) {
+      request.offset = offset;
+    }
+    const stepUnary = await client.listSteps(request, await callOptionsUserToken());
     return stepUnary.response?.steps || [];
   } catch (error) {
     console.error("Error while retrieving steps:", error);
@@ -540,25 +613,45 @@ export async function getSteps(workflowId: number): Promise<taskqueue.Step[]> {
 }
 
 
+/**
+ * Deletes a step by their ID.
+ *
+ * @param StepId - The ID of the step to delete.
+ */
+export async function delStep(StepId: number) {
+  try {
+    await client.deleteStep({ stepId: StepId }, await callOptionsUserToken());
+    console.log("Step deleted successfully!");
+  } catch (error) {
+    console.error("Error deleting step: ", error);
+  }
+}
+
+
+
 /* -------------------------------- TASKS -------------------------------- */ 
 
 /**
- * Retrieves all tasks, optionally filtered by worker ID, workflowID, step ID, and status.
- * Can also sort the resulting list by task ID, worker ID, workflowID or workflow step ID.
- * 
- * @param {number} [workerId] - Optional worker ID to filter tasks by.
- * @param {number} [workflowId] - Optional workflow ID to filter tasks by.
- * @param {number} [stepId] - Optional step ID to filter tasks by.
- * @param {string} [statusFilter] - Optional task status to filter by.
- * @param {'task' | 'worker' | 'workflow'} [sortBy] - Optional sorting key for the returned tasks.
- * @returns {Promise<taskqueue.Task[]>} - A promise resolving to an array of tasks matching the filters and sorted if specified.
+ * Retrieves all tasks with optional filtering, sorting and pagination
+ * @param {number} [workerId] - Filter by worker ID
+ * @param {number} [workflowId] - Filter by workflow ID
+ * @param {number} [stepId] - Filter by step ID
+ * @param {string} [statusFilter] - Filter by status (e.g., 'pending', 'completed')
+ * @param {'task' | 'worker' | 'workflow' | 'step'} [sortBy] - Field to sort by
+ * @param {string} [command] - Filter by command name/type
+ * @param {number} [limit] - Pagination limit
+ * @param {number} [offset] - Pagination offset
+ * @returns {Promise<taskqueue.Task[]>} Promise resolving to array of tasks
  */
 export async function getAllTasks(
   workerId?: number,
   workflowId?: number,
   stepId?: number,
   statusFilter?: string,
-  sortBy?: 'task' | 'worker' | 'workflow' | 'step'
+  sortBy?: 'task' | 'worker' | 'workflow' | 'step',
+  command?: string,
+  limit?: number,
+  offset?: number,
 ): Promise<taskqueue.Task[]> {
   try {
     const request: taskqueue.ListTasksRequest = {};
@@ -566,38 +659,40 @@ export async function getAllTasks(
     if (statusFilter) {
       request.statusFilter = statusFilter;
     }
-
     if (workerId) {
       request.workerIdFilter = workerId;
+    }
+    if (workflowId) {
+      request.workflowIdFilter = workflowId;
+    }
+    if (stepId) {
+      request.stepIdFilter = stepId;
+    }
+    if (command) {
+      request.commandFilter = command;
+    }
+    if (limit) {
+      request.limit = limit;
+    }
+    if (offset) {
+      request.offset = offset;
     }
 
     const taskUnary = await client.listTasks(request, await callOptionsUserToken());
     let allTasks = taskUnary.response?.tasks || [];
 
-    // Filter tasks by worflowId if provided
-    if (workflowId !== undefined) {
-      allTasks = allTasks.filter(task => task.workflowId === workflowId);
-    }
-
-    // Filter tasks by stepId if provided
-    if (stepId !== undefined) {
-      allTasks = allTasks.filter(task => task.stepId === stepId);
-    }
-
-    // Sort tasks if sortBy is provided
-    if (sortBy) {
-      allTasks.sort((a, b) => {
+    // Apply sorting if specified
+    if (sortBy && allTasks.length > 0) {
+      allTasks = [...allTasks].sort((a, b) => {
         switch (sortBy) {
-          case 'task':
-            return (a.taskId ?? 0) - (b.taskId ?? 0);
           case 'worker':
-            return (a.workerId ?? 0) - (b.workerId ?? 0);
+            return (a.workerId || 0) - (b.workerId || 0);
           case 'workflow':
-            return (a.workflowId ?? 0) - (b.workflowId ?? 0);
+            return (a.workflowId || 0) - (b.workflowId || 0);
           case 'step':
-            return (a.stepId ?? 0) - (b.stepId ?? 0);
-          default:
-            return 0;
+            return (a.stepId || 0) - (b.stepId || 0);
+          default: // Default sorts by task ID
+            return (b.taskId || 0) - (a.taskId || 0);
         }
       });
     }

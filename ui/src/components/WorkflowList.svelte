@@ -1,6 +1,7 @@
 <script lang="ts"> 
   import StepList from './StepList.svelte';
   import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronRight, ChevronDown } from 'lucide-svelte';
+  import {delWorkflow} from '../lib/api';
   import { onMount } from 'svelte';
   
   /**
@@ -83,7 +84,7 @@
           <button class="btn-action" title="Pause"><PauseCircle /></button>
           <button class="btn-action" title="Reset"><RefreshCw /></button>
           <button class="btn-action" title="Break"><CircleX /></button>
-          <button class="btn-action" title="Clear"><Eraser /></button>
+          <button class="btn-action" title="Clear" on:click={() => delWorkflow(wf.workflowId)}><Eraser /></button>
         </div>
       </div>
 

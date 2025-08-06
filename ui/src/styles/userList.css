@@ -1,4 +1,15 @@
 /* === UserList specific styles === */
+.user-list-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
 
 /* Modal overlay & content */
 .userList-modal-overlay {
@@ -60,7 +71,6 @@
 .userList-modal-buttons button {
   padding: 0.6rem 3rem;
   border-radius: 8px;
-  border: none;
   cursor: pointer;
   font-weight: bold;
   transition: background-color 0.3s ease;
@@ -79,3 +89,4 @@
 .userList-empty-state {
   text-align: center;
 }
+ 

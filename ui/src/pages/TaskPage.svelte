@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { wsClient } from '../lib/wsClient';
   import {
     getAllTasks,
     getWorkFlow,
@@ -12,28 +13,25 @@
   import TaskList from '../components/TaskList.svelte';
   import { LogChunk, TaskLog } from '../../gen/taskqueue';
   import '../styles/tasks.css';
-  import { ArrowBigUp } from 'lucide-svelte';
+  import { ArrowBigUp, Search, X} from 'lucide-svelte';
 
-  // --- State variables ---
-
-  let tasks: Task[] = [];
+  // --- State Management ---
   let workers: Worker[] = [];
   let workflows: Workflow[] = [];
   let allSteps: Step[] = [];
 
-  let selectedWorkerId: number | '' = '';
-  let selectedWfId: number | '' = '';
-  let selectedStepId: number | '' = '';
+  // Filtering and sorting state
+  let selectedWorkerId: number = undefined;
+  let selectedWfId: number = undefined;
+  let selectedStepId: number = undefined;
   let selectedCommand: string = '';
   let selectedStatus: string = '';
-
+  let selectedTaskStatus: string = '';
+  let selectedTaskCommand: String = undefined;
   let sortBy: 'task' | 'worker' | 'wf' | 'step' = 'task';
-
   let workflowSteps: Step[] = [];
 
-  let intervalId: number;
-
-  // Log handling
+  // Log management state
   const CHUNK_SIZE = 50;
   let hasMoreStdout = true;
   let hasMoreStderr = true;
@@ -47,90 +45,329 @@
   let taskLogsOut: Record<number, TaskLog[]> = {};
   let taskLogsErr: Record<number, TaskLog[]> = {};
   let taskLogsSaved: LogChunk[] = [];
-
   const streamedTasks = new Set<number>();
 
-  // Modal and logs display
+  // UI state
   let selectedTaskId: number | null = null;
   let showLogModal = false;
   let logsToShowOut: TaskLog[] = [];
   let logsToShowErr: TaskLog[] = [];
-
   let stdoutPre: HTMLPreElement | null = null;
   let stderrPre: HTMLPreElement | null = null;
-
   let isScrolledToBottomOut = true;
   let isScrolledToBottomErr = true;
 
-  // --- Helper Functions ---
+  // Task list pagination
+  const TASKS_CHUNK_SIZE = 25;
+  let displayedTasks: Task[] = [];
+  let firstTasks: Task[] = [];
+  let pendingTasks: Task[] = []; // New pending tasks
+  let hasMoreTasks = true;
+  let isLoading = false;
+  let tasksContainer: HTMLDivElement;
+  let isScrolledToTop = false;
+  let isScrolledToBottom = false;
+  let lastScrollPosition = 0;
+  let showNewTasksNotification = false;
+  let unsubscribeWS: () => void;
+
+async function handleWebSocketMessage(message) {
+  if (message.type === 'task-created') {
+    // Create a complete task object with received data
+    const newTask: Task = {
+      taskId: message.payload.taskId,
+      command: message.payload.command || '',
+      status: message.payload.status || 'P',
+      stepId: message.payload.stepId || null,
+      workerId: null, // To be filled if available in the message
+      workflowId: null, // To be filled if available in the message
+      taskName: message.payload.taskName || null,
+    };
+
+    // Add to the appropriate list
+    if (!isScrolledToTop) {
+      pendingTasks = [...pendingTasks, newTask];
+      showNewTasksNotification = true;
+    } else {
+      displayedTasks = [newTask, ...displayedTasks];
+      firstTasks = [newTask, ...firstTasks];
+      const finishedTaskIds = displayedTasks
+        .filter(task => !['R', 'U', 'V'].includes(task.status))
+        .map(task => task.taskId);
+
+      if (finishedTaskIds.length > 0) {
+        taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+      }
+    }
+    
+    // Start streaming if needed
+    if (['R', 'U', 'V'].includes(newTask.status)) {
+      startStreaming(newTask);
+    }
+  }
+  else if (message.type === 'task-updated') {
+    const updatedTaskId = message.payload.taskId;
+    const newStatus = message.payload.status;
+    const workerId = message.payload.workerId;
+
+    console.log('Task updated:', {updatedTaskId, newStatus, workerId});
+
+    // Helper function to update a task in an array
+    const updateTaskInArray = (tasks: Task[]) => {
+      return tasks.map(task => {
+        if (task.taskId === updatedTaskId) {
+          const updatedTask = {
+            ...task,
+            status: newStatus
+          };
+          
+          if (workerId !== undefined) {
+            updatedTask.workerId = workerId;
+            
+            if (workers.length > 0) {
+              const worker = workers.find(w => w.workerId === workerId);
+              if (worker) {
+                updatedTask.workerName = worker.name;
+              }
+            }
+          }
+          
+          return updatedTask;
+        }
+        return task;
+      });
+    };
+
+    // Update in displayedTasks
+    displayedTasks = updateTaskInArray(displayedTasks);
+    
+    // Update in firstTasks
+    firstTasks = updateTaskInArray(firstTasks);
+    
+    // Update in pendingTasks if the task is there
+    pendingTasks = updateTaskInArray(pendingTasks);
+
+    // Start streaming if needed
+    if (['R', 'U', 'V'].includes(newStatus)) {
+      // Check in displayedTasks first
+      let task = displayedTasks.find(t => t.taskId === updatedTaskId);
+      
+      // If not found, check in pendingTasks
+      if (!task) {
+        task = pendingTasks.find(t => t.taskId === updatedTaskId);
+      }
+      
+      if (task && !streamedTasks.has(task.taskId)) {
+        startStreaming(task);
+      }
+    }
+  }
+}
+
+  // --- Core Functions ---
 
   /**
+   * Loads initial task batch with current filters
+   * @async
+   * @returns {Promise<void>} Resolves when initial load completes
+   */
+  async function loadInitialTasks() {
+    displayedTasks = await getAllTasks(
+      selectedWorkerId,
+      selectedWfId,
+      selectedStepId,
+      selectedStatus,
+      sortBy,
+      selectedCommand,
+      TASKS_CHUNK_SIZE,
+      0
+    );
+    firstTasks = [...displayedTasks];
+    hasMoreTasks = displayedTasks.length === TASKS_CHUNK_SIZE;
+    
+    // Start streaming for running tasks
+    for (const task of displayedTasks) {
+      if (['R', 'U', 'V'].includes(task.status) && !streamedTasks.has(task.taskId)) {
+        startStreaming(task);
+      }
+    }
+  }
+  /**
    * Parses filter parameters from URL hash
-   * @returns {Object} Filters object containing:
-   * @property {string|undefined} status - Task status filter
-   * @property {number|undefined} workerId - Worker ID filter
-   * @property {number|undefined} workflowId - Workflow ID filter
-   * @property {number|undefined} stepId - Step ID filter
+   * @returns {Object} Filter parameters object
    */
   function getFiltersFromUrl() {
     const hash = window.location.hash;
     const queryPart = hash.includes('?') ? hash.split('?')[1] : '';
     const params = new URLSearchParams(queryPart);
 
+    const parseNumber = (value: string | null): number | undefined => {
+      const num = Number(value);
+      return value && !isNaN(num) ? num : undefined;
+    };
     return {
       status: params.get('status') ?? undefined,
-      workerId: params.get('workerId') ? Number(params.get('workerId')) : undefined,
-      workflowId: params.get('workflowId') ? Number(params.get('workflowId')) : undefined,
-      stepId: params.get('stepId') ? Number(params.get('stepId')) : undefined,
+      workerId: parseNumber(params.get('workerId')),
+      workflowId: parseNumber(params.get('workflowId')),
+      stepId: parseNumber(params.get('stepId')),
+      command: params.get('command') ? decodeURIComponent(params.get('command')) : undefined
     };
   }
 
   /**
-   * Updates task list based on current URL filters and sorting
+   * Updates task list based on URL filters
    * @async
+   * @returns {Promise<void>} Resolves when update completes
    */
   async function updateTasksFromUrl() {
     const filters = getFiltersFromUrl();
 
-    selectedWorkerId = filters.workerId ?? '';
-    selectedWfId = filters.workflowId ?? '';
-    selectedStepId = filters.stepId ?? '';
+    selectedWorkerId = filters.workerId ?? undefined;
+    selectedWfId = filters.workflowId ?? undefined;
+    selectedStepId = filters.stepId ?? undefined;
+    selectedStatus = filters.status ?? undefined;
 
-    if (selectedWfId !== '') {
+    if (selectedWfId !== undefined) {
       workflowSteps = await getSteps(selectedWfId);
     } else {
       workflowSteps = [];
     }
 
-    const latestTasks = await getAllTasks(
-      filters.workerId,
-      filters.workflowId,
-      filters.stepId,
-      filters.status,
-      sortBy
-    );
-
-    if (Array.isArray(latestTasks)) {
-      for (const task of latestTasks) {
+    isLoading = true;
+    try {
+      const initialLoad = await getAllTasks(
+        selectedWorkerId,
+        selectedWfId,
+        selectedStepId,
+        selectedStatus,
+        sortBy,
+        selectedCommand,
+        TASKS_CHUNK_SIZE,
+        0
+      );
+    
+      if (Array.isArray(initialLoad)) {
+        displayedTasks = initialLoad;
+        if(!selectedCommand){
+          firstTasks = initialLoad;
+        }
+        else {
+          firstTasks = await getAllTasks(
+            selectedWorkerId,
+            selectedWfId,
+            selectedStepId,
+            selectedStatus,
+            sortBy,
+            undefined,
+            TASKS_CHUNK_SIZE,
+            0
+           );
+        }
+        hasMoreTasks = initialLoad.length === TASKS_CHUNK_SIZE;
+        
+        // Start streaming for running tasks
+        for (const task of initialLoad) {
         if (['R', 'U', 'V'].includes(task.status) && !streamedTasks.has(task.taskId)) {
           startStreaming(task);
         }
       }
 
-      const oldIds = tasks.map(t => t.taskId).join(',');
-      const newIds = latestTasks.map(t => t.taskId).join(',');
-      const statusChanged = tasks.some((t, i) => t.status !== latestTasks[i]?.status);
+        const finishedTaskIds = displayedTasks
+          .filter(task => !['R', 'U', 'V'].includes(task.status))
+          .map(task => task.taskId);
 
-      if (oldIds !== newIds || statusChanged) {
-        tasks = latestTasks;
+        if (finishedTaskIds.length > 0) {
+          taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+        }
       }
-    } else {
-      console.error('getAllTasks() did not return an array:', latestTasks);
+    } finally {
+      isLoading = false;
     }
   }
 
   /**
-   * Updates URL hash with current filter parameters
+   * Loads newly arrived tasks
+   */
+  function loadNewTasks() {
+    if (pendingTasks.length === 0) return;
+    
+    // Reset if in search mode
+    if (selectedCommand) {
+      selectedCommand = undefined;
+      displayedTasks = [...firstTasks];
+      hasMoreTasks = firstTasks.length === TASKS_CHUNK_SIZE;
+      showNewTasksNotification = false;
+      pendingTasks = [];
+      return;
+    }
+
+    // Add pending tasks to the top
+    displayedTasks = [...pendingTasks, ...displayedTasks];
+    firstTasks = [...pendingTasks, ...firstTasks];
+    pendingTasks = [];
+    showNewTasksNotification = false;
+    
+    if (tasksContainer) {
+      tasksContainer.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    }
+  }
+
+  /**
+   * Loads additional tasks for infinite scroll
+   * @async
+   * @returns {Promise<void>} Resolves when loading completes
+   */
+  async function loadMoreTasks() {
+    if (isLoading || !hasMoreTasks) return;
+    
+    isLoading = true;
+    try {
+        const additionalTasks = await getAllTasks(
+            selectedWorkerId,
+            selectedWfId,
+            selectedStepId,
+            selectedStatus,
+            sortBy,
+            selectedCommand,
+            TASKS_CHUNK_SIZE,
+            displayedTasks.length
+        );
+
+        if (additionalTasks.length > 0) {
+            // Merge avoiding duplicates
+            const mergedTasks = [...new Map([...displayedTasks, ...additionalTasks].map(task => [task.taskId, task])).values()];
+            displayedTasks = mergedTasks;
+            displayedTasks = handleSortBy();
+            hasMoreTasks = additionalTasks.length === TASKS_CHUNK_SIZE;
+            
+            await tick();
+            
+            if (tasksContainer && !isScrolledToTop) {
+                tasksContainer.scrollTop = lastScrollPosition;
+            }
+
+            const finishedTaskIds = displayedTasks
+            .filter(task => !['R', 'U', 'V'].includes(task.status))
+            .map(task => task.taskId);
+
+          if (finishedTaskIds.length > 0) {
+            taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+          }
+        } else {
+            hasMoreTasks = false;
+        }
+    } catch (error) {
+        console.error("Error loading more tasks:", error);
+    } finally {
+        isLoading = false;
+    }
+  }
+
+  /**
+   * Updates URL with current filters
    * @param {string} [status] - Optional status filter to apply
    */
   function handleStatusClick(status?: string) {
@@ -140,19 +377,48 @@
     if (selectedWorkerId) query.set('workerId', selectedWorkerId.toString());
     if (selectedWfId) query.set('workflowId', selectedWfId.toString());
     if (selectedStepId) query.set('stepId', selectedStepId.toString());
+    if (selectedCommand) {
+        query.set('command', encodeURIComponent(selectedCommand));
+    }
 
     window.location.hash = `/tasks?${query.toString()}`;
   }
 
   /**
-   * Handles workflow selection change and updates related state
+   * Handles workflow selection change
    * @async
+   * @returns {Promise<void>} Resolves when steps are loaded
    */
   async function handleWfClick() {
     selectedWfId = selectedWfId !== '' ? Number(selectedWfId) : '';
     workflowSteps = selectedWfId !== '' ? allSteps.filter(s => s.workflowId === selectedWfId) : [];
     selectedStepId = '';
     handleStatusClick();
+  }
+
+  /**
+   * Sorts tasks based on current sort criteria
+   * @returns {Task[]} Sorted task array
+   */
+  function handleSortBy() {
+    if (!displayedTasks) return [];
+
+    const sortedTasks = [...displayedTasks].sort((a, b) => {
+      switch (sortBy) {
+        case 'task':
+          return (b.taskId ?? 0) - (a.taskId ?? 0);
+        case 'worker':
+          return (a.workerId ?? 0) - (b.workerId ?? 0);
+        case 'wf':
+          return (a.workflowId ?? 0) - (b.workflowId ?? 0);
+        case 'step':
+          return (a.stepId ?? 0) - (b.stepId ?? 0);
+        default:
+          return 0;
+      }
+    });
+    
+    return sortedTasks;
   }
 
   /**
@@ -167,8 +433,8 @@
     taskLogsErr[task.taskId] = taskLogsErr[task.taskId] ?? [];
 
     /**
-     * Handles incoming log entries
-     * @param {TaskLog} log - The log entry to process
+     * Processes incoming log entries
+     * @param {TaskLog} log - Log entry to process
      */
     const handleLog = async (log: TaskLog) => {
       const maxLines = 50;
@@ -206,10 +472,11 @@
   }
 
   /**
-   * Loads older logs for a task in chunks
+   * Loads older logs for a task
    * @async
-   * @param {number} taskId - ID of task to load logs for
-   * @param {'stdout'|'stderr'} logType - Type of logs to load
+   * @param {number} taskId - Task ID to load logs for
+   * @param {'stdout'|'stderr'} logType - Log type to load
+   * @returns {Promise<void>} Resolves when logs are loaded
    */
   async function loadMoreLogs(taskId: number, logType: 'stdout' | 'stderr') {
     if (!logSkipTracker[taskId]) {
@@ -244,20 +511,21 @@
   }
 
   /**
-   * Opens the log modal for a specific task
+   * Opens log modal for a task
    * @async
-   * @param {number} taskId - ID of task to show logs for
+   * @param {number} taskId - Task ID to show logs for
+   * @returns {Promise<void>} Resolves when modal is ready
    */
   async function openLogModal(taskId: number) {
     isScrolledToBottomErr = true;
     isScrolledToBottomOut = true;
     selectedTaskId = taskId;
 
-    const task = tasks.find(t => t.taskId === taskId);
+    const task = displayedTasks.find(t => t.taskId === taskId);
     if (!task) return;
 
-    selectedCommand = task.command;
-    selectedStatus = task.status;
+    selectedTaskCommand = task.command;
+    selectedTaskStatus = task.status;
 
     if (['R', 'U', 'V'].includes(task.status)) {
       startStreaming(task);
@@ -273,18 +541,18 @@
   }
 
   /**
-   * Closes the log modal and resets related state
+   * Closes log modal
    */
   function closeLogModal() {
     showLogModal = false;
     selectedTaskId = null;
-    selectedCommand = '';
+    selectedTaskCommand = '';
     hasMoreStdout = true;
     hasMoreStderr = true;
   }
 
   /**
-   * Scrolls the specified log panel to top
+   * Scrolls log panel to top
    * @param {'stdout'|'stderr'} logType - Which log panel to scroll
    */
   function scrollToTop(logType: 'stdout' | 'stderr') {
@@ -299,44 +567,92 @@
     }
   }
 
-  // --- Lifecycle Hooks ---
-
+    // --- Lifecycle Management ---
   onMount(async () => {
-    workers = await getWorkers();
-    workflows = await getWorkFlow();
-    const steps = await Promise.all(workflows.map(wf => getSteps(wf.workflowId)));
-    allSteps = steps.flat();
+    try {
+      // Parallel data loading
+      const [workersData, workflowsData] = await Promise.all([
+        getWorkers(),
+        getWorkFlow()
+      ]);
+      
+      workers = workersData;
+      workflows = workflowsData;
+      
+      // Load steps for all workflows
+      const allStepsArrays = await Promise.all(workflows.map(wf => getSteps(wf.workflowId)));
+      allSteps = allStepsArrays.reduce((acc, steps) => acc.concat(steps), []);
+      
+      // Initial task load
+      await updateTasksFromUrl();
 
-    await updateTasksFromUrl();
+      const finishedTaskIds = displayedTasks
+        .filter(task => !['R', 'U', 'V'].includes(task.status))
+        .map(task => task.taskId);
 
-    // Load saved logs for finished tasks
-    const finishedTaskIds = tasks
-      .filter(task => !['R', 'U', 'V'].includes(task.status))
-      .map(task => task.taskId);
+      if (finishedTaskIds.length > 0) {
+        taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+      }
 
-    if (finishedTaskIds.length > 0) {
-      taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+      // Setup WebSocket subscription
+      unsubscribeWS = wsClient.subscribeToMessages(handleWebSocketMessage);
+
+      // URL change listener
+      window.addEventListener('hashchange', updateTasksFromUrl);
+
+      // Initial scroll position check
+      if (tasksContainer) {
+        handleScroll();
+      }
+    } catch (error) {
+      console.error("Initialization error:", error);
     }
 
-    window.addEventListener('hashchange', updateTasksFromUrl);
-    intervalId = setInterval(updateTasksFromUrl, 1000);
-
     return () => {
-      clearInterval(intervalId);
+      // Cleanup
+      unsubscribeWS?.();
       window.removeEventListener('hashchange', updateTasksFromUrl);
     };
   });
 
+  let lastScrollTrigger = 0;
+
+  /**
+   * Handles scroll events for infinite loading
+   */
+  function handleScroll() {
+    if (!tasksContainer || isLoading) return;
+
+    lastScrollPosition = tasksContainer.scrollTop;
+
+    const { scrollTop, scrollHeight, clientHeight } = tasksContainer;
+    const scrollPosition = scrollTop + clientHeight;
+    const threshold = 150;
+
+    // Detect top of page
+    isScrolledToTop = scrollTop <= 10;
+
+    // Load new tasks if scrolled to top
+    if (isScrolledToTop && pendingTasks.length > 0) {
+      loadNewTasks();
+    }
+
+    // Detect bottom of page
+    const distanceFromBottom = scrollHeight - scrollPosition;
+    if (distanceFromBottom <= threshold && hasMoreTasks && !isLoading) {
+      loadMoreTasks();
+    }
+  }
+
   // --- Reactive Statements ---
 
-  // Update logs to show when selectedTaskId changes
+  // Update logs when selected task changes
   $: if (selectedTaskId !== null) {
     logsToShowOut = taskLogsOut[selectedTaskId] ?? [];
     logsToShowErr = taskLogsErr[selectedTaskId] ?? [];
-    console.log('Logs Out:', logsToShowOut.length, 'Logs Err:', logsToShowErr.length);
   }
 
-  // Auto-scroll stdout to bottom when new logs appear
+  // Auto-scroll stdout when new logs arrive
   $: if (logsToShowOut.length > 0) {
     tick().then(() => {
       setTimeout(() => {
@@ -345,7 +661,7 @@
     });
   }
 
-  // Auto-scroll stderr to bottom when new logs appear
+  // Auto-scroll stderr when new logs arrive
   $: if (logsToShowErr.length > 0) {
     tick().then(() => {
       setTimeout(() => {
@@ -356,12 +672,74 @@
 </script>
 
 <div class="tasks-container" data-testid="tasks-page">
+  {#if showNewTasksNotification}
+    <div 
+      class="new-tasks-notification"
+      data-testid={`tasks-notification-${pendingTasks.length}`}
+      on:click={loadNewTasks}
+      on:keydown={e => e.key === 'Enter' && loadNewTasks()}
+      tabindex="0"
+      role="button"
+      aria-label={`Show ${pendingTasks.length} new task${pendingTasks.length > 1 ? 's' : ''}`}
+    >
+      {pendingTasks.length} new task{pendingTasks.length > 1 ? 's' : ''} available
+      <button class="show-new-btn" on:click={loadNewTasks}>Show</button>
+    </div>
+  {/if}
+
 
   <!-- Filters -->
   <form class="tasks-filters-form" on:submit|preventDefault={() => handleStatusClick()}>
+
+    <div class="tasks-filter-group tasks-search-container {isLoading ? 'searching' : ''}">
+      <label for="command">Command</label>
+      <div class="search-input-wrapper">
+          <input
+            id="command"
+            type="text"
+            bind:value={selectedCommand}
+            placeholder="Search commands..."
+            aria-label="Search tasks by command"
+            on:keydown={(e) => e.key === 'Enter' && handleStatusClick()}
+          />
+        <div class="search-icons">
+          {#if selectedCommand}
+            <button 
+              type="button" 
+              on:click={() => {
+                selectedCommand = '';
+                handleStatusClick();
+              }}
+              class="clear-button"
+              aria-label="Clear search"
+            >
+              <X size={16}/>
+            </button>
+          {/if}
+          <button 
+            type="button" 
+            on:click={() => handleStatusClick()}
+            class="search-button"
+            disabled={isLoading}
+            aria-label={isLoading ? "Searching..." : "Search"}
+          >
+            {#if isLoading}
+              <span class="loading-spinner" aria-hidden="true"></span>
+            {:else}
+              <Search size={16}/>
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="tasks-filter-group">
       <label for="sortBy">Sort by</label>
-      <select id="sortBy" bind:value={sortBy} on:change={() => handleStatusClick()}>
+      <select id="sortBy" bind:value={sortBy} on:change={() => {
+          if (displayedTasks) {
+              displayedTasks = handleSortBy();
+          }
+      }}>
         <option value="task">Task</option>
         <option value="worker">Worker</option>
         <option value="wf">Workflow</option>
@@ -410,7 +788,7 @@
           id="stepSelect"
           bind:value={selectedStepId}
           on:change={() => {
-            selectedStepId = selectedStepId !== '' ? Number(selectedStepId) : '';
+            selectedStepId = selectedStepId !== '' ? Number(selectedStepId) : undefined;
             handleStatusClick();
           }}
         >
@@ -441,8 +819,26 @@
     <button class="tasks-status-canceled" on:click={() => handleStatusClick('X')}>Canceled</button>
   </div>
 
-  <!-- Filtered task list -->
-  <TaskList {tasks} {taskLogsSaved} {workers} {workflows} {allSteps} onOpenModal={openLogModal} />
+  <div class="tasks-list-container" bind:this={tasksContainer} on:scroll={handleScroll}>
+
+      <!-- Filtered task list -->
+  <TaskList 
+    displayedTasks={displayedTasks}
+    {taskLogsSaved}
+    {workers}
+    {workflows}
+    {allSteps}
+    onOpenModal={openLogModal}
+  />
+
+  {#if isLoading}
+    <div class="loading-indicator">Loading...</div>
+  {:else if !hasMoreTasks}
+    <p class="workerCompo-empty-state">No more task.</p>
+  {/if}
+
+  </div>
+
 </div>
 
 {#if showLogModal && selectedTaskId !== null}
@@ -471,13 +867,13 @@
       <h2 id="modal-title" class="modal-title">
         📜 Logs for Task {selectedTaskId}:
       </h2>
-      <p class="tasks-command-preview"> {selectedCommand}</p>
+      <p class="tasks-command-preview"> {selectedTaskCommand}</p>
       <div class="tasks-log-columns">
         {#if logsToShowOut.length > 0}
           <div class="tasks-log-block tasks-stdout-block">
             <h3 class="tasks-output-header">
               🟢 Output
-              {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedStatus) && hasMoreStdout}
+              {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedTaskStatus) && hasMoreStdout}
                 <button
                   class="tasks-load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stdout'); scrollToTop('stdout');; }}
@@ -501,7 +897,7 @@
                   isScrolledToBottomOut = atBottom;
                 }}
               >
-                {#each logsToShowOut as log}
+                {#each logsToShowOut as log, i (log.logText + i)}
 {log.logText}
                 {/each}
               </pre>
@@ -512,7 +908,7 @@
           <div class="tasks-log-block tasks-stderr-block">
             <h3 class="tasks-error-header">
               🔴 Error
-              {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedStatus) && hasMoreStderr}
+              {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedTaskStatus) && hasMoreStderr}
                 <button
                   class="tasks-load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stderr'); scrollToTop('stderr');; }}
@@ -535,7 +931,7 @@
                   isScrolledToBottomErr = atBottom;
                 }}
               >
-                {#each logsToShowErr as log}
+                {#each logsToShowErr as log, i (log.logText + i)}
 {log.logText}
                 {/each}
               </pre>

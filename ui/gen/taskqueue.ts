@@ -492,6 +492,26 @@ export interface ListTasksRequest {
      * @generated from protobuf field: optional uint32 worker_id_filter = 2;
      */
     workerIdFilter?: number;
+    /**
+     * @generated from protobuf field: optional uint32 workflow_id_filter = 3;
+     */
+    workflowIdFilter?: number;
+    /**
+     * @generated from protobuf field: optional uint32 step_id_filter = 4;
+     */
+    stepIdFilter?: number;
+    /**
+     * @generated from protobuf field: optional string command_filter = 5;
+     */
+    commandFilter?: string;
+    /**
+     * @generated from protobuf field: optional uint32 limit = 6;
+     */
+    limit?: number;
+    /**
+     * @generated from protobuf field: optional uint32 offset = 7;
+     */
+    offset?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkerRequest
@@ -658,6 +678,14 @@ export interface FlavorsList {
  * @generated from protobuf message taskqueue.ListJobsRequest
  */
 export interface ListJobsRequest {
+    /**
+     * @generated from protobuf field: optional uint32 limit = 1;
+     */
+    limit?: number;
+    /**
+     * @generated from protobuf field: optional uint32 offset = 2;
+     */
+    offset?: number;
 }
 /**
  * @generated from protobuf message taskqueue.Job
@@ -987,6 +1015,14 @@ export interface WorkflowFilter {
      * @generated from protobuf field: optional string name_like = 1;
      */
     nameLike?: string;
+    /**
+     * @generated from protobuf field: optional uint32 limit = 2;
+     */
+    limit?: number;
+    /**
+     * @generated from protobuf field: optional uint32 offset = 3;
+     */
+    offset?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkflowId
@@ -1043,6 +1079,23 @@ export interface WorkflowList {
      * @generated from protobuf field: repeated taskqueue.Workflow workflows = 1;
      */
     workflows: Workflow[];
+}
+/**
+ * @generated from protobuf message taskqueue.StepFilter
+ */
+export interface StepFilter {
+    /**
+     * @generated from protobuf field: uint32 WorkflowId = 1 [json_name = "WorkflowId"];
+     */
+    workflowId: number;
+    /**
+     * @generated from protobuf field: optional uint32 limit = 2;
+     */
+    limit?: number;
+    /**
+     * @generated from protobuf field: optional uint32 offset = 3;
+     */
+    offset?: number;
 }
 /**
  * @generated from protobuf message taskqueue.StepId
@@ -1462,6 +1515,27 @@ export interface DeleteTemplateRunRequest {
      * @generated from protobuf field: uint32 template_run_id = 1;
      */
     templateRunId: number;
+}
+/**
+ * @generated from protobuf message taskqueue.ResourceSpec
+ */
+export interface ResourceSpec {
+    /**
+     * @generated from protobuf field: string worker_id = 1;
+     */
+    workerId: string;
+    /**
+     * @generated from protobuf field: int32 cpu = 2;
+     */
+    cpu: number;
+    /**
+     * @generated from protobuf field: float mem = 3;
+     */
+    mem: number;
+    /**
+     * @generated from protobuf field: float disk = 4;
+     */
+    disk: number;
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class TaskResponse$Type extends MessageType<TaskResponse> {
@@ -3184,7 +3258,12 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
     constructor() {
         super("taskqueue.ListTasksRequest", [
             { no: 1, name: "status_filter", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "worker_id_filter", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
+            { no: 2, name: "worker_id_filter", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "workflow_id_filter", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "step_id_filter", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 5, name: "command_filter", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "limit", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 7, name: "offset", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<ListTasksRequest>): ListTasksRequest {
@@ -3204,6 +3283,21 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
                 case /* optional uint32 worker_id_filter */ 2:
                     message.workerIdFilter = reader.uint32();
                     break;
+                case /* optional uint32 workflow_id_filter */ 3:
+                    message.workflowIdFilter = reader.uint32();
+                    break;
+                case /* optional uint32 step_id_filter */ 4:
+                    message.stepIdFilter = reader.uint32();
+                    break;
+                case /* optional string command_filter */ 5:
+                    message.commandFilter = reader.string();
+                    break;
+                case /* optional uint32 limit */ 6:
+                    message.limit = reader.uint32();
+                    break;
+                case /* optional uint32 offset */ 7:
+                    message.offset = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3222,6 +3316,21 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
         /* optional uint32 worker_id_filter = 2; */
         if (message.workerIdFilter !== undefined)
             writer.tag(2, WireType.Varint).uint32(message.workerIdFilter);
+        /* optional uint32 workflow_id_filter = 3; */
+        if (message.workflowIdFilter !== undefined)
+            writer.tag(3, WireType.Varint).uint32(message.workflowIdFilter);
+        /* optional uint32 step_id_filter = 4; */
+        if (message.stepIdFilter !== undefined)
+            writer.tag(4, WireType.Varint).uint32(message.stepIdFilter);
+        /* optional string command_filter = 5; */
+        if (message.commandFilter !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.commandFilter);
+        /* optional uint32 limit = 6; */
+        if (message.limit !== undefined)
+            writer.tag(6, WireType.Varint).uint32(message.limit);
+        /* optional uint32 offset = 7; */
+        if (message.offset !== undefined)
+            writer.tag(7, WireType.Varint).uint32(message.offset);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3687,7 +3796,10 @@ export const FlavorsList = new FlavorsList$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListJobsRequest$Type extends MessageType<ListJobsRequest> {
     constructor() {
-        super("taskqueue.ListJobsRequest", []);
+        super("taskqueue.ListJobsRequest", [
+            { no: 1, name: "limit", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "offset", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
+        ]);
     }
     create(value?: PartialMessage<ListJobsRequest>): ListJobsRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
@@ -3700,6 +3812,12 @@ class ListJobsRequest$Type extends MessageType<ListJobsRequest> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
+                case /* optional uint32 limit */ 1:
+                    message.limit = reader.uint32();
+                    break;
+                case /* optional uint32 offset */ 2:
+                    message.offset = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3712,6 +3830,12 @@ class ListJobsRequest$Type extends MessageType<ListJobsRequest> {
         return message;
     }
     internalBinaryWrite(message: ListJobsRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional uint32 limit = 1; */
+        if (message.limit !== undefined)
+            writer.tag(1, WireType.Varint).uint32(message.limit);
+        /* optional uint32 offset = 2; */
+        if (message.offset !== undefined)
+            writer.tag(2, WireType.Varint).uint32(message.offset);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4943,7 +5067,9 @@ export const RecruiterList = new RecruiterList$Type();
 class WorkflowFilter$Type extends MessageType<WorkflowFilter> {
     constructor() {
         super("taskqueue.WorkflowFilter", [
-            { no: 1, name: "name_like", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "name_like", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "limit", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "offset", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkflowFilter>): WorkflowFilter {
@@ -4960,6 +5086,12 @@ class WorkflowFilter$Type extends MessageType<WorkflowFilter> {
                 case /* optional string name_like */ 1:
                     message.nameLike = reader.string();
                     break;
+                case /* optional uint32 limit */ 2:
+                    message.limit = reader.uint32();
+                    break;
+                case /* optional uint32 offset */ 3:
+                    message.offset = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4975,6 +5107,12 @@ class WorkflowFilter$Type extends MessageType<WorkflowFilter> {
         /* optional string name_like = 1; */
         if (message.nameLike !== undefined)
             writer.tag(1, WireType.LengthDelimited).string(message.nameLike);
+        /* optional uint32 limit = 2; */
+        if (message.limit !== undefined)
+            writer.tag(2, WireType.Varint).uint32(message.limit);
+        /* optional uint32 offset = 3; */
+        if (message.offset !== undefined)
+            writer.tag(3, WireType.Varint).uint32(message.offset);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5210,6 +5348,67 @@ class WorkflowList$Type extends MessageType<WorkflowList> {
  * @generated MessageType for protobuf message taskqueue.WorkflowList
  */
 export const WorkflowList = new WorkflowList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StepFilter$Type extends MessageType<StepFilter> {
+    constructor() {
+        super("taskqueue.StepFilter", [
+            { no: 1, name: "WorkflowId", kind: "scalar", jsonName: "WorkflowId", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "limit", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "offset", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<StepFilter>): StepFilter {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workflowId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<StepFilter>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StepFilter): StepFilter {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 WorkflowId = 1 [json_name = "WorkflowId"];*/ 1:
+                    message.workflowId = reader.uint32();
+                    break;
+                case /* optional uint32 limit */ 2:
+                    message.limit = reader.uint32();
+                    break;
+                case /* optional uint32 offset */ 3:
+                    message.offset = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StepFilter, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 WorkflowId = 1 [json_name = "WorkflowId"]; */
+        if (message.workflowId !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.workflowId);
+        /* optional uint32 limit = 2; */
+        if (message.limit !== undefined)
+            writer.tag(2, WireType.Varint).uint32(message.limit);
+        /* optional uint32 offset = 3; */
+        if (message.offset !== undefined)
+            writer.tag(3, WireType.Varint).uint32(message.offset);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.StepFilter
+ */
+export const StepFilter = new StepFilter$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class StepId$Type extends MessageType<StepId> {
     constructor() {
@@ -6774,6 +6973,77 @@ class DeleteTemplateRunRequest$Type extends MessageType<DeleteTemplateRunRequest
  * @generated MessageType for protobuf message taskqueue.DeleteTemplateRunRequest
  */
 export const DeleteTemplateRunRequest = new DeleteTemplateRunRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ResourceSpec$Type extends MessageType<ResourceSpec> {
+    constructor() {
+        super("taskqueue.ResourceSpec", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "cpu", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "mem", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 4, name: "disk", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ResourceSpec>): ResourceSpec {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = "";
+        message.cpu = 0;
+        message.mem = 0;
+        message.disk = 0;
+        if (value !== undefined)
+            reflectionMergePartial<ResourceSpec>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ResourceSpec): ResourceSpec {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string worker_id */ 1:
+                    message.workerId = reader.string();
+                    break;
+                case /* int32 cpu */ 2:
+                    message.cpu = reader.int32();
+                    break;
+                case /* float mem */ 3:
+                    message.mem = reader.float();
+                    break;
+                case /* float disk */ 4:
+                    message.disk = reader.float();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ResourceSpec, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string worker_id = 1; */
+        if (message.workerId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.workerId);
+        /* int32 cpu = 2; */
+        if (message.cpu !== 0)
+            writer.tag(2, WireType.Varint).int32(message.cpu);
+        /* float mem = 3; */
+        if (message.mem !== 0)
+            writer.tag(3, WireType.Bit32).float(message.mem);
+        /* float disk = 4; */
+        if (message.disk !== 0)
+            writer.tag(4, WireType.Bit32).float(message.disk);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ResourceSpec
+ */
+export const ResourceSpec = new ResourceSpec$Type();
 /**
  * @generated ServiceType for protobuf service taskqueue.TaskQueue
  */
@@ -6812,7 +7082,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListWorkflows", options: {}, I: WorkflowFilter, O: WorkflowList },
     { name: "CreateWorkflow", options: {}, I: WorkflowRequest, O: WorkflowId },
     { name: "DeleteWorkflow", options: {}, I: WorkflowId, O: Ack },
-    { name: "ListSteps", options: {}, I: WorkflowId, O: StepList },
+    { name: "ListSteps", options: {}, I: StepFilter, O: StepList },
     { name: "CreateStep", options: {}, I: StepRequest, O: StepId },
     { name: "DeleteStep", options: {}, I: StepId, O: Ack },
     { name: "GetWorkerStats", options: {}, I: GetWorkerStatsRequest, O: GetWorkerStatsResponse },
@@ -6823,5 +7093,6 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListTemplateRuns", options: {}, I: TemplateRunFilter, O: TemplateRunList },
     { name: "UpdateTemplateRun", options: {}, I: UpdateTemplateRunRequest, O: Ack },
     { name: "DeleteTemplateRun", options: {}, I: DeleteTemplateRunRequest, O: Ack },
-    { name: "GetWorkspaceRoot", options: {}, I: WorkspaceRootRequest, O: WorkspaceRootResponse }
+    { name: "GetWorkspaceRoot", options: {}, I: WorkspaceRootRequest, O: WorkspaceRootResponse },
+    { name: "RegisterSpecifications", options: {}, I: ResourceSpec, O: Ack }
 ]);

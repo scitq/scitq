@@ -22,12 +22,6 @@ let hasLoaded = false;
 /** Map of job statuses and progressions by job ID */
 let jobStatusMap = new Map<number, { status: string, progression?: number }>();
 
-/**
- * Callback when job is deleted
- * @event
- * @param jobId ID of deleted job
- */
-export let onJobDeleted: (event: { detail: { jobId: number } }) => void = () => {};
 
 /**
  * Initialize component - starts auto-refresh
@@ -63,7 +57,7 @@ $: displayJobs = jobs.map(job => {
  * Updates internal status map
  */
 async function updateJobData() {
-  if (jobs.length === 0) return;
+  if (jobs.length === 0) return; 
 
   try {
     const jobsStatus = await getJobStatus(jobs.map(j => j.jobId));
@@ -77,12 +71,11 @@ async function updateJobData() {
 }
 
 /**
- * Delete a job and clean up local state
+ * Delete a job
  * @param jobId ID of job to delete
  */
 async function deleteJob(jobId: number) {
-  onJobDeleted({ detail: { jobId } });
-  jobStatusMap.delete(jobId);
+  await delJob({ jobId });
 }
 
 /**
@@ -96,7 +89,7 @@ function handleRestart(jobId: number) {
 </script>
 
 {#if displayJobs && displayJobs.length > 0}
-  <div class="workerCompo-table-wrapper">
+  <div class="jobCompo-table-wrapper">
     <table class="listTable">
       <thead>
         <tr>

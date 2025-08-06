@@ -1,9 +1,14 @@
+.jobCompo-table-wrapper {
+    margin-top: auto;
+    width: 100%;
+}
+
 /* Status indicator styles (circular pills) */
 .jobCompo-status-pill {
     display: inline-block;
     width: 12px;
     height: 12px;
-    border-radius: 50%;
+    border-radius: 50%; 
     cursor: pointer;
 }
 

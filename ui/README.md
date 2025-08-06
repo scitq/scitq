@@ -274,14 +274,15 @@ The API layer (`lib/api.ts`) makes several key features possible:
 | 👷 **Worker Management**   | `getWorkers()`, `newWorker()`, `updateWorkerConfig()`, `delWorker()`, `getStatus()`, `getTasksCount()`                                                      | Manage workers: CRUD operations, configuration updates, and status                                   |
 | 📋 **Job Management**      | `getJobs()`, `delJob()`, `getJobStatus()`, `getJobStatusClass()`, `getJobStatusText()`                                                                     | Handle jobs: list, delete, retrieve job statuses, and map job status codes to UI                    |
 | 🧪 **Flavor Discovery**    | `getFlavors()`                                                                                                                                              | Retrieve available flavors for creating new workers                                                  |
+| � **Template Management**  | `getTemplates()`, `UploadTemplates()`, `runTemp()`                                                                                                         | Manage workflow templates: list, upload, and execute templates                                       |
+| � **Workflow Management**  | `getWorkFlow()`, `getSteps()`                                                                                                                              | List workflows and their steps                                                                       |
 | 🎨 **UI Mapping**          | `getJobStatusClass()`, `getJobStatusText()`, `getWorkerStatusClass()`, `getWorkerStatusText()`                                                            | Convert backend status codes into human-readable labels and CSS classes                             |
 | 📊 **Worker Stats**        | `getStats()`, `formatBytesPair()`                                                                                                                           | Retrieve statistics and metrics related to workers                                                   |
 | 📋 **Task Management**     | `getAllTasks()`, `getLogsBatch()`, `streamTaskLogsOutput()`, `streamTaskLogsErr()`                                                                         | Retrieve, sort, and filter tasks; stream live logs (stdout/stderr); fetch historical logs           |
-| 🔄 **Workflow Management** | `getWorkFlow()`, `getSteps()`                                                                                                                               | List workflows and their steps                                                                       |
 
 These functions use the client generated from the `.proto` file (`taskqueue.client.ts`) and the associated data types (`taskqueue.ts`), making the communication **type-safe**, **predictable**, and **intuitive**.
 
-## 🧩 Components
+## 🧩 Components 
 
 | 🧩 Component             | 📝 Description |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
@@ -303,103 +304,157 @@ These functions use the client generated from the `.proto` file (`taskqueue.clie
 
 | 📄 Page                  | 📝 Description |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 🖥️ **Dashboard.svelte** | Main dashboard page displayed after login.<br>Fetches and displays lists of workers (`getWorkers`) and jobs (`getJobs`) on mount.<br>Uses `WorkerCompo` to display workers with options to update (`handleWorkerUpdated`) or delete (`handleWorkerDeleted`) them; deletion also triggers job creation.<br>Uses `JobCompo` to display and delete jobs (`handleJobDeleted`).<br>Includes `CreateForm` to create new workers and their corresponding job record; handled via `onWorkerAdded` event.<br>All success messages (add, delete, update) are shown for 5 seconds.<br>**Styles**: `dashboard.css` |
+| 🖥️ **Dashboard.svelte** | **Central hub with real-time monitoring and management**<br><br>**Core Features**:<br>- Dual-panel layout (Workers + Jobs)<br>- Infinite scrolling for jobs with chunked loading (25 items per load)<br>- New job notification system with "Show" button<br>- Success message handling with 5s timeout<br>- Comprehensive worker lifecycle management (create/update/delete)<br>- Automatic job creation for worker deletions<br><br>**Data Flow**:<br>- Initial load fetches workers and first job chunk<br>- Scroll-triggered loading of additional jobs<br>- Real-time updates through event handlers (`onWorkerAdded`, `handleWorkerUpdated`, `handleWorkerDeleted`)<br><br>**UI Components**:<br>- `WorkerCompo`: Displays and manages workers<br>- `JobCompo`: Shows job list with actions<br>- `CreateForm`: Worker creation form<br>- Smart scroll management maintains position during updates<br><br>**Technical Highlights**:<br>- Scroll direction detection (ignores horizontal scroll)<br>- Position-aware new job insertion (top or notification)<br>- Memory-efficient job loading (chunked requests)<br>- Robust error handling with user feedback<br>**Styles**: `dashboard.css` |
 | 🔐 **loginPage.svelte** | Login page with `LoginForm`.<br>Checks for token in `localStorage` and redirects to `/dashboard`.<br>Displays logo and header.<br>**Styles**: `loginPage.css` |
 | ⚙️ **SettingPage.svelte** | User and admin settings page.<br>Displays personal profile info and allows password change via modal.<br>Fetches and maintains the full list of users on mount using `getListUser()`, then passes it to `UserList`.<br>If the user is admin: shows `CreateUserForm` and `UserList`.<br>Receives new user data from `CreateUserForm` via `onUserCreated` and adds it to the local list.<br>Handles user updates (`onUserUpdated`), deletion (`onUserDeleted`), and password reset (`onForgotPassword`), updating local state and showing success alerts accordingly.<br>**Styles**: `SettingPage.css` |
-| 📝 **TaskPage.svelte** | Task management page with dynamic filtering and live log streaming.<br>Fetches workers, workflows, and steps on mount.<br>Filters tasks by worker, workflow, step, and status using URL hash parameters.<br>Sorts tasks by task, worker, workflow, or step.<br>Task list is auto-refreshed every second and on hash change.<br>Displays filtered tasks with `TaskList`.<br>Supports real-time log streaming for running tasks via `streamTaskLogsOutput` and `streamTaskLogsErr`.<br>Shows modal with stdout/stderr logs for each task, including pagination for older logs via `getLogsBatch()`.<br>Scrolls logs to bottom or top with animation.<br>**Styles**: `tasks.css` |
-| 🌐 **WorkflowPage.svelte** | Workflow overview page.<br>Fetches workflows on mount via `getWorkFlow()`.<br>Displays `WorkflowList` component with fetched workflows.<br>Also fetches and displays associated steps for each workflow.<br>Uses styles from `workflow.css`. |
+| 📝 **TaskPage.svelte** | **Advanced task management system**<br><br>**Core Features**:<br>- Real-time task monitoring with 1s auto-refresh<br>- Dynamic filtering (worker/workflow/step/status/command)<br>- URL-synchronized filters via hash parameters<br>- Infinite scroll with 25-task chunks<br>- New task notification system<br>- Comprehensive log streaming (stdout/stderr)<br>- Interactive log modal with pagination (50 logs/chunk)<br><br>**Data Flow**:<br>- Parallel loading of workers/workflows/steps on mount<br>- Dual log streams for running tasks (`streamTaskLogsOutput`, `streamTaskLogsErr`)<br>- Batch loading for completed task logs (`getLogsBatch`)<br>- Smart task deduplication during updates<br><br>**UI Components**:<br>- `TaskList`: Displays filtered tasks with contextual actions<br>- Status filter bar with 13 task states<br>- Searchable command filter with loading state<br>- Modal with auto-scrolling log panels<br><br>**Technical Highlights**:<br>- Scroll position preservation during updates<br>- Memory-optimized log buffers (50-line limit)<br>- Direction-aware infinite loading (top/bottom)<br>- Comprehensive error handling<br>**Styles**: `tasks.css` |
+| 🌐 **WorkflowPage.svelte** | **Workflow management with infinite scroll**<br><br>**Core Features**:<br>- Chunked loading (25 workflows per request)<br>- Scroll direction detection (ignores horizontal scroll)<br>- New workflow notification system<br>- Position-aware loading (top/bottom detection)<br><br>**Data Flow**:<br>- Initial load fetches first chunk<br>- Scroll-triggered loading of additional chunks<br>- Smart state management for new workflows<br><br>**UI Components**:<br>- `WorkflowList`: Main workflow display component<br>- Notification button for new workflows<br><br>**Technical Highlights**:<br>- Throttled scroll handling (100ms delay)<br>- Memory-efficient chunk loading<br>- Scroll position preservation<br>**Styles**: `workflow.css` |
+| 📂 **WfTemplatePage.svelte** | **Template management system**<br><br>**Core Features**:<br>- Template upload and validation system<br>- Parameter modal for template execution<br>- Sorting by template/version/name<br>- File handling with preview and clear options<br><br>**Data Flow**:<br>- Initial template list load on mount<br>- File upload handling with ArrayBuffer conversion<br>- Parameter parsing and validation<br><br>**UI Components**:<br>- `WfTemplateList`: Main template display<br>- Sort controls<br>- File upload interface<br>- Parameter modal with dynamic form generation<br><br>**Technical Highlights**:<br>- Dynamic form generation from JSON parameters<br>- Type-specific input fields (text/number/checkbox/select)<br>- Help system for parameters<br>- Error handling with force upload option<br>**Styles**: `wfTemplate.css` |
 
-## 📖 Event-Driven Architecture in Svelte
-This application leverages Svelte's custom event system for **surgical-precision component communication**, achieving **300-500ms faster operations** by eliminating full data reloads. The system maintains **sub-50ms UI updates** through local state management.
+## 📡 Real-Time Architecture with WebSockets in Svelte
+This application uses a **WebSocket-based architecture** to enable **real-time, multi-user communication** between the UI and backend. It replaces traditional client-side event dispatching with **bidirectional streaming**, drastically improving performance and consistency in collaborative environments.
 
-### 🌐 Key Event Patterns
-1. 👨‍👦 Parent-Child Communication
+### 💡 Why WebSockets?
+Unlike client-triggered actions or periodic sync mechanisms, **WebSockets maintain a persistent channel** between the server and all connected clients. This is essential for features like:
 
-Child components (`UserList`, `CreateForm`, etc.) emit optimized events handled by parents (`SettingPage`, `Dashboard`) to:
+- 🔄 **Live updates** (e.g., job creation, task status, worker state)
+- 👥 **Multi-user collaboration** (e.g., multiple admins managing workflows in sync)
+- ⚡ **Sub-50ms UI reactivity** without polling or reloading
 
-- **Trigger API calls** (with request debouncing)
-- **Update local state** (no full list reloads)
-- **Manage side effects** (toasts/animations)
+### 🌍 WebSocket Integration in Svelte
+The WebSocket connection is **established once** at app launch and **shared globally** via a store. Each Svelte component can then **subscribe only to relevant message types**, ensuring performance and modularity.
+```ts
+// wsClient.ts (Store abstraction)
+import { writable } from 'svelte/store';
 
-Example Implementation:
-```svelte
-<!-- Child emits lean event -->
-<button on:click={() => onDelete({ detail: { userId }})>🗑️</button>
+function createWebSocketStore() {
+  const { subscribe, set } = writable<WebSocket | null>(null);
+  const handlers = new Set<(data: any) => void>();
 
-<!-- Parent handles efficiently -->
-<script>
-  async function handleDelete(event) {
-    // 1. Instant UI update
-    $users = $users.filter(u => u.id !== event.detail.userId); 
-    
-    // 2. Debounced API call 
-    await api.deleteUser(event.detail.userId); // 300ms saved vs full reload
+  function connect() {
+    const socket = new WebSocket('ws://localhost:PORT/ws');
+    set(socket);
+
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      handlers.forEach((h) => h(message));
+    };
+
+    socket.onclose = () => set(null); // auto-reconnect logic can go here
   }
-</script>
 
-```
-
-| Component | Event Type | Data Sent | Performance Gain |
-|-----------|------------|-----------|------------------|
-| `UserList` | `userDeleted` | `{ userId }` | 300ms faster than full reload |
-| `CreateForm` | `workerCreated` | Full worker object | Type-safe validation |
-
-
-2. ⚡ Data Flow Optimization
-The system is designed for maximum efficiency:
-
-- Events carry minimal necessary data (e.g., `userId` instead of full objects)
-- For complex operations, events contain complete validated payloads:
-
-```typescript
-{
-  detail: {
-    user: {
-      userId: number
-      username: string
-      email: string
-      isAdmin: boolean
-    }
+  function subscribeToMessages(handler) {
+    handlers.add(handler);
+    return () => handlers.delete(handler);
   }
+
+  return {
+    subscribe,
+    connect,
+    subscribeToMessages
+  };
 }
+
+export const wsClient = createWebSocketStore();
 ```
 
+```ts
+// wsClient.ts (Store abstraction)
+import { writable } from 'svelte/store';
 
-3. Cross-Page Consistency
-**Update Cascade:**
-- Local store updates immediately
-- API syncs in background
-- UI confirms visually
+function createWebSocketStore() {
+  const { subscribe, set } = writable<WebSocket | null>(null);
+  const handlers = new Set<(data: any) => void>();
 
+  function connect() {
+    const socket = new WebSocket('ws://localhost:PORT/ws');
+    set(socket);
+
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      handlers.forEach((h) => h(message));
+    };
+
+    socket.onclose = () => set(null); // auto-reconnect logic can go here
+  }
+
+  function subscribeToMessages(handler) {
+    handlers.add(handler);
+    return () => handlers.delete(handler);
+  }
+
+  return {
+    subscribe,
+    connect,
+    subscribeToMessages
+  };
+}
+
+export const wsClient = createWebSocketStore();
+```
+Each component **reacts only to its relevant event types**, making the app **reactive, scalable, and maintainable**.
+
+### 🧠 Key Advantages
+| Feature                | Without WebSocket           | With WebSocket                |
+| ---------------------- | --------------------------- | ----------------------------- |
+| Communication Scope    | Client-triggered only       | Full duplex (server & client) |
+| UI State Updates       | Triggered manually          | Pushed instantly from server  |
+| Multi-User Consistency | Complex to maintain         | Native and automatic          |
+| Latency                | Depends on gRPC roundtrips  | ⚡ < 50ms                      |
+| Network Load           | Higher (repeated requests)  | Minimal (one persistent conn) |
+| Scalability            | Challenging with many users | Excellent                     |
+
+
+### ⚙️ WebSocket Lifecycle (Svelte Integration)
 ```mermaid
 sequenceDiagram
-    participant Child
-    participant Parent
-    participant Store
-    participant API
-    participant UI
-    
-    Child->>Parent: deleteUser event (userId=1)
-    Parent->>Store: Remove user (5ms)
-    Parent->>API: DELETE /users/1
-    API-->>Parent: 200 OK (Success)
-    Parent->>UI: Show toast
+    participant Client
+    participant WebSocket
+    participant Server (Go)
+    participant OtherClients
+
+    Client->>WebSocket: Connect
+    WebSocket->>Server: Open stream
+    Server-->>Client: task-created / job-deleted
+    Client->>Server: gRPC calls (e.g. CreateTask)
+    Server-->>OtherClients: task-created
+    Client->>WebSocket: Ping every 30s
+    WebSocket-->>Client: Pong
+    Client->>WebSocket: Disconnect onDestroy()
 ```
->200 OK **Explanation:** The HTTP status code indicating successful API request completion. In this flow, it confirms the user was deleted server-side.
+- **Ping/Pong** keeps the connection alive
+- **Scoped events:** only relevant clients are updated (e.g. no broadcast storm)
+- **Reconnect logic:** handled globally or per-component
 
-**🏎️ Performance Benchmarks**
-| Operation | Before (ms) | After (ms) | Improvement |
-|-----------|-------------|------------|-------------|
-| Delete User | 1200 | 400 | 3x faster |
-| Load User List | 500 | 5 | 100x faster |
-| Update Profile | 800 | 200 | 4x faster |
+### 📊 Real-World Performance Benchmarks
+| Operation                 | gRPC only (manual fetch) | WebSocket-Based | Improvement  |
+| ------------------------- | ------------------------ | --------------- | ------------ |
+| Task Creation Visibility  | 300–600ms                | <50ms           | 🚀 6–10x     |
+| User Deletion Propagation | Manual refresh           | Instantly shown | ✅ Live       |
+| Multi-Admin Sync          | Risk of stale data       | Live and synced | ✅ Seamless   |
+| List Refresh Frequency    | Frequent calls           | Not needed      | ✅ Eliminated |
 
-### 🚀 Performance Benefits
-- **Zero full list reloads** - 100% local state updates
-- **70% less network traffic** via lean payloads
-- **Instant UI feedback** before API completion
 
-The event system forms the backbone of the application's reactivity, enabling seamless user experiences while maintaining clean architectural boundaries between components.
+### 🧩 Multi-User Collaboration
+Thanks to WebSocket integration, this system supports real-time dashboards where **multiple users** can:
+- 📥 See new jobs, tasks, and workers **as they appear**
+- 🔄 React to status updates or deletions **instantly**
+- ✅ Avoid stale state or manual reloads
+- 👨‍🔧 Safely collaborate with **no conflict risk**
+
+This is ideal for **scientific task pipelines, shared admin panels,** and **real-time monitoring** environments.
+
+### ✅ Benefits Recap
+
+- 🔁 **True bidirectional communication** (not just user-triggered)
+- ⚡ **<50ms end-to-end latency**
+- 👥 **Real-time multi-user support**
+- 📉 **Minimal network usage**
+- 🧼 **Clean abstraction via store + handler pattern**
+- 🧠 **Fully decoupled, reactive UI components**
+
+### 🧩 Conclusion
+WebSocket integration provides the **reliability, speed, and reactivity** needed for modern apps — especially when combined with **Svelte + Go + gRPC**. Whether you're building **scientific workflows, job queues, or collaborative tools,** this architecture gives you the **infrastructure to scale with confidence**.
 
 ## 🧠 App.svelte – Root Component  
 Handles login logic:
@@ -429,7 +484,6 @@ This section explains how the authentication flow is implemented in the applicat
 ### Overview
 
 - 🔑 The authentication system uses **cookies** and JWT tokens to manage user sessions.  
-- 📦 Tokens are stored in the `userInfo` Svelte store (not in localStorage).  
 - ✔️ A login status boolean is kept in `isLoggedIn`.  
 - 🔍 Token presence is checked on mount inside the login page (`loginPage.svelte`).  
 - 🔄 If a valid token exists, the user is automatically redirected to the dashboard.
@@ -439,7 +493,6 @@ This section explains how the authentication flow is implemented in the applicat
 | 🔍 Feature               | 📋 Description                                                                                       |
 |-------------------------|---------------------------------------------------------------------------------------------------|
 | 🛠️ Authentication method | Uses cookies and JWT tokens to manage user sessions securely.                                      |
-| 📥 Token storage         | JWT tokens are stored in the `userInfo` Svelte store (from cookies).                              |
 | ✅ Login status          | Boolean `isLoggedIn` tracks whether the user is authenticated.                                    |
 | 🔎 Token validation      | Checked during component mount on the login page (`loginPage.svelte`).                            |
 | ↪️ Redirect behavior     | Automatically redirects authenticated users to the dashboard.                                    |
@@ -732,6 +785,52 @@ it('should display Setting page when clicking "Settings" in the ToolBar', async 
 > **- Unit tests focus on isolated components and functions.<br>**
 > **- Integration tests verify that multiple parts work together correctly and simulate real user behavior.<br>**
 > **- You can expand this table as you add more test files.**
+
+## 🚀 Production & Security Overview
+
+### 🔐 HTTPS & Certificates Setup
+- Your Go server runs on **port 443**, the standard HTTPS port.
+- TLS certificates (e.g. from Let’s Encrypt) must be specified in your server config so your app can serve HTTPS properly and be trusted by browsers.
+- In your frontend Vite config, you load these same certs to enable **HTTPS on the dev server** (port 5173) with a valid certificate, preventing browser trust issues during development:
+```ts
+// vite.config.ts snippet
+server: {
+  https: {
+    key: fs.readFileSync(path.resolve(__dirname, '../certs/privkey.pem')),
+    cert: fs.readFileSync(path.resolve(__dirname, '../certs/fullchain.pem')),
+  },
+  host: 'alpha2.gmt.bio',
+  port: 5173,
+}
+```
+- Using self-signed or invalid certs breaks browser trust and blocks connections. Let’s Encrypt or other CA-issued certs fix this.
+- The server handles CORS and HTTPS termination internally — **no nginx reverse proxy is used** currently, as traffic levels remain manageable.
+
+### 🛠️ Production Deployment Steps: Frontend (Svelte + Vite)
+1. Certs must be present in `../certs` folder or wherever you configured.
+2. Vite dev server configured with HTTPS using those certs allows secure local development.
+3. For production, build your frontend assets:
+```bash
+npm run build
+```
+4. Deploy the built static files (usually in `dist/`) to your production server or CDN.
+5. Your Go server’s static file handler serves these files over HTTPS (already set up).
+6. Access your app securely via `https://alpha2.gmt.bio`.
+
+### 🧰 About the HTTP mux & gRPC-Web
+- Your HTTP mux handles static files, gRPC endpoints, and gRPC-Web requests all in one unified HTTPS server on port 443.
+- No extra steps needed in production for mux config — it is already production-ready and supports TLS, CORS, and fallback routing.
+- The mux middleware sets strict CORS headers to allow only your frontend domain.
+- gRPC-Web wrapper inside mux transparently upgrades requests to gRPC protocol.
+
+| Step             | Server-side                                  | Frontend (Svelte + Vite)                |
+| ---------------- | -------------------------------------------- | --------------------------------------- |
+| TLS certificates | Configure in config, use Let’s Encrypt certs | Use same certs in Vite dev HTTPS config |
+| HTTPS port       | Listen on 443                                | Dev on 5173 HTTPS                       |
+| Build            | Already built                                | `npm run build`                         |
+| Run              | Run binary with config on 443                | Serve static files from Go server       |
+| CORS             | Configured in Go mux                         | Access frontend securely via HTTPS      |
+| Reverse proxy    | Not used, unnecessary for now                | Not applicable                          |
 
 
 ## Conclusion

@@ -3,6 +3,8 @@ scitq:
   log_level: "info"
   worker_token: "changeMeIamUnsecure123"
   jwt_secret: "weAreOnAMissionFromGod"
+  certificate_key: "/home/ubuntu/scitq2/certs/privkey.pem"
+  certificate_pem: "/home/ubuntu/scitq2/certs/fullchain.pem"
 providers:
   azure:
     primary:

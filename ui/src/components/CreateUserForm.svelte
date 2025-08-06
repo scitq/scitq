@@ -4,9 +4,6 @@
   import { newUser } from '../lib/api';
   import "../styles/createForm.css"; // Shared form styles
 
-  // Callback function to notify parent component when a user is created
-  export let onUserCreated: (event: { detail: { user: User } }) => void = () => {};
-
 /**
  * Callback function type for notifying when a new user is created.
  * @callback onUserCreated
@@ -45,6 +42,9 @@ let isAdmin = false;
  */
 let showPassword = false;
 
+  let successMessage: string = '';
+  let alertTimeout;
+
 /**
  * Creates a new user by calling the API with current form values.
  * On success, triggers the `onUserCreated` callback passing the new user details,
@@ -55,29 +55,16 @@ let showPassword = false;
  */
 async function handleCreateUser() {
   const newUserId = await newUser(username, password, email, isAdmin);
+  username = '';
+  email = '';
+  password = '';
+  isAdmin = false;
+  successMessage = "User Created";
 
-  if (newUserId !== undefined) {
-    // Notify parent with created user info
-    onUserCreated({
-      detail: {
-        user: {
-          userId: newUserId,
-          username,
-          email,
-          isAdmin
-        }
-      }
-    });
-
-    // Reset form inputs
-    username = '';
-    email = '';
-    password = '';
-    isAdmin = false;
-
-  } else {
-    console.error("User creation failed, not dispatching event.");
-  }
+  clearTimeout(alertTimeout);
+  alertTimeout = setTimeout(() => {
+    successMessage = '';
+  }, 5000);
 }
 
 /**

@@ -40,6 +40,10 @@ export const mockApi = {
   
   getSteps: vi.fn().mockResolvedValue([]),
 
+  getTemplates: vi.fn().mockResolvedValue([]),
+  UploadTemplates: vi.fn().mockResolvedValue([]),
+  runTemp: vi.fn().mockResolvedValue([]),
+
 
 };
 

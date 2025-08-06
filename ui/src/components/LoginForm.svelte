@@ -3,7 +3,6 @@
   import { getLogin } from '../lib/auth';        // API call for authentication
   import { isLoggedIn } from '../lib/Stores/user'; // Svelte store for global auth state
   import { push } from 'svelte-spa-router';      // For navigation after login
-
   import { Eye, EyeOff } from 'lucide-svelte';   // Icons for showing/hiding password
 
   // Local state variables
@@ -35,7 +34,6 @@
       await getLogin(username, password); // Call API to authenticate
       message = '';
       isLoggedIn.set(true);              // Update global store
-      push('/');                         // Navigate to homepage
     } catch (error) {
       console.error("Login error: ", error);
       message = "Login failed. Check your credentials.";

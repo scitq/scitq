@@ -1,17 +1,22 @@
 /* Container for the entire form */
 .createForm-form-container {
+  width: 100%;
   max-width: 100%;
+  height: auto;
   padding: 0.5rem;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
   background-color: var(--bg-secondary);
   border-radius: 8px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
   border: 1px solid var(--border-color);
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 /* Form title */
 .createForm-title {
   text-align: center;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
+  font-weight: 600;
   background-color: var(--primary-color);
   color: var(--primary-text);
   padding: 0.5rem;
@@ -52,15 +57,16 @@
 /* Button styles */
 .createForm-add-button {
   width: 32%;
-  padding: 0.3rem 0.6rem;
+  padding: 0.2rem 0.1rem;
   background-color: var(--primary-color);
   color: var(--primary-text);
   border: none;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 0.6rem;
   cursor: pointer;
   display: block;
   margin: 0 auto;
+  margin-top: 0.5rem;
   transition: background-color 0.2s;
 }
 

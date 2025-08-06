@@ -4,15 +4,6 @@
   import "../styles/createForm.css";
   import { JobId, WorkerDetails, Workflow, Job } from "../../gen/taskqueue";
 
-  /**
-   * Callback when new worker (and associated job) is created
-   * @param worker Created worker details
-   * @param job Associated job record
-   */
-  export let onWorkerCreated = (event: { detail: { 
-    worker: WorkerDetails, 
-    job: Partial<Job>  
-  } }) => {};
 
   // Form state
   let provider = "";
@@ -199,28 +190,6 @@ function selectStep(suggestion: string) {
     const statuses = await getStatus([workerCreatedDetails.workerId]);
     const statusObj = statuses[0];
     const workerStatus = statusObj ? statusObj.status : 'unknown';
-
-    onWorkerCreated({
-      detail: {
-        worker: {
-          workerId: workerCreatedDetails.workerId,
-          name: workerCreatedDetails.workerName,
-          concurrency,
-          prefetch,
-          status: workerStatus,
-          flavor,
-          provider,
-          region,
-        },
-        job: {
-          JobId: workerCreatedDetails.jobId,
-          action: 'C',
-          workerId: workerCreatedDetails.workerId,
-          modifiedAt : new Date().toLocaleString(),
-        }
-      }
-    });
-
 
     // Reset form
     concurrency = 1;
