@@ -118,8 +118,12 @@ func (s *taskQueueServer) scriptRunner(
 	cmd := exec.CommandContext(ctx, s.cfg.Scitq.ScriptInterpreter, append([]string{scriptPath}, args...)...)
 
 	// 🌍 Inject environment variables
+	serverName := s.cfg.Scitq.ServerFQDN
+	if serverName == "" {
+		serverName = "localhost"
+	}
 	env := []string{
-		fmt.Sprintf("SCITQ_SERVER=localhost:%d", s.cfg.Scitq.Port),
+		fmt.Sprintf("SCITQ_SERVER=%s:%d", serverName, s.cfg.Scitq.Port),
 		fmt.Sprintf("SCITQ_TOKEN=%s", authToken),
 	}
 	if mode == "run" && templateRunID != 0 {
