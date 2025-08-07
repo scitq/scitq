@@ -115,7 +115,7 @@
       await forgotPassword(
         passwordUser.userId,
         passwordUser.username,
-        passwordUser.newPassword,
+        newPassword,
         passwordUser.email,
         passwordUser.isAdmin
       );

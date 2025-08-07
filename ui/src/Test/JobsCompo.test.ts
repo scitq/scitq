@@ -6,7 +6,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import JobsCompo from '../components/JobsCompo.svelte';
 
 describe('JobsCompo', () => {
-  const mockOnJobDeleted = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -34,8 +33,7 @@ describe('JobsCompo', () => {
 
     render(JobsCompo, {
       props: {
-        jobs: mockJobs,
-        onJobDeleted: mockOnJobDeleted
+        jobs: mockJobs
       }
     });
 
@@ -58,8 +56,7 @@ describe('JobsCompo', () => {
   it('should show a message when there are no jobs', async () => {
     render(JobsCompo, {
       props: {
-        jobs: [],
-        onJobDeleted: mockOnJobDeleted
+        jobs: []
       }
     });
 
@@ -82,8 +79,7 @@ describe('JobsCompo', () => {
 
     render(JobsCompo, {
       props: {
-        jobs: mockJobs,
-        onJobDeleted: mockOnJobDeleted
+        jobs: mockJobs
       }
     });
 
@@ -115,8 +111,7 @@ describe('JobsCompo', () => {
 
     render(JobsCompo, {
       props: {
-        jobs: mockJobs,
-        onJobDeleted: mockOnJobDeleted
+        jobs: mockJobs
       }
     });
 
@@ -144,8 +139,7 @@ describe('JobsCompo', () => {
 
     render(JobsCompo, {
       props: {
-        jobs: mockJobs,
-        onJobDeleted: mockOnJobDeleted
+        jobs: mockJobs
       }
     });
 
@@ -154,9 +148,7 @@ describe('JobsCompo', () => {
     });
 
     await waitFor(() => {
-      expect(mockOnJobDeleted).toHaveBeenCalledWith({
-        detail: { jobId: 'job-1' }
-      });
+      expect(mockApi.delJob).toHaveBeenCalledWith({ jobId: 'job-1' });
     });
   });
 });

@@ -79,7 +79,20 @@ type taskQueueServer struct {
 	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
 	workerStats        *sync.Map
 	sslCertificatePEM  string
+
 }
+
+type TaskUpdateBroadcast struct {
+	TaskId   uint32
+	Status   string
+	WorkerId uint32
+}
+
+var (
+    batchMutex         sync.Mutex
+    taskUpdateBatches  [][]TaskUpdateBroadcast
+    currentBatchIndex  int
+)
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
 	workerWeightMemory, err := memory.LoadWeightMemory(context.Background(), db, "weight_memory")
@@ -125,6 +138,53 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 	s.watchdog.RebuildFromWorkers(workers)
 
 	go s.watchdog.Run(s.stopWatchdog)
+
+	go func() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	for range ticker.C {
+		batchMutex.Lock()
+
+		if len(taskUpdateBatches) == 0 {
+			batchMutex.Unlock()
+			continue
+		}
+
+		if currentBatchIndex >= len(taskUpdateBatches) {
+			currentBatchIndex = 0
+		}
+
+		currentBatch := taskUpdateBatches[currentBatchIndex]
+
+		for _, update := range currentBatch {
+			payload := struct {
+				Type    string `json:"type"`
+				Payload struct {
+					TaskId   uint32 `json:"taskId"`
+					Status   string `json:"status"`
+					WorkerId uint32 `json:"workerId,omitempty"`
+				} `json:"payload"`
+			}{
+				Type: "task-updated",
+				Payload: struct {
+					TaskId   uint32 `json:"taskId"`
+					Status   string `json:"status"`
+					WorkerId uint32 `json:"workerId,omitempty"`
+				}{
+					TaskId:   update.TaskId,
+					Status:   update.Status,
+					WorkerId: update.WorkerId,
+				},
+			}
+
+			jsonData, _ := json.Marshal(payload)
+			ws.Broadcast(jsonData)
+		}
+
+
+		currentBatchIndex = (currentBatchIndex + 1) % len(taskUpdateBatches)
+		batchMutex.Unlock()
+	}
+}()
 
 	return s
 }
@@ -340,36 +400,27 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		s.triggerAssign()
 	}
 
-	// 🔔 Broadcast WebSocket
-    payload := struct {
-        Type    string `json:"type"`
-        Payload struct {
-            TaskId     uint32 `json:"taskId"`
-            Status     string `json:"status"`
-            WorkerId   uint32 `json:"workerId,omitempty"`
-        } `json:"payload"`
-    }{
-        Type: "task-updated",
-        Payload: struct {
-            TaskId     uint32 `json:"taskId"`
-            Status     string `json:"status"`
-            WorkerId   uint32 `json:"workerId,omitempty"`
-        }{
-            TaskId: req.TaskId,
-            Status: req.NewStatus,
-        },
-    }
+	var workerId uint32
+	if workerID.Valid {
+		workerId = uint32(workerID.Int32)
+	}
 
-    if workerID.Valid {
-        payload.Payload.WorkerId = uint32(workerID.Int32)
-    }
+	update := TaskUpdateBroadcast{
+		TaskId:   req.TaskId,
+		Status:   req.NewStatus,
+		WorkerId: workerId,
+	}
 
-    jsonData, err := json.Marshal(payload)
-    if err != nil {
-        log.Printf("⚠️ Failed to marshal WebSocket task-updated: %v", err)
-    } else {
-        ws.Broadcast(jsonData)
-    }
+	batchMutex.Lock()
+	defer batchMutex.Unlock()
+
+	if len(taskUpdateBatches) == 0 || len(taskUpdateBatches[len(taskUpdateBatches)-1]) >= 20 {
+		taskUpdateBatches = append(taskUpdateBatches, []TaskUpdateBroadcast{})
+	}
+
+	taskUpdateBatches[len(taskUpdateBatches)-1] = append(taskUpdateBatches[len(taskUpdateBatches)-1], update)
+
+
 
 	return &pb.Ack{Success: true}, nil
 }

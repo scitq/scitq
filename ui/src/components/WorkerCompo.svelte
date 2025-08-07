@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {getWorkerStatusClass, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus} from '../lib/api';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';

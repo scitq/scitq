@@ -286,30 +286,28 @@ These functions use the client generated from the `.proto` file (`taskqueue.clie
 
 | 🧩 Component             | 📝 Description |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
-| 🔨 **createForm.svelte** | Dynamic form to create new workers with interactive auto-complete fields for **provider**, **flavor**, **region**, and **workflow.step**.<br>Fetches flavor and workflow data on `onMount()` and provides a two-column suggestion dropdown for selecting a workflow and its steps.<br>Filters suggestions in real time based on user input.<br>Once submitted, the form calls `newWorker(...)` and dispatches a `worker + job` object through the `onWorkerCreated` event.<br>Includes input validation, error handling, and automatic form reset upon success.<br>**Styles**: `createForm.css` |
+| 🔨 **createForm.svelte** | Dynamic form to create new workers with interactive auto-complete fields for **provider**, **flavor**, **region**, and **workflow.step**.<br>Fetches flavor and workflow data on `onMount()` and provides a two-column suggestion dropdown for selecting a workflow and its steps.<br>Filters suggestions in real time based on user input.<br>Once submitted, the form calls `newWorker(...)` and sends a `worker + job` object via WebSocket to notify of creation.<br>Includes input validation, error handling, and automatic form reset upon success.<br>**Styles**: `createForm.css` |
 | 📋 **jobsCompo.svelte**  | Displays a live-updating list of current and past jobs.<br>Uses `onMount()` to periodically refresh job status and progression every 5 seconds via `getJobStatus(...)`.<br>Jobs are rendered with status badges (`getJobStatusClass()`), progress bars, and action icons (🔁 Restart / 🗑️ Delete).<br>Maintains a reactive `jobStatusMap` to sync latest job info.<br>Emits a `jobId` via `onJobDeleted` when a job is removed.<br>Supports graceful unmounting by clearing the refresh interval.<br>**Styles**: `worker.css`, `jobsCompo.css` |
 | 🔐 **loginForm.svelte**  | Simple login form.<br>Uses `getClient().login()` for authentication.<br>Handles loading (`isLoading`) and errors.<br>**Styles**: `loginForm.css` |
 | 📚 **Sidebar.svelte**    | Sidebar navigation with dropdowns and icons via lucide-svelte (Dashboard, Tasks, Batch, Settings, Logout).<br>Handles `tasksOpen` for submenus.<br>`isSidebarVisible` and `toggleSidebar()` passed as props.<br>**Styles**: `dashboard.css` |
-| 👷 **workerCompo.svelte** | **Enhanced worker dashboard with dual display modes**:<br>📊 **Table Mode**: Classic tabular view with all metrics<br>📈 **Chart Mode**: Visual analytics with:<br>- Real-time **Disk I/O** and **Network I/O** line charts (via `LineChart` component)<br>- Interactive zoom controls (in/out/reset) and auto-zoom<br>- System metrics visualization (CPU, RAM, Load, IOWait)<br>- Disk usage bars with warning thresholds<br><br>**Key Features**:<br>- Toggle between table/chart views<br>- Aggregates metrics across all workers<br>- 30-point history tracking for trend visualization<br>- Responsive design adapts to data intensity<br>- Smart auto-zoom calculates optimal view<br>- Manual zoom override available<br><br>**Data Flow**:<br>- Receives preloaded workers list<br>- Periodically refreshes stats/status (5s interval)<br>- Emits update/deletion events<br>**Styles**: `worker.css`, `jobsCompo.css` |
-| 📋 **UserList.svelte** | Displays a table of users with columns: Username, Email, Admin status, and Actions.<br>Receives the `users` list as a prop from the parent component (`SettingsPage`).<br>Provides modals for editing user info and resetting passwords.<br>Supports user deletion with confirmation.<br>Dispatches events: `onUserUpdated`, `onUserDeleted`, and `onForgotPassword`.<br>Includes password visibility toggle with `Eye` / `EyeOff` icons<br>**Styles**: `worker.css`, `userList.css` |
-| 🆕 **CreateUserForm.svelte** | Form for creating new users.<br>Receives input for username, email, password (with visibility toggle), and admin checkbox.<br>Calls the API to create a user and notifies the parent component (`SettingsPage`) via the `onUserCreated` callback with the new user data.<br>Resets form fields after successful creation.<br>**Styles**: `createForm.css` |
+| 👷 **workerCompo.svelte** | **Enhanced worker dashboard with dual display modes**:<br>📊 **Table Mode**: Classic tabular view with all metrics<br>📈 **Chart Mode**: Visual analytics with:<br>- Real-time **Disk I/O** and **Network I/O** line charts (via `LineChart` component)<br>- Interactive zoom controls (in/out/reset) and auto-zoom<br>- System metrics visualization (CPU, RAM, Load, IOWait)<br>- Disk usage bars with warning thresholds<br><br>**Key Features**:<br>- Toggle between table/chart views<br>- Aggregates metrics across all workers<br>- 30-point history tracking for trend visualization<br>- Responsive design adapts to data intensity<br>- Smart auto-zoom calculates optimal view<br>- Manual zoom override available<br><br>**Data Flow**:<br>- Receives preloaded workers list<br>- Periodically refreshes stats/status (5s interval)<br>- Sends update and deletion notifications via WebSocket<br>**Styles**: `worker.css`, `jobsCompo.css` |
+| 📋 **UserList.svelte** | Displays a table of users with columns: Username, Email, Admin status, and Actions.<br>Receives the `users` list as a prop from the parent component (`SettingsPage`).<br>Provides modals for editing user info and resetting passwords.<br>Supports user deletion with confirmation.<br>Uses WebSocket messages to receive user updates, deletions, and password reset confirmations instead of dispatching events.<br>Includes password visibility toggle with `Eye` / `EyeOff` icons<br>**Styles**: `worker.css`, `userList.css` |
+| 🆕 **CreateUserForm.svelte** | Form for creating new users.<br>Receives input for username, email, password (with visibility toggle), and admin checkbox.<br>Calls the API to create a user and notifies the parent component (`SettingsPage`) via WebSocket message with the new user data.<br>Supports user deletion via WebSocket.<br>Resets form fields after successful creation.<br>**Styles**: `createForm.css` |
 | 📝 **TaskList.svelte**   | Displays all tasks in a detailed table with columns: Task ID, Name, Command, Worker, Workflow, Step, Status, Start, Runtime, Output, Error, Actions.<br>Uses `getJobStatusClass()`, `getJobStatusText()`, and lucide icons for restart, download, delete.<br>Shows a message if no tasks found.<br>**Styles**: `worker.css`, `jobsCompo.css` |
-| 📂 **WorkflowList.svelte** | Displays a list of workflows with expandable details.<br>Uses lucide icons for actions (Pause, Reset, Break, Clear).<br>Manages expanded state for workflows.<br>Embeds `StepList` component for detailed step display.<br>**Styles**: (to be added) |
-| 📑 **StepList.svelte**     | Shows detailed steps for a given workflow.<br>Fetches steps via `getSteps(workflowId)` on mount.<br>Displays table with step metrics and action buttons.<br>Uses lucide icons for Pause, Reset, Break, Clear.<br>**Styles**: `worker.css`, `jobsCompo.css` |
+| 📂 **WorkflowList.svelte** | Displays a list of workflows with expandable details.<br>Uses lucide icons for actions (Pause, Reset, Break, Clear).<br>Manages expanded state for workflows.<br>Embeds `StepList` component for detailed step display.<br>Supports workflow deletion via WebSocket messages.<br>**Styles**: (to be added) |
+| 📑 **StepList.svelte**     | Shows detailed steps for a given workflow.<br>Fetches steps via `getSteps(workflowId)` on mount.<br>Displays table with step metrics and action buttons.<br>Uses lucide icons for Pause, Reset, Break, Clear.<br>Supports step deletion via WebSocket.<br>**Styles**: `worker.css`, `jobsCompo.css` |
 | 📈 **LineChart.svelte**    | **Reusable SVG-based line chart component**<br>Features:<br>- Dual-line visualization with customizable colors<br>- Dynamic stroke width based on zoom intensity<br>- Auto/manual zoom controls<br>- Legend display with real-time values<br>- Total metrics summary<br>- Responsive SVG rendering<br>Used by `workerCompo` for Disk/Network I/O visualization<br>**Props**:<br>- `line1/line2`: Data points arrays<br>- `color1/color2`: Line colors<br>- `title1/title2`: Metric names<br>- `value1/value2`: Current values<br>- `total1/total2`: Aggregate totals<br>- `zoomLevel`: Current zoom factor<br>- `autoZoom`: Auto-scaling toggle<br>**Styles**: Embedded component CSS |
-
-
 
 ## 📄 Pages
 
 | 📄 Page                  | 📝 Description |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 🖥️ **Dashboard.svelte** | **Central hub with real-time monitoring and management**<br><br>**Core Features**:<br>- Dual-panel layout (Workers + Jobs)<br>- Infinite scrolling for jobs with chunked loading (25 items per load)<br>- New job notification system with "Show" button<br>- Success message handling with 5s timeout<br>- Comprehensive worker lifecycle management (create/update/delete)<br>- Automatic job creation for worker deletions<br><br>**Data Flow**:<br>- Initial load fetches workers and first job chunk<br>- Scroll-triggered loading of additional jobs<br>- Real-time updates through event handlers (`onWorkerAdded`, `handleWorkerUpdated`, `handleWorkerDeleted`)<br><br>**UI Components**:<br>- `WorkerCompo`: Displays and manages workers<br>- `JobCompo`: Shows job list with actions<br>- `CreateForm`: Worker creation form<br>- Smart scroll management maintains position during updates<br><br>**Technical Highlights**:<br>- Scroll direction detection (ignores horizontal scroll)<br>- Position-aware new job insertion (top or notification)<br>- Memory-efficient job loading (chunked requests)<br>- Robust error handling with user feedback<br>**Styles**: `dashboard.css` |
+| 🖥️ **Dashboard.svelte** | **Central hub with real-time monitoring and management**<br><br>**Core Features**:<br>- Dual-panel layout (Workers + Jobs)<br>- Infinite scrolling for jobs with chunked loading (25 items per load)<br>- New job notification system with "Show" button<br>- Success message handling with 5s timeout<br>- Comprehensive worker lifecycle management (create/update/delete)<br>- Automatic job creation for worker deletions<br><br>**Data Flow**:<br>- Initial load fetches workers and first job chunk<br>- Scroll-triggered loading of additional jobs<br>- Real-time updates via WebSocket event handlers (`onWorkerAdded`, `handleWorkerUpdated`, `handleWorkerDeleted`)<br><br>**UI Components**:<br>- `WorkerCompo`: Displays and manages workers<br>- `JobCompo`: Shows job list with actions<br>- `CreateForm`: Worker creation form<br>- Smart scroll management maintains position during updates<br><br>**Technical Highlights**:<br>- Scroll direction detection (ignores horizontal scroll)<br>- Position-aware new job insertion (top or notification)<br>- Memory-efficient job loading (chunked requests)<br>- Robust error handling with user feedback<br>**Styles**: `dashboard.css` |
 | 🔐 **loginPage.svelte** | Login page with `LoginForm`.<br>Checks for token in `localStorage` and redirects to `/dashboard`.<br>Displays logo and header.<br>**Styles**: `loginPage.css` |
-| ⚙️ **SettingPage.svelte** | User and admin settings page.<br>Displays personal profile info and allows password change via modal.<br>Fetches and maintains the full list of users on mount using `getListUser()`, then passes it to `UserList`.<br>If the user is admin: shows `CreateUserForm` and `UserList`.<br>Receives new user data from `CreateUserForm` via `onUserCreated` and adds it to the local list.<br>Handles user updates (`onUserUpdated`), deletion (`onUserDeleted`), and password reset (`onForgotPassword`), updating local state and showing success alerts accordingly.<br>**Styles**: `SettingPage.css` |
+| ⚙️ **SettingPage.svelte** | User and admin settings page.<br>Displays personal profile info and allows password change via modal.<br>Fetches and maintains the full list of users on mount using `getListUser()`, then passes it to `UserList`.<br>If the user is admin: shows `CreateUserForm` and `UserList`.<br>Receives new user data via WebSocket messages and adds it to the local list.<br>Handles user updates, deletions, and password reset confirmations via WebSocket, updating local state and showing success alerts accordingly.<br>**Styles**: `SettingPage.css` |
 | 📝 **TaskPage.svelte** | **Advanced task management system**<br><br>**Core Features**:<br>- Real-time task monitoring with 1s auto-refresh<br>- Dynamic filtering (worker/workflow/step/status/command)<br>- URL-synchronized filters via hash parameters<br>- Infinite scroll with 25-task chunks<br>- New task notification system<br>- Comprehensive log streaming (stdout/stderr)<br>- Interactive log modal with pagination (50 logs/chunk)<br><br>**Data Flow**:<br>- Parallel loading of workers/workflows/steps on mount<br>- Dual log streams for running tasks (`streamTaskLogsOutput`, `streamTaskLogsErr`)<br>- Batch loading for completed task logs (`getLogsBatch`)<br>- Smart task deduplication during updates<br><br>**UI Components**:<br>- `TaskList`: Displays filtered tasks with contextual actions<br>- Status filter bar with 13 task states<br>- Searchable command filter with loading state<br>- Modal with auto-scrolling log panels<br><br>**Technical Highlights**:<br>- Scroll position preservation during updates<br>- Memory-optimized log buffers (50-line limit)<br>- Direction-aware infinite loading (top/bottom)<br>- Comprehensive error handling<br>**Styles**: `tasks.css` |
-| 🌐 **WorkflowPage.svelte** | **Workflow management with infinite scroll**<br><br>**Core Features**:<br>- Chunked loading (25 workflows per request)<br>- Scroll direction detection (ignores horizontal scroll)<br>- New workflow notification system<br>- Position-aware loading (top/bottom detection)<br><br>**Data Flow**:<br>- Initial load fetches first chunk<br>- Scroll-triggered loading of additional chunks<br>- Smart state management for new workflows<br><br>**UI Components**:<br>- `WorkflowList`: Main workflow display component<br>- Notification button for new workflows<br><br>**Technical Highlights**:<br>- Throttled scroll handling (100ms delay)<br>- Memory-efficient chunk loading<br>- Scroll position preservation<br>**Styles**: `workflow.css` |
-| 📂 **WfTemplatePage.svelte** | **Template management system**<br><br>**Core Features**:<br>- Template upload and validation system<br>- Parameter modal for template execution<br>- Sorting by template/version/name<br>- File handling with preview and clear options<br><br>**Data Flow**:<br>- Initial template list load on mount<br>- File upload handling with ArrayBuffer conversion<br>- Parameter parsing and validation<br><br>**UI Components**:<br>- `WfTemplateList`: Main template display<br>- Sort controls<br>- File upload interface<br>- Parameter modal with dynamic form generation<br><br>**Technical Highlights**:<br>- Dynamic form generation from JSON parameters<br>- Type-specific input fields (text/number/checkbox/select)<br>- Help system for parameters<br>- Error handling with force upload option<br>**Styles**: `wfTemplate.css` |
+| 🌐 **WorkflowPage.svelte** | **Workflow management with infinite scroll**<br><br>**Core Features**:<br>- Chunked loading (25 workflows per request)<br>- Scroll direction detection (ignores horizontal scroll)<br>- New workflow notification system<br>- Position-aware loading (top/bottom detection)<br><br>**Data Flow**:<br>- Loads workflows on mount and on scroll<br>- Expands workflows to show steps with `StepList` component<br>- Supports workflow deletion via WebSocket messages<br><br>**UI Components**:<br>- `WorkflowList` with expandable details<br>- `StepList` for workflow steps<br><br>**Technical Highlights**:<br>- Efficient event handling for scroll<br>- Seamless user experience with notifications<br>**Styles**: (to be added) |
+
 
 ## 📡 Real-Time Architecture with WebSockets in Svelte
 This application uses a **WebSocket-based architecture** to enable **real-time, multi-user communication** between the UI and backend. It replaces traditional client-side event dispatching with **bidirectional streaming**, drastically improving performance and consistency in collaborative environments.
@@ -444,11 +442,140 @@ Thanks to WebSocket integration, this system supports real-time dashboards where
 
 This is ideal for **scientific task pipelines, shared admin panels,** and **real-time monitoring** environments.
 
+### 🎯 Targeted Real-Time Messaging with WebSockets
+This section explains how to **send WebSocket updates only to the user who submitted the task** in your current Svelte + Go WebSocket setup, improving efficiency and security by avoiding broadcasting to all clients.
+
+#### 🛠️ Why Targeted Messaging?
+- 🚫 Avoid irrelevant messages for other users
+- 🎯 Deliver updates **only to the user who created or owns the task**
+- 🔒 Improve security by minimizing data exposure
+- ⚡ Reduce bandwidth and improve client-side performance
+
+#### 🛠️ Step-by-Step Implementation (Example for Tasks)
+
+##### 1️⃣ Modify `broadcaster.go` (in `websocket/` folder)
+**Goal:** Track connected clients with their user IDs (e.g. workerId or clientId) instead of just storing connections.
+
+- Add a new global map to associate **client/user IDs** with their WebSocket connections:
+```go
+// Add near the top, after `clients` and `mu`
+var clientsById = make(map[string]*websocket.Conn)
+```
+- In the `Handler` function, extract the user ID from the URL query or headers **when the client connects** (for example, a `clientId` param):
+```go
+clientId := r.URL.Query().Get("clientId")
+if clientId == "" {
+    log.Printf("Client connected without clientId, rejecting")
+    http.Error(w, "clientId is required", http.StatusBadRequest)
+    return
+}
+```
+- Then **register the connection with this ID** instead of only tracking the connection:
+```go
+mu.Lock()
+clientsById[clientId] = conn
+mu.Unlock()
+```
+- On connection close, remove the client from the map:
+```go
+defer func() {
+    mu.Lock()
+    delete(clientsById, clientId)
+    mu.Unlock()
+    conn.Close()
+}()
+```
+
+##### 2️⃣ Create a Helper Function in `broadcaster.go` to Send to a Specific Client
+Add this function **inside** `broadcaster.go`, after your existing functions:
+
+```go
+func sendToClient(clientId string, message []byte) {
+    mu.Lock()
+    conn, ok := clientsById[clientId]
+    mu.Unlock()
+
+    if !ok {
+        log.Printf("Client %s not connected", clientId)
+        return
+    }
+    if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+        log.Printf("Error sending message to %s: %v", clientId, err)
+        conn.Close()
+        mu.Lock()
+        delete(clientsById, clientId)
+        mu.Unlock()
+    }
+}
+```
+
+##### 3️⃣ Update Your Database Schema (SQL Migration)
+Add a `submitted_by` or `client_id` field to the task table to record who submitted the task.
+Example SQL:
+```sql
+ALTER TABLE task ADD COLUMN submitted_by TEXT;
+```
+Make sure your task creation logic stores the user’s ID here (depends on your backend code, e.g., `INSERT INTO task (...) VALUES (..., submitted_by)`).
+
+##### 4️⃣ Modify Your Task Update Logic (Wherever You Push Updates)
+Wherever you currently broadcast task updates (likely inside your gRPC server or update handlers), change to:
+- **Query the `submitted_by` user ID** for the updated task
+
+Example in Go (pseudo-code):
+```go
+var submitterId string
+err := db.QueryRowContext(ctx, "SELECT submitted_by FROM task WHERE task_id = $1", taskId).Scan(&submitterId)
+if err != nil {
+    log.Printf("Failed to get submitter for task %d: %v", taskId, err)
+    return
+}
+```
+- Then **send the update only to that client** using the helper function:
+```go
+messageBytes, _ := json.Marshal(updateMessage)
+sendToClient(submitterId, messageBytes)
+```
+
+##### 5️⃣ Update Client WebSocket Connection (`wsClient.ts` in your Svelte app)
+Modify the `connect()` function to **include the token or clientId in the WebSocket URL query string**:
+
+```ts
+import { getToken } from './auth'; // adjust path as needed
+
+function connect() {
+  const token = getToken();
+  const clientId = extractClientIdFromToken(token); // implement or get userId from JWT claims
+
+  const url = `wss://alpha2.gmt.bio/ws?clientId=${encodeURIComponent(clientId)}&token=${encodeURIComponent(token)}`;
+  socket = new WebSocket(url);
+
+  // existing code...
+}
+```
+- This ensures the server can associate each WebSocket connection with the proper user.
+
+##### 6️⃣ Secure WebSocket Connections (Important!)
+- **Validate the JWT token on the server** in `broadcaster.go` when the WebSocket connection is established, to confirm the clientId is genuine.
+- Use **TLS** (`wss://`) to encrypt the connection and protect tokens.
+- Reject connections with invalid or expired tokens.
+
+##### 🚀 Summary Table: What & Where to Change
+| Step | File / Folder                              | What to Change                                                                  |
+| ---- | ------------------------------------------ | ------------------------------------------------------------------------------- |
+| 1    | `websocket/broadcaster.go`                 | Add `clientsById` map, register connections by clientId, remove on close        |
+| 2    | `websocket/broadcaster.go`                 | Add `sendToClient(clientId, message)` helper function                           |
+| 3    | Database (SQL migration)                   | Add `submitted_by` field to `task` table                                        |
+| 4    | Backend gRPC handlers or task update logic | Query `submitted_by` for updated task, call `sendToClient` instead of broadcast |
+| 5    | `src/lib/wsClient.ts` (Svelte client)      | Modify WebSocket URL to include `clientId` and `token` query parameters         |
+| 6    | `websocket/broadcaster.go`                 | Add JWT token validation on WebSocket connect                                   |
+
+This precise integration will help your app send **real-time updates only to the relevant user**, enhancing security and performance, while keeping your existing codebase clean and modular.
+
 ### ✅ Benefits Recap
 
 - 🔁 **True bidirectional communication** (not just user-triggered)
 - ⚡ **<50ms end-to-end latency**
-- 👥 **Real-time multi-user support**
+- 👥👤 **Flexible real-time support: multi-user broadcasts and targeted single-user updates**  
 - 📉 **Minimal network usage**
 - 🧼 **Clean abstraction via store + handler pattern**
 - 🧠 **Fully decoupled, reactive UI components**

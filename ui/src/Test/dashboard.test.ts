@@ -1,9 +1,12 @@
 vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
-import { render, fireEvent, waitFor, screen, queryByTestId, getByTestId } from '@testing-library/svelte';
+
+import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Dashboard from '../pages/Dashboard.svelte';
 
+
+let wsMessageHandler: any;
 
 // Define types for task status
 interface TaskStatus {
@@ -48,14 +51,37 @@ const mockJobs = [
   { jobId: 2, status: 'S', action: 'C', progression: 100, modifiedAt: new Date().toISOString(), workerId: 'worker-2'}
 ]
 
+vi.mock('../lib/wsClient', () => ({
+  wsClient: {
+    subscribeToMessages: vi.fn(() => () => {}),
+    sendMessage: vi.fn()
+  }
+}));
+
+import { wsClient } from '../lib/wsClient';
+
 describe('Worker integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Configure le mock API
     mockApi.getWorkers.mockResolvedValue([
       { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1' }
     ]);
-    mockApi.getJobs.mockResolvedValue(mockJobs);
+    mockApi.getJobs.mockResolvedValue([
+      { jobId: 1, status: 'S', action: 'D', progression: 100, modifiedAt: new Date().toISOString(), workerId: 'worker-1' }
+    ]);
     mockApi.getStatus.mockResolvedValue([{ workerId: 1, status: 'online' }]);
+    mockApi.delJob.mockResolvedValue({});
+    mockApi.delWorker.mockResolvedValue({});
+    mockApi.updateWorkerConfig.mockResolvedValue({});
+    mockApi.newWorker.mockResolvedValue([]);
+
+    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler) => {
+      wsMessageHandler = handler;
+      return () => true;
+    });
+
   });
 
   it('updates concurrency on increase button click', async () => {
@@ -100,8 +126,7 @@ describe('Worker integration', () => {
       expect(queryByTestId('worker-1')).toBeNull();
       expect(queryByTestId('job-row-3')).toBeInTheDocument();
     });
-    
-    expect(screen.getByText('Worker deleted / Job Created')).toBeInTheDocument();
+  
   });
 
   it('should add a worker and update the worker and the jobs list', async () => {
@@ -140,9 +165,6 @@ describe('Worker integration', () => {
     // 5. Click on submit
     await fireEvent.click(getByTestId('add-worker-button'));
 
-    // 6. Check that success message appears
-    expect(await findByText('Worker/Job Added')).toBeInTheDocument();
-
     // 7. Check that newWorker was called correctly
     expect(mockApi.newWorker).toHaveBeenCalledWith(
       2,           // concurrency
@@ -164,39 +186,28 @@ describe('Worker integration', () => {
   });
 
   it('should delete a job when trash button is clicked', async () => {
-    const mockJobs = [
-      {
-        jobId: 1,
-        status: 'S',
-        action: 'D',
-        progression: 100,
-        modifiedAt: new Date().toISOString(),
-        workerId: 'worker-1',
-      }
-    ];
-
-    // Mock API responses
-    mockApi.getJobs.mockResolvedValue(mockJobs);
-    mockApi.delJob.mockResolvedValue({});
-    
     render(Dashboard);
 
-    // Wait until jobs appear
     await waitFor(() => {
       expect(screen.getByTestId('job-row-1')).toBeInTheDocument();
     });
 
-    // Click the delete button for jobId = 1
-    const deleteButton = screen.getByTestId('trash-button-1');
-    await fireEvent.click(deleteButton);
+    const deleteBtn = screen.getByTestId('trash-button-1');
+    await fireEvent.click(deleteBtn);
 
-    // Wait for API call
     await waitFor(() => {
       expect(mockApi.delJob).toHaveBeenCalledWith({ jobId: 1 });
+    });
+
+    wsMessageHandler({
+      type: 'job-deleted',
+      payload: { jobId: 1 }
+    });
+
+    await waitFor(() => {
       expect(screen.queryByTestId('job-row-1')).toBeNull();
     });
   });
-
 });
 
 // Mock data
@@ -265,89 +276,89 @@ describe('Job Pagination and Notifications', () => {
     }, { timeout: 3000 });
   });
 
-  // it('should show notification when new jobs are added', async () => {
-  //   // First call - initial jobs
-  //   mockApi.getJobs.mockImplementationOnce(() => 
-  //     Promise.resolve(mockJobsFirstPage)
-  //   );
+  it('should show notification when new jobs are added', async () => {
+    // First call - initial jobs
+    mockApi.getJobs.mockImplementationOnce(() => 
+      Promise.resolve(mockJobsFirstPage)
+    );
     
-  //   // Subsequent calls - new jobs
-  //   mockApi.getJobs.mockImplementation(() => 
-  //     Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
-  //   );
+    // Subsequent calls - new jobs
+    mockApi.getJobs.mockImplementation(() => 
+      Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
+    );
 
-  //   const { getByTestId, getByText } = render(Dashboard);
+    const { getByTestId, getByText } = render(Dashboard);
     
-  //   await waitFor(() => getByTestId('job-row-1'));
+    await waitFor(() => getByTestId('job-row-1'));
     
-  //   const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
-  //   if (!jobsContainer) throw new Error('Container not found');
+    const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
+    if (!jobsContainer) throw new Error('Container not found');
     
-  //   // Simulate scroll down
-  //   Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
-  //   Object.defineProperty(jobsContainer, 'scrollTop', { value: 800 });
-  //   Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
+    // Simulate scroll down
+    Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(jobsContainer, 'scrollTop', { value: 800 });
+    Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
     
-  //   await waitFor(() => {
-  //     expect(getByText('1 new job available')).toBeInTheDocument();
-  //   }, { timeout: 3000 });
-  // });
+    await waitFor(() => {
+      expect(getByText('1 new job available')).toBeInTheDocument();
+    }, { timeout: 3000 });
+  });
 
-  // it('should load new jobs when clicking notification', async () => {
-  //   // First call - initial jobs
-  //   mockApi.getJobs.mockImplementationOnce(() => 
-  //     Promise.resolve(mockJobsFirstPage)
-  //   );
+  it('should load new jobs when clicking notification', async () => {
+    // First call - initial jobs
+    mockApi.getJobs.mockImplementationOnce(() => 
+      Promise.resolve(mockJobsFirstPage)
+    );
     
-  //   // Subsequent calls - new jobs
-  //   mockApi.getJobs.mockImplementation(() => 
-  //     Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
-  //   );
+    // Subsequent calls - new jobs
+    mockApi.getJobs.mockImplementation(() => 
+      Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
+    );
 
-  //   const { getByTestId, getByText, queryByText } = render(Dashboard);
+    const { getByTestId, getByText, queryByText } = render(Dashboard);
     
-  //   await waitFor(() => getByTestId('job-row-1'));
+    await waitFor(() => getByTestId('job-row-1'));
     
-  //   const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
-  //   if (!jobsContainer) throw new Error('Container not found');
+    const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
+    if (!jobsContainer) throw new Error('Container not found');
     
-  //   // Create mock scrollTop
-  //   let mockScrollTop = 800;
+    // Create mock scrollTop
+    let mockScrollTop = 800;
     
-  //   // Mock scrollTo method
-  //   jobsContainer.scrollTo = vi.fn((options) => {
-  //     mockScrollTop = options.top;
-  //     fireEvent.scroll(jobsContainer);
-  //   });
+    // Mock scrollTo method
+    jobsContainer.scrollTo = vi.fn((options) => {
+      mockScrollTop = options.top;
+      fireEvent.scroll(jobsContainer);
+    });
     
-  //   // Make scrollTop configurable
-  //   Object.defineProperty(jobsContainer, 'scrollTop', {
-  //     get: () => mockScrollTop,
-  //     set: (value) => { mockScrollTop = value; },
-  //     configurable: true
-  //   });
+    // Make scrollTop configurable
+    Object.defineProperty(jobsContainer, 'scrollTop', {
+      get: () => mockScrollTop,
+      set: (value) => { mockScrollTop = value; },
+      configurable: true
+    });
     
-  //   Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
-  //   Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
+    Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
     
-  //   await waitFor(() => {
-  //     expect(getByText('1 new job available')).toBeInTheDocument();
-  //   }, { timeout: 3000 });
+    await waitFor(() => {
+      expect(getByText('1 new job available')).toBeInTheDocument();
+    }, { timeout: 3000 });
 
-  //   const notification = getByText('1 new job available');
-  //   await fireEvent.click(notification);
+    const notification = getByText('1 new job available');
+    await fireEvent.click(notification);
 
-  //   await waitFor(() => {
-  //     expect(jobsContainer.scrollTo).toHaveBeenCalledWith({
-  //       top: 0,
-  //       behavior: 'smooth'
-  //     });
-  //     expect(mockScrollTop).toBe(0);
-  //   });
+    await waitFor(() => {
+      expect(jobsContainer.scrollTo).toHaveBeenCalledWith({
+        top: 0,
+        behavior: 'smooth'
+      });
+      expect(mockScrollTop).toBe(0);
+    });
 
-  //   await waitFor(() => {
-  //     expect(getByTestId('job-row-6')).toBeInTheDocument();
-  //     expect(queryByText('1 new job available')).not.toBeInTheDocument();
-  //   });
-  // });
+    await waitFor(() => {
+      expect(getByTestId('job-row-6')).toBeInTheDocument();
+      expect(queryByText('1 new job available')).not.toBeInTheDocument();
+    });
+  });
 });

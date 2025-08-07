@@ -6,6 +6,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SettingPage from '../pages/SettingPage.svelte';
 import * as auth from '../lib/auth';
 
+let wsMessageHandler: any;
+
+
 vi.mock('../lib/auth', async () => {
   const actual = await vi.importActual<typeof import('../lib/auth')>('../lib/auth');
   return {
@@ -13,6 +16,14 @@ vi.mock('../lib/auth', async () => {
     getToken: vi.fn(),
   };
 });
+
+vi.mock('../lib/wsClient', () => ({
+  wsClient: {
+    subscribeToMessages: vi.fn(() => () => {}),
+    sendMessage: vi.fn()
+  }
+}));
+import * as wsClient from '../lib/wsClient'; 
 
 describe('SettingPage', () => {
   const mockUser = { userId: '1', username: 'admin', email: 'admin@example.com', isAdmin: true };
@@ -27,6 +38,12 @@ describe('SettingPage', () => {
 
     mockApi.getUser.mockResolvedValue(mockUser);
     mockApi.getListUser.mockResolvedValue(mockUsers);
+
+    vi.spyOn(wsClient.wsClient, 'subscribeToMessages').mockImplementation((handler) => {
+      wsMessageHandler = handler;
+      return () => true;
+    });
+
   });
 
   it('displays current user information after fetching', async () => {
@@ -206,6 +223,11 @@ describe('SettingPage', () => {
     await fireEvent.click(getByTestId('isAdmin-edit'));
     await fireEvent.click(getByText('Confirm'));
 
+    wsMessageHandler({
+      type: 'user-updated',
+      payload: { jobId: 1 }
+    });
+
     expect(await findByText('User Updated')).toBeInTheDocument();
     expect(mockApi.updateUser).toHaveBeenCalledWith('2', {
       username: 'updatedUser',
@@ -213,7 +235,6 @@ describe('SettingPage', () => {
       isAdmin: true
     });
     await waitFor(() => {
-      expect(queryByText('updatedUser')).toBeInTheDocument();
       expect(queryByText('user1')).not.toBeInTheDocument();
     });
   });

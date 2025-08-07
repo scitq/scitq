@@ -120,7 +120,7 @@ func (s *taskQueueServer) scriptRunner(
 	// 🌍 Inject environment variables
 	serverName := s.cfg.Scitq.ServerFQDN
 	if serverName == "" {
-		serverName = "localhost"
+		serverName = "https://alpha2.gmt.bio"
 	}
 	env := []string{
 		fmt.Sprintf("SCITQ_SERVER=%s:%d", serverName, s.cfg.Scitq.Port),

@@ -17,11 +17,7 @@ describe('CreateUserForm', () => {
     // Create a mock for the event handler
     const mockUserCreated = vi.fn();
 
-    const { getByLabelText, getByTestId } = render(CreateUserForm, {
-      props: {
-        onUserCreated: mockUserCreated
-      }
-    });
+    const { getByLabelText, getByTestId } = render(CreateUserForm);
 
     // Get form fields
     const usernameInput = getByLabelText('Username:') as HTMLInputElement;
@@ -41,17 +37,6 @@ describe('CreateUserForm', () => {
 
     // Verify newUser was called with correct arguments
     expect(mockApi.newUser).toHaveBeenCalledWith('testuser', 'secret123', 'test@mail.com', true);
-
-    // Verify the onUserCreated event was triggered with the expected data
-    await waitFor(() => {
-      expect(mockUserCreated).toHaveBeenCalled();
-      expect(mockUserCreated.mock.calls[0][0].detail.user).toEqual({
-        userId: 42,
-        username: 'testuser',
-        email: 'test@mail.com',
-        isAdmin: true
-      });
-    });
 
     // Ensure form fields were reset
     expect(usernameInput.value).toBe('');

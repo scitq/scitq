@@ -8,6 +8,14 @@ import { isLoggedIn } from '../lib/Stores/user';
 import * as auth from '../lib/auth';
 import App from '../App.svelte';
 
+vi.mock('../lib/wsClient', () => ({
+  wsClient: {
+    subscribeToMessages: vi.fn(() => () => {}),
+    sendMessage: vi.fn()
+  }
+}));
+import * as wsClient from '../lib/wsClient'; 
+
 const mockFetch = vi.fn((url, options) => {
   if (url.includes('/login')) {
     return Promise.resolve({

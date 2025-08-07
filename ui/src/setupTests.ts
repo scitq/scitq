@@ -3,6 +3,7 @@ import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 import { mockApi } from './mocks/api_mock';
 import { mockAuth } from './mocks/auth_mock';
+import { wsClient } from './lib/wsClient';
 
 vi.mock('grpc-web', () => {
   return {
@@ -22,6 +23,16 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
     dispatchEvent: vi.fn(),
   }));
 }
+
+vi.mock('../lib/wsClient', async () => {
+  return {
+    wsClient: {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      subscribeToMessages: vi.fn(() => () => true),
+    },
+  };
+});
 
 // Global API mock
 vi.mock('../lib/api', () => mockApi);
