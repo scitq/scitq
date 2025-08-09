@@ -16,78 +16,129 @@
   import { ArrowBigUp, Search, X} from 'lucide-svelte';
 
   // --- State Management ---
+  // List of available workers
   let workers: Worker[] = [];
+  // List of available workflows
   let workflows: Workflow[] = [];
+  // All steps across workflows
   let allSteps: Step[] = [];
 
-  // Filtering and sorting state
+  // --- Filtering State ---
+  // Currently selected worker filter
   let selectedWorkerId: number = undefined;
+  // Currently selected workflow filter
   let selectedWfId: number = undefined;
+  // Currently selected step filter
   let selectedStepId: number = undefined;
-  let selectedCommand: string = '';
+  // Currently selected command filter
+  let selectedCommand: string = undefined;
+  // Currently selected status filter
   let selectedStatus: string = '';
+  // Status of the selected task (for log modal)
   let selectedTaskStatus: string = '';
+  // Command of the selected task (for log modal)
   let selectedTaskCommand: String = undefined;
+  // Current sorting method
   let sortBy: 'task' | 'worker' | 'wf' | 'step' = 'task';
+  // Steps for the currently selected workflow
   let workflowSteps: Step[] = [];
 
-  // Log management state
+  // --- Log Management ---
+  // Number of log lines to load at once
   const CHUNK_SIZE = 50;
+  // Whether more stdout logs are available to load
   let hasMoreStdout = true;
+  // Whether more stderr logs are available to load
   let hasMoreStderr = true;
   
+  // Tracks how many logs have been skipped for each task
   type LogSkip = {
     stdout: number;
     stderr: number;
   };
   let logSkipTracker: Record<number, LogSkip> = {};
 
+  // Stores stdout logs by task ID
   let taskLogsOut: Record<number, TaskLog[]> = {};
+  // Stores stderr logs by task ID
   let taskLogsErr: Record<number, TaskLog[]> = {};
+  // Stores saved log chunks
   let taskLogsSaved: LogChunk[] = [];
+  // Tracks which tasks are currently being streamed
   const streamedTasks = new Set<number>();
 
-  // UI state
+  // --- UI State ---
+  // Currently selected task ID (for log modal)
   let selectedTaskId: number | null = null;
+  // Whether log modal is visible
   let showLogModal = false;
+  // Logs to display in stdout panel
   let logsToShowOut: TaskLog[] = [];
+  // Logs to display in stderr panel
   let logsToShowErr: TaskLog[] = [];
+  // Reference to stdout pre element
   let stdoutPre: HTMLPreElement | null = null;
+  // Reference to stderr pre element
   let stderrPre: HTMLPreElement | null = null;
+  // Whether stdout panel is scrolled to bottom
   let isScrolledToBottomOut = true;
+  // Whether stderr panel is scrolled to bottom
   let isScrolledToBottomErr = true;
 
-  // Task list pagination
+  // --- Task List Pagination ---
+  // Number of tasks to load at once
   const TASKS_CHUNK_SIZE = 25;
+  // Currently displayed tasks
   let displayedTasks: Task[] = [];
+  // First loaded tasks (used for resetting search)
   let firstTasks: Task[] = [];
-  let pendingTasks: Task[] = []; // New pending tasks
+  // New tasks waiting to be displayed
+  let pendingTasks: Task[] = [];
+  // Whether more tasks are available to load
   let hasMoreTasks = true;
+  // Whether tasks are currently loading
   let isLoading = false;
+  // Reference to tasks container element
   let tasksContainer: HTMLDivElement;
+  // Whether list is scrolled to top
   let isScrolledToTop = false;
+  // Whether list is scrolled to bottom
   let isScrolledToBottom = false;
+  // Last scroll position (for maintaining position during updates)
   let lastScrollPosition = 0;
+  // Whether to show new tasks notification
   let showNewTasksNotification = false;
+  // Function to unsubscribe from WebSocket
   let unsubscribeWS: () => void;
 
+/**
+ * Handles incoming WebSocket messages for task updates
+ * @param {Object} message - The WebSocket message
+ * @param {string} message.type - Type of message ('task-created' or 'task-updated')
+ * @param {Object} message.payload - The task data
+ */
 async function handleWebSocketMessage(message) {
+  console.log('Received WS message:', message);
   if (message.type === 'task-created') {
-    // Create a complete task object with received data
+    console.log('New task created:', message.payload);
+    console.log('isScrolledToTop:', isScrolledToTop);
+    
+    // Create new task object from message
     const newTask: Task = {
       taskId: message.payload.taskId,
       command: message.payload.command || '',
       status: message.payload.status || 'P',
       stepId: message.payload.stepId || null,
-      workerId: null, // To be filled if available in the message
-      workflowId: null, // To be filled if available in the message
+      workerId: null,
+      workflowId: null,
       taskName: message.payload.taskName || null,
     };
 
-    // Add to the appropriate list
+    // Add to pending tasks if not at top, otherwise prepend
     if (!isScrolledToTop) {
       pendingTasks = [...pendingTasks, newTask];
-      showNewTasksNotification = true;
+      showNewTasksNotification = true; 
+      console.log('Notification state:', { showNewTasksNotification, pendingTasks });
     } else {
       displayedTasks = [newTask, ...displayedTasks];
       firstTasks = [newTask, ...firstTasks];
@@ -100,7 +151,7 @@ async function handleWebSocketMessage(message) {
       }
     }
     
-    // Start streaming if needed
+    // Start streaming if task is running
     if (['R', 'U', 'V'].includes(newTask.status)) {
       startStreaming(newTask);
     }
@@ -112,7 +163,11 @@ async function handleWebSocketMessage(message) {
 
     console.log('Task updated:', {updatedTaskId, newStatus, workerId});
 
-    // Helper function to update a task in an array
+    /**
+     * Updates task in given array
+     * @param {Task[]} tasks - Array to update
+     * @returns {Task[]} Updated array
+     */
     const updateTaskInArray = (tasks: Task[]) => {
       return tasks.map(task => {
         if (task.taskId === updatedTaskId) {
@@ -138,21 +193,14 @@ async function handleWebSocketMessage(message) {
       });
     };
 
-    // Update in displayedTasks
+    // Update task in all relevant arrays
     displayedTasks = updateTaskInArray(displayedTasks);
-    
-    // Update in firstTasks
     firstTasks = updateTaskInArray(firstTasks);
-    
-    // Update in pendingTasks if the task is there
     pendingTasks = updateTaskInArray(pendingTasks);
 
-    // Start streaming if needed
+    // Start streaming if task is now running
     if (['R', 'U', 'V'].includes(newStatus)) {
-      // Check in displayedTasks first
       let task = displayedTasks.find(t => t.taskId === updatedTaskId);
-      
-      // If not found, check in pendingTasks
       if (!task) {
         task = pendingTasks.find(t => t.taskId === updatedTaskId);
       }
@@ -167,9 +215,8 @@ async function handleWebSocketMessage(message) {
   // --- Core Functions ---
 
   /**
-   * Loads initial task batch with current filters
+   * Loads initial batch of tasks with current filters
    * @async
-   * @returns {Promise<void>} Resolves when initial load completes
    */
   async function loadInitialTasks() {
     displayedTasks = await getAllTasks(
@@ -192,19 +239,26 @@ async function handleWebSocketMessage(message) {
       }
     }
   }
+
   /**
    * Parses filter parameters from URL hash
-   * @returns {Object} Filter parameters object
+   * @returns {Object} Filter parameters
    */
   function getFiltersFromUrl() {
     const hash = window.location.hash;
     const queryPart = hash.includes('?') ? hash.split('?')[1] : '';
     const params = new URLSearchParams(queryPart);
 
+    /**
+     * Safely parses number from string
+     * @param {string|null} value - Value to parse
+     * @returns {number|undefined} Parsed number or undefined
+     */
     const parseNumber = (value: string | null): number | undefined => {
       const num = Number(value);
       return value && !isNaN(num) ? num : undefined;
     };
+    
     return {
       status: params.get('status') ?? undefined,
       workerId: parseNumber(params.get('workerId')),
@@ -217,7 +271,6 @@ async function handleWebSocketMessage(message) {
   /**
    * Updates task list based on URL filters
    * @async
-   * @returns {Promise<void>} Resolves when update completes
    */
   async function updateTasksFromUrl() {
     const filters = getFiltersFromUrl();
@@ -227,6 +280,7 @@ async function handleWebSocketMessage(message) {
     selectedStepId = filters.stepId ?? undefined;
     selectedStatus = filters.status ?? undefined;
 
+    // Load steps if workflow is selected
     if (selectedWfId !== undefined) {
       workflowSteps = await getSteps(selectedWfId);
     } else {
@@ -267,11 +321,12 @@ async function handleWebSocketMessage(message) {
         
         // Start streaming for running tasks
         for (const task of initialLoad) {
-        if (['R', 'U', 'V'].includes(task.status) && !streamedTasks.has(task.taskId)) {
-          startStreaming(task);
+          if (['R', 'U', 'V'].includes(task.status) && !streamedTasks.has(task.taskId)) {
+            startStreaming(task);
+          }
         }
-      }
 
+        // Load logs for finished tasks
         const finishedTaskIds = displayedTasks
           .filter(task => !['R', 'U', 'V'].includes(task.status))
           .map(task => task.taskId);
@@ -286,7 +341,7 @@ async function handleWebSocketMessage(message) {
   }
 
   /**
-   * Loads newly arrived tasks
+   * Loads newly arrived pending tasks
    */
   function loadNewTasks() {
     if (pendingTasks.length === 0) return;
@@ -301,12 +356,13 @@ async function handleWebSocketMessage(message) {
       return;
     }
 
-    // Add pending tasks to the top
+    // Add pending tasks to display
     displayedTasks = [...pendingTasks, ...displayedTasks];
     firstTasks = [...pendingTasks, ...firstTasks];
     pendingTasks = [];
     showNewTasksNotification = false;
     
+    // Scroll to top
     if (tasksContainer) {
       tasksContainer.scrollTo({
         top: 0,
@@ -316,9 +372,8 @@ async function handleWebSocketMessage(message) {
   }
 
   /**
-   * Loads additional tasks for infinite scroll
+   * Loads more tasks for infinite scroll
    * @async
-   * @returns {Promise<void>} Resolves when loading completes
    */
   async function loadMoreTasks() {
     if (isLoading || !hasMoreTasks) return;
@@ -345,17 +400,19 @@ async function handleWebSocketMessage(message) {
             
             await tick();
             
+            // Maintain scroll position
             if (tasksContainer && !isScrolledToTop) {
                 tasksContainer.scrollTop = lastScrollPosition;
             }
 
+            // Load logs for finished tasks
             const finishedTaskIds = displayedTasks
-            .filter(task => !['R', 'U', 'V'].includes(task.status))
-            .map(task => task.taskId);
+              .filter(task => !['R', 'U', 'V'].includes(task.status))
+              .map(task => task.taskId);
 
-          if (finishedTaskIds.length > 0) {
-            taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
-          }
+            if (finishedTaskIds.length > 0) {
+              taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+            }
         } else {
             hasMoreTasks = false;
         }
@@ -368,7 +425,7 @@ async function handleWebSocketMessage(message) {
 
   /**
    * Updates URL with current filters
-   * @param {string} [status] - Optional status filter to apply
+   * @param {string} [status] - Optional status filter
    */
   function handleStatusClick(status?: string) {
     const query = new URLSearchParams();
@@ -387,7 +444,6 @@ async function handleWebSocketMessage(message) {
   /**
    * Handles workflow selection change
    * @async
-   * @returns {Promise<void>} Resolves when steps are loaded
    */
   async function handleWfClick() {
     selectedWfId = selectedWfId !== '' ? Number(selectedWfId) : '';
@@ -398,7 +454,7 @@ async function handleWebSocketMessage(message) {
 
   /**
    * Sorts tasks based on current sort criteria
-   * @returns {Task[]} Sorted task array
+   * @returns {Task[]} Sorted tasks
    */
   function handleSortBy() {
     if (!displayedTasks) return [];
@@ -429,12 +485,13 @@ async function handleWebSocketMessage(message) {
     if (streamedTasks.has(task.taskId)) return;
     streamedTasks.add(task.taskId);
 
+    // Initialize log storage
     taskLogsOut[task.taskId] = taskLogsOut[task.taskId] ?? [];
     taskLogsErr[task.taskId] = taskLogsErr[task.taskId] ?? [];
 
     /**
-     * Processes incoming log entries
-     * @param {TaskLog} log - Log entry to process
+     * Handles incoming log entries
+     * @param {TaskLog} log - Log entry
      */
     const handleLog = async (log: TaskLog) => {
       const maxLines = 50;
@@ -449,6 +506,7 @@ async function handleWebSocketMessage(message) {
         taskLogsErr = { ...taskLogsErr };
       }
 
+      // Update saved logs
       let savedEntry = taskLogsSaved.find(c => c.taskId === task.taskId);
       if (!savedEntry) {
         savedEntry = { taskId: task.taskId, stdout: [], stderr: [] };
@@ -467,6 +525,7 @@ async function handleWebSocketMessage(message) {
       await tick();
     };
 
+    // Start streaming both stdout and stderr
     streamTaskLogsOutput(task.taskId, handleLog);
     streamTaskLogsErr(task.taskId, handleLog);
   }
@@ -474,9 +533,8 @@ async function handleWebSocketMessage(message) {
   /**
    * Loads older logs for a task
    * @async
-   * @param {number} taskId - Task ID to load logs for
-   * @param {'stdout'|'stderr'} logType - Log type to load
-   * @returns {Promise<void>} Resolves when logs are loaded
+   * @param {number} taskId - Task ID
+   * @param {'stdout'|'stderr'} logType - Type of logs to load
    */
   async function loadMoreLogs(taskId: number, logType: 'stdout' | 'stderr') {
     if (!logSkipTracker[taskId]) {
@@ -499,6 +557,7 @@ async function handleWebSocketMessage(message) {
       return;
     }
 
+    // Prepend new logs and update skip count
     if (logType === 'stdout') {
       taskLogsOut[taskId] = [...newLogs, ...(taskLogsOut[taskId] ?? [])];
       logSkipTracker[taskId].stdout += CHUNK_SIZE;
@@ -514,7 +573,6 @@ async function handleWebSocketMessage(message) {
    * Opens log modal for a task
    * @async
    * @param {number} taskId - Task ID to show logs for
-   * @returns {Promise<void>} Resolves when modal is ready
    */
   async function openLogModal(taskId: number) {
     isScrolledToBottomErr = true;
@@ -553,7 +611,7 @@ async function handleWebSocketMessage(message) {
 
   /**
    * Scrolls log panel to top
-   * @param {'stdout'|'stderr'} logType - Which log panel to scroll
+   * @param {'stdout'|'stderr'} logType - Which panel to scroll
    */
   function scrollToTop(logType: 'stdout' | 'stderr') {
     if (logType === 'stdout' && stdoutPre) {
@@ -567,7 +625,11 @@ async function handleWebSocketMessage(message) {
     }
   }
 
-    // --- Lifecycle Management ---
+  // --- Lifecycle Management ---
+  /**
+   * Component mount lifecycle hook
+   * @async
+   */
   onMount(async () => {
     try {
       // Parallel data loading
@@ -586,6 +648,7 @@ async function handleWebSocketMessage(message) {
       // Initial task load
       await updateTasksFromUrl();
 
+      // Load logs for finished tasks
       const finishedTaskIds = displayedTasks
         .filter(task => !['R', 'U', 'V'].includes(task.status))
         .map(task => task.taskId);
@@ -608,8 +671,8 @@ async function handleWebSocketMessage(message) {
       console.error("Initialization error:", error);
     }
 
+    // Cleanup function
     return () => {
-      // Cleanup
       unsubscribeWS?.();
       window.removeEventListener('hashchange', updateTasksFromUrl);
     };
@@ -629,7 +692,7 @@ async function handleWebSocketMessage(message) {
     const scrollPosition = scrollTop + clientHeight;
     const threshold = 150;
 
-    // Detect top of page
+    // Detect scroll position
     isScrolledToTop = scrollTop <= 10;
 
     // Load new tasks if scrolled to top
@@ -637,7 +700,7 @@ async function handleWebSocketMessage(message) {
       loadNewTasks();
     }
 
-    // Detect bottom of page
+    // Load more tasks if near bottom
     const distanceFromBottom = scrollHeight - scrollPosition;
     if (distanceFromBottom <= threshold && hasMoreTasks && !isLoading) {
       loadMoreTasks();
@@ -671,6 +734,7 @@ async function handleWebSocketMessage(message) {
   }
 </script>
 
+<!-- Main Tasks Container -->
 <div class="tasks-container" data-testid="tasks-page">
   {#if showNewTasksNotification}
     <div 
@@ -682,15 +746,15 @@ async function handleWebSocketMessage(message) {
       role="button"
       aria-label={`Show ${pendingTasks.length} new task${pendingTasks.length > 1 ? 's' : ''}`}
     >
-      {pendingTasks.length} new task{pendingTasks.length > 1 ? 's' : ''} available
+    {pendingTasks.length} new task{pendingTasks.length > 1 ? 's' : ''} available
       <button class="show-new-btn" on:click={loadNewTasks}>Show</button>
     </div>
   {/if}
 
-
-  <!-- Filters -->
+  <!-- Filters Section -->
   <form class="tasks-filters-form" on:submit|preventDefault={() => handleStatusClick()}>
 
+    <!-- Command Search -->
     <div class="tasks-filter-group tasks-search-container {isLoading ? 'searching' : ''}">
       <label for="command">Command</label>
       <div class="search-input-wrapper">
@@ -733,6 +797,7 @@ async function handleWebSocketMessage(message) {
       </div>
     </div>
 
+    <!-- Sort By Dropdown -->
     <div class="tasks-filter-group">
       <label for="sortBy">Sort by</label>
       <select id="sortBy" bind:value={sortBy} on:change={() => {
@@ -747,6 +812,7 @@ async function handleWebSocketMessage(message) {
       </select>
     </div>
 
+    <!-- Worker Filter -->
     <div class="tasks-filter-group">
       <label for="workerSelect">Worker</label>
       <select
@@ -764,6 +830,7 @@ async function handleWebSocketMessage(message) {
       </select>
     </div>
 
+    <!-- Workflow Filter -->
     <div class="tasks-filter-group">
       <label for="wfSelect">Workflow</label>
       <select 
@@ -781,6 +848,7 @@ async function handleWebSocketMessage(message) {
       </select>
     </div>
 
+    <!-- Step Filter (shown when workflow selected) -->
     {#if workflowSteps.length > 0}
       <div class="tasks-filter-group">
         <label for="stepSelect">Step</label>
@@ -802,7 +870,7 @@ async function handleWebSocketMessage(message) {
 
   </form>
 
-  <!-- Status buttons -->
+  <!-- Status Filter Tabs -->
   <div class="tasks-status-filters-bar tasks-status-tabs">
     <button class="tasks-status-all" on:click={() => handleStatusClick()}>All</button>
     <button class="tasks-status-pending" on:click={() => handleStatusClick('P')}>Pending</button>
@@ -819,28 +887,31 @@ async function handleWebSocketMessage(message) {
     <button class="tasks-status-canceled" on:click={() => handleStatusClick('X')}>Canceled</button>
   </div>
 
-  <div class="tasks-list-container" bind:this={tasksContainer} on:scroll={handleScroll}>
+  <!-- Task List Container -->
+  <div class="tasks-list-container" data-testid="tasks-list" bind:this={tasksContainer} on:scroll={handleScroll}>
 
-      <!-- Filtered task list -->
-  <TaskList 
-    displayedTasks={displayedTasks}
-    {taskLogsSaved}
-    {workers}
-    {workflows}
-    {allSteps}
-    onOpenModal={openLogModal}
-  />
+      <!-- Task List Component -->
+      <TaskList 
+        displayedTasks={displayedTasks}
+        {taskLogsSaved}
+        {workers}
+        {workflows}
+        {allSteps}
+        onOpenModal={openLogModal}
+      />
 
-  {#if isLoading}
-    <div class="loading-indicator">Loading...</div>
-  {:else if !hasMoreTasks}
-    <p class="workerCompo-empty-state">No more task.</p>
-  {/if}
+      <!-- Loading and Empty States -->
+      {#if isLoading}
+        <div class="loading-indicator">Loading...</div>
+      {:else if !hasMoreTasks}
+        <p class="workerCompo-empty-state">No more task.</p>
+      {/if}
 
   </div>
 
 </div>
 
+<!-- Log Modal -->
 {#if showLogModal && selectedTaskId !== null}
   <div
     class="tasks-modal-backdrop"
@@ -869,6 +940,7 @@ async function handleWebSocketMessage(message) {
       </h2>
       <p class="tasks-command-preview"> {selectedTaskCommand}</p>
       <div class="tasks-log-columns">
+        <!-- Stdout Log Panel -->
         {#if logsToShowOut.length > 0}
           <div class="tasks-log-block tasks-stdout-block">
             <h3 class="tasks-output-header">
@@ -890,7 +962,6 @@ async function handleWebSocketMessage(message) {
                 class="tasks-log-pre"
                 on:scroll={() => {
                   if (!stdoutPre) return;
-                  // Threshold to consider if scrolled to bottom (e.g., 10px from bottom)
                   const threshold = 10;
                   const atBottom =
                     stdoutPre.scrollHeight - stdoutPre.scrollTop - stdoutPre.clientHeight < threshold;
@@ -904,6 +975,7 @@ async function handleWebSocketMessage(message) {
           </div>
         {/if}
 
+        <!-- Stderr Log Panel -->
         {#if logsToShowErr.length > 0}
           <div class="tasks-log-block tasks-stderr-block">
             <h3 class="tasks-error-header">
@@ -924,7 +996,6 @@ async function handleWebSocketMessage(message) {
                 class="tasks-log-pre"
                 on:scroll={() => {
                   if (!stderrPre) return;
-                  // Threshold to consider if scrolled to bottom (e.g., 10px from bottom)
                   const threshold = 10;
                   const atBottom =
                     stderrPre.scrollHeight - stderrPre.scrollTop - stderrPre.clientHeight < threshold;

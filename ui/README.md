@@ -787,6 +787,45 @@ import { mockApi } from '../mocks/api_mock';
 vi.mock('../lib/api', () => mockApi);
 ```
 
+### 🧪 Testing with a Mocked WebSocket
+To simulate WebSocket messages in your tests, you mock `wsClient.subscribeToMessages` and capture the message handler callback provided by your component.
+
+**1. Mock Setup (`src/setupTests.ts`)**
+```ts
+vi.mock('@/lib/wsClient', () => ({
+  wsClient: {
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    subscribeToMessages: vi.fn(() => () => true), // returns an unsubscribe function
+  },
+}));
+```
+
+**2. Capture and Use the `messageHandler` in Tests**
+```ts
+import { wsClient } from '../lib/wsClient';
+
+let messageHandler: (msg: any) => void;
+
+beforeEach(() => {
+  vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler) => {
+    messageHandler = handler; // store the handler to use later
+    return () => true; // unsubscribe function
+  });
+});
+
+// In a test:
+messageHandler?.({
+  type: 'user-created',
+  payload: { userId: 4, username: 'newuser' }
+});
+```
+
+**3. Benefits**
+- No need for a real WebSocket server.
+- Full control over when and what messages are sent.
+- Tests only your component’s reaction to WebSocket events.
+
 ### Theme Testing Support
 The test setup includes:
 - Mock for window.matchMedia to simulate OS theme preferences
@@ -903,6 +942,9 @@ it('should display Setting page when clicking "Settings" in the ToolBar', async 
 | `TaskList.test.ts`        | Unit                                |
 | `TaskPage.test.ts`        | Integration                         |
 | `UserList.test.ts`        | Unit                                |
+| `WebSocket.test.ts`       | Unit                                |
+| `WfTemplateList.test.ts`  | Unit                                |
+| `WfTemplatePage.test.ts`  | Integration                         |
 | `WorkerCompo.test.ts`     | Unit                                |
 | `WorkflowList.test.ts`    | Unit                                |
 | `WorkflowPage.test.ts`    | Integration                         |

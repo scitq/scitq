@@ -5,7 +5,7 @@ import { render, screen, fireEvent } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import WfTemplateList from '../components/WfTemplateList.svelte';
 
-// Mock data injected via prop
+// Mock data for workflow templates
 const mockTemplates = [
   {
     workflowTemplateId: 1,
@@ -30,25 +30,25 @@ describe('WfTemplateList', () => {
       openParamModal: vi.fn() 
     });
 
-    // Check all templates are rendered
+    // Verify all template rows are rendered
     const rows = await screen.findAllByTestId(/^wfTemplate-/);
     expect(rows.length).toBe(2);
 
-    // Verify template A data
+    // Check Template A details
     expect(screen.getByText('Template A')).toBeInTheDocument();
     expect(screen.getByText('v1.0')).toBeInTheDocument();
     expect(screen.getByText('01/01/2023')).toBeInTheDocument();
     expect(screen.getByText('user1')).toBeInTheDocument();
     expect(screen.getByText('#1')).toBeInTheDocument();
 
-    // Verify template B data
+    // Check Template B details
     expect(screen.getByText('Template B')).toBeInTheDocument();
     expect(screen.getByText('v2.0')).toBeInTheDocument();
     expect(screen.getByText('01/02/2023')).toBeInTheDocument();
     expect(screen.getByText('user2')).toBeInTheDocument();
     expect(screen.getByText('#2')).toBeInTheDocument();
 
-    // Verify action buttons
+    // Verify action buttons are present
     expect(screen.getAllByTitle('Play').length).toBe(2);
     expect(screen.getAllByTitle('Pause').length).toBe(2);
   });
@@ -69,9 +69,11 @@ describe('WfTemplateList', () => {
       openParamModal: mockOpen 
     });
 
+    // Get all Play buttons and click the first one
     const playButtons = await screen.findAllByTitle('Play');
     await fireEvent.click(playButtons[0]);
     
+    // Verify the modal was opened with correct template data
     expect(mockOpen).toHaveBeenCalledWith(mockTemplates[0]);
   });
 });

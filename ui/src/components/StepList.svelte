@@ -5,31 +5,107 @@
   import { wsClient } from '../lib/wsClient';
   import { RefreshCw, PauseCircle, CircleX, Eraser } from 'lucide-svelte';
 
+  /**
+   * Workflow ID passed as a prop to the component
+   * @type {number}
+   */
   export let workflowId: number;
 
+  /**
+   * Array of loaded steps for the workflow
+   * @type {Array<Object>}
+   */
   let steps = [];
+
+  /**
+   * Array of pending steps waiting to be loaded
+   * @type {Array<Object>}
+   */
   let pendingSteps = [];
+
+  /**
+   * Flag indicating if more steps are available to load
+   * @type {boolean}
+   */
   let hasMoreSteps = true;
+
+  /**
+   * Loading state flag
+   * @type {boolean}
+   */
   let isLoading = false;
+
+  /**
+   * Reference to the table container element
+   * @type {HTMLDivElement}
+   */
   let tableContainer: HTMLDivElement;
+
+  /**
+   * Flag indicating if the table is scrolled to top
+   * @type {boolean}
+   */
   let isScrolledToTop = true;
+
+  /**
+   * Count of new steps available
+   * @type {number}
+   */
   let newStepsCount = 0;
+
+  /**
+   * Flag to show new steps notification
+   * @type {boolean}
+   */
   let showNewStepsNotification = false;
+
+  /**
+   * Last scroll position of the table
+   * @type {{top: number, left: number}}
+   */
   let lastScrollPosition = { top: 0, left: 0 };
 
+  /**
+   * Number of steps to load at once
+   * @type {number}
+   * @constant
+   */
   const STEPS_CHUNK_SIZE = 25;
 
+  /**
+   * Unsubscribe function for WebSocket messages
+   * @type {Function}
+   */
   let unsubscribeWS: () => void;
 
+  /**
+   * Component lifecycle hook that runs on mount
+   * Loads initial steps and subscribes to WebSocket messages
+   * @async
+   * @returns {Promise<void>}
+   */
   onMount(async () => {
     steps = await getSteps(workflowId, STEPS_CHUNK_SIZE, 0);
     unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
   });
 
+  /**
+   * Component lifecycle hook that runs on destroy
+   * Unsubscribes from WebSocket messages
+   * @returns {void}
+   */
   onDestroy(() => {
     unsubscribeWS?.();
   });
 
+  /**
+   * Handles incoming WebSocket messages
+   * Updates steps list based on message type
+   * @param {Object} message - The WebSocket message
+   * @property {string} type - Message type ('step-created' or 'step-deleted')
+   * @property {Object} payload - Message payload containing step data
+   * @returns {void}
+   */
   function handleMessage(message) {
     if (message.type === 'step-created' && message.payload.workflowId === workflowId) {
       const newStep = message.payload;
@@ -54,6 +130,11 @@
     }
   }
 
+  /**
+   * Loads pending steps into the main steps list
+   * Resets notification and scrolls to top
+   * @returns {void}
+   */
   function loadNewSteps() {
     steps = [...pendingSteps, ...steps];
     pendingSteps = [];
@@ -65,6 +146,12 @@
     }
   }
 
+  /**
+   * Handles scroll events on the table container
+   * Triggers loading more steps when near bottom
+   * Tracks scroll position for new steps notification
+   * @returns {void}
+   */
   function handleScroll() {
     if (!tableContainer || isLoading) return;
 
@@ -87,6 +174,11 @@
     }
   }
 
+  /**
+   * Loads additional steps when scrolling near bottom
+   * @async
+   * @returns {Promise<void>}
+   */
   async function loadMoreSteps() {
     if (isLoading || !hasMoreSteps) return;
 
@@ -107,7 +199,7 @@
   }
 </script>
 
-
+<!-- Steps container component -->
 <div class="steps-container">
   {#if steps && steps.length > 0}
     <div class="steps-table-wrapper" bind:this={tableContainer} on:scroll={handleScroll}>
@@ -118,6 +210,7 @@
         </button>
       {/if}
 
+      <!-- Steps table -->
       <table class="listTable">
         <thead>
           <tr>
@@ -151,7 +244,7 @@
                 <button class="btn-action" title="Pause"><PauseCircle /></button>
                 <button class="btn-action" title="Reset"><RefreshCw /></button>
                 <button class="btn-action" title="Break"><CircleX /></button>
-                <button class="btn-action" title="Clear" on:click={() => delStep(step.stepId)}><Eraser /></button>
+                <button class="btn-action" title="Clear" data-testid={`delete-step-${step.stepId}`} on:click={() => delStep(step.stepId)}><Eraser /></button>
               </td>
             </tr>
           {/each}

@@ -32,7 +32,7 @@ describe('CreateForm', () => {
     // Render the component
     render(CreateForm);
 
-    // Check that API functions were called
+    // Verify API functions were called
     await waitFor(() => {
       expect(mockApi.getFlavors).toHaveBeenCalled();
       expect(mockApi.getWorkFlow).toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe('CreateForm', () => {
     // Submit the form
     await fireEvent.click(getByTestId('add-worker-button'));
 
-    // Check that newWorker was called with correct arguments
+    // Verify newWorker was called with correct arguments
     await waitFor(() => {
       expect(mockApi.newWorker).toHaveBeenCalledWith(
         5, 10, 'flavor1', 'us-east', 'aws', 3, 'step1'

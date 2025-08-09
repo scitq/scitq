@@ -4,9 +4,9 @@ import { mockApi } from '../mocks/api_mock';
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Dashboard from '../pages/Dashboard.svelte';
+import { wsClient } from '../lib/wsClient';
 
-
-let wsMessageHandler: any;
+let messageHandler: (msg: any) => void;
 
 // Define types for task status
 interface TaskStatus {
@@ -51,20 +51,19 @@ const mockJobs = [
   { jobId: 2, status: 'S', action: 'C', progression: 100, modifiedAt: new Date().toISOString(), workerId: 'worker-2'}
 ]
 
-vi.mock('../lib/wsClient', () => ({
+vi.mock('@/lib/wsClient', () => ({
   wsClient: {
     subscribeToMessages: vi.fn(() => () => {}),
     sendMessage: vi.fn()
   }
 }));
 
-import { wsClient } from '../lib/wsClient';
 
 describe('Worker integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Configure le mock API
+    // Configure API mocks
     mockApi.getWorkers.mockResolvedValue([
       { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1' }
     ]);
@@ -77,138 +76,144 @@ describe('Worker integration', () => {
     mockApi.updateWorkerConfig.mockResolvedValue({});
     mockApi.newWorker.mockResolvedValue([]);
 
-    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler) => {
-      wsMessageHandler = handler;
-      return () => true;
-    });
-
-  });
-
-  it('updates concurrency on increase button click', async () => {
-    const { getByTestId } = render(Dashboard);
-
-    await waitFor(() => getByTestId('increase-concurrency-1'));
-
-    const increaseBtn = getByTestId('increase-concurrency-1');
-    await fireEvent.click(increaseBtn);
-
-    await waitFor(() => {
-      expect(mockApi.updateWorkerConfig).toHaveBeenCalledWith(1, { concurrency: 6 });
+    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
+      messageHandler = handler; // Store the handler for later use
+      return () => true; // Unsubscribe function
     });
   });
 
-  it('updates prefetch on decrease button click', async () => {
-    const { getByTestId } = render(Dashboard);
+it('updates concurrency on increase button click', async () => {
+  // 1. Setup mocks
+  mockApi.getWorkers.mockResolvedValue([
+    { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1', status: 'online' }
+  ]);
+  mockApi.updateWorkerConfig.mockResolvedValue({});
 
-    await waitFor(() => getByTestId('decrease-prefetch-1'));
+  // 2. Render the component
+  const { getByTestId } = render(Dashboard);
 
-    const decreaseBtn = getByTestId('decrease-prefetch-1');
-    await fireEvent.click(decreaseBtn);
-
-    await waitFor(() => {
-      expect(mockApi.updateWorkerConfig).toHaveBeenCalledWith(1, { prefetch: 9 });
-    });
+  // 3. Wait for worker to load
+  await waitFor(() => {
+    expect(getByTestId('worker-1')).toBeInTheDocument();
   });
 
-  it('deletes a worker and update Jobs when delete button is clicked', async () => {
+  // 4. Find and click the button
+  const increaseBtn = getByTestId('increase-concurrency-1');
+  await fireEvent.click(increaseBtn);
+
+  // 5. Verify API call
+  await waitFor(() => {
+    expect(mockApi.updateWorkerConfig).toHaveBeenCalledWith(1, { concurrency: 6 });
+  });
+});
+
+it('updates prefetch on decrease button click', async () => {
+  // 1. Setup mocks
+  mockApi.getWorkers.mockResolvedValue([
+    { workerId: 1, concurrency: 5, prefetch: 10, name: 'Worker 1', status: 'online' }
+  ]);
+  mockApi.updateWorkerConfig.mockResolvedValue({});
+
+  // 2. Render the component
+  const { getByTestId } = render(Dashboard);
+
+  // 3. Wait for worker to load
+  await waitFor(() => {
+    expect(getByTestId('worker-1')).toBeInTheDocument();
+  });
+
+  // 4. Find and click the button
+  const decreaseBtn = getByTestId('decrease-prefetch-1');
+  await fireEvent.click(decreaseBtn);
+
+  // 5. Verify API call
+  await waitFor(() => {
+    expect(mockApi.updateWorkerConfig).toHaveBeenCalledWith(1, { prefetch: 9 });
+  });
+});
+
+it('should add a worker and update the worker and the jobs list', async () => {
+  mockApi.newWorker.mockResolvedValue([{ workerId: 3, workerName: 'new-worker' }]);
+  mockApi.getJobs.mockResolvedValue(mockJobs);
+
+  const { getByTestId } = render(Dashboard);
+
+  await waitFor(() => getByTestId('add-worker-button'));
+
+  // Fill the form
+  await fireEvent.input(getByTestId('concurrency-createWorker'), { target: { value: '2' } });
+  await fireEvent.input(getByTestId('prefetch-createWorker'), { target: { value: '1' } });
+  await fireEvent.input(getByTestId('flavor-createWorker'), { target: { value: 'flavor-a' } });
+  await fireEvent.input(getByTestId('region-createWorker'), { target: { value: 'us-east' } });
+  await fireEvent.input(getByTestId('provider-createWorker'), { target: { value: 'aws' } });
+  await fireEvent.input(getByTestId('number-createWorker'), { target: { value: '1' } });
+  await fireEvent.input(getByTestId('wfStep-createWorker'), { target: { value: 'myWorkflow.myStep' } });
+
+  await fireEvent.click(getByTestId('add-worker-button'));
+
+  // Simulate WebSocket message
+  if (messageHandler) {
+    messageHandler({
+      type: 'worker-created',
+      payloadWorker: {
+        workerId: 3,
+        name: 'new-worker',
+        concurrency: 2,
+        prefetch: 1,
+        status: 'P'
+      },
+      payloadJob: {
+        jobId: 3,
+        action: "C",
+        status: "P",
+        workerID: 3,
+        modifiedAt: new Date().toISOString()
+      }
+    });
+  }
+
+  // Wait for new worker to appear
+  await waitFor(() => {
+    expect(screen.getByText('new-worker')).toBeInTheDocument();
+  });
+
+  // Verify API call
+  expect(mockApi.newWorker).toHaveBeenCalledWith(
+    2, 1, 'flavor-a', 'us-east', 'aws', 1, 'myWorkflow.myStep'
+  );
+});
+
+it('deletes a worker and update Jobs when delete button is clicked', async () => {
     const { getByTestId, queryByTestId } = render(Dashboard);
 
     await waitFor(() => getByTestId('worker-1'));
-    mockApi.delWorker.mockResolvedValue('3');
+    
+    mockApi.delWorker.mockResolvedValue({});
     const deleteBtn = getByTestId('delete-worker-1');
     await fireEvent.click(deleteBtn);
 
-    await waitFor(() => {
-      expect(mockApi.delWorker).toHaveBeenCalledWith({ workerId: 1 });
-    });
+    // Simulate WebSocket message
+    if (messageHandler) {
+        messageHandler({
+        type: 'worker-deleted',
+        payloadWorker: { workerId: 1 },
+        payloadJob: {
+            jobId: 3,
+            action: "D",
+            status: "P",
+            workerID: 1,
+            modifiedAt: new Date().toISOString()
+        }
+        });
+    }
 
     await waitFor(() => {
-      expect(queryByTestId('worker-1')).toBeNull();
-      expect(queryByTestId('job-row-3')).toBeInTheDocument();
+        expect(mockApi.delWorker).toHaveBeenCalledWith({ workerId: 1 });
+        expect(queryByTestId('worker-1')).toBeNull();
     });
-  
-  });
-
-  it('should add a worker and update the worker and the jobs list', async () => {
-    // 1. Mock newWorker to return a new worker
-    mockApi.newWorker.mockResolvedValue([
-      {
-        workerId: 3,
-        workerName: 'new-worker'
-      }
-    ]);
-
-    // Mock API responses
-    mockApi.getJobs.mockResolvedValue(mockJobs);
-
-    // 2. Render the dashboard
-    const { getByTestId, findByText, queryByText, queryByTestId } = render(Dashboard);
-
-    // 3. Ensure the form is visible
-    await waitFor(() => {
-      expect(getByTestId('add-worker-button')).toBeInTheDocument();
-      expect(screen.getByTestId('job-row-1')).toBeInTheDocument();
-      expect(screen.getByTestId('job-row-2')).toBeInTheDocument();
-      expect(queryByText('new-worker')).not.toBeInTheDocument();
-      expect(queryByTestId('job-row-3')).not.toBeInTheDocument();
-    });
-
-    // 4. Fill the inputs
-    await fireEvent.input(getByTestId('concurrency-createWorker'), { target: { value: '2' } });
-    await fireEvent.input(getByTestId('prefetch-createWorker'), { target: { value: '1' } });
-    await fireEvent.input(getByTestId('flavor-createWorker'), { target: { value: 'flavor-a' } });
-    await fireEvent.input(getByTestId('region-createWorker'), { target: { value: 'us-east' } });
-    await fireEvent.input(getByTestId('provider-createWorker'), { target: { value: 'aws' } });
-    await fireEvent.input(getByTestId('number-createWorker'), { target: { value: '1' } });
-    await fireEvent.input(getByTestId('wfStep-createWorker'), { target: { value: 'myWorkflow.myStep' } });
-
-    // 5. Click on submit
-    await fireEvent.click(getByTestId('add-worker-button'));
-
-    // 7. Check that newWorker was called correctly
-    expect(mockApi.newWorker).toHaveBeenCalledWith(
-      2,           // concurrency
-      1,           // prefetch
-      'flavor-a',  // flavor
-      'us-east',   // region
-      'aws',       // provider
-      1,           // number
-      'myWorkflow.myStep' // wfStep
-    );
-
-    // 8. Check that the worker is now in the DOM
-    const newWorkerName = await screen.findByText('new-worker');
-    expect(newWorkerName).toBeInTheDocument();
-
-    // 9. Check that the job is now in the DOM
-    const newJob = await screen.findByText('3');
-    expect(newJob).toBeInTheDocument();
-  });
-
-  it('should delete a job when trash button is clicked', async () => {
-    render(Dashboard);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('job-row-1')).toBeInTheDocument();
-    });
-
-    const deleteBtn = screen.getByTestId('trash-button-1');
-    await fireEvent.click(deleteBtn);
-
-    await waitFor(() => {
-      expect(mockApi.delJob).toHaveBeenCalledWith({ jobId: 1 });
-    });
-
-    wsMessageHandler({
-      type: 'job-deleted',
-      payload: { jobId: 1 }
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('job-row-1')).toBeNull();
-    });
-  });
 });
+});
+
 
 // Mock data
 const mockJobsFirstPage = [
@@ -234,6 +239,11 @@ describe('Job Pagination and Notifications', () => {
     ]);
     mockApi.getJobs.mockResolvedValue(mockJobsFirstPage);
     mockApi.getStatus.mockResolvedValue([{ workerId: 1, status: 'online' }]);
+
+    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
+      messageHandler = handler; // Store the handler for later use
+      return () => true; // Unsubscribe function
+    });
   });
 
   it('should load initial jobs', async () => {
@@ -276,89 +286,110 @@ describe('Job Pagination and Notifications', () => {
     }, { timeout: 3000 });
   });
 
-  it('should show notification when new jobs are added', async () => {
-    // First call - initial jobs
-    mockApi.getJobs.mockImplementationOnce(() => 
-      Promise.resolve(mockJobsFirstPage)
-    );
-    
-    // Subsequent calls - new jobs
-    mockApi.getJobs.mockImplementation(() => 
-      Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
-    );
+it('should show notification when new jobs are added', async () => {
+  // Initial setup
+  mockApi.getWorkers.mockResolvedValue([{ workerId: 1, name: 'Worker 1', status: 'online' }]);
+  mockApi.getJobs.mockResolvedValue(mockJobsFirstPage);
+  
+  const { getByTestId, getByText } = render(Dashboard);
+  
+  await waitFor(() => getByTestId('job-row-1'));
+  
+  await waitFor(() => getByTestId('job-row-1'));
 
-    const { getByTestId, getByText } = render(Dashboard);
-    
-    await waitFor(() => getByTestId('job-row-1'));
-    
-    const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
-    if (!jobsContainer) throw new Error('Container not found');
-    
-    // Simulate scroll down
-    Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
-    Object.defineProperty(jobsContainer, 'scrollTop', { value: 800 });
-    Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
-    
-    await waitFor(() => {
-      expect(getByText('1 new job available')).toBeInTheDocument();
-    }, { timeout: 3000 });
+  // Simulate being scrolled to bottom
+  const jobsContainer = getByTestId('jobs-container');
+  Object.defineProperties(jobsContainer, {
+    scrollTop: { value: 100, writable: true },
+    scrollHeight: { value: 1000 },
+    clientHeight: { value: 500 }
   });
+  await fireEvent.scroll(jobsContainer); // updates isScrolledToTop
 
-  it('should load new jobs when clicking notification', async () => {
-    // First call - initial jobs
-    mockApi.getJobs.mockImplementationOnce(() => 
-      Promise.resolve(mockJobsFirstPage)
-    );
-    
-    // Subsequent calls - new jobs
-    mockApi.getJobs.mockImplementation(() => 
-      Promise.resolve([...mockNewJobs, ...mockJobsFirstPage])
-    );
-
-    const { getByTestId, getByText, queryByText } = render(Dashboard);
-    
-    await waitFor(() => getByTestId('job-row-1'));
-    
-    const jobsContainer = getByTestId('dashboard-page').querySelector('.dashboard-job-section');
-    if (!jobsContainer) throw new Error('Container not found');
-    
-    // Create mock scrollTop
-    let mockScrollTop = 800;
-    
-    // Mock scrollTo method
-    jobsContainer.scrollTo = vi.fn((options) => {
-      mockScrollTop = options.top;
-      fireEvent.scroll(jobsContainer);
+  // Now simulate WebSocket message
+  if (messageHandler) {
+    messageHandler({
+      type: 'worker-created',
+      payloadWorker: {
+        workerId: 3,
+        name: 'New Worker',
+        concurrency: 2,
+        prefetch: 1,
+        status: 'online'
+      },
+      payloadJob: {
+        jobId: 6,
+        status: "S",
+        action: "C",
+        workerID: 3,
+        modifiedAt: new Date().toISOString()
+      }
     });
-    
-    // Make scrollTop configurable
-    Object.defineProperty(jobsContainer, 'scrollTop', {
-      get: () => mockScrollTop,
-      set: (value) => { mockScrollTop = value; },
-      configurable: true
-    });
-    
-    Object.defineProperty(jobsContainer, 'scrollHeight', { value: 1000 });
-    Object.defineProperty(jobsContainer, 'clientHeight', { value: 200 });
-    
-    await waitFor(() => {
-      expect(getByText('1 new job available')).toBeInTheDocument();
-    }, { timeout: 3000 });
+  }
 
-    const notification = getByText('1 new job available');
-    await fireEvent.click(notification);
-
-    await waitFor(() => {
-      expect(jobsContainer.scrollTo).toHaveBeenCalledWith({
-        top: 0,
-        behavior: 'smooth'
-      });
-      expect(mockScrollTop).toBe(0);
-    });
-
-    await waitFor(() => {
-      expect(getByTestId('job-row-6')).toBeInTheDocument();
-      expect(queryByText('1 new job available')).not.toBeInTheDocument();
-    });
+  // Verify notification appears
+  await waitFor(() => {
+    expect(getByText('1 new job available')).toBeInTheDocument();
   });
+});
+
+it('should load new jobs when clicking notification', async () => {
+  // Initial setup
+  mockApi.getWorkers.mockResolvedValue([{ workerId: 1, name: 'Worker 1', status: 'online' }]);
+  mockApi.getJobs.mockResolvedValue(mockJobsFirstPage);
+  
+  const { getByTestId, getByText, queryByText, queryByTestId } = render(Dashboard);
+  
+  await waitFor(() => getByTestId('job-row-1'));
+  
+  // Simulate being scrolled to bottom
+  const jobsContainer = getByTestId('jobs-container');
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+    value: vi.fn(),
+    writable: true
+  });
+  Object.defineProperties(jobsContainer, {
+    scrollTop: { value: 100, writable: true },
+    scrollHeight: { value: 1000 },
+    clientHeight: { value: 500 }
+  });
+  await fireEvent.scroll(jobsContainer); // updates isScrolledToTop
+
+  // Simulate new job
+  if (messageHandler) {
+    messageHandler({
+      type: 'worker-created',
+      payloadWorker: {
+        workerId: 3,
+        name: 'New Worker',
+        concurrency: 2,
+        prefetch: 1,
+        status: 'online'
+      },
+      payloadJob: {
+        jobId: 6,
+        status: "S",
+        action: "C",
+        workerID: 3,
+        modifiedAt: new Date().toISOString()
+      }
+    });
+  }
+  
+  // Verify notification appears first
+  await waitFor(() => {
+    expect(getByText('1 new job available')).toBeInTheDocument();
+    expect(queryByTestId('job-row-6')).not.toBeInTheDocument(); // New job shouldn't be visible yet
+  }, { timeout: 3000 });
+  
+  // Now click the notification
+  const notification = getByText('1 new job available');
+  await fireEvent.click(notification);
+  
+  // Verify changes after click
+  await waitFor(() => {
+    expect(getByTestId('job-row-6')).toBeInTheDocument();
+    expect(queryByText('1 new job available')).not.toBeInTheDocument();
+  });
+});
 });

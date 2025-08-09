@@ -752,6 +752,25 @@ export async function streamTaskLogsErr(
   }
 }
 
+/**
+ * Retrieves a batch of logs for specified tasks with pagination support
+ * 
+ * @async
+ * @param {number[]} taskIds - Array of task IDs to fetch logs for
+ * @param {number} chunkSize - Maximum number of log entries to return per task
+ * @param {number} [skip] - Optional number of log entries to skip from the end (for pagination)
+ * @param {string} [type] - Optional log type filter ('stdout' or 'stderr')
+ * @returns {Promise<taskqueue.LogChunk[]>} Promise resolving to an array of log chunks, one per task
+ * @throws Will not throw but returns empty array on error (errors are logged to console)
+ * 
+ * @example
+ * // Get first 50 stdout logs for tasks 123 and 456
+ * const logs = await getLogsBatch([123, 456], 50, 0, 'stdout');
+ * 
+ * @example
+ * // Get next 50 stdout logs (skip first 50)
+ * const moreLogs = await getLogsBatch([123, 456], 50, 50, 'stdout');
+ */
 export async function getLogsBatch(taskIds: number[], chunkSize: number, skip?: number, type?: string): Promise<taskqueue.LogChunk[]> {
   try {
     const request: any = {
@@ -774,7 +793,6 @@ export async function getLogsBatch(taskIds: number[], chunkSize: number, skip?: 
     return [];
   }
 }
-
 
 /* -------------------------------- STATUS -------------------------------- */ 
 

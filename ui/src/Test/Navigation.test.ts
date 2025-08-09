@@ -118,6 +118,7 @@ describe('Navigation integration', () => {
     await fireEvent.click(pendingLink);
 
     await waitFor(() => {
+      console.log(mockApi.getAllTasks.mock.calls);
       expect(mockApi.getAllTasks).toHaveBeenCalledWith(
         undefined, undefined, undefined, 'P', 'task', undefined, 25, 0
       );
@@ -150,6 +151,7 @@ describe('Navigation integration', () => {
 
     await waitFor(() => {
       expect(mockApi.getAllTasks).toHaveBeenCalledWith(1, undefined, undefined, undefined, 'task', undefined, 25, 0);
+      console.log(mockApi.getAllTasks.mock.calls);
       expect(screen.getByText('Task A')).toBeInTheDocument();
       expect(screen.queryByText('Task B')).not.toBeInTheDocument();
       expect(screen.getByText('Task C')).toBeInTheDocument();
@@ -297,9 +299,8 @@ describe('Navigation integration', () => {
     // Initial state (dark mode from mock)
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     
-    // Click to toggle
+    // Click to toggle theme
     await fireEvent.click(toggle);
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
-  
 });

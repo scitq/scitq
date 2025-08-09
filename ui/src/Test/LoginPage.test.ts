@@ -8,14 +8,6 @@ import { isLoggedIn } from '../lib/Stores/user';
 import * as auth from '../lib/auth';
 import App from '../App.svelte';
 
-vi.mock('../lib/wsClient', () => ({
-  wsClient: {
-    subscribeToMessages: vi.fn(() => () => {}),
-    sendMessage: vi.fn()
-  }
-}));
-import * as wsClient from '../lib/wsClient'; 
-
 const mockFetch = vi.fn((url, options) => {
   if (url.includes('/login')) {
     return Promise.resolve({
@@ -47,7 +39,7 @@ const mockFetch = vi.fn((url, options) => {
 
 global.fetch = mockFetch;
 
-// AT THE TOP OF THE FILE BEFORE EVERYTHING ELSE
+// Mock auth module at the beginning of the file
 vi.mock('../lib/auth', async () => {
   const actual = await vi.importActual<typeof import('../lib/auth')>('../lib/auth');
   return {
@@ -95,7 +87,6 @@ describe('Login functionality', () => {
     isLoggedIn.set(false);
   })
 
-
   it('should trigger login, update store state and display dashboard', async () => {
     const { getByText, getByLabelText, getByTestId } = render(App);
     const usernameInput = getByLabelText('Username') as HTMLInputElement;
@@ -106,7 +97,7 @@ describe('Login functionality', () => {
 
     expect(getByText('Log In')).toBeInTheDocument();
 
-    // Clicks on "Log in"
+    // Click on "Log in" button
     await fireEvent.click(getByText('Log In'));
 
     vi.mocked(auth.getToken).mockResolvedValue('mocked-token-123');
@@ -121,7 +112,7 @@ describe('Login functionality', () => {
       );
     });
     await waitFor(()=>{
-      // Check side effects on stores
+      // Verify store updates and UI changes
       expect(get(isLoggedIn)).toBe(true);
       expect(getByTestId('dashboard-page')).toBeInTheDocument();
     });
@@ -136,20 +127,20 @@ describe('Logout functionality', () => {
   it('should trigger logout, update store state and display login page', async () => {
     const { getByTestId, getByText, queryByText } = render(App);
 
-    // Opens the confirmation popup
+    // Open the confirmation dialog
     await fireEvent.click(getByTestId('logout-button'));
 
     expect(getByText('Are you sure you want to log out?')).toBeInTheDocument();
 
-    // Clicks on "Log out"
+    // Confirm logout by clicking "Log out"
     await fireEvent.click(getByText('Log out'));
 
     await waitFor(() => {
-      // Popup disappears
+      // Verify dialog is closed
       expect(queryByText('Are you sure you want to log out?')).toBeNull();
     });
 
-    // Checks that logout was called
+    // Verify logout was called
     expect(auth.logout).toHaveBeenCalled();
 
     await waitFor(() => {
@@ -162,7 +153,7 @@ describe('Logout functionality', () => {
       );
     });
 
-    // Check side effects on stores
+    // Verify store updates
     expect(get(isLoggedIn)).toBe(false);
     await waitFor(()=>{
       expect(getByTestId('login-page')).toBeInTheDocument();
@@ -179,7 +170,7 @@ describe('Logout functionality', () => {
     await fireEvent.click(getByText('Cancel'));
 
     await waitFor(() => {
-      expect(getByText('Log Out')).toBeInTheDocument(); // still visible
+      expect(getByText('Log Out')).toBeInTheDocument(); // Button still visible
     });
   });
 });

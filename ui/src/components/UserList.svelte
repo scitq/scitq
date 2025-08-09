@@ -8,63 +8,152 @@
   import "../styles/SettingPage.css";
   import "../styles/userList.css";
 
+  /**
+   * Array of user objects
+   * @type {User[]}
+   */
   let users: User[] = [];
 
+  /**
+   * User currently being edited
+   * @type {User | null}
+   */
   let editingUser: User = null;
+
+  /**
+   * Flag to show/hide edit modal
+   * @type {boolean}
+   */
   let showEditModal = false;
+
+  /**
+   * Temporary storage for edited username
+   * @type {string}
+   */
   let editedUsername = '';
+
+  /**
+   * Temporary storage for edited email
+   * @type {string}
+   */
   let editedEmail = '';
+
+  /**
+   * Temporary storage for edited admin status
+   * @type {boolean}
+   */
   let editedIsAdmin = false;
 
+  /**
+   * Flag to show/hide password modal
+   * @type {boolean}
+   */
   let showPasswordModal = false;
+
+  /**
+   * User whose password is being changed
+   * @type {User | null}
+   */
   let passwordUser: User = null;
+
+  /**
+   * New password value
+   * @type {string}
+   */
   let newPassword = '';
+
+  /**
+   * Flag to show/hide password text
+   * @type {boolean}
+   */
   let showForgotPassword = false;
 
+  /**
+   * Success message to display
+   * @type {string}
+   */
   let successMessage: string = '';
+
+  /**
+   * Timeout reference for clearing messages
+   * @type {number}
+   */
   let alertTimeout;
 
+  /**
+   * Handles WebSocket messages for user events
+   * @param {Object} message - The WebSocket message
+   */
   function handleMessage(message) {
+    // Handle user deletion
     if (message.type === 'user-deleted') {
-      users = users.filter(u => u.userId !== message.userId);
-      console.log('User removed via WebSocket:', message.userId);
+      users = users.filter(u => u.userId !== String(message.userId));
     }
 
+    // Handle user creation
+    if (message.type === 'user-created') {
+      const newUser = {
+        userId: String(message.payload.userId),
+        username: message.payload.username,
+        email: message.payload.email,
+        isAdmin: message.payload.isAdmin
+      };
+      if (!users.some(u => u.userId === newUser.userId)) {
+        users = [...users, newUser];
+      }
+    }
+
+    // Handle user updates
     if (message.type === 'user-updated') {
-      users = users.map(u =>
-        u.userId === message.payload.userId
-          ? { ...u, ...message.payload }
+      users = users.map(u => 
+        u.userId === String(message.payload.userId)
+          ? {
+              ...u,
+              username: message.payload.username || u.username,
+              email: message.payload.email || u.email,
+              isAdmin: message.payload.isAdmin !== undefined 
+                       ? message.payload.isAdmin 
+                       : u.isAdmin
+            }
           : u
       );
-      console.log('User updated via WebSocket:', message.payload);
-    }
-
-    if (message.type === 'user-created') {
-      if (!users.some(u => u.userId === message.payload.userId)) {
-        users = [...users, message.payload];
-      }
-      console.log('User created via WebSocket:', message.payload);
     }
   }
 
+  /**
+   * Function to unsubscribe from WebSocket
+   * @type {() => void}
+   */
   let unsubscribeWS: () => void;
 
+  /**
+   * Component mount lifecycle hook
+   * Loads users and subscribes to WebSocket
+   */
   onMount(async () => {
     try {
       users = await getListUser();
 
-      // 🔄 Subscribe to messages (connection already opened globally)
+      // Subscribe to WebSocket messages
       unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
     } catch (err) {
       console.error("Error loading user data:", err);
     }
   });
 
+  /**
+   * Component destroy lifecycle hook
+   * Unsubscribes from WebSocket
+   */
   onDestroy(() => {
-    // ❌ Unsubscribe from messages only, not from the connection
+    // Unsubscribe from WebSocket messages
     unsubscribeWS?.();
   });
 
+  /**
+   * Opens the edit modal for a user
+   * @param {User} user - User to edit
+   */
   function openEditModal(user: User) {
     editingUser = user;
     editedUsername = user.username;
@@ -73,11 +162,18 @@
     showEditModal = true;
   }
 
+  /**
+   * Closes the edit modal
+   */
   function closeEditModal() {
     showEditModal = false;
     editingUser = null;
   }
 
+  /**
+   * Confirms and saves user edits
+   * @async
+   */
   async function confirmEdit() {
     const updates: Partial<User> = {};
     
@@ -98,18 +194,29 @@
     closeEditModal();
   }
 
+  /**
+   * Opens the password change modal
+   * @param {User} user - User to change password for
+   */
   function openPasswordModal(user: User) {
     passwordUser = user;
     newPassword = '';
     showPasswordModal = true;
   }
 
+  /**
+   * Closes the password change modal
+   */
   function closePasswordModal() {
     showPasswordModal = false;
     passwordUser = null;
     newPassword = '';
   }
 
+  /**
+   * Confirms and saves password change
+   * @async
+   */
   async function confirmPasswordChange() {
     try {
       await forgotPassword(
@@ -128,6 +235,11 @@
     closePasswordModal();
   }
 
+  /**
+   * Handles user deletion
+   * @async
+   * @param {number} userId - ID of user to delete
+   */
   async function handleDeleteUser(userId: number) {
     try {
       await delUser(userId);

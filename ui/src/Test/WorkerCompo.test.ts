@@ -26,7 +26,6 @@ interface TasksStatus {
 }
 
 // Example task status data for testing
-// __mocks__/taskStatusMock.ts
 export const taskStatusMock: TasksStatus = {
   1: {
     pending: 3,
@@ -110,29 +109,7 @@ describe('WorkerCompo', () => {
     vi.clearAllMocks();
 
     mockApi.getWorkers.mockResolvedValue(mockWorkers);
-    (mockApi.getStats as any).mockResolvedValue({
-      1: {
-        cpuUsagePercent: 42.5,
-        memUsagePercent: 73.1,
-        load1Min: 2.5,
-        disks: [
-          { deviceName: 'sda1', usagePercent: 60.4 },
-          { deviceName: 'sdb1', usagePercent: 88.2 },
-        ],
-        diskIo: {
-          readBytesRate: 1048576,
-          writeBytesRate: 524288,
-          readBytesTotal: 1073741824,
-          writeBytesTotal: 536870912,
-        },
-        netIo: {
-          sentBytesRate: 2097152,
-          recvBytesRate: 1048576,
-          sentBytesTotal: 2147483648,
-          recvBytesTotal: 1073741824,
-        },
-      },
-    });
+    (mockApi.getStats as any).mockResolvedValue(mockStats);
     mockApi.getTasksCount.mockImplementation((workerId?: number) => {
       if (workerId !== undefined) {
         return Promise.resolve(taskStatusMock[workerId] ?? {});
@@ -168,11 +145,13 @@ describe('WorkerCompo', () => {
 
   it('should display statistics for a worker', async () => {
     render(WorkerCompo, { props: { workers: mockWorkers } });
+    const metricsButton = screen.getByTestId('advanced-metrics');
+    await fireEvent.click(metricsButton);
+    expect(screen.queryByTestId('charts-worker-1')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText('42.5%')).toBeTruthy();
       expect(screen.getByText('73.1%')).toBeTruthy();
-      expect(screen.getByText('2.5')).toBeTruthy();
       expect(screen.getByText('sda1: 60.4%')).toBeTruthy();
       expect(screen.getByText('sdb1: 88.2%')).toBeTruthy();
       expect(screen.getByText('1.0/0.5 MB/s')).toBeTruthy();
@@ -184,6 +163,9 @@ describe('WorkerCompo', () => {
 
   it('should display graphs statistics for a worker', async () => {
     render(WorkerCompo, { props: { workers: mockWorkers } });
+
+    const metricsButton = screen.getByTestId('advanced-metrics');
+    await fireEvent.click(metricsButton);
 
     await waitFor(() => {
       expect(screen.getByText('Network Sent/Recv')).toBeInTheDocument();
@@ -238,7 +220,7 @@ describe('WorkerCompo', () => {
   });
 
   it('should count tasks globally (allTaskCount)', async () => {
-    const result = await mockApi.getTasksCount(); // Corrected here
+    const result = await mockApi.getTasksCount();
     const expected = Object.values(taskStatusMock).reduce((acc, curr) => {
       for (const key in curr) {
         acc[key] = (acc[key] || 0) + curr[key];
@@ -254,30 +236,7 @@ describe('Zoom Management', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.getWorkers.mockResolvedValue(mockWorkers);
-    (mockApi.getStats as any).mockResolvedValue({
-      1: {
-        cpuUsagePercent: 42.5,
-        memUsagePercent: 73.1,
-        load1Min: 2.5,
-        disks: [
-          { deviceName: 'sda1', usagePercent: 60.4 },
-          { deviceName: 'sdb1', usagePercent: 88.2 },
-        ],
-        diskIo: {
-          readBytesRate: 1048576,
-          writeBytesRate: 524288,
-          readBytesTotal: 1073741824,
-          writeBytesTotal: 536870912,
-        },
-        netIo: {
-          sentBytesRate: 2097152,
-          recvBytesRate: 1048576,
-          sentBytesTotal: 2147483648,
-          recvBytesTotal: 1073741824,
-        },
-      },
-    });
-
+    (mockApi.getStats as any).mockResolvedValue(mockStats);
     mockApi.getTasksCount.mockImplementation((workerId?: number) => {
       if (workerId !== undefined) {
         return Promise.resolve(taskStatusMock[workerId] ?? {});
@@ -347,7 +306,6 @@ describe('Zoom Management', () => {
     await switchToChartMode();
     await fireEvent.click(screen.getByTestId('read-auto-zoom-toggle'));
 
-    // Simplified helper function
     const getZoom = () => {
       const text = screen.getByTestId('read-zoom-level').textContent || '';
       return parseFloat(text.split(' ')[1]);

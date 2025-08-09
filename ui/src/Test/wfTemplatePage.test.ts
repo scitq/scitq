@@ -4,6 +4,9 @@ import { mockApi } from '../mocks/api_mock';
 import { render, fireEvent, screen, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import WorkflowTemplatePage from '../pages/WfTemplatePage.svelte';
+import { wsClient } from '../lib/wsClient';
+
+let messageHandler: (msg: any) => void;
 
 const mockTemplates = [
   {
@@ -28,6 +31,11 @@ describe('WorkflowTemplatePage', () => {
     mockApi.getTemplates.mockResolvedValue(mockTemplates);
     mockApi.UploadTemplates.mockResolvedValue({ success: true });
     mockApi.runTemp.mockResolvedValue({});
+
+    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
+        messageHandler = handler; // Store the handler for later use
+        return () => true; // Unsubscribe function
+    });
   });
 
   it('loads and displays templates on mount', async () => {
@@ -41,34 +49,59 @@ describe('WorkflowTemplatePage', () => {
   });
 
   it('handles file selection and upload', async () => {
-    render(WorkflowTemplatePage);
+    const { getByTestId, findByText, getByTitle } = render(WorkflowTemplatePage);
     
     // Create test file
     const file = new File(['dummy content'], 'test-template.json', { type: 'application/json' });
 
-    // Find file input in a more robust way
-    const fileInput = screen.getByTestId('wfTemp-page').querySelector('input[type="file"]') as HTMLInputElement;
+    // Find file input via parent container
+    const fileContainer = getByTestId('wfTemp-page');
+    const fileInput = fileContainer.querySelector('input[type="file"]') as HTMLInputElement;
     expect(fileInput).not.toBeNull();
 
     // Simulate file selection
     await fireEvent.change(fileInput, { 
         target: { 
-        files: [file] 
+            files: [file] 
         } 
     });
 
-    // Verify filename is displayed
-    const fileNameDisplay = await screen.findByDisplayValue('test-template.json');
-    expect(fileNameDisplay).toBeInTheDocument();
+    // Verify filename appears in the text input
+    const fileNameDisplay = await waitFor(() => {
+        const display = fileContainer.querySelector('.wfTemp-file-display') as HTMLInputElement;
+        expect(display.value).toBe('test-template.json');
+        return display;
+    });
 
-    // Trigger upload
-    const validateButton = screen.getByTitle('Validate');
+    // Verify validate button is enabled
+    const validateButton = getByTitle('Validate');
+    expect(validateButton).not.toBeDisabled();
+
+    // Simulate clicking validate button
     await fireEvent.click(validateButton);
 
     // Verify API call
     await waitFor(() => {
         expect(mockApi.UploadTemplates).toHaveBeenCalledWith(expect.any(Uint8Array), false);
     });
+
+    // Simulate WebSocket response as sent by server
+    if (messageHandler) {
+        messageHandler({
+            type: 'template-uploaded',
+            payload: {
+                workflowTemplateId: 123,
+                name: 'test-template',
+                version: '1.0',
+                description: 'Test template',
+                paramJson: '[]',
+                uploadedAt: new Date().toISOString()
+            }
+        });
+    }
+
+    // Verify new template appears in the list
+    expect(await findByText('test-template')).toBeInTheDocument();
   });
 
   it('opens parameter modal with correct template', async () => {
@@ -109,38 +142,37 @@ describe('WorkflowTemplatePage', () => {
   });
 
   it('shows error modal on upload failure', async () => {
-    // 1. Configure mock
+    // Configure mock to return error response
     mockApi.UploadTemplates.mockResolvedValue({
         success: false,
         message: 'Invalid file format'
     });
 
-    // 2. Render component
+    // Render component
     render(WorkflowTemplatePage);
 
-    // 3. Simulate file selection
+    // Simulate file selection
     const file = new File(['content'], 'test.json', { type: 'application/json' });
     
-    // Most reliable way to find file input
+    // Find file input element
     const fileInput = screen.getByTestId('wfTemp-page')
                             .querySelector('input[type="file"]') as HTMLInputElement;
     await fireEvent.change(fileInput, { target: { files: [file] } });
 
-    // 4. Verify file is selected - alternative method
-    // According to your code, filename appears in an input.readonly
+    // Verify file is selected
     const fileNameDisplay = await screen.findByDisplayValue('test.json');
     expect(fileNameDisplay).toBeInTheDocument();
 
-    // 5. Trigger upload
+    // Trigger upload
     await fireEvent.click(screen.getByTitle('Validate'));
 
-    // 6. Verify error modal
+    // Verify error modal appears
     await waitFor(() => {
         expect(screen.getByText('Upload Error')).toBeInTheDocument();
         expect(screen.getByText('Invalid file format')).toBeInTheDocument();
     });
 
-    // 7. Verify API call
+    // Verify API was called
     expect(mockApi.UploadTemplates).toHaveBeenCalled();
   });
 });

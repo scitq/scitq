@@ -5,31 +5,127 @@
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
 
+  /**
+   * Array of worker objects to display
+   * @type {Array<Object>}
+   */
   export let workers = [];
+  
+  /**
+   * Callback function when worker is updated
+   * @type {(event: { detail: { workerId: number; updates: Partial<Worker> } }) => void}
+   */
   export let onWorkerUpdated: (event: { detail: { workerId: number; updates: Partial<Worker> } }) => void = () => {};
     
   // State management
+  /**
+   * Processed workers data for display
+   * @type {Array<Object>}
+   */
   let displayWorkers = [];
+  
+  /**
+   * Map of worker statistics by worker ID
+   * @type {Record<number, taskqueue.WorkerStats>}
+   */
   let workersStatsMap: Record<number, taskqueue.WorkerStats> = {};
+  
+  /**
+   * Count of tasks by worker ID and status
+   * @type {Record<number, Record<string, number>>}
+   */
   let tasksCount: Record<number, Record<string, number>> = {};
+  
+  /**
+   * Count of all tasks by status
+   * @type {Object}
+   */
   let tasksAllCount;
+  
+  /**
+   * Map of worker statuses by worker ID
+   * @type {Map<number, string>}
+   */
   let statusMap = new Map<number, string>();
+  
+  /**
+   * Current display mode ('table' or 'charts')
+   * @type {'table' | 'charts'}
+   */
   let displayMode: 'table' | 'charts' = 'table';
+  
+  /**
+   * Flag indicating if data has been loaded
+   * @type {boolean}
+   */
   let hasLoaded = false;
+  
+  /**
+   * Interval reference for auto-refresh
+   * @type {number}
+   */
   let interval;
+  
+  /**
+   * Flag to show/hide advanced metrics
+   * @type {boolean}
+   */
   let showAdvancedMetrics = false;
 
   // Chart data
+  /**
+   * Maximum number of data points to keep in history
+   * @type {number}
+   */
   const MAX_HISTORY = 30;
+  
+  /**
+   * History of disk I/O metrics
+   * @type {Array<{time: Date, read: number, write: number}>}
+   */
   let diskHistory: {time: Date, read: number, write: number}[] = [];
+  
+  /**
+   * History of network I/O metrics
+   * @type {Array<{time: Date, sent: number, received: number}>}
+   */
   let networkHistory: {time: Date, sent: number, received: number}[] = [];
+  
+  /**
+   * Data for disk chart visualization
+   * @type {{line1: Array, line2: Array}}
+   */
   let diskChartData = { line1: [], line2: [] };
+  
+  /**
+   * Data for network chart visualization
+   * @type {{line1: Array, line2: Array}}
+   */
   let networkChartData = { line1: [], line2: [] };
   
   // Zoom controls
+  /**
+   * Current zoom level for disk chart
+   * @type {number}
+   */
   let diskZoom = 1;
+  
+  /**
+   * Current zoom level for network chart
+   * @type {number}
+   */
   let networkZoom = 1;
+  
+  /**
+   * Flag for auto-zoom on disk chart
+   * @type {boolean}
+   */
   let diskAutoZoom = true;
+  
+  /**
+   * Flag for auto-zoom on network chart
+   * @type {boolean}
+   */
   let networkAutoZoom = true;
 
   /**
@@ -50,7 +146,10 @@
   // Make reactive
   $: diskZoom, networkZoom, diskAutoZoom, networkAutoZoom;
 
-  // Lifecycle hooks
+  /**
+   * Component mount lifecycle hook
+   * Initializes data loading and sets up refresh interval
+   */
   onMount(() => {
     updateWorkerData();
     interval = setInterval(updateWorkerData, 5000);
@@ -235,6 +334,7 @@
 
   /**
    * Updates worker data by fetching latest stats
+   * @async
    */
   async function updateWorkerData() {
     if (workers.length === 0) return;
@@ -306,6 +406,7 @@
   /**
    * Deletes a worker and triggers delete event
    * @param {number} workerId - ID of worker to delete
+   * @async
    */
   async function deleteWorker(workerId: number) {
     await delWorker({ workerId });
@@ -388,8 +489,16 @@
                 <div class="value-with-controls">
                   <span class="value">{worker.concurrency}</span>
                   <div class="controls">
-                    <button class="small-btn" on:click={() => updateValue(worker, 'concurrency', 1)}>+</button>
-                    <button class="small-btn" on:click={() => updateValue(worker, 'concurrency', -1)}>-</button>
+                    <button 
+                      class="small-btn" 
+                      on:click={() => updateValue(worker, 'concurrency', 1)}
+                      data-testid={`increase-concurrency-${worker.workerId}`}
+                    >+</button>
+                    <button 
+                      class="small-btn" 
+                      on:click={() => updateValue(worker, 'concurrency', -1)}
+                      data-testid={`decrease-concurrency-${worker.workerId}`}
+                    >-</button>
                   </div>
                 </div>
               </td>
@@ -398,8 +507,16 @@
                 <div class="value-with-controls">
                   <span class="value">{worker.prefetch}</span>
                   <div class="controls">
-                    <button class="small-btn" on:click={() => updateValue(worker, 'prefetch', 1)}>+</button>
-                    <button class="small-btn" on:click={() => updateValue(worker, 'prefetch', -1)}>-</button>
+                    <button 
+                      class="small-btn" 
+                      on:click={() => updateValue(worker, 'prefetch', 1)}
+                      data-testid={`increase-prefetch-${worker.workerId}`}
+                    >+</button>
+                    <button 
+                      class="small-btn" 
+                      on:click={() => updateValue(worker, 'prefetch', -1)}
+                      data-testid={`decrease-prefetch-${worker.workerId}`}
+                    >-</button>
                   </div>
                 </div>
               </td>
@@ -639,7 +756,9 @@
                       </button>
                       <button class="btn-action" 
                       on:click={() => showAdvancedMetrics = !showAdvancedMetrics}
-                      title={showAdvancedMetrics ? 'Hide advanced metrics' : 'Show advanced metrics'}>
+                      title={showAdvancedMetrics ? 'Hide advanced metrics' : 'Show advanced metrics'}
+                      data-testid={showAdvancedMetrics ? 'hide-advanced-metrics' : 'advanced-metrics'}
+                      >
                         {#if showAdvancedMetrics}
                           <ChevronUp/>
                         {:else}

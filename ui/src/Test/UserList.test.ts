@@ -40,10 +40,10 @@ describe('UserList', () => {
       expect(getByTestId('edit-btn-user-1')).toBeDefined();
     });
 
-    // Open edit modal
+    // Open the edit modal
     await fireEvent.click(getByTestId('edit-btn-user-1'));
 
-    // Modify fields
+    // Update user fields
     const usernameInput = getByLabelText('Username:');
     const emailInput = getByLabelText('Email:');
     const adminCheckbox = getByLabelText('Admin:');
@@ -52,10 +52,10 @@ describe('UserList', () => {
     await fireEvent.input(emailInput, { target: { value: 'new@email.com' } });
     await fireEvent.click(adminCheckbox);
 
-    // Submit changes
+    // Save changes
     await fireEvent.click(getByText('Confirm'));
 
-    // Verify API call
+    // Check API was called with correct data
     expect(mockApi.updateUser).toHaveBeenCalledTimes(1);
     expect(mockApi.updateUser).toHaveBeenCalledWith(1, {
       username: 'newUsername',
@@ -71,18 +71,18 @@ describe('UserList', () => {
       expect(getByTestId('forgot-pswd-button-1')).toBeDefined();
     });
 
-    // Open password modal
+    // Open the password reset modal
     await fireEvent.click(getByTestId('forgot-pswd-button-1'));
 
-    // Set new password
+    // Enter new password
     await fireEvent.input(getByLabelText('New Password:'), { 
       target: { value: 'newPass123' } 
     });
 
-    // Submit
+    // Submit password change
     await fireEvent.click(getByText('Confirm'));
 
-    // Verify API call
+    // Verify API was called with correct parameters
     expect(mockApi.forgotPassword).toHaveBeenCalledTimes(1);
     expect(mockApi.forgotPassword).toHaveBeenCalledWith(
       1,      // userId

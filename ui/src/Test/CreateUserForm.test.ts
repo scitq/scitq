@@ -11,34 +11,35 @@ describe('CreateUserForm', () => {
   });
 
   it('fills the form and creates a new user', async () => {
-    // Mock newUser to resolve with an ID
+    // Mock the API response for new user creation
     mockApi.newUser.mockResolvedValue(42);
 
-    // Create a mock for the event handler
+    // Create a mock function for the event handler
     const mockUserCreated = vi.fn();
 
+    // Render the component and get DOM elements
     const { getByLabelText, getByTestId } = render(CreateUserForm);
 
-    // Get form fields
+    // Get all form input elements
     const usernameInput = getByLabelText('Username:') as HTMLInputElement;
     const emailInput = getByLabelText('Email:') as HTMLInputElement;
     const passwordInput = getByLabelText('Password:') as HTMLInputElement;
     const adminCheckbox = getByLabelText('Is Admin:') as HTMLInputElement;
     const createBtn = getByTestId('create-user-button');
 
-    // Fill in fields
+    // Simulate user input in all fields
     await fireEvent.input(usernameInput, { target: { value: 'testuser' } });
     await fireEvent.input(emailInput, { target: { value: 'test@mail.com' } });
     await fireEvent.input(passwordInput, { target: { value: 'secret123' } });
     await fireEvent.click(adminCheckbox);
 
-    // Click the Create button
+    // Simulate form submission
     await fireEvent.click(createBtn);
 
-    // Verify newUser was called with correct arguments
+    // Verify the API was called with correct parameters
     expect(mockApi.newUser).toHaveBeenCalledWith('testuser', 'secret123', 'test@mail.com', true);
 
-    // Ensure form fields were reset
+    // Verify the form was reset after submission
     expect(usernameInput.value).toBe('');
     expect(emailInput.value).toBe('');
     expect(passwordInput.value).toBe('');

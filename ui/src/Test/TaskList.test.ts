@@ -56,14 +56,17 @@ describe('TaskList', () => {
       onOpenModal: vi.fn(),
     });
 
+    // Verify all task rows are rendered
     const rows = await screen.findAllByTestId(/^task-/);
     expect(rows.length).toBe(2);
 
+    // Check task names and commands are displayed
     expect(screen.getByText('Task A')).toBeInTheDocument();
     expect(screen.getByText('Task B')).toBeInTheDocument();
     expect(screen.getByText('echo A')).toBeInTheDocument();
     expect(screen.getByText('echo B')).toBeInTheDocument();
 
+    // Verify all log outputs are displayed correctly
     expect(screen.getByText((content) => content.includes('stdout log A1'))).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes('stdout log B1'))).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes('stdout log B2'))).toBeInTheDocument();

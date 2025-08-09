@@ -91,7 +91,7 @@ function createWebSocketStore() {
 
   function subscribeToMessages(handler: MessageHandler) {
     handlers.add(handler);
-    return () => handlers.delete(handler); // unsubscribe function
+    return () => handlers.delete(handler); 
   }
 
   return {

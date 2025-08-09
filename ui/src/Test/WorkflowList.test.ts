@@ -5,7 +5,7 @@ import { render, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import WorkflowList from '../components/WorkflowList.svelte';
 
-// Mock data injected via prop
+// Test data for workflows
 const mockWorkflows = [
   {
     workflowId: 1,
@@ -17,15 +17,15 @@ const mockWorkflows = [
   },
 ];
 
-describe('WorflowList', () => {
-  it('displays worflows in the table', async () => {
+describe('WorkflowList', () => {
+  it('displays workflows in the table', async () => {
     render(WorkflowList, { workflows: mockWorkflows });
 
-    // Checks that rows are properly rendered
+    // Verify all workflow rows are rendered
     const rows = await screen.findAllByTestId(/^wf-/);
-    expect(rows.length).toBe(2); // 2 mocked tasks
+    expect(rows.length).toBe(2); // Should render 2 workflows
 
-    // Checks that contents are visible
+    // Check workflow details are displayed correctly
     expect(screen.getByText('#1')).toBeInTheDocument();
     expect(screen.getByText('wf A')).toBeInTheDocument();
     expect(screen.getByText('#2')).toBeInTheDocument();
@@ -35,6 +35,7 @@ describe('WorflowList', () => {
   it('displays a message if no workflows are present', async () => {
     render(WorkflowList, { workflows: [] });
 
+    // Verify empty state message appears
     expect(screen.getByText('No Workflow found.')).toBeInTheDocument();
   });
 });

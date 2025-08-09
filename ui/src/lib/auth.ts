@@ -89,7 +89,7 @@ export async function getToken(): Promise<string | null> {
 }
 
 /**
- * Logs out the current user by calling the gRPC logout method and the REST logout endpoint.
+ * Logs out the current user by calling the gRPC logout method and the logout endpoint.
  * Clears user info, login status and window theme after successful logout.
  */
 export async function logout() {

@@ -1,8 +1,12 @@
 vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
-import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
+import { render, fireEvent, waitFor, screen, within } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import TaskPage from '../pages/TaskPage.svelte';
+import { wsClient } from '../lib/wsClient';
+import { tick } from 'svelte';
+
+let messageHandler: (msg: any) => void;
 
 // Simple mock data
 const mockTasksFirstPage = [
@@ -37,6 +41,11 @@ describe('TaskPage', () => {
     mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
     mockApi.getAllTasks.mockResolvedValue(mockTasksFirstPage);
     window.location.hash = '/tasks';
+
+    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
+        messageHandler = handler; // Store the handler for later use
+        return () => true; // Unsubscribe function
+    });
   });
 
   it('should load first page of tasks', async () => {
@@ -84,101 +93,129 @@ describe('TaskPage', () => {
     }, { timeout: 3000 });
   });
 
-  it('should show notification when new tasks arrive', async () => {
-    // 1. First call - initial tasks
-    mockApi.getAllTasks.mockImplementationOnce(() => 
-      Promise.resolve(mockTasksFirstPage)
-    );
-    
-    // 2. Subsequent calls - new tasks + old ones
-    mockApi.getAllTasks.mockImplementation(() => 
-      Promise.resolve([...mockNewTasks, ...mockTasksFirstPage])
-    );
+it('should show notification when new tasks arrive', async () => {
+  // Mock API initial
+  mockApi.getAllTasks.mockResolvedValue(mockTasksFirstPage);
 
-    render(TaskPage);
-    
-    // 3. Wait for initial load
-    await waitFor(() => screen.getByText('Task 1'));
-    
-    // 4. Simulate scrolling to bottom
-    const tasksContainer = screen.getByTestId('tasks-page').querySelector('.tasks-list-container');
-    if (!tasksContainer) throw new Error('Container not found');
-    
-    // Set properties to simulate being at bottom
-    Object.defineProperty(tasksContainer, 'scrollHeight', { value: 1000 });
-    Object.defineProperty(tasksContainer, 'scrollTop', { value: 800 }); // Scrolled down
-    Object.defineProperty(tasksContainer, 'clientHeight', { value: 200 });
-    
-    // 5. Wait for notification to appear
-      await waitFor(() => {
-        expect(screen.getByText('1 new task available')).toBeInTheDocument();
-      }, { timeout: 3000 });
+  // Simulated new task
+  const newTask = {
+    taskId: 999,
+    command: 'new command',
+    status: 'P',
+    stepId: null,
+    workerId: null,
+    workflowId: null,
+    taskName: 'New Task'
+  };
+
+  // Mock scrollTo to avoid JSDOM errors
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+    value: vi.fn(),
+    writable: true
   });
 
-  it('should scroll to top and show new tasks when clicking notification', async () => {
-    // 1. First call - initial tasks
-    mockApi.getAllTasks.mockImplementationOnce(() => 
-      Promise.resolve(mockTasksFirstPage)
-    );
-    
-    // 2. Subsequent calls - new tasks + old ones
-    mockApi.getAllTasks.mockImplementation(() => 
-      Promise.resolve([...mockNewTasks, ...mockTasksFirstPage])
-    );
+  render(TaskPage);
 
-    render(TaskPage);
-    
-    // 3. Wait for initial load
-    await waitFor(() => screen.getByText('Task 1'));
-    
-    // 4. Get the container and mock its properties
-    const tasksContainer = screen.getByTestId('tasks-page').querySelector('.tasks-list-container');
-    if (!tasksContainer) throw new Error('Container not found');
-    
-    // Create a mock scrollTop that we can modify
-    let mockScrollTop = 800;
-    
-    // Mock scrollTo method
-    tasksContainer.scrollTo = vi.fn((options) => {
-      mockScrollTop = options.top;
-      // Trigger scroll event
-      fireEvent.scroll(tasksContainer);
-    });
-    
-    // Make scrollTop configurable so we can modify it
-    Object.defineProperty(tasksContainer, 'scrollTop', {
-      get: () => mockScrollTop,
-      set: (value) => { mockScrollTop = value; },
-      configurable: true
-    });
-    
-    Object.defineProperty(tasksContainer, 'scrollHeight', { value: 1000 });
-    Object.defineProperty(tasksContainer, 'clientHeight', { value: 200 });
-    
-    // 5. Wait for notification to appear
+  // Wait for initial load
+  await waitFor(() => {
+    expect(screen.getByText('Task 1')).toBeInTheDocument();
+  });
+
+  // Simulate being scrolled down in the list
+  const tasksContainer = screen.getByTestId('tasks-list');
+  Object.defineProperties(tasksContainer, {
+    scrollTop: { value: 100, writable: true },
+    scrollHeight: { value: 1000 },
+    clientHeight: { value: 500 }
+  });
+
+  // Trigger scroll → updates isScrolledToTop = false
+  await fireEvent.scroll(tasksContainer);
+
+  // Send WebSocket message
+  messageHandler?.({
+    type: 'task-created',
+    payload: newTask
+  });
+
+  // Verify notification appears
+  await waitFor(() => {
+    expect(screen.getByText('1 new task available')).toBeInTheDocument();
+  }, { timeout: 3000 });
+});
+
+
+it('should scroll to top and show new tasks when clicking notification', async () => {
+  // 1. First call → initial tasks
+  mockApi.getAllTasks.mockImplementationOnce(() =>
+    Promise.resolve(mockTasksFirstPage)
+  );
+
+  // 2. Subsequent calls → new task + existing ones
+  mockApi.getAllTasks.mockImplementation(() =>
+    Promise.resolve([...mockNewTasks, ...mockTasksFirstPage])
+  );
+
+  const newTask = {
+    taskId: 999,
+    command: 'new command',
+    status: 'P',
+    stepId: null,
+    workerId: null,
+    workflowId: null,
+    taskName: 'New Task'
+  };
+
+  // Mock scrollTo
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+    value: vi.fn(),
+    writable: true
+  });
+
+  const { getByTestId, getByText, queryByText } = render(TaskPage);
+
+  // 3. Wait for initial load
+  await waitFor(() => screen.getByText('Task 1'));
+
+  // 4. Simulate being scrolled down in the list
+  const tasksContainer = getByTestId('tasks-list');
+  Object.defineProperties(tasksContainer, {
+    scrollTop: { value: 100, writable: true },
+    scrollHeight: { value: 1000 },
+    clientHeight: { value: 500 }
+  });
+  await fireEvent.scroll(tasksContainer);
+
+  // 5. Send WebSocket message
+  messageHandler?.({
+    type: 'task-created',
+    payload: newTask
+  });
+
+  // 6. Verify notification appears
     await waitFor(() => {
-      expect(screen.getByText('1 new task available')).toBeInTheDocument();
+    expect(getByText('1 new task available')).toBeInTheDocument();
     }, { timeout: 3000 });
 
-    // 6. Click the notification
-    const notification = screen.getByTestId('tasks-notification-1');
-    await fireEvent.click(notification);
+  // 7. Click notification
+  const notification = getByTestId('tasks-notification-1');
+  await fireEvent.click(notification);
 
-    // 7. Verify scroll behavior
-    await waitFor(() => {
-      expect(tasksContainer.scrollTo).toHaveBeenCalledWith({
-        top: 0,
-        behavior: 'smooth'
-      });
-      expect(mockScrollTop).toBe(0);
-    });
-
-    // 8. Verify new tasks are visible
-    await waitFor(() => {
-      expect(screen.getByText('New Task 6')).toBeInTheDocument();
-      expect(screen.queryByText('1 new task available')).not.toBeInTheDocument();
+  // 8. Verify we scrolled to top
+  await waitFor(() => {
+    expect(tasksContainer.scrollTo).toHaveBeenCalledWith({
+      top: 0,
+      behavior: 'smooth'
     });
   });
+
+  // 9. Verify new task is visible and notification disappeared
+  await waitFor(() => {
+    expect(screen.getByText('new command')).toBeInTheDocument();
+    expect(queryByText('1 new task available')).not.toBeInTheDocument();
+  });
+});
+
 
   it('should sort tasks by worker when selecting sort option', async () => {
     // 1. Configure mock to respond differently based on sortBy

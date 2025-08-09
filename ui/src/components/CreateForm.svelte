@@ -4,7 +4,6 @@
   import "../styles/createForm.css";
   import { JobId, WorkerDetails, Workflow, Job } from "../../gen/taskqueue";
 
-
   // Form state
   let provider = "";
   let flavor = "";
@@ -47,7 +46,10 @@
     listWf = await getWorkFlow();
   });
 
-  /** Updates flavor suggestions based on input and available data. */
+  /** 
+   * Computed property that updates flavor suggestions based on input and available data.
+   * @type {string[]}
+   */
   $: flavorSuggestions = Array.from(
     new Set(
       listFlavor
@@ -56,7 +58,10 @@
     )
   );
 
-  /** Updates region suggestions based on input and available data. */
+  /** 
+   * Computed property that updates region suggestions based on input and available data.
+   * @type {string[]}
+   */
   $: regionSuggestions = Array.from(
     new Set(
       listFlavor
@@ -65,7 +70,10 @@
     )
   );
 
-  /** Updates provider suggestions based on input and available data. */
+  /** 
+   * Computed property that updates provider suggestions based on input and available data.
+   * @type {string[]}
+   */
   $: providerSuggestions = Array.from(
     new Set(
       listFlavor
@@ -74,7 +82,10 @@
     )
   );
 
-  /** Updates workflow name suggestions based on input and available workflows. */
+  /** 
+   * Computed property that updates workflow name suggestions based on input and available workflows.
+   * @type {string[]}
+   */
   $: wfSuggestions = Array.from(
     new Set(
       listWf
@@ -83,7 +94,10 @@
     )
   );
 
-  /** Updates step suggestions from the fetched listStep, filtered by input. */
+  /** 
+   * Computed property that updates step suggestions from the fetched listStep, filtered by input.
+   * @type {string[]}
+   */
   $: stepSuggestions = listStep?.map(s => s.name)?.filter(name =>
     name?.toLowerCase().includes(step.toLowerCase())
   ) || [];
@@ -125,14 +139,14 @@
     showWfSuggestions = false;
   }
 
+  let isHandlingHover = false;
+
   /**
    * Handles hovering over a workflow to load its steps asynchronously.
    * Updates `listStep` and controls loading state.
    * @param {string} wfName - Workflow name hovered by the user
    * @returns {Promise<void>}
    */
-  let isHandlingHover = false;
-
   async function handleWfHover(wfName: string): Promise<void> {
       if (isHandlingHover) return;
       isHandlingHover = true;
@@ -166,23 +180,24 @@
    * Updates the combined wfStep value and hides step suggestions.
    * @param {string} suggestion - Step name selected
    */
-function selectStep(suggestion: string) {
-    const selectedWf = hoveredWf || wfStep.split('.')[0];
-    if (selectedWf) {
-        wfStep = `${selectedWf}.${suggestion}`;
-        step = suggestion;
-        showStepSuggestions = false;
-        showWfSuggestions = false;
-    } else {
-        console.error("No workflow selected");
-    }
-    hoveredWf = null; // Reset après sélection
-}
-
+  function selectStep(suggestion: string) {
+      const selectedWf = hoveredWf || wfStep.split('.')[0];
+      if (selectedWf) {
+          wfStep = `${selectedWf}.${suggestion}`;
+          step = suggestion;
+          showStepSuggestions = false;
+          showWfSuggestions = false;
+      } else {
+          console.error("No workflow selected");
+      }
+      hoveredWf = null; // Reset after selection
+  }
 
   /**
-   * Create new worker and associated job
-   * Resets form on success
+   * Creates new worker and associated job.
+   * Resets form on success.
+   * @async
+   * @returns {Promise<void>}
    */
   async function handleAddWorker(): Promise<void> {
     const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
@@ -201,7 +216,6 @@ function selectStep(suggestion: string) {
     wfStep = "";
   }
 </script>
-
 
 <div class="createForm-form-container">
   <h2 class="createForm-title">Create Worker</h2>

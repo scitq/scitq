@@ -11,6 +11,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'grpc-web': path.resolve(__dirname, 'src/mocks/grpc-web.ts'),
+      '@': path.resolve(__dirname, 'src'),
     },
   },
 

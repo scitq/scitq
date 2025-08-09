@@ -8,28 +8,29 @@
   import { Eye, EyeOff } from 'lucide-svelte';
   import '../styles/SettingPage.css';
 
-  // Current user info
+  // Current authenticated user data
   let user: User = undefined;
 
-  // Modal visibility state for password change
+  // Controls visibility of password change modal
   let showModal = false;
 
-  // Password input fields
+  // Password fields for change password operation
   let oldPassword = '';
   let newPassword = '';
   let confirmNewPassword = '';
 
-  // Error message for password change
+  // Stores error messages for password change operations
   let errorMessage = '';
 
-  // Toggles for password visibility
+  // Toggle states for password visibility
   let showOld = false;
   let showNew = false;
   let showConfirm = false;
 
   /**
-   * Initializes component by fetching current user and user list
-   * @returns {Promise<void>} Resolves when data is loaded
+   * Component initialization lifecycle hook
+   * Fetches current user data when component mounts
+   * @async
    */
   onMount(async () => {
     try {
@@ -43,9 +44,8 @@
   });
 
   /**
-   * Toggles the visibility of password input fields.
-   * 
-   * @param type - Which password field to toggle ('old', 'new', or 'confirm').
+   * Toggles password field visibility
+   * @param {'old'|'new'|'confirm'} type - Specifies which password field to toggle
    */
   function toggleShow(type: 'old' | 'new' | 'confirm') {
     if (type === 'old') showOld = !showOld;
@@ -54,7 +54,7 @@
   }
 
   /**
-   * Opens the password change modal and resets input fields and error messages.
+   * Opens the password change modal and resets form state
    */
   function openModal() {
     showModal = true;
@@ -65,16 +65,17 @@
   }
 
   /**
-   * Closes the password change modal.
+   * Closes the password change modal
    */
   function closeModal() {
     showModal = false;
   }
 
   /**
-   * Confirms the password change after validating input fields.
-   * Checks password match and difference, then calls API to change the password.
-   * Displays error messages if validation or API call fails.
+   * Handles password change confirmation
+   * Validates inputs and calls password change API
+   * @async
+   * @throws {Error} When password validation fails or API call fails
    */
   async function confirmPasswordChange() {
     if (newPassword !== confirmNewPassword) {
@@ -94,7 +95,7 @@
   }
 </script>
 
-<!-- Personal profile display -->
+<!-- Main user profile section -->
 <div class="settings-container" data-testid="settings-page">
   <div class="settings-myProfile">
     <h2 class="settings-myProfile-header" style="margin-left: 2rem;">My Profile :</h2>
@@ -117,7 +118,7 @@
     {/if}
   </div>
 
-    <!-- Admin section: user creation and user list -->
+  <!-- Admin-specific functionality section -->
   {#if user && user.isAdmin}
     <div class="settings-admin-user-grid">
       <div class="settings-list-user-box">
@@ -132,7 +133,7 @@
   {/if}
 </div>
 
-<!-- Password change modal -->
+<!-- Password change modal dialog -->
 {#if showModal}
   <div class="settings-modal">
     <div class="settings-modal-content">

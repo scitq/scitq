@@ -7,33 +7,54 @@
   import '../styles/jobsCompo.css';
   import { TaskId, TaskLog } from '../../gen/taskqueue';
 
-  /** Mapping of task IDs to their saved logs */
+  /**
+   * Mapping of task IDs to their saved logs
+   * @type {LogChunk[]}
+   */
   export let taskLogsSaved: LogChunk[] = [];
 
-  /** List of all available workers */
+  /**
+   * List of all available workers
+   * @type {Worker[]}
+   */
   export let workers: Worker[] = [];
 
-  /** List of all available workflows */
+  /**
+   * List of all available workflows
+   * @type {Workflow[]}
+   */
   export let workflows: Workflow[] = [];
 
-  /** List of all steps from all workflows */
+  /**
+   * List of all steps from all workflows
+   * @type {Step[]}
+   */
   export let allSteps: Step[] = [];
 
-  /** Callback function triggered when "Full Log" button is clicked */
+  /**
+   * Callback function triggered when "Full Log" button is clicked
+   * @type {(taskId: number) => void}
+   */
   export let onOpenModal: (taskId: number) => void;
 
-  /** Currently displayed tasks in the table */
+  /**
+   * Currently displayed tasks in the table
+   * @type {Task[]}
+   */
   export let displayedTasks: Task[] = [];
 
-  /** Mapping of task IDs to their log containers for auto-scrolling */
+  /**
+   * Mapping of task IDs to their log containers for auto-scrolling
+   * @type {Record<number, HTMLDivElement>}
+   */
   let logContainers: Record<number, HTMLDivElement> = {};
 
   /**
    * Resolves and returns a display name based on provided identifiers
-   * @param workerId - Optional worker ID
-   * @param workflowId - Optional workflow ID
-   * @param stepId - Optional step ID
-   * @returns Display name for the given identifier(s)
+   * @param {number} [workerId] - Optional worker ID
+   * @param {number} [workflowId] - Optional workflow ID
+   * @param {number} [stepId] - Optional step ID
+   * @returns {string} Display name for the given identifier(s)
    */
   function getName(workerId?: number, workflowId?: number, stepId?: number): string {
     if (workerId != undefined) {
@@ -54,7 +75,10 @@
     return '';
   }
 
-  /** Auto-scrolls log containers to bottom after DOM updates */
+  /**
+   * Auto-scrolls log containers to bottom after DOM updates
+   * @returns {void}
+   */
   afterUpdate(() => {
     Object.values(logContainers).forEach(container => {
       if (container) container.scrollTop = container.scrollHeight;
@@ -63,8 +87,8 @@
 
   /**
    * Retrieves stdout logs for a specific task
-   * @param taskId - ID of the task
-   * @returns Array of formatted stdout log entries
+   * @param {number} taskId - ID of the task
+   * @returns {Array<{id: string, text: string}>} Array of formatted stdout log entries
    */
   function getLogsOut(taskId: number) {
     const logs = taskLogsSaved.find(log => log.taskId === taskId)?.stdout || [];
@@ -73,8 +97,8 @@
 
   /**
    * Retrieves stderr logs for a specific task
-   * @param taskId - ID of the task
-   * @returns Array of formatted stderr log entries
+   * @param {number} taskId - ID of the task
+   * @returns {Array<{id: string, text: string}>} Array of formatted stderr log entries
    */
   function getLogsErr(taskId: number) {
     const logs = taskLogsSaved.find(log => log.taskId === taskId)?.stderr || [];
@@ -83,7 +107,7 @@
 </script>
 
 {#if displayedTasks && displayedTasks.length > 0}
-  <div class="tasks-table-wrapper">
+  <div class="tasks-table-wrapper" >
     <table class="listTable">
       <thead>
         <tr>
@@ -131,6 +155,8 @@
                 {/each}
               </div>
             </td>
+            
+            <!-- Action Buttons -->
             <td class="workerCompo-actions">
               <button class="btn-action" title="Full Log" data-testid={`full-log-${task.taskId}`} on:click={() => onOpenModal(task.taskId)}><Eye /></button>
               <button class="btn-action" title="Restart"><RefreshCcw /></button>

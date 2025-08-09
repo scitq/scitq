@@ -24,7 +24,7 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
   }));
 }
 
-vi.mock('../lib/wsClient', async () => {
+vi.mock('@/lib/wsClient', async () => {
   return {
     wsClient: {
       connect: vi.fn(),

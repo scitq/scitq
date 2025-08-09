@@ -10,7 +10,7 @@
   import { wsClient } from './lib/wsClient';
   import Router from 'svelte-spa-router';
 
-  // Pages
+  // Import page components
   import Dashboard from './pages/Dashboard.svelte';
   import SettingPage from './pages/SettingPage.svelte';
   import TaskPage from './pages/TaskPage.svelte';
@@ -20,26 +20,34 @@
   let isSidebarVisible = true;
   let logged = false;
 
+  // React to login state changes
   $: $isLoggedIn;
   $: logged = $isLoggedIn;
 
+  // Toggle sidebar visibility
   const toggleSidebar = () => {
     isSidebarVisible = !isSidebarVisible;
   };
 
+  // Initialize component
   onMount(async () => {
+    // Connect to WebSocket
     wsClient.connect();
+    // Set initial theme
     document.documentElement.setAttribute('data-theme', $theme);
+    // Check for existing auth token
     const tokenCookie = await getToken(); 
     if (tokenCookie) {
       isLoggedIn.set(true);
     }
   });
 
+  // Update body class based on login state
   $: {
     document.body.className = logged ? 'body-dashboard' : 'body-login';
   }
 
+  // Define application routes
   const routes = {
     '/': Dashboard,
     '/settings': SettingPage,
@@ -55,7 +63,7 @@
       <Sidebar {isSidebarVisible} {toggleSidebar} />
     {/if}
     <div class="main-content">
-      <!-- The button is now to the right of the sidebar -->
+      <!-- Sidebar toggle button positioned to the right -->
       <button class="hamburger-button" on:click={toggleSidebar} aria-label="Toggle sidebar">
         <span class="hamburger-icon"></span>
         <span class="hamburger-icon"></span>

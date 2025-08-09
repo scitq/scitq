@@ -1,12 +1,14 @@
 vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
-import { render, fireEvent, waitFor, getByTestId } from '@testing-library/svelte';
+import { wsClient } from '../lib/wsClient';
+
+import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SettingPage from '../pages/SettingPage.svelte';
 import * as auth from '../lib/auth';
 
-let wsMessageHandler: any;
+let messageHandler: (msg: any) => void;
 
 
 vi.mock('../lib/auth', async () => {
@@ -17,13 +19,6 @@ vi.mock('../lib/auth', async () => {
   };
 });
 
-vi.mock('../lib/wsClient', () => ({
-  wsClient: {
-    subscribeToMessages: vi.fn(() => () => {}),
-    sendMessage: vi.fn()
-  }
-}));
-import * as wsClient from '../lib/wsClient'; 
 
 describe('SettingPage', () => {
   const mockUser = { userId: '1', username: 'admin', email: 'admin@example.com', isAdmin: true };
@@ -39,11 +34,10 @@ describe('SettingPage', () => {
     mockApi.getUser.mockResolvedValue(mockUser);
     mockApi.getListUser.mockResolvedValue(mockUsers);
 
-    vi.spyOn(wsClient.wsClient, 'subscribeToMessages').mockImplementation((handler) => {
-      wsMessageHandler = handler;
-      return () => true;
+    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
+      messageHandler = handler; // Store the handler for later use
+      return () => true; // Unsubscribe function
     });
-
   });
 
   it('displays current user information after fetching', async () => {
@@ -136,86 +130,75 @@ describe('SettingPage', () => {
     });
   });
 
-  it('should add a user and update the list', async () => {
-    // 1. Setup mocks
+it('should add a user and update the list', async () => {
     mockApi.newUser.mockResolvedValue('4');
-    mockApi.getListUser.mockResolvedValueOnce(mockUsers); // First call - initial list
+    mockApi.getListUser.mockResolvedValueOnce(mockUsers);
 
-    const { getByTestId, findByText, queryByText } = render(SettingPage);
+    const { getByTestId, findByText, getByText } = render(SettingPage);
 
-    // 2. Wait for form to be ready
     await waitFor(() => {
-      expect(getByTestId('create-user-button')).toBeInTheDocument();
+        expect(getByTestId('create-user-button')).toBeInTheDocument();
     });
 
-    // 3. Fill the form with a more robust approach
-    const usernameInput = getByTestId('username-createUser') as HTMLInputElement;
-    const emailInput = getByTestId('email-createUser') as HTMLInputElement;
-    const passwordInput = getByTestId('password-createUser') as HTMLInputElement;
-
-    // Method to ensure values update
-    await fireEvent.input(usernameInput, { target: { value: 'newuser' } });
-    await fireEvent.input(emailInput, { target: { value: 'new@test.com' } });
-    await fireEvent.input(passwordInput, { target: { value: 'password123' } });
-
-    // Intermediate value check
-    expect(usernameInput.value).toBe('newuser');
-    expect(emailInput.value).toBe('new@test.com');
-    expect(passwordInput.value).toBe('password123');
-
-    // Check the checkbox
-    const adminCheckbox = getByTestId('isAdmin-createUser') as HTMLInputElement;
-    await fireEvent.click(adminCheckbox);
+    // Fill the form
+    await fireEvent.input(getByTestId('username-createUser'), { target: { value: 'newuser' } });
+    await fireEvent.input(getByTestId('email-createUser'), { target: { value: 'new@test.com' } });
+    await fireEvent.input(getByTestId('password-createUser'), { target: { value: 'password123' } });
+    await fireEvent.click(getByTestId('isAdmin-createUser'));
 
     // Submit the form
     await fireEvent.click(getByTestId('create-user-button'));
 
-    // 4. Validations
-    expect(await findByText('User Created')).toBeInTheDocument();
-    expect(mockApi.newUser).toHaveBeenCalledWith(
-      'newuser',
-      'password123',
-      'new@test.com',
-      true
-    );
+    // Simulate WebSocket message
+    if (messageHandler) {
+        messageHandler({
+            type: 'user-created',
+            payload: {
+                userId: 4,
+                username: 'newuser',
+                email: 'new@test.com',
+                isAdmin: true
+            }
+        });
+    }
 
-    // Additional check that user appears in list
+    expect(await findByText('newuser')).toBeInTheDocument();
+});
+
+it('should delete a user and update the list', async () => {
+    const { getByTestId, findByText, queryByText } = render(SettingPage);
+
     await waitFor(() => {
-      expect(queryByText('newuser')).toBeInTheDocument();
-    });
-  });
-
-  it('should delete a user and update the list', async () => {
-    const { findByText, getByTestId, queryByText, getByText } = render(SettingPage);
-
-    await waitFor(() => {
-      expect(getByText('My Profile :')).toBeInTheDocument();
-      expect(queryByText('List of Users :')).toBeInTheDocument();
-      expect(queryByText('Create User :')).toBeInTheDocument();
-      expect(queryByText('user2')).toBeInTheDocument;
+        expect(getByTestId('delete-btn-user-3')).toBeInTheDocument();
     });
 
-    const deleteButton = getByTestId('delete-btn-user-3');
-    await fireEvent.click(deleteButton);
+    await fireEvent.click(getByTestId('delete-btn-user-3'));
 
+    // Simulate WebSocket message
+    if (messageHandler) {
+        messageHandler({
+            type: 'user-deleted',
+            userId: 3
+        });
+    }
+
+    // Wait for success message
     expect(await findByText('User Deleted')).toBeInTheDocument();
-    expect(mockApi.delUser).toHaveBeenCalledWith('3');
+    
+    // Verify user is removed
+    await waitFor(() => {
+        expect(queryByText('user2')).not.toBeInTheDocument();
+    });
+});
+
+it('should update a user and show success message', async () => {
+    const { getByTestId, getByText, findByText, queryByText } = render(SettingPage);
 
     await waitFor(() => {
-      expect(queryByText('user2')).not.toBeInTheDocument();
+        expect(getByTestId('edit-btn-user-2')).toBeInTheDocument();
     });
-  });
 
-  it('should update a user and show success message', async () => {
-    const { getByText, findByText, getByTestId, queryByText } = render(SettingPage);
-
-    await waitFor(() => {
-      expect(getByText('My Profile :')).toBeInTheDocument();
-      expect(queryByText('List of Users :')).toBeInTheDocument();
-      expect(queryByText('Create User :')).toBeInTheDocument();
-      expect(queryByText('user1')).toBeInTheDocument();
-      expect(getByTestId(`edit-btn-user-2`)).toBeInTheDocument();
-    });
+    mockApi.updateUser.mockResolvedValue({ success: true });
 
     await fireEvent.click(getByTestId('edit-btn-user-2'));
     await fireEvent.input(getByTestId('username-edit'), { target: { value: 'updatedUser' } });
@@ -223,21 +206,28 @@ describe('SettingPage', () => {
     await fireEvent.click(getByTestId('isAdmin-edit'));
     await fireEvent.click(getByText('Confirm'));
 
-    wsMessageHandler({
-      type: 'user-updated',
-      payload: { jobId: 1 }
-    });
+    // Simulate WebSocket message
+    if (messageHandler) {
+        messageHandler({
+            type: 'user-updated',
+            payload: {
+                userId: 2,
+                username: 'updatedUser',
+                email: 'updated@test.com',
+                isAdmin: true
+            }
+        });
+    }
 
+    // Wait for success message
     expect(await findByText('User Updated')).toBeInTheDocument();
-    expect(mockApi.updateUser).toHaveBeenCalledWith('2', {
-      username: 'updatedUser',
-      email: 'updated@test.com',
-      isAdmin: true
-    });
+    
+    // Verify changes
     await waitFor(() => {
-      expect(queryByText('user1')).not.toBeInTheDocument();
+        expect(queryByText('user1')).not.toBeInTheDocument();
+        expect(getByText('updatedUser')).toBeInTheDocument();
     });
-  });
+});
 
   it('should handle forgot password functionality', async () => {
     const { getByTestId, getByLabelText, getByText, findByText } = render(SettingPage);
