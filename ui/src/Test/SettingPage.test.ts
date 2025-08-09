@@ -21,10 +21,10 @@ vi.mock('../lib/auth', async () => {
 
 
 describe('SettingPage', () => {
-  const mockUser = { userId: '1', username: 'admin', email: 'admin@example.com', isAdmin: true };
+  const mockUser = { userId: 1, username: 'admin', email: 'admin@example.com', isAdmin: true };
   const mockUsers = [
-    { userId: '2', username: 'user1', email: 'user1@example.com', isAdmin: false },
-    { userId: '3', username: 'user2', email: 'user2@example.com', isAdmin: false },
+    { userId: 2, username: 'user1', email: 'user1@example.com', isAdmin: false },
+    { userId: 3, username: 'user2', email: 'user2@example.com', isAdmin: false },
   ];
 
   beforeEach(() => {
@@ -98,7 +98,7 @@ describe('SettingPage', () => {
 
   it('shows user list and create user form only for admin', async () => {
     mockApi.getUser.mockResolvedValue({
-      userId: '1',
+      userId: 1,
       username: 'admin',
       email: 'admin@example.com',
       isAdmin: true
@@ -115,7 +115,7 @@ describe('SettingPage', () => {
 
   it('does not show user list and create user form for non-admin user', async () => {
     mockApi.getUser.mockResolvedValue({
-      userId: '2',
+      userId: 2,
       username: 'user1',
       email: 'user1@example.com',
       isAdmin: false
@@ -242,7 +242,7 @@ it('should update a user and show success message', async () => {
 
     expect(await findByText('Password Reset')).toBeInTheDocument();
     expect(mockApi.forgotPassword).toHaveBeenCalledWith(
-      '2',
+      2,
       'user1',
       'newPassword123',
       'user1@example.com',

@@ -87,13 +87,13 @@
   function handleMessage(message) {
     // Handle user deletion
     if (message.type === 'user-deleted') {
-      users = users.filter(u => u.userId !== String(message.userId));
+      users = users.filter(u => u.userId !== message.userId);
     }
 
     // Handle user creation
     if (message.type === 'user-created') {
       const newUser = {
-        userId: String(message.payload.userId),
+        userId: Number(message.payload.userId),
         username: message.payload.username,
         email: message.payload.email,
         isAdmin: message.payload.isAdmin
@@ -106,7 +106,7 @@
     // Handle user updates
     if (message.type === 'user-updated') {
       users = users.map(u => 
-        u.userId === String(message.payload.userId)
+        u.userId === Number(message.payload.userId)
           ? {
               ...u,
               username: message.payload.username || u.username,
