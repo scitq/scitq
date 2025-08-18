@@ -4,6 +4,9 @@ import { mockApi } from '../mocks/api_mock';
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import WorkflowPage from '../pages/WorkflowPage.svelte';
+import { wsClient } from '../lib/wsClient';
+
+let messageHandler: (msg: any) => void;
 
 const mockSteps= [
   { stepId: 1, name: 'Step A', workflowId: 10 },
@@ -29,6 +32,11 @@ describe('WorkflowPage', () => {
     mockApi.getSteps.mockImplementation(async (workflowId) => {
         return mockSteps.filter(step => step.workflowId === workflowId);
     });
+
+    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
+        messageHandler = handler; // Store the handler for later use
+        return () => true; // Unsubscribe function
+    });
   });
 
   it('displays the initial list of workflows', async () => {
@@ -39,6 +47,36 @@ describe('WorkflowPage', () => {
       expect(screen.queryByText('Step A')).not.toBeInTheDocument();
       expect(screen.queryByText('Step B')).not.toBeInTheDocument();
       expect(screen.queryByText('Step C')).not.toBeInTheDocument();
+    });
+  });
+
+  it('deletes a workflow when clicking the delete button', async () => {
+    render(WorkflowPage);
+    await waitFor(() => screen.getByText('Workflow A'));
+    
+    // Click the Delete button
+    const deleteButton = screen.getByTestId('delete-btn-10');
+    await fireEvent.click(deleteButton);
+    
+    // Verify API call
+    await waitFor(() => {
+      expect(mockApi.delWorkflow).toHaveBeenCalledWith(10);
+    });
+    
+    // Simulate WebSocket response
+    if (messageHandler) {
+      messageHandler({
+        type: 'workflow-deleted',
+        payload: {
+          workflowId: 10
+        }
+      });
+    }
+    
+    // Verify workflow was removed
+    await waitFor(() => {
+      expect(screen.queryByText('Workflow A')).not.toBeInTheDocument();
+      expect(screen.getByText('Workflow B')).toBeInTheDocument();
     });
   });
 
@@ -63,7 +101,7 @@ describe('WorkflowPage', () => {
     });
   });
 
-    it('hides steps for a given workflowId when clicking on chevron down', async () => {
+  it('hides steps for a given workflowId when clicking on chevron down', async () => {
     render(WorkflowPage);
     await waitFor(() => screen.getByTestId('chevronRight-10'));
     const chevDownBtn = screen.getByTestId('chevronRight-10');
@@ -89,5 +127,4 @@ describe('WorkflowPage', () => {
       expect(screen.queryByText('Step C')).not.toBeInTheDocument();
     });
   });
-
 });

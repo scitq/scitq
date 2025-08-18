@@ -1,33 +1,158 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import { wsClient } from '../lib/wsClient';
+  import { getListUser, updateUser, delUser, forgotPassword } from '../lib/api';
+  import type { User } from '../lib/Stores/user';
   import { Trash, Pencil, Lock, Eye, EyeOff } from 'lucide-svelte';
   import "../styles/worker.css";
+  import "../styles/SettingPage.css";
   import "../styles/userList.css";
 
-  export let users: User[] = [];
+  /**
+   * Array of user objects
+   * @type {User[]}
+   */
+  let users: User[] = [];
 
-  // Callbacks passed from parent component
-  export let onUserUpdated: (event: { detail: { user: User } }) => void = () => {};
-  export let onUserDeleted: (event: { detail: { userId: number } }) => void = () => {};
-  export let onForgotPassword: (event: { detail: { user: User; newPswd: string } }) => void = () => {};
-
-  // Edit modal state
+  /**
+   * User currently being edited
+   * @type {User | null}
+   */
   let editingUser: User = null;
+
+  /**
+   * Flag to show/hide edit modal
+   * @type {boolean}
+   */
   let showEditModal = false;
+
+  /**
+   * Temporary storage for edited username
+   * @type {string}
+   */
   let editedUsername = '';
+
+  /**
+   * Temporary storage for edited email
+   * @type {string}
+   */
   let editedEmail = '';
+
+  /**
+   * Temporary storage for edited admin status
+   * @type {boolean}
+   */
   let editedIsAdmin = false;
 
-  // Password modal state
+  /**
+   * Flag to show/hide password modal
+   * @type {boolean}
+   */
   let showPasswordModal = false;
+
+  /**
+   * User whose password is being changed
+   * @type {User | null}
+   */
   let passwordUser: User = null;
+
+  /**
+   * New password value
+   * @type {string}
+   */
   let newPassword = '';
+
+  /**
+   * Flag to show/hide password text
+   * @type {boolean}
+   */
   let showForgotPassword = false;
 
   /**
-   * Opens the edit modal for a given user.
-   * Initializes the form fields with the user's current data.
-   * @param {User} user - The user to be edited.
-   * @returns {void}
+   * Success message to display
+   * @type {string}
+   */
+  let successMessage: string = '';
+
+  /**
+   * Timeout reference for clearing messages
+   * @type {number}
+   */
+  let alertTimeout;
+
+  /**
+   * Handles WebSocket messages for user events
+   * @param {Object} message - The WebSocket message
+   */
+  function handleMessage(message) {
+    // Handle user deletion
+    if (message.type === 'user-deleted') {
+      users = users.filter(u => u.userId !== message.userId);
+    }
+
+    // Handle user creation
+    if (message.type === 'user-created') {
+      const newUser = {
+        userId: Number(message.payload.userId),
+        username: message.payload.username,
+        email: message.payload.email,
+        isAdmin: message.payload.isAdmin
+      };
+      if (!users.some(u => u.userId === newUser.userId)) {
+        users = [...users, newUser];
+      }
+    }
+
+    // Handle user updates
+    if (message.type === 'user-updated') {
+      users = users.map(u => 
+        u.userId === Number(message.payload.userId)
+          ? {
+              ...u,
+              username: message.payload.username || u.username,
+              email: message.payload.email || u.email,
+              isAdmin: message.payload.isAdmin !== undefined 
+                       ? message.payload.isAdmin 
+                       : u.isAdmin
+            }
+          : u
+      );
+    }
+  }
+
+  /**
+   * Function to unsubscribe from WebSocket
+   * @type {() => void}
+   */
+  let unsubscribeWS: () => void;
+
+  /**
+   * Component mount lifecycle hook
+   * Loads users and subscribes to WebSocket
+   */
+  onMount(async () => {
+    try {
+      users = await getListUser();
+
+      // Subscribe to WebSocket messages
+      unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
+    } catch (err) {
+      console.error("Error loading user data:", err);
+    }
+  });
+
+  /**
+   * Component destroy lifecycle hook
+   * Unsubscribes from WebSocket
+   */
+  onDestroy(() => {
+    // Unsubscribe from WebSocket messages
+    unsubscribeWS?.();
+  });
+
+  /**
+   * Opens the edit modal for a user
+   * @param {User} user - User to edit
    */
   function openEditModal(user: User) {
     editingUser = user;
@@ -38,8 +163,7 @@
   }
 
   /**
-   * Closes the edit modal and resets the editing user.
-   * @returns {void}
+   * Closes the edit modal
    */
   function closeEditModal() {
     showEditModal = false;
@@ -47,35 +171,32 @@
   }
 
   /**
-   * Confirms the changes made to the user.
-   * Prepares an object containing only the updated fields and triggers the onUserUpdated event.
-   * Then closes the edit modal.
-   * @returns {void}
+   * Confirms and saves user edits
+   * @async
    */
-  function confirmEdit() {
+  async function confirmEdit() {
     const updates: Partial<User> = {};
     
     if (editedUsername !== editingUser.username) updates.username = editedUsername;
     if (editedEmail !== editingUser.email) updates.email = editedEmail;
     if (editedIsAdmin !== editingUser.isAdmin) updates.isAdmin = editedIsAdmin;
 
-    if (Object.keys(updates).length > 0) {
-      onUserUpdated({
-        detail: {
-          userId: editingUser.userId,
-          updates
-        }
-      });
+    try {
+      await updateUser(editingUser.userId, updates);
+      successMessage = "User Updated";
+      clearTimeout(alertTimeout);
+      alertTimeout = setTimeout(() => successMessage = '', 5000);
+    } catch (error) {
+      console.error("Update error:", error);
+      alert("Error updating user.");
     }
     
     closeEditModal();
   }
 
   /**
-   * Opens the password change modal for a given user.
-   * Initializes the new password field.
-   * @param {User} user - The user whose password will be changed.
-   * @returns {void}
+   * Opens the password change modal
+   * @param {User} user - User to change password for
    */
   function openPasswordModal(user: User) {
     passwordUser = user;
@@ -84,8 +205,7 @@
   }
 
   /**
-   * Closes the password change modal and resets related fields.
-   * @returns {void}
+   * Closes the password change modal
    */
   function closePasswordModal() {
     showPasswordModal = false;
@@ -94,37 +214,54 @@
   }
 
   /**
-   * Confirms the password change.
-   * Triggers the onForgotPassword event with the user and new password,
-   * then closes the modal.
-   * @returns {void}
+   * Confirms and saves password change
+   * @async
    */
-  function confirmPasswordChange() {
-    onForgotPassword({
-      detail: {
-        user: passwordUser,
-        newPswd: newPassword
-      }
-    });
+  async function confirmPasswordChange() {
+    try {
+      await forgotPassword(
+        passwordUser.userId,
+        passwordUser.username,
+        newPassword,
+        passwordUser.email,
+        passwordUser.isAdmin
+      );
+      successMessage = "Password Reset";
+      clearTimeout(alertTimeout);
+      alertTimeout = setTimeout(() => successMessage = '', 5000);
+    } catch (error) {
+      alert("Error changing password.");
+    }
     closePasswordModal();
   }
 
   /**
-   * Handles user deletion by triggering the onUserDeleted event.
-   * @param {number} userId - The ID of the user to delete.
-   * @returns {void}
+   * Handles user deletion
+   * @async
+   * @param {number} userId - ID of user to delete
    */
-  function handleDeleteUser(userId: number) {
-    onUserDeleted({
-      detail: { userId }
-    });
+  async function handleDeleteUser(userId: number) {
+    try {
+      await delUser(userId);
+      successMessage = "User Deleted";
+      clearTimeout(alertTimeout);
+      alertTimeout = setTimeout(() => successMessage = '', 5000);
+    } catch (error) {
+      console.error("Error deleting user:", error);
+    }
   }
 </script>
 
 
+<!-- Success message alert -->
+{#if successMessage}
+  <div class="alert-success">
+    {successMessage}
+  </div>
+{/if}
 
 {#if users && users.length > 0}
-  <div class="workerCompo-table-wrapper">
+  <div class="user-list-container">
     <table class="listTable">
       <thead>
         <tr>

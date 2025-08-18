@@ -1,42 +1,67 @@
 import type { RpcOptions } from "@protobuf-ts/runtime-rpc";
 import { get } from 'svelte/store';
-import { userInfo, isLoggedIn } from '../lib/Stores/user';
+import {isLoggedIn } from '../lib/Stores/user';
 import { client } from './grpcClient';
+import { getUser } from "./api";
 
 /**
- * Logs in a user with the provided username and password.
- * Sends a POST request to the login endpoint and updates user info and login status on success.
+ * Authenticates a user with the provided credentials and manages user session.
  * 
- * @param username - The username of the user.
- * @param password - The password of the user.
- * @returns A promise that resolves with the login response data or null if no JSON response.
- * @throws Throws an error if the login request fails or token is missing after login.
+ * @param {string} username - The user's login username
+ * @param {string} password - The user's login password
+ * @returns {Promise<any>} Promise that resolves with:
+ *   - The login response data if JSON content is returned
+ *   - null if response has no JSON content
+ * @throws {Error} Throws an error when:
+ *   - HTTP request fails (non-OK response)
+ *   - Authentication token is missing after login
+ *   - Network or server errors occur
+ * 
+ * @example
+ * try {
+ *   const loginData = await getLogin('user123', 'password123');
+ *   // Handle successful login
+ * } catch (error) {
+ *   // Handle login error
+ * }
  */
 export async function getLogin(username: string, password: string) {
-  const response = await fetch('http://localhost:8081/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ username, password }),
-    credentials: 'include', // To receive the cookie
-  });
+  try {
+    const response = await fetch('https://alpha2.gmt.bio/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+      credentials: 'include'
+    });
 
-  if (!response.ok) {
-    throw new Error('Login failed');
-  }
+    if (!response.ok) {
+      throw new Error(`Login failed with status: ${response.status}`);
+    }
 
-  // Check if the response has a JSON content-type before parsing
-  const contentType = response.headers.get('Content-Type');
-  if (contentType && contentType.includes('application/json')) {
-    const data = await response.json();
+    // 1. First obtain the authentication token
     const tokenCookie = await getToken();
     if (!tokenCookie) throw new Error('Token not found after login');
-    userInfo.set({ token: tokenCookie });
+    
+    // 2. Update application state stores
     isLoggedIn.set(true);
-    return data;
-  } else {
-    return null; // or {} depending on expected response
+
+    // 3. Fetch and store user information
+    const user = await getUser(tokenCookie);
+    if (user?.username) {
+      localStorage.setItem('username', user.username);
+    }
+
+    // Skip JSON parsing for empty responses
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return await response.json();
+    }
+    
+    return null; // Return null for non-JSON responses
+
+  } catch (error) {
+    console.error("Login error:", error);
+    throw error; // Re-throw for error handling in calling code
   }
 }
 
@@ -47,7 +72,7 @@ export async function getLogin(username: string, password: string) {
  */
 export async function getToken(): Promise<string | null> {
   try {
-    const response = await fetch('http://localhost:8081/fetchCookie', {
+    const response = await fetch('https://alpha2.gmt.bio/fetchCookie', {
       method: 'GET',
       credentials: 'include',
     });
@@ -64,16 +89,15 @@ export async function getToken(): Promise<string | null> {
 }
 
 /**
- * Logs out the current user by calling the gRPC logout method and the REST logout endpoint.
- * Clears user info and login status after successful logout.
+ * Logs out the current user by calling the gRPC logout method and the logout endpoint.
+ * Clears user info, login status and window theme after successful logout.
  */
 export async function logout() {
-  const token = get(userInfo).token;
+  const token = await getToken();
 
   if (token && token.trim() !== "") {
     try {
       const response = await client.logout({ token }, await callOptionsUserToken());
-      console.log("Logout gRPC success:", response);
     } catch (error) {
       console.error("Error while logout User:", error);
     }
@@ -82,7 +106,7 @@ export async function logout() {
   }
 
   try {
-    const response = await fetch('http://localhost:8081/logout', {
+    const response = await fetch('https://alpha2.gmt.bio/logout', {
       method: 'POST',
       credentials: 'include',
     });
@@ -91,8 +115,9 @@ export async function logout() {
       throw new Error('Cookie delete failed');
     }
 
-    userInfo.set({ token: null });
     isLoggedIn.set(false);
+    localStorage.removeItem('theme'); 
+    localStorage.removeItem('username'); 
   } catch (error) {
     console.error('Cookie delete error:', error);
   }
@@ -104,11 +129,11 @@ export async function logout() {
  * @returns A promise resolving to the RpcOptions object with Authorization metadata.
  */
 export async function callOptionsUserToken(): Promise<RpcOptions> {
-  let user = get(userInfo);
+  const userToken = await getToken();
   return {
     meta: {
-      Authorization: user?.token ? `Bearer ${user.token}` : '',
-    },
+      Authorization: `Bearer ${userToken}`
+    }
   };
 }
 
@@ -120,7 +145,7 @@ export async function callOptionsUserToken(): Promise<RpcOptions> {
  */
 export async function getWorkerToken(): Promise<string | null> {
   try {
-    const res = await fetch("http://localhost:8081/fetchCookie", {
+    const res = await fetch("https://alpha2.gmt.bio/fetchCookie", {
       credentials: "include",
     });
 
@@ -128,7 +153,7 @@ export async function getWorkerToken(): Promise<string | null> {
 
     const { token } = await res.json();
 
-    const workerRes = await fetch("http://localhost:8081/WorkerToken", {
+    const workerRes = await fetch("https://alpha2.gmt.bio/WorkerToken", {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`, // Pass JWT manually here

@@ -5,14 +5,16 @@
   import '../styles/loginPage.css';
 </script>
 
-<!--
-  General wrapper for the login page layout
--->
+<!-- 
+ * Main container for the login page layout
+ * @type {HTMLElement}
+ -->
 <div class="loginpage-page-wrapper" data-testid="login-page">
 
-  <!--
-    Header section with site title and branding
-  -->
+  <!-- 
+   * Header section containing site title and branding elements
+   * @type {HTMLElement}
+   -->
   <div class="loginpage-header_login">
     <div class="top-left">SCITQ2</div>
     <div class="loginpage-top-right">
@@ -21,6 +23,9 @@
     </div>
   </div>
 
-  <!-- Login form component -->
+  <!-- 
+   * LoginForm component instance
+   * @component
+   -->
   <LoginForm />
 </div>

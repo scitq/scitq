@@ -12,7 +12,7 @@
   },
   "scripts": {
     "docs": "typedoc",
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
     "gen-proto": "protoc --ts_out ./gen --proto_path=../proto taskqueue.proto"
@@ -24,6 +24,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@tsconfig/svelte": "^5.0.4",
     "@types/google-protobuf": "^3.15.12",
+    "@types/node": "^24.2.0",
     "jsdom": "^26.1.0",
     "svelte": "^5.27.0",
     "svelte-check": "^4.1.4",
@@ -36,6 +37,7 @@
   "dependencies": {
     "@protobuf-ts/grpcweb-transport": "^2.9.6",
     "@protobuf-ts/plugin": "^2.9.6",
+    "chart.js": "^4.5.0",
     "dotenv": "^16.5.0",
     "google-protobuf": "^3.21.4",
     "lucide-svelte": "^0.503.0",

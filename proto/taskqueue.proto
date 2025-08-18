@@ -41,7 +41,7 @@ service TaskQueue {
     rpc ListWorkflows(WorkflowFilter) returns (WorkflowList);
     rpc CreateWorkflow(WorkflowRequest) returns (WorkflowId);
     rpc DeleteWorkflow(WorkflowId) returns (Ack);
-    rpc ListSteps(WorkflowId) returns (StepList);
+    rpc ListSteps(StepFilter) returns (StepList);
     rpc CreateStep(StepRequest) returns (StepId);
     rpc DeleteStep(StepId) returns (Ack);
     rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
@@ -221,8 +221,13 @@ message Ack {
 }
 
 message ListTasksRequest {
-    optional string status_filter = 1;
-    optional uint32 worker_id_filter = 2;
+    optional string status_filter = 1;      
+    optional uint32 worker_id_filter = 2;   
+    optional uint32 workflow_id_filter = 3;  
+    optional uint32 step_id_filter = 4;   
+    optional string command_filter = 5;    
+    optional uint32 limit = 6;            
+    optional uint32 offset = 7;                
 }
 
 message WorkerRequest {
@@ -277,6 +282,8 @@ message FlavorsList {
 }
 
 message ListJobsRequest {
+  optional uint32 limit = 1;
+  optional uint32 offset = 2; 
 }
 
 message Job {
@@ -397,6 +404,8 @@ message RecruiterList {
 
 message WorkflowFilter {
     optional string name_like = 1;
+    optional uint32 limit = 2;
+    optional uint32 offset = 3;
 }
 
 message WorkflowId {
@@ -417,6 +426,12 @@ message WorkflowRequest {
 
 message WorkflowList {
     repeated Workflow workflows = 1;
+}
+
+message StepFilter {
+    uint32 WorkflowId = 1;
+    optional uint32 limit = 2;
+    optional uint32 offset = 3;
 }
 
 message StepId {

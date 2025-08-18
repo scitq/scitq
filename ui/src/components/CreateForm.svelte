@@ -4,16 +4,6 @@
   import "../styles/createForm.css";
   import { JobId, WorkerDetails, Workflow, Job } from "../../gen/taskqueue";
 
-  /**
-   * Callback when new worker (and associated job) is created
-   * @param worker Created worker details
-   * @param job Associated job record
-   */
-  export let onWorkerCreated = (event: { detail: { 
-    worker: WorkerDetails, 
-    job: Partial<Job>  
-  } }) => {};
-
   // Form state
   let provider = "";
   let flavor = "";
@@ -56,7 +46,10 @@
     listWf = await getWorkFlow();
   });
 
-  /** Updates flavor suggestions based on input and available data. */
+  /** 
+   * Computed property that updates flavor suggestions based on input and available data.
+   * @type {string[]}
+   */
   $: flavorSuggestions = Array.from(
     new Set(
       listFlavor
@@ -65,7 +58,10 @@
     )
   );
 
-  /** Updates region suggestions based on input and available data. */
+  /** 
+   * Computed property that updates region suggestions based on input and available data.
+   * @type {string[]}
+   */
   $: regionSuggestions = Array.from(
     new Set(
       listFlavor
@@ -74,7 +70,10 @@
     )
   );
 
-  /** Updates provider suggestions based on input and available data. */
+  /** 
+   * Computed property that updates provider suggestions based on input and available data.
+   * @type {string[]}
+   */
   $: providerSuggestions = Array.from(
     new Set(
       listFlavor
@@ -83,7 +82,10 @@
     )
   );
 
-  /** Updates workflow name suggestions based on input and available workflows. */
+  /** 
+   * Computed property that updates workflow name suggestions based on input and available workflows.
+   * @type {string[]}
+   */
   $: wfSuggestions = Array.from(
     new Set(
       listWf
@@ -92,7 +94,10 @@
     )
   );
 
-  /** Updates step suggestions from the fetched listStep, filtered by input. */
+  /** 
+   * Computed property that updates step suggestions from the fetched listStep, filtered by input.
+   * @type {string[]}
+   */
   $: stepSuggestions = listStep?.map(s => s.name)?.filter(name =>
     name?.toLowerCase().includes(step.toLowerCase())
   ) || [];
@@ -130,9 +135,11 @@
    */
   function selectWf(suggestion: string) {
     wfStep = suggestion;
-    wf = suggestion;
+    wf = "";
     showWfSuggestions = false;
   }
+
+  let isHandlingHover = false;
 
   /**
    * Handles hovering over a workflow to load its steps asynchronously.
@@ -141,26 +148,31 @@
    * @returns {Promise<void>}
    */
   async function handleWfHover(wfName: string): Promise<void> {
-    hoveredWf = wfName;
-    const selectedWf = listWf.find(w => w.name === wfName);
+      if (isHandlingHover) return;
+      isHandlingHover = true;
+      
+      hoveredWf = wfName;
+      const selectedWf = listWf.find(w => w.name === wfName);
 
-    if (!selectedWf?.workflowId) {
-      console.error("No workflow ID found for", wfName);
-      listStep = [];
-      return;
-    }
+      if (!selectedWf?.workflowId) {
+          console.error("No workflow ID found for", wfName);
+          listStep = [];
+          isHandlingHover = false;
+          return;
+      }
 
-    isLoadingSteps = true;
-    try {
-      listStep = await getSteps(selectedWf.workflowId) || [];
-      showStepSuggestions = listStep.length > 0;
-    } catch (error) {
-      console.error("Failed to load steps:", error);
-      listStep = [];
-      showStepSuggestions = false;
-    } finally {
-      isLoadingSteps = false;
-    }
+      isLoadingSteps = true;
+      try {
+          listStep = await getSteps(selectedWf.workflowId) || [];
+          showStepSuggestions = listStep.length > 0;
+      } catch (error) {
+          console.error("Failed to load steps:", error);
+          listStep = [];
+          showStepSuggestions = false;
+      } finally {
+          isLoadingSteps = false;
+          isHandlingHover = false;
+      }
   }
 
   /**
@@ -169,16 +181,23 @@
    * @param {string} suggestion - Step name selected
    */
   function selectStep(suggestion: string) {
-    wfStep = `${hoveredWf}.${suggestion}`;
-    step = suggestion;
-    showStepSuggestions = false;
-    showWfSuggestions = false;
+      const selectedWf = hoveredWf || wfStep.split('.')[0];
+      if (selectedWf) {
+          wfStep = `${selectedWf}.${suggestion}`;
+          step = suggestion;
+          showStepSuggestions = false;
+          showWfSuggestions = false;
+      } else {
+          console.error("No workflow selected");
+      }
+      hoveredWf = null; // Reset after selection
   }
 
-
   /**
-   * Create new worker and associated job
-   * Resets form on success
+   * Creates new worker and associated job.
+   * Resets form on success.
+   * @async
+   * @returns {Promise<void>}
    */
   async function handleAddWorker(): Promise<void> {
     const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
@@ -186,28 +205,6 @@
     const statuses = await getStatus([workerCreatedDetails.workerId]);
     const statusObj = statuses[0];
     const workerStatus = statusObj ? statusObj.status : 'unknown';
-
-    onWorkerCreated({
-      detail: {
-        worker: {
-          workerId: workerCreatedDetails.workerId,
-          name: workerCreatedDetails.workerName,
-          concurrency,
-          prefetch,
-          status: workerStatus,
-          flavor,
-          provider,
-          region,
-        },
-        job: {
-          JobId: workerCreatedDetails.jobId,
-          action: 'C',
-          workerId: workerCreatedDetails.workerId,
-          modifiedAt : new Date().toLocaleString(),
-        }
-      }
-    });
-
 
     // Reset form
     concurrency = 1;
@@ -219,7 +216,6 @@
     wfStep = "";
   }
 </script>
-
 
 <div class="createForm-form-container">
   <h2 class="createForm-title">Create Worker</h2>
@@ -321,7 +317,7 @@
   </div>
 
   <!-- Workflow step autocomplete -->
-  <div class="createForm-form-group createForm-autocomplete">
+  <div class="createForm-form-group">
     <label class="createForm-label" for="step">Step (Workflow.step):</label>
     <input
       data-testid="wfStep-createWorker"
@@ -332,19 +328,22 @@
       autocomplete="off"
       placeholder="Type to search..."
       on:focus={() => showWfSuggestions = true}
-      on:input={() => showWfSuggestions = true}
+      on:input={(e) => {
+        wf = e.target.value.split('.')[0];
+        showWfSuggestions = true;
+      }}
       on:blur={() => setTimeout(() => {
         showWfSuggestions = false;
         showStepSuggestions = false;
         hoveredWf = null;
-      }, 150)}
+      }, 200)}
     />
 
-    <div class="suggestions-container">
-      {#if showWfSuggestions && wfSuggestions.length > 0}
+    {#if showWfSuggestions && wfSuggestions.length > 0}
+      <div class="suggestions-container">
         <div class="workflow-steps-columns">
           <!-- Workflows -->
-          <ul class="createForm-suggestions workflow-list">
+          <ul class="workflow-list">
             {#each wfSuggestions as suggestionWf}
               <li>
                 <button 
@@ -361,12 +360,9 @@
 
           <!-- Steps -->
           {#if hoveredWf}
-            <ul 
-              class="createForm-suggestions steps-list" 
-              style:max-height={listStep.length > 5 ? '150px' : (listStep.length * 30 + 10) + 'px'}
-            >
+            <ul class="steps-list">
               {#if isLoadingSteps}
-                <li class="createForm-suggestion-item">Loading steps...</li>
+                <li class="loading-message">Loading steps...</li>
               {:else if listStep.length > 0}
                 {#each listStep as stepObj (stepObj.name)}
                   <li>
@@ -380,13 +376,13 @@
                   </li>
                 {/each}
               {:else}
-                <li class="createForm-suggestion-item">No steps available</li>
+                <li class="no-steps-message">No steps available</li>
               {/if}
             </ul>
           {/if}
         </div>
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 
   <!-- Number of workers to create -->

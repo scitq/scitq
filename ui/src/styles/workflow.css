@@ -3,7 +3,6 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-
   width: 100%;
 }
 
@@ -11,13 +10,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: white;
+  background: var(--bg-secondary);
   padding: 0.2rem 1rem;
   border-radius: 8px;
   border-width: 1px;
-  border-color: #192245;
+  border-color: var(--border-color);
   border-style: solid;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  height: 25px;
 }
 
 .wf-chevron-btn {
@@ -29,13 +29,14 @@
 }
 
 .wf-chevron-btn:hover {
-  background-color: #e0e7ff;
+  background-color: rgba(160, 158, 158, 0.978);
+  border-radius: 8px;
   transform: scale(1.05);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1); 
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .wf-chevron {
-  color: #4b5563;
+  color: var(--text-secondary);
   width: 20px;
   height: 20px;
 }
@@ -49,34 +50,135 @@
 
 .wf-id {
   font-weight: bold;
-  color: #374151;
+  color: var(--text-primary);
+  font-size: 0.7rem;
 }
 
 .wf-name {
-  font-size: 0.95rem;
+  font-size: 0.7rem;
   font-weight: bold;
-  color: #374151;
+  color: var(--text-primary);
   cursor: pointer;
   transition: color 0.2s ease;
 }
 
 .wf-name:hover {
-  color: #9CA3AF; 
+  color: var(--text-secondary); 
 }
 
 .wf-progress-bar {
   flex: 1;
   height: 6px;
-  background: #e5e7eb;
+  background: var(--border-color);
   border-radius: 4px;
   margin-left: 1rem;
   margin-right: 1rem;
   max-width: 300px;
 }
 
+/* Workflow list container */
+.workflow-list-container {
+    height: 100%;
+    overflow-y: auto;
+    position: relative;
+    margin-bottom: 1rem;
+}
 
+/* Main workflow container */
+.wf-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Workflow content area */
+.workflow-content {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden; /* Prevent global scrolling */
+}
+
+/* Scrollable list container */
+.workflow-list-scroll-container {
+    flex-grow: 1;
+    overflow-y: auto; /* Scroll only here */
+    overflow-x: hidden;
+    height: 0; /* Required for flex-grow */
+}
+
+/* New workflows notification */
+.new-workflows-notification {
+    position: sticky;
+    top: 10px;
+    z-index: 100;
+    background: var(--primary-color);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 auto 10px auto;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+.show-new-btn {
+    font-weight: bold;
+    margin-left: 8px;
+}
+
+/* Workflow steps section */
 .wf-steps {
-  margin-left: 2.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: 0 0 8px 8px;
+    padding: 0.5rem 1rem;
+    border-radius: 0 0 8px 8px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Steps container */
+.steps-container {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    max-height: 50vh;
+}
+
+/* Steps table wrapper */
+.steps-table-wrapper {
+    flex: 1;
+    max-height: 50vh;
+    height: auto;
+    overflow-y: auto; /* Vertical scroll */
+    overflow-x: auto; /* Horizontal scroll */
+    position: relative;
+}
+
+/* New steps notification */
+.new-steps-notification {
+    position: sticky;
+    top: 10px;
+    z-index: 100;
+    background: var(--primary-color);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 auto 10px auto;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+.show-new-btn {
+    font-weight: bold;
+}
+
+/* Table styling */
+.listTable {
+    width: 100%;
 }

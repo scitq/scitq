@@ -6,7 +6,7 @@ import { GrpcWebFetchTransport } from '@protobuf-ts/grpcweb-transport';
  * Configured to use the base URL for the backend and include credentials with fetch requests.
  */
 const transport = new GrpcWebFetchTransport({
-  baseUrl: 'http://localhost:8081',
+  baseUrl: 'https://alpha2.gmt.bio',
   fetchInit: { credentials: 'include' },
 });
 

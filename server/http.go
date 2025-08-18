@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"fmt"
 
 	"github.com/scitq/scitq/server/config"
 )
@@ -13,63 +14,50 @@ import (
 //go:embed public/*
 var publicFiles embed.FS
 
-func HttpServer(cfg config.Config) (string, error) {
-	// Retrieve certificate data from environment, if provided.
+func HttpServer(cfg config.Config) (tls.Certificate, string, http.Handler, error) {
 	var tlsCert tls.Certificate
 	var certPEMstring string
 	var err error
+
 	if cfg.Scitq.CertificateKey == "" || cfg.Scitq.CertificatePem == "" {
 		log.Printf("Using embedded certificates")
 		tlsCert, certPEMstring, err = LoadEmbeddedCertificates()
 		if err != nil {
-			log.Fatalf("failed to load embedded TLS credentials: %v", err)
+			return tls.Certificate{}, "", nil, fmt.Errorf("failed to load embedded TLS credentials: %w", err)
 		}
 	} else {
-		// Read the certificate and key file contents.
 		certPEMData, err := os.ReadFile(cfg.Scitq.CertificatePem)
 		if err != nil {
-			log.Fatalf("failed to read certificate file: %v", err)
+			return tls.Certificate{}, "", nil, fmt.Errorf("failed to read certificate file: %w", err)
 		}
 		certPEMstring = string(certPEMData)
 		certKeyData, err := os.ReadFile(cfg.Scitq.CertificateKey)
 		if err != nil {
-			log.Fatalf("failed to read certificate key file: %v", err)
+			return tls.Certificate{}, "", nil, fmt.Errorf("failed to read certificate key file: %w", err)
 		}
 		tlsCert, err = tls.X509KeyPair(certPEMData, certKeyData)
 		if err != nil {
-			log.Fatalf("failed to load TLS credentials from file: %v", err)
+			return tls.Certificate{}, "", nil, fmt.Errorf("failed to load TLS credentials from file: %w", err)
 		}
 	}
 
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-	}
+	mux := http.NewServeMux()
 
-	// Endpoint to serve the client binary over HTTPS.
-	http.HandleFunc("/scitq-client", func(w http.ResponseWriter, r *http.Request) {
-		// Check for the correct token.
+	// Serve client binary
+	mux.HandleFunc("/scitq-client", func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 		if token != cfg.Scitq.ClientDownloadToken {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		// Set headers to indicate a binary download.
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", "attachment; filename=scitq-client")
 		http.ServeFile(w, r, cfg.Scitq.ClientBinaryPath)
 	})
 
-	// Serve the Svelte application assets from the embedded "public" folder.
+	// Serve embedded Svelte frontend
 	fs := http.FileServer(http.FS(publicFiles))
-	http.Handle("/", fs)
+	mux.Handle("/", fs)
 
-	// Create an HTTP server with the TLS configuration.
-	server := &http.Server{
-		Addr:      ":443",
-		TLSConfig: tlsConfig,
-	}
-
-	log.Printf("Starting HTTPS server")
-	return certPEMstring, server.ListenAndServeTLS("", "")
+	return tlsCert, certPEMstring, mux, nil
 }

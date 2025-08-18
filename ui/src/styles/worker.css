@@ -1,130 +1,605 @@
+/* ==================== */
+/* BASE COMPONENT STYLES */
+/* ==================== */
 .status-count-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 8px;
+  flex-wrap: nowrap; /* Force single line */
+  align-items: center;
+  gap: 1px;
   border-radius: 6px;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 0.90rem; /* smaller */
+  font-size: 0.65rem;
   user-select: none;
+  margin: 1.25rem 0 0.5rem 2rem; /* Maintain other margins */
+  overflow: hidden; /* Hide overflow */
 }
 
 .status-count-bar a {
+  flex: 1 0 auto; /* Stretch but don't shrink below content width */
+  min-width: min-content; /* Minimum width based on content */
+  padding: 0 4px; /* Minimum padding */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis; /* Show ... if text is too long */
   display: inline-flex;
   align-items: center;
-  background-color: #fff;
-  color: #444;
-  padding: 2px 6px; /* smaller padding */
+  justify-content: center;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 0 4px;
   border-radius: 12px;
   font-weight: 600;
   text-decoration: none;
-  box-shadow: 0px 3px 6px rgba(0, 0, 0, 0.35);
-  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  border: 1px solid var(--border-color);
 }
 
 .status-count-bar a:hover {
-  background-color: #192245;
-  color: white;
-  box-shadow: 0 2px 4px rgb(30 64 175 / 0.35);
-  cursor: pointer;
+  background-color: var(--primary-color);
+  color: var(--primary-text);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(30, 64, 175, 0.15);
 }
 
 .status-count-bar a::before {
   content: '';
   display: inline-block;
-  width: 4px;  /* smaller */
-  height: 4px; /* smaller */
-  background-color: #192245;
+  width: 4px;
+  height: 4px;
+  background-color: var(--primary-color);
   border-radius: 50%;
-  margin-right: 2px; /* almost touching */
+  margin-right: 2px;
 }
 
-/* === Basic Table Styles === */
-.workerCompo-table {
-  width: auto;
-  min-width: 100%;
-  border-collapse: collapse;
-  color: black;
-}
+/* ==================== */
+/* TABLE STYLES */
+/* ==================== */
 
-.workerCompo-table,
-.workerCompo-table th,
-.workerCompo-table td {
-  font-size: 0.85rem;
-}
-
-/* Table Wrapper */
 .workerCompo-table-wrapper {
   max-width: 100%;
   margin: auto;
-  overflow-x: auto;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
+  overflow: auto; /* Add scroll if needed */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  max-height: 100%; /* Take all available height */
+  flex: 1; /* Fill all space in dashboard-worker-section */
 }
 
-/* === Clickable Cells === */
+.workerCompo-table-scroll-container {
+  overflow: auto;
+  flex: 1;
+}
+
+.workerCompo-table-container {
+  overflow: auto;
+  flex: 1;
+}
+
+.workerCompo-table {
+  width: 100%;
+  max-height: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  flex: 1;
+  margin-bottom: 0; /* Important to avoid unwanted spaces */
+}
+
+/* Fixed header */
+.workerCompo-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.workerCompo-table th,
+.workerCompo-table td {
+  border: 1px solid var(--border-color);
+  text-align: center;
+  overflow: hidden;
+}
+
+.workerCompo-table td {
+  height: 100%; /* Fixed cell height */
+  padding: 0;
+}
+
+.scrollable-cell {
+  max-height: 40px;
+  overflow-y: auto;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
+
+/* Scrollbar style for cells */
+.workerCompo-table td::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.workerCompo-table td::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 2px;
+}
+
+.workerCompo-table th {
+  background-color: var(--table-header);
+  color: var(--table-header-text);
+  position: sticky;
+  top: 0;
+  font-weight: 600;
+}
+
+.workerCompo-table tr:nth-child(even) {
+  background-color: var(--table-row-even);
+}
+
+.workerCompo-table th:nth-child(1) { width: 90px; } /* Name */
+.workerCompo-table th:nth-child(2) { width: 90px; } /* Wf.Step */
+.workerCompo-table th:nth-child(3) { width: 30px; } /* Status */
+.workerCompo-table th:nth-child(4) { width: 40px; } /* Concurrency */
+.workerCompo-table th:nth-child(5) { width: 40px; } /* Prefetch */
+.workerCompo-table th:nth-child(6) { width: 45px; } /* Starting */
+.workerCompo-table th:nth-child(7) { width: 45px; } /* Progress */
+.workerCompo-table th:nth-child(8) { width: 45px; } /* Successes */
+.workerCompo-table th:nth-child(9) { width: 45px; } /* Fails */
+.workerCompo-table th:nth-child(10) { width: 45px; } /* Inactive */
+.workerCompo-table th:nth-child(11) { width: 45px; } /* CPU% */
+.workerCompo-table th:nth-child(12) { width: 45px; } /* Mem% */
+.workerCompo-table th:nth-child(13) { width: 115px; } /* Disk Usage% */
+.workerCompo-table th:nth-child(14) { width: 115px; } /* Disk R/W */
+.workerCompo-table th:nth-child(15) { width: 115px; } /* Network Sent/Recv */
+.workerCompo-table th:nth-child(16) { width: 45px; } /* Actions */
+
+.workerCompo-table th[colspan="7"] {
+  width: 400px;
+}
+
+/* ==================== */
+/* INTERACTIVE ELEMENTS */
+/* ==================== */
 .workerCompo-clickable {
   cursor: pointer;
-  text-decoration: underline;
-  color: #4ea6ff;
+  color: var(--link-color);
+  font-weight: 500;
+  transition: color 0.2s ease;
 }
 
 .workerCompo-clickable:hover {
-  color: #82cfff;
+  color: var(--link-hover);
+  text-decoration: underline;
 }
 
-/* === Empty State Paragraph === */
-.workerCompo-empty-state {
+.value-with-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.value {
+  min-width: 20px;
   text-align: center;
 }
 
-/* Status Pills */
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.small-btn {
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.small-btn:hover {
+  background-color: var(--primary-color);
+  color: var(--primary-text);
+  border-color: var(--primary-color);
+}
+
+.small-btn:active {
+  transform: scale(0.95);
+}
+
+/* ==================== */
+/* STATUS INDICATORS */
+/* ==================== */
 .workerCompo-status-pill {
   display: inline-block;
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  cursor: pointer;
+  vertical-align: middle;
+  margin: 0 auto;
+  box-shadow: 0 0 0 2px var(--bg-primary);
 }
 
-/* Worker statuses */
+/* Worker status colors (same for both themes) */
 .workerCompo-status-pill.offline {
-  background-color: #9e9e9e; /* gray */
+  background-color: #9e9e9e;
 }
 
 .workerCompo-status-pill.installing {
-  background-color: #ccbe21; /* dull yellow, like initializing */
+  background-color: #ccbe21;
 }
 
 .workerCompo-status-pill.ready {
-  background-color: #4caf50; /* green, like running */
+  background-color: #4caf50;
 }
 
 .workerCompo-status-pill.paused {
-  background-color: #ff9800; /* orange, like pending */
+  background-color: #ff9800;
 }
 
 .workerCompo-status-pill.failing {
-  background-color: #f44336; /* red, like failed */
+  background-color: #f44336;
 }
 
 .workerCompo-status-pill.quarantined {
-  background-color: #673ab7; /* purple, special state */
+  background-color: #673ab7;
 }
 
 .workerCompo-status-pill.lost {
-  background-color: #607d8b; /* blue-gray, indicating lost */
+  background-color: #607d8b;
+}
+
+/* ==================== */
+/* CHART COMPONENTS */
+/* ==================== */
+.chart-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chart-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chart-legends {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.6rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.time-chart {
+  background-color: var(--chart-area-bg);
+  border-radius: 6px;
+  height: 80px;
+}
+
+.time-chart polyline {
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.toggle-auto-zoom {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.65rem;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.toggle-auto-zoom.active {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.manual-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.zoom-level {
+  font-size: 0.65rem;
+}
+
+.manual-zoom button {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.5rem;
+  min-width: 10px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.manual-zoom button:hover {
+  background-color: var(--primary-color);
+  color: var(--primary-text);
+  border-color: var(--primary-color);
+}
+
+.chart-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+/* ==================== */
+/* METRIC CHARTS GRID */
+/* ==================== */
+.metrics-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 95%;
+  justify-content: center; 
+  height: 100%; 
+}
+
+.metric-chart {
+  flex: 1;
+  width: 100%;
+  padding: 8px;
+  background-color: var(--bg-primary);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.metrics-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.chart-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.chart-bar {
+  height: 100%;
+  background: var(--primary-color);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.combined-metrics-container {
+  display: flex;
+  width: 100%;
+  min-height: 100%;
+}
+
+.system-metrics {
+  flex: 1;
+  min-width: 0;
+}
+
+.io-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 250px; /* Fixed width for I/O charts */
+}
+
+.io-chart-container {
+  background: var(--bg-primary);
+  border-radius: 6px;
+  padding: 5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.io-chart-container .chart-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  text-align: center;
+  background: #FF6384; /* Pink for Disk I/O */
+  color: white;
+  padding: 1px;
+  border-radius: 4px;
+}
+
+.io-chart-container:nth-child(2) .chart-title {
+  background: #36A2EB; /* Blue for Network I/O */
+}
+
+/* ==================== */
+/* DISK USAGE BARS */
+/* ==================== */
+.disk-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.disk-chart-container {
+  margin: 0 auto;
+  width: 80%;
+  max-width: 400px; 
+  padding: 8px;
+  background-color: var(--bg-primary);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.disk-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.disk-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+}
+
+.disk-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.disk-percent {
+  color: var(--text-secondary);
+}
+
+.disk-bar-background {
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.disk-bar-fill {
+  height: 100%;
+  background: var(--primary-color);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.disk-bar-fill.warning {
+  background: var(--status-failing);
+}
+
+.scrollable-disks {
+  max-height: 120px;
+  overflow-y: auto;
+  padding-right: 4px; 
+}
+
+
+.scrollable-disks::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollable-disks::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 2px;
+}
+
+
+/* ==================== */
+/* UTILITY CLASSES */
+/* ==================== */
+.workerCompo-empty-state {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 2rem;
+  font-size: 0.9rem;
+}
+
+.no-data {
+  color: var(--text-secondary);
+  font-style: italic;
+  text-align: center;
+  padding: 12px;
+  font-size: 0.8rem;
 }
 
 .spinner {
   display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(0,0,0,0.2);
-  border-top-color: #333;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-top-color: var(--primary-color);
   border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+  animation: spin 0.8s linear infinite;
+}
+
+@media (max-width: 1200px) {
+
+  .combined-metrics-container {
+    flex-direction: column;
+  }
+  
+  .io-charts {
+    width: 100%;
+    flex-direction: row;
+  }
+  
+  .io-chart-container {
+    flex: 1;
+  }
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ==================== */
+/* DARK MODE ENHANCEMENTS */
+/* ==================== */
+[data-theme="dark"] {
+  .status-count-bar a {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+  
+  .status-count-bar a:hover {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+  
+  .workerCompo-table-wrapper {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
+  
+  .time-chart polyline {
+    filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.1));
+  }
+  
+  .disk-bar-fill {
+    filter: brightness(1.1);
+  }
 }

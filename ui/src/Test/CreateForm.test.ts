@@ -32,7 +32,7 @@ describe('CreateForm', () => {
     // Render the component
     render(CreateForm);
 
-    // Check that API functions were called
+    // Verify API functions were called
     await waitFor(() => {
       expect(mockApi.getFlavors).toHaveBeenCalled();
       expect(mockApi.getWorkFlow).toHaveBeenCalled();
@@ -92,64 +92,11 @@ describe('CreateForm', () => {
     // Submit the form
     await fireEvent.click(getByTestId('add-worker-button'));
 
-    // Check that newWorker was called with correct arguments
+    // Verify newWorker was called with correct arguments
     await waitFor(() => {
       expect(mockApi.newWorker).toHaveBeenCalledWith(
         5, 10, 'flavor1', 'us-east', 'aws', 3, 'step1'
       );
-    });
-  });
-
-  it('should dispatch onWorkerCreated event with correct data', async () => {
-    // Mock API functions
-    mockApi.getFlavors.mockResolvedValue(mockFlavors);
-    mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
-    mockApi.newWorker.mockResolvedValue(mockNewWorkerResponse);
-    mockApi.getStatus.mockResolvedValue(mockStatusResponse);
-
-    // Mock the onWorkerCreated function
-    const mockOnWorkerCreated = vi.fn();
-
-    // Render the component with mock prop
-    const { getByLabelText, getByTestId } = render(CreateForm, {
-      props: {
-        onWorkerCreated: mockOnWorkerCreated
-      }
-    });
-
-    // Fill form fields and submit
-    await fireEvent.input(getByLabelText('Concurrency:'), { target: { value: '5' } });
-    await fireEvent.input(getByLabelText('Prefetch:'), { target: { value: '10' } });
-    await fireEvent.input(getByLabelText('Flavor:'), { target: { value: 'flavor1' } });
-    await fireEvent.input(getByLabelText('Region:'), { target: { value: 'us-east' } });
-    await fireEvent.input(getByLabelText('Provider:'), { target: { value: 'aws' } });
-    await fireEvent.input(getByLabelText('Step (Workflow.step):'), { target: { value: 'step1' } });
-    await fireEvent.input(getByLabelText('Number:'), { target: { value: '3' } });
-    
-    await fireEvent.click(getByTestId('add-worker-button'));
-
-    // Check that the onWorkerCreated event was dispatched with correct data
-    await waitFor(() => {
-      expect(mockOnWorkerCreated).toHaveBeenCalledWith({
-        detail: {
-          worker: {
-            workerId: 'w1',
-            name: 'workerOne',
-            concurrency: 5,
-            prefetch: 10,
-            status: 'running',
-            flavor: 'flavor1',
-            provider: 'aws',
-            region: 'us-east',
-          },
-          job: {
-            JobId: 'j1',
-            action: 'C',
-            workerId: 'w1',
-            modifiedAt: expect.any(String),
-          }
-        }
-      });
     });
   });
 });

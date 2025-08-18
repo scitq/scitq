@@ -1,0 +1,442 @@
+/* workflowTemplate.css */
+/* Header styles */
+.wfTemp-header {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  margin: 1rem 0 1rem 3rem;
+  gap: 1rem;
+}
+
+.wfTemp-sort-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  white-space: nowrap; /* Add this line */
+}
+
+.wfTemp-sort-group label {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+}
+
+.wfTemp-sort-group select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+/* File input styles */
+.wfTemp-file-action-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.wfTemp-file-info {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.wfTemp-file-display {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  min-width: 200px;
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wfTemp-clear-file {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  margin-left: 0.5rem;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.wfTemp-clear-file:hover {
+  color: #e00;
+}
+
+.wfTemp-list {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+
+/* Button styles */
+.wfTemp-button-group {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.wfTemp-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 1.85rem;
+  height: 1.85rem;
+}
+
+.wfTemp-add-button {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.wfTemp-validate-button {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.wfTemp-add-button:hover {
+  background-color: var(--primary-hover);
+  transform: scale(1.05);
+}
+
+.wfTemp-validate-button:hover {
+  background-color: #43A047;
+  transform: scale(1.05);
+}
+
+.wfTemp-action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Modal styles (consistent with settings) */
+.wfTemp-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+/* Modal styles */
+.wfTemp-modal {
+  background: var(--bg-secondary);
+  padding: 2rem;
+  border-radius: 8px;
+  width: 30%;
+  height: 40%; /* Maximum height of 80% of screen height */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.wfTemp-modal-content {
+  overflow-y: auto; /* Enable vertical scroll if needed */
+  padding-right: 0.5rem; /* Space to prevent scroll from overlapping content */
+  margin-right: -0.5rem; /* Compensate for padding-right */
+  flex-grow: 1;
+}
+
+/* Add shadow at top and bottom to indicate scrollable content */
+.wfTemp-modal-content {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 1rem,
+    black calc(100% - 1rem),
+    transparent
+  );
+}
+
+  /* Scrollbar style */
+  .wfTemp-modal-content::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .wfTemp-modal-content::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+    border-radius: 3px;
+  }
+
+  .wfTemp-modal-content::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 3px;
+  }
+
+  /* Dark mode scrollbar */
+  [data-theme="dark"] .wfTemp-modal-content::-webkit-scrollbar-thumb {
+    background: var(--primary-hover);
+  }
+
+.wfTemp-modal h2 {
+  font-size: 1.25rem;
+  margin-bottom: 1.5rem;
+  color: var(--text-primary);
+  text-align: center;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.wfTemp-modal p {
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+}
+
+.wfTemp-form-group {
+  margin-bottom: 0.75rem;
+}
+
+.wfTemp-form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.1rem;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+}
+
+.wfTemp-form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  transition: all 0.2s ease;
+}
+
+.wfTemp-form-group input:focus {
+  border-color: var(--primary-color);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(25, 34, 69, 0.2);
+}
+
+.wfTemp-modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.wfTemp-modal-actions button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.7rem;
+  transition: all 0.2s ease;
+  min-width: 120px;
+}
+
+.wfTemp-modal-actions button:first-child {
+  background-color: var(--primary-color);
+  color: var(--primary-text);
+}
+
+.wfTemp-modal-actions button:first-child:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.wfTemp-modal-actions button:last-child {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.wfTemp-modal-actions button:last-child:hover {
+  background-color: var(--border-color);
+  transform: translateY(-1px);
+}
+
+/* Dark theme adjustments */
+[data-theme="dark"] {
+  .wfTemp-modal {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  
+  .wfTemp-modal-actions button:first-child:hover {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+}
+
+
+/* Error styles */
+.wfTemp-error-message {
+  color: #ff4444;
+  background-color: #ffeeee;
+  padding: 0.75rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.7rem;
+  border-left: 3px solid #ff4444;
+}
+
+.wfTemp-field-error {
+  color: #ff4444;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+label.required::after {
+  content: ' *';
+  color: #ff4444;
+}
+
+label.error {
+  color: #ff4444;
+}
+
+input.error {
+  border-color: #ff4444 !important;
+  background-color: #fffafa !important;
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] {
+  .wfTemp-error-message {
+    background-color: #2a1a1a;
+    border-left-color: #ff6666;
+  }
+  
+  input.error {
+    background-color: #2a1a1a !important;
+  }
+}
+
+/* Input container */
+.wfTemp-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Help button styles */
+.wfTemp-help-button {
+  position: absolute;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.wfTemp-help-button:hover {
+  background-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+/* Help text styles */
+.wfTemp-help-text {
+  margin-top: 0.25rem;
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  display: inline-block;
+  border-left: 3px solid var(--primary-color);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  border-radius: 0 4px 4px 0;
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] {
+  .wfTemp-help-text {
+    background-color: var(--bg-secondary);
+    border-left-color: var(--primary-hover);
+  }
+  
+  .wfTemp-help-button:hover {
+    background-color: var(--bg-primary);
+  }
+}
+
+/* Select styles */
+.wfTemp-select-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  appearance: none; /* Remove default browser styling */
+  padding-right: 2rem; /* Space for icon */
+}
+
+/* Chevron icon for select */
+.wfTemp-select-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  pointer-events: none; /* Allow clicking through the icon */
+}
+
+/* Help button positioning for selects */
+.wfTemp-select-wrapper + .wfTemp-help-button {
+  right: 2.5rem; /* Offset to not overlap the chevron */
+}
+
+/* Dark mode for chevron icon */
+[data-theme="dark"] .wfTemp-select-wrapper::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+/* Checkbox styles */
+.wfTemp-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--primary-color);
+}

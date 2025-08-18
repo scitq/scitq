@@ -1,8 +1,10 @@
+/* Sidebar container */
 .dashboard-sidebar {
   width: 220px;
   height: 100vh;
+  overflow: auto; 
   background-color: #192245;
-  color: #e5e7eb;
+  color: var(--primary-text); 
   display: flex;
   flex-direction: column;
   padding: 1.5rem 1rem;
@@ -12,10 +14,12 @@
   transition: transform 0.3s ease;
 }
 
+/* Hidden sidebar state */
 .dashboard-sidebar.hidden {
   transform: translateX(-100%);
 }
 
+/* Sidebar header section */
 .dashboard-sidebar-header {
   display: flex;
   align-items: center;
@@ -24,14 +28,22 @@
   font-weight: bold;
   margin-bottom: 2rem;
   color: #f3f4f6;
+  justify-content: space-between;
 }
 
+.dashboard-sidebar-version {
+  font-size: 1.1rem;
+  font-weight: 100;
+}
+
+/* Logo styling */
 .dashboard-logo {
   width: 40px;
   height: 32px;
   object-fit: contain;
 }
 
+/* Navigation container */
 .dashboard-sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -56,39 +68,60 @@
   width: 100%;
 }
 
+/* Navigation link hover/active states */
 .dashboard-nav-link:hover,
 .dashboard-nav-link.active {
   color: #8ecae6;
   background-color: rgba(255, 255, 255, 0.05);
 }
 
+/* Dropdown navigation links */
 .dashboard-nav-link.dropdown {
   justify-content: space-between;
   cursor: pointer;
 }
 
+/* Icon styling */
 .dashboard-icon {
   width: 20px;
   height: 20px;
   color: #9ca3af;
 }
 
+/* Left-aligned content in nav items */
 .dashboard-left {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
-/* Chevron icon */
-.dashboard-chevron {
-  width: 16px;
-  height: 16px;
-  color: #9ca3af;
-  transition: transform 0.3s ease;
-  align-self: right;
+/* Container for nav link content */
+.dashboard-nav-link-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 
-.dashboard-chevron.rotate {
+/* Chevron button for dropdowns */
+.dashboard-chevron-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+  margin-left: 0.5rem;
+  display: flex;
+  align-items: center;
+  color: #d1d5db;
+}
+
+/* Chevron hover state */
+.dashboard-chevron-button:hover .dashboard-chevron {
+  color: #8ecae6;
+}
+
+/* Rotated chevron for expanded dropdowns */
+.dashboard-chevron-button.rotate .dashboard-chevron {
   transform: rotate(180deg);
 }
 
@@ -102,10 +135,15 @@
   background-color: transparent;
 }
 
+/* Expanded submenu state */
+.dashboard-submenu.expanded {
+  max-height: 1000px; 
+}
+
 /* Submenu header */
 .dashboard-submenu-header {
   display: flex;
-  justify-content: space-between; /* Positions chevron on right */
+  justify-content: space-between;
   align-items: center;
   font-size: 1.05rem;
   font-weight: 600;
@@ -119,12 +157,13 @@
   width: 80%;
 }
 
+/* Submenu header hover/active states */
 .dashboard-submenu-header:hover,
 .dashboard-submenu-header.active {
   color: #a5d8f0;
 }
 
-/* Submenu links */
+/* Submenu items container */
 .dashboard-submenu-items {
   display: flex;
   flex-direction: column;
@@ -133,6 +172,7 @@
   margin-top: 0.3rem;
 }
 
+/* Submenu links */
 .dashboard-submenu-items a {
   font-size: 1rem;
   font-style: italic;
@@ -144,13 +184,14 @@
   text-decoration: none;
 }
 
+/* Submenu link hover/active states */
 .dashboard-submenu-items a:hover,
 .dashboard-submenu-items a.active {
   color: #c1e3f6;
   background: none;
 }
 
-/* Logout button */
+/* Logout button styling */
 .dashboard-logout {
   margin-top: auto;
   color: #f87171;
@@ -159,60 +200,86 @@
   border: none;
 }
 
+/* Logout button hover state */
 .dashboard-logout:hover {
   color: #ef4444;
   background-color: #1e1e1e;
   border: none;
 }
 
-/* Dashboard main content area */
+/* Main content container */
 .dashboard-content {
-  position: relative;
-  padding: 1rem;
-  height: 100vh;
+  height: 100%;
+  flex: 1;
+  min-height: min-content;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Worker section styling */
+.dashboard-worker-section {
+  flex: 0 0 auto;
+  height: auto;
+  width: 100%;
   box-sizing: border-box;
+  margin: 5px 0;
+  transition: max-height 0.3s ease;
   display: flex;
   flex-direction: column;
 }
 
+/* Bottom container section */
 .dashboard-bottom-div {
+  min-height: 0;
   display: flex;
   gap: 20px;
-  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  height: auto; 
   align-items: flex-start;
-  border-radius: 8px;
-  height: calc(100vh - 150px);
-  box-sizing: border-box;
 }
 
+/* Job section styling */
 .dashboard-job-section {
   flex: 3;
-  text-align: center;
-  border-radius: 8px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
-  max-height: 100%;
-  overflow-y: auto;
-  background: none;
+  align-self: flex-start;
+  margin-top: -0.1rem;
+  height: 0; /* Reset */
+  position: relative;
+  min-height: 100%;
+  max-height: none;
   box-sizing: border-box;
+  border-radius: 8px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
+.dashboard-job-section > div:first-child {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Add worker section styling */
 .dashboard-add-worker-section {
   flex: 1;
-  border-radius: 8px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
-  max-height: 100%;
-  overflow-y: auto;
-  background: none;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: fit-content;
+  height: auto;
+  max-height: none;
 }
 
-.dashboard-worker-section {
-  margin-top: 2rem;
-  margin-bottom: 1rem;
-  background: none;
-}
-
-/* Popup overlay */
+/* Popup overlay styling */
 .dashboard-popup-overlay {
   position: fixed;
   top: 0;
@@ -226,19 +293,23 @@
   z-index: 1000;
 }
 
-/* Popup container */
+/* Popup container styling */
 .dashboard-popup {
-  background-color: white;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
   padding: 20px;
   border-radius: 8px;
   width: 300px;
   text-align: center;
 }
 
+/* Popup action buttons container */
 .dashboard-popup-actions {
   margin-top: 20px;
 }
 
+/* Popup action buttons */
 .dashboard-popup-actions button {
   margin: 0 10px;
   padding: 10px 20px;
@@ -246,18 +317,109 @@
   font-size: 16px;
 }
 
-/* Confirm button */
+/* ==================== */
+/* POPUP BUTTON STYLES */
+/* ==================== */
+
+/* Confirm button styling */
 .dashboard-confirm {
-  background-color: #4CAF50;
+  background-color: #66BB6A; 
   color: white;
-  border: none;
-  border-radius: 4px;
 }
 
-/* Cancel button */
+/* Cancel button styling */
 .dashboard-cancel {
-  background-color: #f44336;
+  background-color: #EF5350; 
   color: white;
+}
+
+/* Dark mode confirm button */
+[data-theme="dark"] .dashboard-confirm {
+  background-color: #388E3C; 
+}
+
+/* Dark mode cancel button */
+[data-theme="dark"] .dashboard-cancel {
+  background-color: #D32F2F; 
+}
+
+/* Common button styles */
+.dashboard-confirm,
+.dashboard-cancel {
   border: none;
   border-radius: 4px;
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.2s;
+}
+
+/* Hover states - Light theme */
+.dashboard-confirm:hover {
+  background-color: #57C15B;
+}
+
+.dashboard-cancel:hover {
+  background-color: #F76969;
+}
+
+/* Hover states - Dark theme */
+[data-theme="dark"] .dashboard-confirm:hover {
+  background-color: #2E7D32;
+}
+
+[data-theme="dark"] .dashboard-cancel:hover {
+  background-color: #C62828;
+}
+
+/* Theme toggle container */
+.theme-toggle-container {
+  margin-top: auto;
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Theme icon styling */
+.theme-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* New jobs notification styling */
+.new-jobs-notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--primary-color);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 20px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1000;
+  animation: pulse 2s infinite;
+}
+
+.new-jobs-notification:focus {
+  outline: 2px solid #ffbe0b;
+  outline-offset: 2px;
+}
+
+/* Show new jobs button styling */
+.show-new-btn {
+  background: white;
+  color: var(--primary-color);
+  border: none;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-weight: bold;
 }

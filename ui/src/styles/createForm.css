@@ -1,50 +1,86 @@
 /* Container for the entire form */
 .createForm-form-container {
+  width: 100%;
   max-width: 100%;
+  height: auto;
   padding: 0.5rem;
-  background-color: #fff;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  background-color: var(--bg-secondary);
   border-radius: 8px;
-  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-color);
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 /* Form title */
 .createForm-title {
   text-align: center;
-  font-size: 0.8rem;
-  background-color: #192245;
-  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background-color: var(--primary-color);
+  color: var(--primary-text);
+  padding: 0.5rem;
+  border-radius: 4px 4px 0 0;
+  margin: -0.5rem -0.5rem 0.5rem -0.5rem;
 }
 
-/* Wrapper for label and input */
+/* Form elements */
 .createForm-form-group {
   margin-bottom: 0.2rem;
-  position: relative; /* Needed for eye button positioning */
+  position: relative;
 }
 
-/* Label style */
 .createForm-label {
   display: block;
   text-decoration: underline;
   text-align: left;
   font-size: 0.75rem;
+  color: var(--text-primary);
 }
 
-/* Input field style */
 .createForm-input {
   width: 100%;
-  padding: 0.2rem 2.5rem 0.2rem 0.4rem; /* Extra right padding for eye button */
-  border: 1px solid #ccc;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   font-size: 0.75rem;
   box-sizing: border-box;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
 }
 
-/* Password input container for eye button positioning */
-.createForm-password-field {
-  position: relative;
+.createForm-input:focus {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -1px;
 }
 
-/* Eye button style */
+/* Button styles */
+.createForm-add-button {
+  width: 32%;
+  padding: 0.2rem 0.1rem;
+  background-color: var(--primary-color);
+  color: var(--primary-text);
+  border: none;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  cursor: pointer;
+  display: block;
+  margin: 0 auto;
+  margin-top: 0.5rem;
+  transition: background-color 0.2s;
+}
+
+.createForm-add-button:hover:not(:disabled) {
+  background-color: var(--primary-hover);
+}
+
+.createForm-add-button:disabled {
+  background-color: var(--border-color);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+/* Eye button style (for password visibility toggle) */
 .createForm-eye-button {
   position: absolute;
   right: 8px;
@@ -55,140 +91,67 @@
   padding: 0;
   display: flex;
   align-items: center;
-  color: #192245;
+  color: var(--text-primary);
 }
 
-/* Add worker button */
-.createForm-add-button {
-  width: 32%;
-  padding: 0.3rem 0.6rem;
-  background-color: #192245;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  cursor: pointer;
-  display: block;
-  margin: 0 auto;
+.createForm-eye-button:hover {
+  color: var(--text-secondary);
 }
 
-.createForm-add-button:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
-}
-
+/* Autocomplete suggestions */
 .createForm-autocomplete {
   position: relative;
 }
 
-/* Autocomplete suggestions list */
 .createForm-suggestions {
   list-style: none;
   padding: 0;
   margin: 0;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   max-height: 150px;
   overflow-y: auto;
-  overflow-x: hidden;
-  background-color: white;
+  background-color: var(--bg-primary);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  z-index: 100;
 }
 
-/* Individual suggestion item */
 .createForm-suggestion-item {
   display: block;
   width: 100%;
-  text-align: center;
   padding: 0.2rem 0.4rem;
   font-size: 0.75rem;
   background: none;
   border: none;
   cursor: pointer;
-  font-weight: normal;
+  text-align: left;
+  color: var(--text-primary);
 }
 
 .createForm-suggestion-item:hover,
-.createForm-suggestion-item:focus {
-  background-color: #f0f0f0;
-  outline: none;
+.createForm-suggestion-item.active {
+  background-color: var(--table-row-even);
 }
 
-/* Intègre ton CSS ici ou dans createForm.css */
-
-/* Styles spécifiques à la liste des workflows et steps */
-.workflow-list {
-  max-width: 100%;
-  margin-bottom: 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 0.3rem;
-  background: #fafafa;
-}
-.workflow-item {
-  padding: 0.3rem 0.5rem;
-  cursor: pointer;
-  border-bottom: 1px solid #eee;
-  font-size: 0.75rem;
-}
-.workflow-item:last-child {
-  border-bottom: none;
-}
-.workflow-item:hover {
-  background-color: #dbe6fb;
-}
-.workflow-steps {
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 0.3rem;
-  margin-top: 0.3rem;
-  background: #fefefe;
-  max-width: 100%;
-}
-.workflow-steps ul {
-  padding-left: 1rem;
-  margin: 0;
-}
-.workflow-steps li button {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.3rem;
-  margin-bottom: 0.2rem;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  cursor: pointer;
-  border-radius: 3px;
-}
-.workflow-steps li button:hover {
-  background-color: #f0f0f0;
-}
-.selected-workflow {
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
-  color: #192245;
-  font-weight: bold;
-}
-
-.createForm-step-suggestions {
-  position: relative;
-  left: 100%;
-  top: 0;
-  margin-left: 0.5rem;
-  min-width: 200px;
-}
-
+/* Workflow steps selector */
 .suggestions-container {
   position: relative;
+  width: 100%;
+  margin-bottom: 0.2rem;
 }
 
 .workflow-steps-columns {
   display: flex;
-  position: absolute;
-  background: white;
+  position: relative;
+  width: 100%;
+  background: var(--bg-primary);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   border-radius: 4px;
   z-index: 1000;
+  max-height: 300px;
+  overflow: hidden;
+  margin-top: 0.2rem;
+  border: 1px solid var(--border-color);
 }
 
 .workflow-list, .steps-list {
@@ -197,24 +160,33 @@
   margin: 0;
   max-height: 300px;
   overflow-y: auto;
+  flex: 1;
 }
 
 .workflow-list {
-  border-right: 1px solid #eee;
+  border-right: 1px solid var(--border-color);
 }
 
-.createForm-suggestion-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 16px;
-  background: none;
-  border: none;
-  cursor: pointer;
+.loading-message,
+.no-steps-message {
+  padding: 15px;
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 0.75rem;
 }
 
-.createForm-suggestion-item:hover, 
-.createForm-suggestion-item.active {
-  background-color: #f0f0f0;
+/* Dark theme specific adjustments */
+[data-theme="dark"] {
+  .createForm-form-container {
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.6);
+  }
+  
+  .createForm-suggestions,
+  .workflow-steps-columns {
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  }
+  
+  .createForm-input {
+    border-color: var(--border-color);
+  }
 }
-

@@ -3,10 +3,34 @@ import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 import { mockApi } from './mocks/api_mock';
 import { mockAuth } from './mocks/auth_mock';
+import { wsClient } from './lib/wsClient';
 
 vi.mock('grpc-web', () => {
   return {
     grpc: {}
+  };
+});
+
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = vi.fn().mockImplementation((query) => ({
+    matches: query === '(prefers-color-scheme: dark)', // or false depending on your needs
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(), // legacy support
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
+vi.mock('@/lib/wsClient', async () => {
+  return {
+    wsClient: {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      subscribeToMessages: vi.fn(() => () => true),
+    },
   };
 });
 

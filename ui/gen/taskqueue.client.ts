@@ -4,6 +4,19 @@
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { TaskQueue } from "./taskqueue";
+import type { ResourceSpec } from "./taskqueue";
+import type { WorkspaceRootResponse } from "./taskqueue";
+import type { WorkspaceRootRequest } from "./taskqueue";
+import type { DeleteTemplateRunRequest } from "./taskqueue";
+import type { UpdateTemplateRunRequest } from "./taskqueue";
+import type { TemplateRunList } from "./taskqueue";
+import type { TemplateRunFilter } from "./taskqueue";
+import type { TemplateList } from "./taskqueue";
+import type { TemplateFilter } from "./taskqueue";
+import type { TemplateRun } from "./taskqueue";
+import type { RunTemplateRequest } from "./taskqueue";
+import type { UploadTemplateResponse } from "./taskqueue";
+import type { UploadTemplateRequest } from "./taskqueue";
 import type { FetchListResponse } from "./taskqueue";
 import type { FetchListRequest } from "./taskqueue";
 import type { GetWorkerStatsResponse } from "./taskqueue";
@@ -11,6 +24,7 @@ import type { GetWorkerStatsRequest } from "./taskqueue";
 import type { StepId } from "./taskqueue";
 import type { StepRequest } from "./taskqueue";
 import type { StepList } from "./taskqueue";
+import type { StepFilter } from "./taskqueue";
 import type { WorkflowId } from "./taskqueue";
 import type { WorkflowRequest } from "./taskqueue";
 import type { WorkflowList } from "./taskqueue";
@@ -205,9 +219,9 @@ export interface ITaskQueueClient {
      */
     deleteWorkflow(input: WorkflowId, options?: RpcOptions): UnaryCall<WorkflowId, Ack>;
     /**
-     * @generated from protobuf rpc: ListSteps(taskqueue.WorkflowId) returns (taskqueue.StepList);
+     * @generated from protobuf rpc: ListSteps(taskqueue.StepFilter) returns (taskqueue.StepList);
      */
-    listSteps(input: WorkflowId, options?: RpcOptions): UnaryCall<WorkflowId, StepList>;
+    listSteps(input: StepFilter, options?: RpcOptions): UnaryCall<StepFilter, StepList>;
     /**
      * @generated from protobuf rpc: CreateStep(taskqueue.StepRequest) returns (taskqueue.StepId);
      */
@@ -224,6 +238,40 @@ export interface ITaskQueueClient {
      * @generated from protobuf rpc: FetchList(taskqueue.FetchListRequest) returns (taskqueue.FetchListResponse);
      */
     fetchList(input: FetchListRequest, options?: RpcOptions): UnaryCall<FetchListRequest, FetchListResponse>;
+    /**
+     * Template system
+     *
+     * @generated from protobuf rpc: UploadTemplate(taskqueue.UploadTemplateRequest) returns (taskqueue.UploadTemplateResponse);
+     */
+    uploadTemplate(input: UploadTemplateRequest, options?: RpcOptions): UnaryCall<UploadTemplateRequest, UploadTemplateResponse>;
+    /**
+     * @generated from protobuf rpc: RunTemplate(taskqueue.RunTemplateRequest) returns (taskqueue.TemplateRun);
+     */
+    runTemplate(input: RunTemplateRequest, options?: RpcOptions): UnaryCall<RunTemplateRequest, TemplateRun>;
+    /**
+     * @generated from protobuf rpc: ListTemplates(taskqueue.TemplateFilter) returns (taskqueue.TemplateList);
+     */
+    listTemplates(input: TemplateFilter, options?: RpcOptions): UnaryCall<TemplateFilter, TemplateList>;
+    /**
+     * @generated from protobuf rpc: ListTemplateRuns(taskqueue.TemplateRunFilter) returns (taskqueue.TemplateRunList);
+     */
+    listTemplateRuns(input: TemplateRunFilter, options?: RpcOptions): UnaryCall<TemplateRunFilter, TemplateRunList>;
+    /**
+     * @generated from protobuf rpc: UpdateTemplateRun(taskqueue.UpdateTemplateRunRequest) returns (taskqueue.Ack);
+     */
+    updateTemplateRun(input: UpdateTemplateRunRequest, options?: RpcOptions): UnaryCall<UpdateTemplateRunRequest, Ack>;
+    /**
+     * @generated from protobuf rpc: DeleteTemplateRun(taskqueue.DeleteTemplateRunRequest) returns (taskqueue.Ack);
+     */
+    deleteTemplateRun(input: DeleteTemplateRunRequest, options?: RpcOptions): UnaryCall<DeleteTemplateRunRequest, Ack>;
+    /**
+     * @generated from protobuf rpc: GetWorkspaceRoot(taskqueue.WorkspaceRootRequest) returns (taskqueue.WorkspaceRootResponse);
+     */
+    getWorkspaceRoot(input: WorkspaceRootRequest, options?: RpcOptions): UnaryCall<WorkspaceRootRequest, WorkspaceRootResponse>;
+    /**
+     * @generated from protobuf rpc: RegisterSpecifications(taskqueue.ResourceSpec) returns (taskqueue.Ack);
+     */
+    registerSpecifications(input: ResourceSpec, options?: RpcOptions): UnaryCall<ResourceSpec, Ack>;
 }
 /**
  * @generated from protobuf service taskqueue.TaskQueue
@@ -473,11 +521,11 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
         return stackIntercept<WorkflowId, Ack>("unary", this._transport, method, opt, input);
     }
     /**
-     * @generated from protobuf rpc: ListSteps(taskqueue.WorkflowId) returns (taskqueue.StepList);
+     * @generated from protobuf rpc: ListSteps(taskqueue.StepFilter) returns (taskqueue.StepList);
      */
-    listSteps(input: WorkflowId, options?: RpcOptions): UnaryCall<WorkflowId, StepList> {
+    listSteps(input: StepFilter, options?: RpcOptions): UnaryCall<StepFilter, StepList> {
         const method = this.methods[34], opt = this._transport.mergeOptions(options);
-        return stackIntercept<WorkflowId, StepList>("unary", this._transport, method, opt, input);
+        return stackIntercept<StepFilter, StepList>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: CreateStep(taskqueue.StepRequest) returns (taskqueue.StepId);
@@ -506,5 +554,63 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
     fetchList(input: FetchListRequest, options?: RpcOptions): UnaryCall<FetchListRequest, FetchListResponse> {
         const method = this.methods[38], opt = this._transport.mergeOptions(options);
         return stackIntercept<FetchListRequest, FetchListResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * Template system
+     *
+     * @generated from protobuf rpc: UploadTemplate(taskqueue.UploadTemplateRequest) returns (taskqueue.UploadTemplateResponse);
+     */
+    uploadTemplate(input: UploadTemplateRequest, options?: RpcOptions): UnaryCall<UploadTemplateRequest, UploadTemplateResponse> {
+        const method = this.methods[39], opt = this._transport.mergeOptions(options);
+        return stackIntercept<UploadTemplateRequest, UploadTemplateResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: RunTemplate(taskqueue.RunTemplateRequest) returns (taskqueue.TemplateRun);
+     */
+    runTemplate(input: RunTemplateRequest, options?: RpcOptions): UnaryCall<RunTemplateRequest, TemplateRun> {
+        const method = this.methods[40], opt = this._transport.mergeOptions(options);
+        return stackIntercept<RunTemplateRequest, TemplateRun>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: ListTemplates(taskqueue.TemplateFilter) returns (taskqueue.TemplateList);
+     */
+    listTemplates(input: TemplateFilter, options?: RpcOptions): UnaryCall<TemplateFilter, TemplateList> {
+        const method = this.methods[41], opt = this._transport.mergeOptions(options);
+        return stackIntercept<TemplateFilter, TemplateList>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: ListTemplateRuns(taskqueue.TemplateRunFilter) returns (taskqueue.TemplateRunList);
+     */
+    listTemplateRuns(input: TemplateRunFilter, options?: RpcOptions): UnaryCall<TemplateRunFilter, TemplateRunList> {
+        const method = this.methods[42], opt = this._transport.mergeOptions(options);
+        return stackIntercept<TemplateRunFilter, TemplateRunList>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: UpdateTemplateRun(taskqueue.UpdateTemplateRunRequest) returns (taskqueue.Ack);
+     */
+    updateTemplateRun(input: UpdateTemplateRunRequest, options?: RpcOptions): UnaryCall<UpdateTemplateRunRequest, Ack> {
+        const method = this.methods[43], opt = this._transport.mergeOptions(options);
+        return stackIntercept<UpdateTemplateRunRequest, Ack>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: DeleteTemplateRun(taskqueue.DeleteTemplateRunRequest) returns (taskqueue.Ack);
+     */
+    deleteTemplateRun(input: DeleteTemplateRunRequest, options?: RpcOptions): UnaryCall<DeleteTemplateRunRequest, Ack> {
+        const method = this.methods[44], opt = this._transport.mergeOptions(options);
+        return stackIntercept<DeleteTemplateRunRequest, Ack>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: GetWorkspaceRoot(taskqueue.WorkspaceRootRequest) returns (taskqueue.WorkspaceRootResponse);
+     */
+    getWorkspaceRoot(input: WorkspaceRootRequest, options?: RpcOptions): UnaryCall<WorkspaceRootRequest, WorkspaceRootResponse> {
+        const method = this.methods[45], opt = this._transport.mergeOptions(options);
+        return stackIntercept<WorkspaceRootRequest, WorkspaceRootResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: RegisterSpecifications(taskqueue.ResourceSpec) returns (taskqueue.Ack);
+     */
+    registerSpecifications(input: ResourceSpec, options?: RpcOptions): UnaryCall<ResourceSpec, Ack> {
+        const method = this.methods[46], opt = this._transport.mergeOptions(options);
+        return stackIntercept<ResourceSpec, Ack>("unary", this._transport, method, opt, input);
     }
 }

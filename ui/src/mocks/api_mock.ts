@@ -39,6 +39,12 @@ export const mockApi = {
   getLogsBatch: vi.fn().mockResolvedValue([]),
   
   getSteps: vi.fn().mockResolvedValue([]),
+  delStep: vi.fn().mockResolvedValue([]),
+  delWorkflow: vi.fn().mockResolvedValue([]),
+
+  getTemplates: vi.fn().mockResolvedValue([]),
+  UploadTemplates: vi.fn().mockResolvedValue([]),
+  runTemp: vi.fn().mockResolvedValue([]),
 
 
 };

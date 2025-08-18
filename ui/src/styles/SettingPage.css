@@ -1,102 +1,141 @@
-/* Main container */
+/* === Settings Container === */
 .settings-container {
-    max-width: 600px;
-    padding: 20px 40px;
-    border: 1px solid white;
-    border-radius: 12px;
-    background-color: white;
+  height: 100vh; /* Full viewport height */
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Vertical centering */
+  box-sizing: border-box;
+}
+
+/* === Profile Section === */
+
+.settings-myProfile {
+    flex: 0 0 auto; /* Doesn't grow */
+    min-height: auto; /* Minimum height */
+    max-height: 50%; /* Maximum 50% of screen */
+    transition: max-height 0.3s ease;
     display: flex;
     flex-direction: column;
 }
 
-/* Grid for admin user settings */
-.settings-admin-user-grid {
-    display: flex;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 20px 40px;
-}
-
-/* Boxes for creating and listing users */
-.settings-create-user-box {
-    flex: 1;
-    background-color: none;
-}
-
-.settings-list-user-box {
-    flex: 2;
-    background-color: none;
-}
-
-/* Profile title */
-.settings-myProfile {
+.settings-myProfile-header {
     text-align: left;
-    font-size: x-large;
-    color: black;
-    padding-bottom: 10px;
-    text-decoration: underline;
-}
-
-/* Spacing for info items */
-.settings-info-item {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    padding: 0.5rem;
     margin-bottom: 1rem;
+    margin-top: 1rem;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-/* Labels styling */
+/* === Form Elements === */
+.settings-info-item {
+    margin-bottom: 0.5rem;
+}
+
 .settings-label-settings {
     display: block;
-    font-weight: bold;
-    margin-bottom: 0.3rem;
-    text-decoration: underline;
-    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+    color: var(--text-primary);
+    font-size: 0.8rem;
 }
 
-/* Input fields styling */
 .settings-input-text,
 .settings-input-email,
 .settings-input-password {
     width: 100%;
-    padding: 0.8rem;
-    margin: 0.5rem 0;
-    border-radius: 8px;
-    border: 1px solid #ddd;
-    background-color: #fff;
-    transition: border 0.3s ease;
+    box-sizing: border-box; 
+    padding: 0.75rem;
+    margin: 0.25rem 0;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.7rem;
+    transition: border-color 0.3s, box-shadow 0.3s;
 }
 
 .settings-input-text:focus,
 .settings-input-email:focus,
 .settings-input-password:focus {
-    border-color: #1e40af;
+    border-color: var(--primary-color);
     outline: none;
+    box-shadow: 0 0 0 2px rgba(25, 34, 69, 0.2);
 }
 
-/* Password field container */
-.settings-password-field {
-    display: flex;
-    align-items: center;
+.settings-change-password {
+    font-size: 0.7rem;
+    width: 19%;
+    color: var(--text-secondary);
+    margin: 0.2rem auto 0; /* Top | Horizontal | Bottom */
+    display: block; /* Changed from inline-block to block */
+    text-align: center; /* Center text inside */
+}
+
+/* === Password Field === */
+.settings-password-field,
+.settings-password-wrapper {
     position: relative;
+    width: 100%;
 }
 
-/* Eye toggle button */
-.settings-eye-button {
-    margin-left: 0.5rem;
+.settings-eye-button,
+.settings-toggle-password-btn {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
     background: none;
     border: none;
     cursor: pointer;
-    display: flex;
-    align-items: center;
+    color: var(--text-secondary);
+    padding: 0.25rem;
 }
 
-/* Change password text */
-.settings-change-password {
-    font-size: 1rem;
-    font-weight: normal;
-    text-align: left;
-    line-height: 1;
+.settings-eye-button:hover,
+.settings-toggle-password-btn:hover {
+    color: var(--primary-color);
 }
 
-/* Modal overlay */
+/* === Admin User Grid === */
+.settings-admin-user-grid {
+  flex: 1; /* Takes remaining space */
+  min-height: 0; /* Important for flex */
+  overflow: hidden;
+  height: auto;
+  display: flex;
+  gap: 20px;
+  margin-bottom: 0.5rem;
+  align-items: flex-start;
+}
+
+.settings-list-user-box {
+  flex: 3;
+  overflow-y: auto;
+  box-sizing: border-box;
+  max-height: 100%;
+  min-height: 0;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+
+.settings-create-user-box {
+  flex: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+}
+
+
+/* === Modal Styles === */
 .settings-modal {
     position: fixed;
     top: 0;
@@ -110,87 +149,76 @@
     z-index: 1000;
 }
 
-/* Modal content box */
 .settings-modal-content {
-    background: #fff;
+    background: var(--bg-secondary);
     padding: 2rem;
     border-radius: 8px;
     width: 90%;
     max-width: 450px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border-color);
 }
 
 .settings-modal-content h3 {
-    font-size: 1.2rem;
-    margin-bottom: 1rem;
-    color: #333;
+    font-size: 1.25rem;
+    margin-bottom: 1.5rem;
+    color: var(--text-primary);
     text-align: center;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
 }
 
-/* Inputs inside modal */
-.settings-modal-content .settings-input-text,
-.settings-modal-content .settings-input-email,
-.settings-modal-content .settings-input-password {
-    width: 100%;
-    padding: 0.8rem;
-    margin: 0.5rem 0;
-    border-radius: 8px;
-    border: 1px solid #ddd;
-}
-
-/* Modal buttons container */
+/* === Modal Buttons === */
 .settings-modal-buttons {
     display: flex;
     justify-content: center;
-    gap: 4rem;
-    margin-top: 1.5rem;
+    gap: 1.5rem;
+    margin-top: 2rem;
 }
 
-/* Modal buttons style */
 .settings-modal-buttons button {
-    padding: 0.4rem 3rem;
-    border-radius: 8px;
-    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 6px;
     cursor: pointer;
-    font-weight: bold;
-    transition: background-color 0.3s ease;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+    min-width: 120px;
+    text-align: center;
 }
 
 .settings-confirm-btn {
-    background-color: #16a34a;
-    color: white;
+    background-color: var(--primary-color);
+    color: var(--primary-text);
 }
 
 .settings-confirm-btn:hover {
-    background-color: #15803d;
+    background-color: var(--primary-hover);
+    transform: translateY(-1px);
 }
 
 .settings-cancel-btn {
-    background-color: #dc2626;
-    color: white;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
 }
 
 .settings-cancel-btn:hover {
-    background-color: #b91c1c;
+    background-color: var(--border-color);
+    transform: translateY(-1px);
 }
 
-/* Password input wrapper for toggle icon */
-.settings-password-wrapper {
-    display: flex;
-    align-items: center;
-    position: relative;
-}
-
-.settings-password-input {
-    flex: 1;
-    padding-right: 2.5rem; /* space for the icon */
-}
-
-/* Button to toggle password visibility */
-.settings-toggle-password-btn {
-    position: absolute;
-    right: 0.5rem;
-    background: transparent;
-    border: none;
-    cursor: pointer;
+/* === Dark Theme Adjustments === */
+[data-theme="dark"] {
+    .settings-modal-content {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    
+    .settings-confirm-btn:hover {
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .settings-cancel-btn {
+        background-color: var(--bg-secondary);
+    }
 }

@@ -4,12 +4,12 @@ import { describe, it, expect, vi } from 'vitest';
 import LoginPage from '../pages/LoginPage.svelte';
 import Sidebar from '../components/SideBar.svelte';
 import { get } from 'svelte/store';
-import { isLoggedIn, userInfo } from '../lib/Stores/user';
+import { isLoggedIn } from '../lib/Stores/user';
 import * as auth from '../lib/auth';
 import App from '../App.svelte';
 
 const mockFetch = vi.fn((url, options) => {
-  if (url === 'http://localhost:8081/login') {
+  if (url.includes('/login')) {
     return Promise.resolve({
       ok: true,
       headers: {
@@ -19,14 +19,14 @@ const mockFetch = vi.fn((url, options) => {
     } as Response);
   }
 
-  if (url === 'http://localhost:8081/fetchCookie') {
+  if (url.includes('/fetchCookie')) {
     return Promise.resolve({
       ok: true,
       json: async () => ({ token: 'mocked-token-123' })
     } as Response);
   }
 
-  if (url === 'http://localhost:8081/logout') {
+  if (url.includes('/logout')) {
     return Promise.resolve({
       ok: true,
       status: 200,
@@ -39,7 +39,7 @@ const mockFetch = vi.fn((url, options) => {
 
 global.fetch = mockFetch;
 
-// AT THE TOP OF THE FILE BEFORE EVERYTHING ELSE
+// Mock auth module at the beginning of the file
 vi.mock('../lib/auth', async () => {
   const actual = await vi.importActual<typeof import('../lib/auth')>('../lib/auth');
   return {
@@ -85,9 +85,7 @@ describe('LoginForm', () => {
 describe('Login functionality', () => {
   beforeEach (() => {
     isLoggedIn.set(false);
-    userInfo.set({ token: null});
   })
-
 
   it('should trigger login, update store state and display dashboard', async () => {
     const { getByText, getByLabelText, getByTestId } = render(App);
@@ -99,14 +97,14 @@ describe('Login functionality', () => {
 
     expect(getByText('Log In')).toBeInTheDocument();
 
-    // Clicks on "Log in"
+    // Click on "Log in" button
     await fireEvent.click(getByText('Log In'));
 
-    (auth.getToken as any).mockResolvedValue('mocked-token-123');
+    vi.mocked(auth.getToken).mockResolvedValue('mocked-token-123');
   
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8081/login',
+        expect.stringContaining('/login'),
         expect.objectContaining({
           method: 'POST',
           credentials: 'include',
@@ -114,8 +112,7 @@ describe('Login functionality', () => {
       );
     });
     await waitFor(()=>{
-      // Check side effects on stores
-      expect(get(userInfo)).toEqual({ token:'mocked-token-123'});
+      // Verify store updates and UI changes
       expect(get(isLoggedIn)).toBe(true);
       expect(getByTestId('dashboard-page')).toBeInTheDocument();
     });
@@ -124,32 +121,31 @@ describe('Login functionality', () => {
 
 describe('Logout functionality', () => {
   beforeEach(() => {
-    userInfo.set({ token: 'fake-token-123' });
     isLoggedIn.set(true);
   });
 
   it('should trigger logout, update store state and display login page', async () => {
     const { getByTestId, getByText, queryByText } = render(App);
 
-    // Opens the confirmation popup
+    // Open the confirmation dialog
     await fireEvent.click(getByTestId('logout-button'));
 
     expect(getByText('Are you sure you want to log out?')).toBeInTheDocument();
 
-    // Clicks on "Log out"
+    // Confirm logout by clicking "Log out"
     await fireEvent.click(getByText('Log out'));
 
     await waitFor(() => {
-      // Popup disappears
+      // Verify dialog is closed
       expect(queryByText('Are you sure you want to log out?')).toBeNull();
     });
 
-    // Checks that logout was called
+    // Verify logout was called
     expect(auth.logout).toHaveBeenCalled();
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8081/logout',
+        expect.stringContaining('/logout'),
         expect.objectContaining({
           method: 'POST',
           credentials: 'include',
@@ -157,8 +153,7 @@ describe('Logout functionality', () => {
       );
     });
 
-    // Check side effects on stores
-    expect(get(userInfo)).toEqual({ token: null });
+    // Verify store updates
     expect(get(isLoggedIn)).toBe(false);
     await waitFor(()=>{
       expect(getByTestId('login-page')).toBeInTheDocument();
@@ -175,7 +170,7 @@ describe('Logout functionality', () => {
     await fireEvent.click(getByText('Cancel'));
 
     await waitFor(() => {
-      expect(getByText('Log Out')).toBeInTheDocument(); // still visible
+      expect(getByText('Log Out')).toBeInTheDocument(); // Button still visible
     });
   });
 });
