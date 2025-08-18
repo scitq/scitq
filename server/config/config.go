@@ -37,6 +37,9 @@ type Config struct {
 		IdleTimeout          int     `yaml:"idle_timeout" default:"300"`
 		NewWorkerIdleTimeout int     `yaml:"new_worker_idle_timeout" default:"900"`
 		OfflineTimeout       int     `yaml:"offline_timeout" default:"30"`
+		AdminUser            string  `yaml:"admin_user" default:"admin"`
+		AdminHashedPassword  string  `yaml:"admin_hashed_password" default:""`
+		AdminEmail           string  `yaml:"admin_email" default:""`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`

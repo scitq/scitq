@@ -204,7 +204,8 @@ func (w *Watchdog) checkIdle() {
 			w.lastNotIdle.Store(workerID, lastActivity)
 		}
 
-		if now.Sub(lastActivity) > timeout {
+		idleTime := now.Sub(lastActivity) // Convert to seconds
+		if idleTime > timeout {
 			if v, ok := w.isPermanent.Load(workerID); ok && v.(bool) {
 				log.Printf("[watchdog] permanent worker %d idle for %v (no deletion)", workerID, now.Sub(lastActivity))
 				return true
@@ -217,7 +218,7 @@ func (w *Watchdog) checkIdle() {
 
 			// Double-check still idle before deletion
 			if activeTasks, ok := w.activeTasks.Load(workerID); ok && activeTasks.(int) == 0 {
-				log.Printf("[watchdog] deleting idle worker %d", workerID)
+				log.Printf("[watchdog] deleting idle worker %d (idle since %v, timeout %v)", workerID, idleTime, timeout)
 				w.deleteWorker(workerID)
 				lastActivity = time.Now() // making dying an activity so that we wait for the worker to delete properly
 				w.lastNotIdle.Store(workerID, lastActivity)

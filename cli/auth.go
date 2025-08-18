@@ -63,7 +63,7 @@ func getToken() (string, error) {
 	return token, nil
 }
 
-func createToken(serverAddr string) string {
+func createToken(serverAddr string, user, userPassword *string) string {
 
 	qcclient, err := lib.CreateLoginClient(serverAddr)
 	if err != nil {
@@ -72,11 +72,16 @@ func createToken(serverAddr string) string {
 	defer qcclient.Close()
 
 	client := qcclient.Client
+	username, password := "", ""
 
-	// Prompt user for login
-	username, password, err := promptCredentials()
-	if err != nil {
-		log.Fatal("failed to read credentials: %w", err)
+	if user == nil || userPassword == nil {
+		// Prompt user for login
+		username, password, err = promptCredentials()
+		if err != nil {
+			log.Fatal("failed to read credentials: %w", err)
+		}
+	} else {
+		username, password = *user, *userPassword
 	}
 
 	resp, err := client.Login(context.Background(), &pb.LoginRequest{

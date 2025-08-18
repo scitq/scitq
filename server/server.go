@@ -2125,6 +2125,11 @@ func Serve(cfg config.Config) error {
 	}
 	defer db.Close()
 
+	// Apply any database migrations needed at startup
+	if err := applyMigrations(db); err != nil {
+		return fmt.Errorf("migration error: %v", err)
+	}
+
 	// Check workflow template directory
 	if err := validateScriptConfig(cfg.Scitq.ScriptRoot, cfg.Scitq.ScriptInterpreter); err != nil {
 		return fmt.Errorf("invalid script config: %w", err)
@@ -2154,13 +2159,8 @@ func Serve(cfg config.Config) error {
 		}
 	}()
 
-	// Apply any database migrations needed at startup
-	if err := applyMigrations(db); err != nil {
-		return fmt.Errorf("migration error: %v", err)
-	}
-
 	log.Println("✅ Server started successfully!")
-	checkAdminUser(db) // Ensure there is at least one admin user
+	checkAdminUser(db, &cfg) // Ensure there is at least one admin user
 
 	var creds credentials.TransportCredentials
 

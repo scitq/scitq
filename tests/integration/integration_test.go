@@ -11,13 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"crypto/rand"
+
 	"github.com/docker/go-connections/nat"
 	"github.com/scitq/scitq/cli"
 	"github.com/scitq/scitq/client"
 	"github.com/scitq/scitq/lib"
 	"github.com/scitq/scitq/server"
 	"github.com/scitq/scitq/server/config"
+	"golang.org/x/crypto/bcrypt"
 
+	"github.com/creasty/defaults"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -111,9 +115,9 @@ func RunRawQuery(dbURL, query string) {
 
 // SendRawGRPCRequest connects to the server and sends a `ListTasks` request
 // use like this: 	SendRawGRPCRequest(server_connection_string)
-func SendRawGRPCRequest(serverAddr string) {
+func SendRawGRPCRequest(serverAddr, token string) {
 	// Set up a gRPC connection
-	qcclient, err := lib.CreateClient(serverAddr)
+	qcclient, err := lib.CreateClient(serverAddr, token)
 	if err != nil {
 		log.Fatalf("Failed to connect to gRPC server: %v", err)
 	}
@@ -193,8 +197,28 @@ func TestIntegration(t *testing.T) {
 	os.MkdirAll(tempLogRoot, 0755)
 	defer os.RemoveAll(tempLogRoot)
 
+	// Create temporary script_root
+	tempScriptRoot := "./tmp_scripts"
+	os.MkdirAll(tempScriptRoot, 0755)
+	defer os.RemoveAll(tempScriptRoot)
+
 	// Use a different port for the test server
 	serverPort := 50052
+
+	// generate a random token and random jwtSecret
+	b := make([]byte, 4)
+	_, err = rand.Read(b)
+	if err != nil {
+		t.Fatalf("Failed to generate random token: %v", err)
+	}
+	workerToken := fmt.Sprintf("test-worker-%x", b)
+	jwtSecret := fmt.Sprintf("test-jwt-secret-%x", b)
+	adminUser := "admin"
+	adminPassword := fmt.Sprintf("secret-%x", b)
+	adminHashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("Failed to generate admin hashed password: %v", err)
+	}
 
 	// Start server in a separate goroutine
 	go func() {
@@ -203,6 +227,14 @@ func TestIntegration(t *testing.T) {
 		cfg.Scitq.Port = serverPort
 		cfg.Scitq.LogLevel = "debug"
 		cfg.Scitq.LogRoot = tempLogRoot
+		cfg.Scitq.WorkerToken = workerToken
+		cfg.Scitq.JwtSecret = jwtSecret
+		cfg.Scitq.ScriptRoot = tempScriptRoot
+		cfg.Scitq.ScriptInterpreter = "/usr/bin/python3"
+		cfg.Scitq.RecruitmentInterval = 2
+		cfg.Scitq.AdminUser = adminUser
+		cfg.Scitq.AdminHashedPassword = string(adminHashedPassword)
+		defaults.Set(&cfg) // ✅ apply struct tag defaults here
 		if err := server.Serve(cfg); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
@@ -222,12 +254,20 @@ func TestIntegration(t *testing.T) {
 	var c cli.CLI
 	c.Attr.Server = server_connection_string
 
+	// login and recover token
+	output, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
+	assert.NoError(t, err)
+	token := strings.TrimSpace(output)
+	assert.NotEmpty(t, token)
+	// Export the token so future CLI calls can use it
+	os.Setenv("SCITQ_TOKEN", token)
+
 	// creating Task
 	_, err = runCLICommand(c, []string{"task", "create", "--container", "ubuntu", "--command", "ls -la"})
 	assert.NoError(t, err)
 
 	// looking up Task
-	output, err := runCLICommand(c, []string{"task", "list", "--status", "P"})
+	output, err = runCLICommand(c, []string{"task", "list", "--status", "P"})
 	assert.NoError(t, err)
 	assert.Contains(t, output, "📋 Task List:\n🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: P\n")
 
@@ -237,9 +277,13 @@ func TestIntegration(t *testing.T) {
 	//
 	//////////////////////////////////////////////////////////////////////////////
 
+	tempStorage := "./tmp_client_store"
+	os.MkdirAll(tempStorage, 0755)
+	defer os.RemoveAll(tempStorage)
+
 	// launch client
 	go func() {
-		client.Run(server_connection_string, 1, "test-worker-1")
+		client.Run(server_connection_string, 1, "test-worker-1", tempStorage, workerToken)
 		if err != nil {
 			log.Fatalf("Server crashed: %v", err)
 		}
@@ -251,7 +295,7 @@ func TestIntegration(t *testing.T) {
 	// looking up Worker
 	output, err = runCLICommand(c, []string{"worker", "list"})
 	assert.NoError(t, err)
-	assert.Contains(t, output, "👷 Worker List:\n🔹 ID: 1 | Name: test-worker-1 | Concurrency: 1\n")
+	assert.Contains(t, output, "👷 Worker List:\n🔹 ID: 1 | Name: test-worker-1 | Concurrency: 1")
 
 	// Allow some time for the client to accept and execute task
 	time.Sleep(5 * time.Second)

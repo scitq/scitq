@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strings"
 
+	"github.com/scitq/scitq/server/config"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -115,7 +116,7 @@ func generateRandomPassword(length int) string {
 	return string(b)
 }
 
-func checkAdminUser(db *sql.DB) {
+func checkAdminUser(db *sql.DB, cfg *config.Config) {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM scitq_user").Scan(&count)
 	if err != nil {
@@ -125,20 +126,27 @@ func checkAdminUser(db *sql.DB) {
 	if count == 0 {
 		log.Println("⚠️ No users found, creating initial admin user...")
 
-		// Generate a random password
-		rawPassword := generateRandomPassword(16)
-		hashed, _ := bcrypt.GenerateFromPassword([]byte(rawPassword), bcrypt.DefaultCost)
-
-		username := "admin"
-		email := "admin@example.com"
+		username := cfg.Scitq.AdminUser
+		email := cfg.Scitq.AdminEmail
+		rawPassword := ""
+		hashed := []byte(cfg.Scitq.AdminHashedPassword)
+		if cfg.Scitq.AdminHashedPassword == "" {
+			// Generate a random password
+			rawPassword = generateRandomPassword(16)
+			hashed, _ = bcrypt.GenerateFromPassword([]byte(rawPassword), bcrypt.DefaultCost)
+		}
 
 		_, err := db.Exec(`INSERT INTO scitq_user (username, email, password, is_admin) VALUES ($1, $2, $3, TRUE)`, username, email, string(hashed))
 		if err != nil {
 			log.Fatalf("Failed to insert initial admin user: %v", err)
 		}
 
-		log.Printf("✅ Created initial admin user '%s' with random password: %s", username, rawPassword)
-		log.Printf("⚠️ Please log in immediately and change the password.")
+		if rawPassword == "" {
+			log.Printf("✅ Created initial admin user '%s' with random password: %s", username, rawPassword)
+			log.Printf("⚠️ Please log in immediately and change the password.")
+		} else {
+			log.Printf("✅ Created initial admin user '%s' with provided hashed password.", username)
+		}
 	}
 
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/alexflint/go-arg"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/lib"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -187,9 +188,17 @@ type Attr struct {
 			RunId uint32 `arg:"--id,required" help:"ID of the template run to delete"`
 		} `arg:"subcommand:delete" help:"Delete a template run"`
 	} `arg:"subcommand:run" help:"Manage template runs"`
+
 	// Login commands
 	Login *struct {
+		User     *string `arg:"--user" help:"Username to log in"`
+		Password *string `arg:"--password" help:"Password to log in"`
 	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
+
+	// HashPassword command
+	HashPassword *struct {
+		Password string `arg:"positional,required" help:"Password to hash"`
+	} `arg:"subcommand:hashpassword" help:"Hash a password using bcrypt (useful for config files)"`
 }
 
 type CLI struct {
@@ -995,11 +1004,18 @@ func (c *CLI) RunDelete() error {
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
-	if c.Attr.Login != nil {
-		fmt.Print(createToken(c.Attr.Server))
+	switch {
+	case c.Attr.Login != nil:
+		fmt.Print(createToken(c.Attr.Server, c.Attr.Login.User, c.Attr.Login.Password))
+		return nil
+	case c.Attr.HashPassword != nil:
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(c.Attr.HashPassword.Password), bcrypt.DefaultCost)
+		if err != nil {
+			log.Fatalf("Failed to hash password: %v", err)
+		}
+		fmt.Printf("Hashed password: %s\n", string(hashedPassword))
 		return nil
 	}
-
 	// Establish gRPC connection
 	// Ensure token exists (interactive if needed)
 	token, err := getToken()
