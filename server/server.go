@@ -88,9 +88,9 @@ type TaskUpdateBroadcast struct {
 }
 
 var (
-	batchMutex        sync.Mutex
-	taskUpdateBatches [][]TaskUpdateBroadcast
-	currentBatchIndex int
+	batchMutex            sync.Mutex
+	taskUpdateQueue       []TaskUpdateBroadcast
+	lastBroadcastedStatus sync.Map // key: uint32 taskId, value: string status
 )
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
@@ -142,19 +142,26 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		ticker := time.NewTicker(500 * time.Millisecond)
 		for range ticker.C {
 			batchMutex.Lock()
-
-			if len(taskUpdateBatches) == 0 {
+			if len(taskUpdateQueue) == 0 {
 				batchMutex.Unlock()
 				continue
 			}
+			drained := taskUpdateQueue
+			taskUpdateQueue = nil
+			batchMutex.Unlock()
 
-			if currentBatchIndex >= len(taskUpdateBatches) {
-				currentBatchIndex = 0
+			latest := make(map[uint32]TaskUpdateBroadcast, 64)
+			for _, u := range drained {
+				latest[u.TaskId] = u
 			}
 
-			currentBatch := taskUpdateBatches[currentBatchIndex]
+			// 3) Broadcast only if status actually changed vs last sent
+			for _, u := range latest {
+				if prev, ok := lastBroadcastedStatus.Load(u.TaskId); ok && prev.(string) == u.Status {
+					continue
+				}
+				lastBroadcastedStatus.Store(u.TaskId, u.Status)
 
-			for _, update := range currentBatch {
 				payload := struct {
 					Type    string `json:"type"`
 					Payload struct {
@@ -169,18 +176,15 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 						Status   string `json:"status"`
 						WorkerId uint32 `json:"workerId,omitempty"`
 					}{
-						TaskId:   update.TaskId,
-						Status:   update.Status,
-						WorkerId: update.WorkerId,
+						TaskId:   u.TaskId,
+						Status:   u.Status,
+						WorkerId: u.WorkerId,
 					},
 				}
-
-				jsonData, _ := json.Marshal(payload)
-				ws.Broadcast(jsonData)
+				if jsonData, err := json.Marshal(payload); err == nil {
+					ws.Broadcast(jsonData)
+				}
 			}
-
-			currentBatchIndex = (currentBatchIndex + 1) % len(taskUpdateBatches)
-			batchMutex.Unlock()
 		}
 	}()
 
@@ -409,11 +413,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	batchMutex.Lock()
 	defer batchMutex.Unlock()
 
-	if len(taskUpdateBatches) == 0 || len(taskUpdateBatches[len(taskUpdateBatches)-1]) >= 20 {
-		taskUpdateBatches = append(taskUpdateBatches, []TaskUpdateBroadcast{})
-	}
-
-	taskUpdateBatches[len(taskUpdateBatches)-1] = append(taskUpdateBatches[len(taskUpdateBatches)-1], update)
+	taskUpdateQueue = append(taskUpdateQueue, update)
 
 	return &pb.Ack{Success: true}, nil
 }
@@ -2269,8 +2269,6 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
 	}
-
-	ws.Broadcast(jsonData)
 
 	ws.Broadcast(jsonData)
 	return &pb.Ack{Success: true}, nil
