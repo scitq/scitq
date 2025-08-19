@@ -2,10 +2,13 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	_ "github.com/scitq/scitq/internal/banner" // logs "<app> <version>" on startup
+	"github.com/scitq/scitq/internal/version"
 	"github.com/scitq/scitq/server"
 	"github.com/scitq/scitq/server/config"
 	"github.com/scitq/scitq/server/updater/run"
@@ -26,7 +29,13 @@ func runUpdater(cfg config.Config, providerCfg config.ProviderConfig) {
 
 func main() {
 	config_file := flag.String("config", "", "Configuration file")
+	version_flag := flag.Bool("version", false, "Print version information and exit")
 	flag.Parse()
+
+	if *version_flag {
+		fmt.Println(version.Full())
+		return
+	}
 
 	cfg, err := config.LoadConfig(*config_file)
 	if err != nil {

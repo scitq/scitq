@@ -21,38 +21,47 @@ OUTDIR=bin
 
 all: build-server build-client build-cli build-fetch
 
+GIT_TAG    := $(shell git describe --tags --always --dirty)
+GIT_SHA    := $(shell git rev-parse --short HEAD)
+BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS    := -X 'github.com/scitq/scitq/internal/version.Version=$(GIT_TAG)' \
+              -X 'github.com/scitq/scitq/internal/version.Commit=$(GIT_SHA)' \
+              -X 'github.com/scitq/scitq/internal/version.Date=$(BUILD_DATE)'
+STATIC_LDFLAGS := $(LDFLAGS) -extldflags "-static"
+
+
 $(BINARY_DIR):
 	@mkdir -p $(BINARY_DIR)
 
 build-server: | $(BINARY_DIR)
-	go build -o $(BINARY_SERVER) $(SRC_SERVER)
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY_SERVER) $(SRC_SERVER)
 
 build-client: | $(BINARY_DIR)
-	go build -o $(BINARY_CLIENT) $(SRC_CLIENT)
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLIENT) $(SRC_CLIENT)
 
 build-cli: | $(BINARY_DIR)
-	go build -o $(BINARY_CLI) $(SRC_CLI)
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLI) $(SRC_CLI)
 
 build-fetch: | $(BINARY_DIR)
-	go build -o $(BINARY_FETCH) $(SRC_FETCH)
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY_FETCH) $(SRC_FETCH)
 
 static-all: static-server static-client static-cli static-fetch
 
 static-server:
 	mkdir -p $(BINARY_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_SERVER)-static -a -ldflags '-extldflags "-static"' $(SRC_SERVER)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_SERVER)-static -a -ldflags "$(STATIC_LDFLAGS)" $(SRC_SERVER)
 
 static-client:
 	mkdir -p $(BINARY_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_CLIENT)-static -a -ldflags '-extldflags "-static"' $(SRC_CLIENT)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_CLIENT)-static -a -ldflags "$(STATIC_LDFLAGS)" $(SRC_CLIENT)
 
 static-cli:
 	mkdir -p $(BINARY_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_CLI)-static -a -ldflags '-extldflags "-static"' $(SRC_CLI)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_CLI)-static -a -ldflags "$(STATIC_LDFLAGS)" $(SRC_CLI)
 
 static-fetch:
 	mkdir -p $(BINARY_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_FETCH)-static -a -ldflags '-extldflags "-static"' $(SRC_FETCH)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_FETCH)-static -a -ldflags "$(STATIC_LDFLAGS)" $(SRC_FETCH)
 
 cross-build:
 	$(foreach platform, $(PLATFORMS), $(call build_binary, $(platform), $(word 1,$(subst /, ,$(platform))), $(word 2,$(subst /, ,$(platform))), scitq-server))
@@ -71,11 +80,21 @@ docs:
 UI_DIR := ui
 UI_DIST := $(UI_DIR)/dist
 SERVER_PUBLIC := server/public
+UI_VERSION_FILE := $(UI_DIR)/src/version.ts
+
+build-ui-version-file:
+	@{ \
+	  echo "// generated at build time"; \
+	  echo "export const APP_VERSION = '$(GIT_TAG)';"; \
+	  echo "export const APP_COMMIT  = '$(GIT_SHA)';"; \
+	  echo "export const APP_BUILDT  = '$(BUILD_DATE)';"; \
+	  echo "export const uiVersion = APP_VERSION;"; \
+	} > $(UI_VERSION_FILE)
 
 ui-deps:
 	@cd $(UI_DIR) && if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-ui-build: ui-deps
+ui-build: ui-deps build-ui-version-file
 	@cd $(UI_DIR) && npm run build
 
 ui-embed: ui-build

@@ -12,6 +12,7 @@ import (
 
 	"github.com/alexflint/go-arg"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/internal/version"
 	"github.com/scitq/scitq/lib"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
@@ -199,6 +200,12 @@ type Attr struct {
 	HashPassword *struct {
 		Password string `arg:"positional,required" help:"Password to hash"`
 	} `arg:"subcommand:hashpassword" help:"Hash a password using bcrypt (useful for config files)"`
+}
+
+// Version enables go-arg's built-in --version handling.
+// When users run `scitq --version`, go-arg will print this string and exit.
+func (Attr) Version() string {
+	return "scitq " + version.Full()
 }
 
 type CLI struct {

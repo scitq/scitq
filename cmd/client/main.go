@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/scitq/scitq/client"
 	"github.com/scitq/scitq/client/install"
+	_ "github.com/scitq/scitq/internal/banner" // logs "<app> <version>" on startup
+	"github.com/scitq/scitq/internal/version"
 )
 
 // main initializes the client.
@@ -19,6 +21,7 @@ func main() {
 	concurrency := flag.Uint("concurrency", 1, "Number of concurrent tasks")
 	store := flag.String("store", "/scratch", "Path to the store directory")
 	token := flag.String("token", "", "Token for authentication")
+	version_flag := flag.Bool("version", false, "Print version information and exit")
 
 	// Get the hostname
 	hostname, err := os.Hostname()
@@ -34,6 +37,11 @@ func main() {
 	swapProportion := flag.Float64("swap", 0.1, "Add automatically a swapfile in scratch of this proportion (0 to disable)")
 
 	flag.Parse()
+
+	if *version_flag {
+		fmt.Println(version.Full())
+		return
+	}
 
 	if *do_install {
 

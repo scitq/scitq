@@ -11,6 +11,7 @@
   import TaskPage from '../pages/TaskPage.svelte';
   import WorkflowPage from '../pages/WorkflowPage.svelte';
   import WfTemplatePage from '../pages/WfTemplatePage.svelte';
+  import { uiVersion } from '../version';
 
   /**
    * State variables for controlling submenu visibility
@@ -109,7 +110,7 @@
   <!-- Sidebar header with version info -->
   <div class="dashboard-sidebar-header">
     <span>SCITQ2</span>
-    <span class="dashboard-sidebar-version">V2.0.0</span>
+    <span class="dashboard-sidebar-version">{uiVersion}</span>
   </div>
 
   <!-- Main navigation menu -->
