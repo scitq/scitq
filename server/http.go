@@ -3,15 +3,16 @@ package server
 import (
 	"crypto/tls"
 	"embed"
+	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"fmt"
 
 	"github.com/scitq/scitq/server/config"
 )
 
-//go:embed public/*
+//go:embed all:public
 var publicFiles embed.FS
 
 func HttpServer(cfg config.Config) (tls.Certificate, string, http.Handler, error) {
@@ -56,8 +57,11 @@ func HttpServer(cfg config.Config) (tls.Certificate, string, http.Handler, error
 	})
 
 	// Serve embedded Svelte frontend
-	fs := http.FileServer(http.FS(publicFiles))
-	mux.Handle("/", fs)
+	sub, err := fs.Sub(publicFiles, "public")
+	if err != nil {
+		log.Fatalf("failed to create sub FS for public/: %v", err)
+	}
+	mux.Handle("/", http.FileServer(http.FS(sub)))
 
 	return tlsCert, certPEMstring, mux, nil
 }

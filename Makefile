@@ -65,7 +65,33 @@ docs:
 	mkdir -p docs
 	protoc --doc_out=./docs --doc_opt=markdown,api.md proto/*.proto
 
-install: all
+# --- UI build/embed (opt-out with SKIP_UI=1) -------------------------------
+.PHONY: ui-deps ui-build ui-embed
+
+UI_DIR := ui
+UI_DIST := $(UI_DIR)/dist
+SERVER_PUBLIC := server/public
+
+ui-deps:
+	@cd $(UI_DIR) && if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+ui-build: ui-deps
+	@cd $(UI_DIR) && npm run build
+
+ui-embed: ui-build
+	@rm -rf $(SERVER_PUBLIC)/*
+	@mkdir -p $(SERVER_PUBLIC)
+	@cp -r $(UI_DIST)/* $(SERVER_PUBLIC)/
+
+# decide if install should build UI
+ifeq ($(SKIP_UI),1)
+UI_PREREQ :=
+else
+UI_PREREQ := ui-embed
+endif
+
+
+install: $(UI_PREREQ) all
 ifeq ($(OS),Windows_NT)
 	@echo Installing binaries to %USERPROFILE%\bin...
 	@powershell -Command "New-Item -ItemType Directory -Force -Path \"$$env:USERPROFILE\\bin\" | Out-Null"
@@ -96,4 +122,3 @@ define build_binary
 	mkdir -p $(OUTDIR)/$(1)
 	GOOS=$(2) GOARCH=$(3) go build -o $(OUTDIR)/$(1)/$(4) ./cmd/$(4)
 endef
-
