@@ -5,6 +5,8 @@ import (
 	"log"
 )
 
+type Reporter func(prog int, msg string)
+
 func checkScratch() error {
 	log.Printf("Checking scratch")
 
@@ -223,16 +225,24 @@ func InstallRcloneConfig(rcloneConfig, rcloneConfigPath string) error {
 	return fmt.Errorf("could not create rclone config %w", err)
 }
 
-func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32, serverAddress string, concurrency int, token string) error {
+func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32, serverAddress string, concurrency int, token string, report Reporter) error {
 	err := checkScratch()
 	if err == nil {
+		report(20, "scratch: ok")
 		err = checkDocker(dockerRegistry, dockerAuthentication)
 	}
-	if err == nil && swapProportion > 0 {
-		err = checkSwap(swapProportion)
+	if err == nil {
+		report(50, "docker: ok")
+		if swapProportion > 0 {
+			err = checkSwap(swapProportion)
+		}
 	}
 	if err == nil {
+		report(80, "swap: ok")
 		err = checkService(dockerRegistry, dockerAuthentication, swapProportion, serverAddress, concurrency, token)
+	}
+	if err == nil {
+		report(100, "service: ok")
 	}
 
 	return err

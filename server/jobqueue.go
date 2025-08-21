@@ -97,7 +97,7 @@ func (s *taskQueueServer) processJob(job Job) error {
 	switch job.Action {
 	case 'C': // Create
 		// Create the worker
-		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region)
+		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region, job.JobID)
 		if err != nil {
 			return fmt.Errorf("failed to create worker %s: %v", job.WorkerName, err)
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -200,6 +201,26 @@ type Attr struct {
 	HashPassword *struct {
 		Password string `arg:"positional,required" help:"Password to hash"`
 	} `arg:"subcommand:hashpassword" help:"Hash a password using bcrypt (useful for config files)"`
+
+	// Worker event commands
+	WorkerEvent *struct {
+		List *struct {
+			Limit    int    `arg:"--limit" default:"20" help:"Max number of events to show"`
+			Level    string `arg:"--level" help:"Filter by level D/I/W/E as D:Debug/I:Info/W:Warning/E:Error"`
+			Class    string `arg:"--class" help:"Filter by event_class"`
+			WorkerId uint32 `arg:"--worker-id" help:"Filter by worker id"`
+		} `arg:"subcommand:list" help:"List worker events"`
+		Delete *struct {
+			Id uint32 `arg:"--id,required" help:"Worker event ID to delete"`
+		} `arg:"subcommand:delete" help:"Delete a worker event by ID"`
+		Prune *struct {
+			OlderThan string `arg:"--older-than" help:"Age to prune, e.g. 7d, 12h, 30m (required unless --dry-run)"`
+			Level     string `arg:"--level" help:"Optional level filter D/I/W/E as D:Debug/I:Info/W:Warning/E:Error"`
+			Class     string `arg:"--class" help:"Optional event_class filter"`
+			WorkerId  uint32 `arg:"--worker-id" help:"Optional worker id filter"`
+			DryRun    bool   `arg:"--dry-run" help:"Only count matched rows; do not delete"`
+		} `arg:"subcommand:prune" help:"Prune worker events by age and optional filters"`
+	} `arg:"subcommand:worker-event" help:"Worker event logs"`
 }
 
 // Version enables go-arg's built-in --version handling.
@@ -1008,6 +1029,133 @@ func (c *CLI) RunDelete() error {
 	return nil
 }
 
+func (c *CLI) WorkerEventList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	f := &pb.WorkerEventFilter{}
+	if c.Attr.WorkerEvent.List.WorkerId != 0 {
+		f.WorkerId = &c.Attr.WorkerEvent.List.WorkerId
+	}
+	if c.Attr.WorkerEvent.List.Level != "" {
+		f.Level = &c.Attr.WorkerEvent.List.Level
+	}
+	if c.Attr.WorkerEvent.List.Class != "" {
+		f.Class = &c.Attr.WorkerEvent.List.Class
+	}
+	if c.Attr.WorkerEvent.List.Limit > 0 {
+		l := uint32(c.Attr.WorkerEvent.List.Limit)
+		f.Limit = &l
+	}
+
+	res, err := c.QC.Client.ListWorkerEvents(ctx, f)
+	if err != nil {
+		return fmt.Errorf("error fetching worker events: %w", err)
+	}
+
+	if len(res.Events) == 0 {
+		fmt.Println("⚠️ No worker events found.")
+		return nil
+	}
+
+	fmt.Println("📋 Worker Events:")
+	for _, e := range res.Events {
+		fmt.Printf("🆔 %d | %s | WID:%v Name:%s | %s/%s | %s\n",
+			e.EventId, e.CreatedAt, e.WorkerId, e.WorkerName,
+			e.Level, e.EventClass, e.Message)
+		if e.DetailsJson != "" {
+			fmt.Printf("   Details: %s\n", e.DetailsJson)
+		}
+	}
+	return nil
+}
+
+func (c *CLI) WorkerEventDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.DeleteWorkerEvent(ctx, &pb.WorkerEventId{EventId: c.Attr.WorkerEvent.Delete.Id})
+	if err != nil {
+		return fmt.Errorf("failed to delete worker event %d: %w", c.Attr.WorkerEvent.Delete.Id, err)
+	}
+	fmt.Printf("🗑️ Deleted worker event %d\n", c.Attr.WorkerEvent.Delete.Id)
+	return nil
+}
+
+func parseAgeToRFC3339(older string) (string, error) {
+	// supports Ns, Nm, Nh, Nd, Nw
+	if older == "" {
+		return "", fmt.Errorf("missing --older-than")
+	}
+	n := len(older)
+	if n < 2 {
+		return "", fmt.Errorf("invalid --older-than: %q", older)
+	}
+	unit := older[n-1]
+	val := older[:n-1]
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil || f <= 0 {
+		return "", fmt.Errorf("invalid --older-than number: %q", val)
+	}
+	var dur time.Duration
+	switch unit {
+	case 's':
+		dur = time.Duration(f * float64(time.Second))
+	case 'm':
+		dur = time.Duration(f * float64(time.Minute))
+	case 'h':
+		dur = time.Duration(f * float64(time.Hour))
+	case 'd':
+		dur = time.Duration(f * float64(24*time.Hour))
+	case 'w':
+		dur = time.Duration(f * float64(7*24*time.Hour))
+	default:
+		return "", fmt.Errorf("invalid --older-than unit (use s,m,h,d,w)")
+	}
+	cutoff := time.Now().UTC().Add(-dur)
+	return cutoff.Format(time.RFC3339), nil
+}
+
+func (c *CLI) WorkerEventPrune() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.WorkerEventPruneFilter{}
+
+	// older-than → RFC3339 'before'
+	if c.Attr.WorkerEvent.Prune.OlderThan != "" {
+		ts, err := parseAgeToRFC3339(c.Attr.WorkerEvent.Prune.OlderThan)
+		if err != nil {
+			return err
+		}
+		req.Before = &ts
+	} else if !c.Attr.WorkerEvent.Prune.DryRun {
+		return fmt.Errorf("--older-than is required unless --dry-run")
+	}
+
+	if v := strings.TrimSpace(c.Attr.WorkerEvent.Prune.Level); v != "" {
+		req.Level = &v
+	}
+	if v := strings.TrimSpace(c.Attr.WorkerEvent.Prune.Class); v != "" {
+		req.Class = &v
+	}
+	if id := c.Attr.WorkerEvent.Prune.WorkerId; id != 0 {
+		req.WorkerId = &id
+	}
+	req.DryRun = c.Attr.WorkerEvent.Prune.DryRun
+
+	res, err := c.QC.Client.PruneWorkerEvents(ctx, req)
+	if err != nil {
+		return fmt.Errorf("prune failed: %w", err)
+	}
+	if req.DryRun {
+		fmt.Printf("🔎 Dry-run: %d events would be deleted.\n", res.Matched)
+	} else {
+		fmt.Printf("🧹 Pruned %d events.\n", res.Deleted)
+	}
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -1154,6 +1302,15 @@ func Run(c CLI) error {
 			err = c.RunList()
 		case c.Attr.Run.Delete != nil:
 			err = c.RunDelete()
+		}
+	case c.Attr.WorkerEvent != nil:
+		switch {
+		case c.Attr.WorkerEvent.List != nil:
+			err = c.WorkerEventList()
+		case c.Attr.WorkerEvent.Delete != nil:
+			err = c.WorkerEventDelete()
+		case c.Attr.WorkerEvent.Prune != nil:
+			err = c.WorkerEventPrune()
 		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")

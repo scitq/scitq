@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scitq/scitq/client/event"
 	"github.com/scitq/scitq/fetch"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
@@ -52,15 +53,17 @@ type UploadManager struct {
 	Completion     chan *pb.Task
 	Store          string
 	Client         pb.TaskQueueClient
+	reporter       event.Reporter
 	pendingUploads SyncCounter // taskID → remaining files
 }
 
-func NewUploadManager(store string, client pb.TaskQueueClient) *UploadManager {
+func NewUploadManager(store string, client pb.TaskQueueClient, reporter event.Reporter) *UploadManager {
 	return &UploadManager{
 		UploadQueue:    make(chan *UploadFile, maxUploads),
 		Completion:     make(chan *pb.Task, maxQueueSize),
 		Store:          store,
 		Client:         client,
+		reporter:       reporter,
 		pendingUploads: SyncCounter{},
 	}
 }
@@ -99,9 +102,12 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 		return nil
 	})
 	if err != nil {
-		message := fmt.Sprintf("❌ Failed walking output directory: %v", err)
-		log.Print(message)
-		logMessage(message, um.Client, task.TaskId)
+		message := fmt.Sprintf("Failed walking output directory: %v", err)
+		log.Printf("❌ %s", message)
+		um.reporter.Event("E", "upload", message, map[string]any{
+			"task_id": task.TaskId,
+			"error":   err.Error(),
+		})
 		task.Status = "F"
 		um.Completion <- task
 		return
@@ -128,8 +134,16 @@ func (um *UploadManager) uploadFile(file *UploadFile) error {
 		log.Print(message)
 		time.Sleep(uploadInterval)
 	}
-	log.Printf("❌ Failed to upload %s after %d attempts", file.SourcePath, uploadRetry)
-	logMessage(message, um.Client, file.Task.TaskId)
+	message = fmt.Sprintf("Failed to upload %s after %d attempts: %v", file.SourcePath, uploadRetry, err)
+	log.Printf("❌ %s", message)
+	um.reporter.Event("E", "upload", message, map[string]any{
+		"source":   file.SourcePath,
+		"target":   file.TargetPath,
+		"task_id":  file.Task.TaskId,
+		"attempts": uploadRetry,
+		"error":    err.Error(),
+	})
+	// Log the failure and update the task status
 	file.Task.Status = "F"
 	um.Completion <- file.Task
 	return err
@@ -177,8 +191,8 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 }
 
 // RunUploader starts upload workers and returns the manager.
-func RunUploader(store string, client pb.TaskQueueClient, activeTasks *sync.Map) *UploadManager {
-	um := NewUploadManager(store, client)
+func RunUploader(store string, client pb.TaskQueueClient, activeTasks *sync.Map, reporter event.Reporter) *UploadManager {
+	um := NewUploadManager(store, client, reporter)
 	go um.StartUploadWorkers(activeTasks)
 	return um
 }

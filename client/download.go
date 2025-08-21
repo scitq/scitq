@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scitq/scitq/client/event"
 	"github.com/scitq/scitq/fetch"
 
 	"github.com/google/uuid"
@@ -51,6 +52,7 @@ type FileMetadata struct {
 	Size       int64
 	Date       time.Time
 	MD5        string
+	Success    bool // true if download failed
 }
 
 // DownloadManager manages task downloads.
@@ -64,10 +66,11 @@ type DownloadManager struct {
 	CompletionQueue chan *FileMetadata // Completed downloads
 	ExecQueue       chan *pb.Task      // Tasks ready for execution
 	Store           string
+	reporter        event.Reporter
 }
 
 // NewDownloadManager initializes the download manager.
-func NewDownloadManager(store string) *DownloadManager {
+func NewDownloadManager(store string, reporter event.Reporter) *DownloadManager {
 	return &DownloadManager{
 		TaskDownloads:     make(map[uint32]int),
 		ResourceDownloads: make(map[string][]*pb.Task),
@@ -77,6 +80,7 @@ func NewDownloadManager(store string) *DownloadManager {
 		CompletionQueue:   make(chan *FileMetadata, maxQueueSize),
 		ExecQueue:         make(chan *pb.Task, maxQueueSize),
 		Store:             store,
+		reporter:          reporter,
 	}
 }
 
@@ -162,9 +166,20 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 		}
 	}
 
+	success := err == nil
 	if err != nil {
-		log.Printf("🚨 Failed to download after %d attempts: %s", maxRetries, file.SourcePath)
-		return
+		message := fmt.Sprintf("Failed to download %s after %d attempts: %v", file.SourcePath, maxRetries, err)
+		log.Printf("🚨 %s", message)
+
+		dm.reporter.Event("E", "download", message, map[string]any{
+			"source_path": file.SourcePath,
+			"target_path": file.TargetPath,
+			"error":       err.Error(),
+			"file_type":   file.FileType,
+			"task_id":     file.TaskId,
+		})
+		//dm.reporter.UpdateTask(file.TaskId, "F", message)
+		//return
 	}
 
 	var size int64
@@ -186,6 +201,7 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 		Size:       size,
 		Date:       time.Now(),
 		MD5:        md5Str,
+		Success:    success, // Download succeeded
 	}
 
 	dm.CompletionQueue <- &metadata
@@ -330,6 +346,12 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 	log.Printf("✅ Download completed: %s", fm.SourcePath)
 	//dm.ResourceMemory[filePath] = dm.ResourceMemory[filePath]
 
+	if !fm.Success {
+		log.Printf("❌ Download failed for %s", fm.SourcePath)
+		dm.reporter.UpdateTask(fm.TaskId, "F", fmt.Sprintf("Download failed for %s", fm.SourcePath))
+		fm.Task.Status = "F"
+	}
+
 	// Check if it's a resource, notify all waiting tasks
 	switch fm.FileType {
 	case InputFile:
@@ -339,8 +361,12 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 				if count <= 1 {
 					// no more input/resource files to wait we can queue task for execution
 					delete(dm.TaskDownloads, fm.TaskId)
-					log.Printf("🚀 Task %d ready for execution", fm.TaskId)
-					dm.ExecQueue <- fm.Task
+					if fm.Task.Status != "F" {
+						log.Printf("🚀 Task %d ready for execution", fm.TaskId)
+						dm.ExecQueue <- fm.Task
+					} else {
+						log.Printf("❌ Task %d failed due to previous download errors", fm.TaskId)
+					}
 				} else {
 					log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)
 				}
@@ -351,11 +377,20 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 			if tasks, exists := dm.ResourceDownloads[fm.SourcePath]; exists {
 				for _, task := range tasks {
 					if count, ok := dm.TaskDownloads[task.TaskId]; ok {
+						if !fm.Success {
+							log.Printf("❌ Task %d failed due to download error for resource %s", task.TaskId, fm.SourcePath)
+							dm.reporter.UpdateTask(fm.TaskId, "F", fmt.Sprintf("Download failed for resource %s", fm.SourcePath))
+							task.Status = "F"
+						}
 						dm.TaskDownloads[task.TaskId] = count - 1
 						if count <= 1 {
 							delete(dm.TaskDownloads, task.TaskId)
-							log.Printf("🚀 Task %d ready for execution", task.TaskId)
-							dm.ExecQueue <- task
+							if fm.Task.Status != "F" {
+								log.Printf("🚀 Task %d ready for execution", task.TaskId)
+								dm.ExecQueue <- task
+							} else {
+								log.Printf("❌ Task %d failed due to previous download errors", task.TaskId)
+							}
 						} else {
 							log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)
 						}
@@ -377,13 +412,29 @@ func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string)
 	fileMeta := dm.ResourceMemory[resourcePath]
 	entries, err := os.ReadDir(fileMeta.FilePath)
 	if err != nil {
-		log.Printf("Error reading directory %s (%v): %v", fileMeta.FilePath, fileMeta, err)
+		message := fmt.Sprintf("Error reading directory %s: %v", fileMeta.FilePath, err)
+		log.Printf("❌ %s", message)
+		dm.reporter.Event("E", "resource_link", message, map[string]any{
+			"resource_path": fileMeta.FilePath,
+			"task_id":       fileMeta.TaskId,
+			"error":         err.Error(),
+		})
+		fileMeta.Task.Status = "F"
+		dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
 		return
 	}
 	for _, entry := range entries {
 		err := os.Link(fileMeta.FilePath+"/"+entry.Name(), taskResourceFolder+"/"+entry.Name())
 		if err != nil {
-			log.Printf("Error creating hard link for %s: %v", entry.Name(), err)
+			message := fmt.Sprintf("Error creating hard link for %s: %v", entry.Name(), err)
+			log.Printf("❌ %s", message)
+			dm.reporter.Event("E", "resource_link", message, map[string]any{
+				"resource_path": fileMeta.FilePath,
+				"task_id":       fileMeta.TaskId,
+				"error":         err.Error(),
+			})
+			fileMeta.Task.Status = "F"
+			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
 		}
 	}
 	log.Printf("Linked %s in %s", resourcePath, taskResourceFolder)
@@ -396,8 +447,8 @@ func extractFilename(path string) string {
 }
 
 // run downloader
-func RunDownloader(store string) *DownloadManager {
-	dm := NewDownloadManager(store)
+func RunDownloader(store string, reporter event.Reporter) *DownloadManager {
+	dm := NewDownloadManager(store, reporter)
 	go func() { dm.StartDownloadWorkers() }()
 	go func() {
 		dm.loadResourceMemory()

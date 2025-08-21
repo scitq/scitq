@@ -1190,6 +1190,51 @@ func (s *taskQueueServer) DeleteJob(ctx context.Context, req *pb.JobId) (*pb.Ack
 	return &pb.Ack{Success: true}, nil
 }
 
+func (s *taskQueueServer) UpdateJob(ctx context.Context, req *pb.JobUpdate) (*pb.Ack, error) {
+	if req.JobId == 0 {
+		return nil, fmt.Errorf("a non zero JobId is required")
+	}
+
+	sets := []string{"modified_at = NOW()"}
+	args := []any{}
+	i := 1
+
+	// Append log (timestamped)
+	if req.AppendLog != nil && strings.TrimSpace(*req.AppendLog) != "" {
+		sets = append(sets,
+			`log = COALESCE(log,'') || CASE WHEN log = '' THEN '' ELSE E'\n' END ||
+             TO_CHAR(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') || ' ' || $`+itoa(i))
+		args = append(args, strings.TrimSpace(*req.AppendLog))
+		i++
+	}
+
+	// Status
+	if req.Status != nil && *req.Status != "" {
+		sets = append(sets, "status = $"+itoa(i))
+		args = append(args, *req.Status)
+		i++
+	}
+
+	// Progression (clamp 0..100)
+	if req.Progression != nil {
+		p := *req.Progression
+		if p > 100 {
+			p = 100
+		}
+		sets = append(sets, "progression = $"+itoa(i))
+		args = append(args, p)
+		i++
+	}
+
+	q := "UPDATE job SET " + strings.Join(sets, ", ") + " WHERE job_id = $" + itoa(i)
+	args = append(args, req.JobId)
+
+	if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
+		return nil, err
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
 func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
 	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2", req.Status, req.WorkerId)
 	if err != nil {

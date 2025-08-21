@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/google/shlex"
 
+	"github.com/scitq/scitq/client/event"
 	"github.com/scitq/scitq/client/install"
 	"github.com/scitq/scitq/client/workerstats"
 	"github.com/scitq/scitq/fetch"
@@ -28,25 +30,12 @@ import (
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
+const fetchTaskErrorThreshold = 5
+
 // the client is divided in several loops to accomplish its tasks:
 // - the main loop (essentially this file)
 //
 //
-
-// send simple log message
-func logMessage(msg string, client pb.TaskQueueClient, taskID uint32) {
-	stream, serr := client.SendTaskLogs(context.Background())
-	if serr != nil {
-		log.Printf("❌ Failed to open error log stream: %v", serr)
-	}
-	defer stream.CloseSend()
-
-	stream.Send(&pb.TaskLog{
-		TaskId:  taskID,
-		LogType: "stderr",
-		LogText: msg,
-	})
-}
 
 // WorkerConfig holds worker settings from CLI args.
 type WorkerConfig struct {
@@ -118,49 +107,40 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	log.Printf("✅ Worker %s registered with concurrency %d", w.Name, w.Concurrency)
 }
 
-// acknowledgeTask marks the task as "Running" (`R` status) before execution.
-func acknowledgeTask(client pb.TaskQueueClient, taskID uint32) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	res, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: taskID, NewStatus: "R"})
-
-	if err != nil || !res.Success {
-		log.Printf("❌ Failed to acknowledge task %d: %v", taskID, err)
-		return false
-	}
-	log.Printf("📌 Task %d running", taskID)
-	return true
-}
-
 // updateTaskStatus marks task as `S` (Success) or `F` (Failed) after execution.
-func updateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
-		TaskId:    taskID,
-		NewStatus: status,
-	})
-	if err != nil {
-		log.Printf("⚠️ Failed to update task %d status to %s: %v", taskID, status, err)
-	} else {
-		log.Printf("✅ Task %d updated to status: %s", taskID, status)
-	}
-}
+//func updateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//
+//	_, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
+//		TaskId:    taskID,
+//		NewStatus: status,
+//	})
+//	if err != nil {
+//		log.Printf("⚠️ Failed to update task %d status to %s: %v", taskID, status, err)
+//	} else {
+//		log.Printf("✅ Task %d updated to status: %s", taskID, status)
+//	}
+//}
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager) {
+func executeTask(client pb.TaskQueueClient, reporter event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
 	// 🛑 Only acknowledge if the task is in "C" or "D"
 	if task.Status != "C" && task.Status != "D" {
 		log.Printf("⚠️ Task %d is not accepted (C) or downloading (D) but %s, skipping acknowledgment.", task.TaskId, task.Status)
+		reporter.Event("E", "task", fmt.Sprintf("task %d is not in accepted state", task.TaskId), map[string]any{
+			"task_id": task.TaskId,
+			"status":  task.Status,
+			"command": task.Command,
+		})
 		return
 	}
-	if !acknowledgeTask(client, task.TaskId) {
-		log.Printf("⚠️ Task %d could not be acknowledged, giving up execution.", task.TaskId)
+	err := reporter.UpdateTask(task.TaskId, "R", "")
+	if err != nil {
+		log.Printf("⚠️ Task %d could not be acknowledged, giving up execution: %v", task.TaskId, err)
 		return // ❌ Do not execute if acknowledgment failed.
 	}
 	task.Status = "R"
@@ -168,6 +148,10 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 	//TODO: linking resource
 	for _, r := range task.Resource {
 		dm.resourceLink(r, store+"/tasks/"+fmt.Sprint(task.TaskId)+"/resource")
+	}
+
+	if task.Status == "F" {
+		return // ❌ Do not execute if task is marked as failed
 	}
 
 	command := []string{"run", "--rm"}
@@ -184,9 +168,14 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 	} else {
 		args, err := shlex.Split(task.Command)
 		if err != nil {
-			log.Printf("❌ Failed to analyze command %s: %v", task.Command, err)
-			task.Status = "F"                          // Mark as failed
-			updateTaskStatus(client, task.TaskId, "V") // Mark as failed
+			message := fmt.Sprintf("Failed to analyze command %s: %v", task.Command, err)
+			log.Printf("❌ %s", message)
+			reporter.Event("E", "task", message, map[string]any{
+				"task_id": task.TaskId,
+				"command": task.Command,
+			})
+			task.Status = "F"                              // Mark as failed
+			reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
 			return
 		}
 		command = append(command, task.Container)
@@ -199,9 +188,14 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 	stderr, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("❌ Failed to start task %d: %v", task.TaskId, err)
-		task.Status = "F"                          // Mark as failed
-		updateTaskStatus(client, task.TaskId, "V") // Mark as failed
+		message := fmt.Sprintf("Failed to start task %d: %v", task.TaskId, err)
+		log.Printf("❌ %s", message)
+		reporter.Event("E", "task", message, map[string]any{
+			"task_id": task.TaskId,
+			"command": task.Command,
+		})
+		task.Status = "F"                              // Mark as failed
+		reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
 		return
 	}
 
@@ -211,10 +205,16 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 
 	stream, err := client.SendTaskLogs(ctx)
 	if err != nil {
-		log.Printf("⚠️ Failed to open log stream for task %d: %v", task.TaskId, err)
+		message := fmt.Sprintf("Failed to open log stream for task %d: %v", task.TaskId, err)
+		log.Printf("⚠️ %s", message)
+		reporter.Event("E", "task", message, map[string]any{
+			"task_id": task.TaskId,
+			"command": task.Command,
+		})
 		cmd.Wait()
-		task.Status = "F"                          // Mark as failed
-		updateTaskStatus(client, task.TaskId, "V") // Mark as failed
+		task.Status = "F"                              // Mark as failed
+		reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
+		log.Printf("⚠️ Failed to open log stream for task %d: %v", task.TaskId, err)
 		return
 	}
 
@@ -238,24 +238,30 @@ func executeTask(client pb.TaskQueueClient, task *pb.Task, wg *sync.WaitGroup, s
 
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
 	if err != nil {
-		log.Printf("❌ Task %d failed: %v", task.TaskId, err)
-		task.Status = "F"                          // Mark as failed
-		updateTaskStatus(client, task.TaskId, "V") // Mark as failed
+		message := fmt.Sprintf("Task %d failed: %v", task.TaskId, err)
+		log.Printf("❌ %s", message)
+		reporter.Event("E", "task", message, map[string]any{
+			"task_id": task.TaskId,
+			"command": task.Command,
+		})
+		task.Status = "F"                         // Mark as failed
+		reporter.UpdateTask(task.TaskId, "V", "") // Mark as failed
 	} else {
 		log.Printf("✅ Task %d completed successfully", task.TaskId)
-		task.Status = "S"                          // Mark as success
-		updateTaskStatus(client, task.TaskId, "U") // Mark as success
+		task.Status = "S" // Mark as success
+		reporter.UpdateTask(task.TaskId, "U", "")
 	}
 }
 
 // fetchTasks requests new tasks from the server.
 func (w *WorkerConfig) fetchTasks(
 	client pb.TaskQueueClient,
+	reporter event.Reporter,
 	id uint32,
 	sem *utils.ResizableSemaphore,
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
-) []*pb.Task {
+) ([]*pb.Task, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -271,7 +277,7 @@ func (w *WorkerConfig) fetchTasks(
 	res, err := client.PingAndTakeNewTasks(ctx, query)
 	if err != nil {
 		log.Printf("⚠️ Error fetching tasks: %v", err)
-		return nil
+		return nil, err
 	}
 
 	if res.Concurrency != uint32(w.Concurrency) {
@@ -296,8 +302,11 @@ func (w *WorkerConfig) fetchTasks(
 		if !known {
 			log.Printf("⚠️ Server believes task %d is active, but client lost track. Reporting failure.", tid)
 			go func(tid uint32) {
-				logMessage("Client lost track of task", client, tid)
-				updateTaskStatus(client, tid, "F")
+				reporter.Event("E", "task", fmt.Sprintf("lost track of task %d", tid), map[string]any{
+					"task_id": tid,
+					"status":  "F",
+				})
+				reporter.UpdateTask(tid, "F", "Client lost track of task")
 			}(tid)
 		}
 	}
@@ -309,15 +318,29 @@ func (w *WorkerConfig) fetchTasks(
 		return true
 	})
 
-	return res.Tasks
+	return res.Tasks, nil
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
+func workerLoop(client pb.TaskQueueClient, reporter event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
 	store := dm.Store
 
+	var consecErrors int
 	for {
-		tasks := config.fetchTasks(client, config.WorkerId, sem, taskWeights, activeTasks)
+
+		tasks, err := config.fetchTasks(client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
+		if err != nil {
+			log.Printf("⚠️ Error fetching tasks: %v", err)
+			consecErrors++
+			if consecErrors >= fetchTaskErrorThreshold {
+				reporter.Event("W", "runtime", fmt.Sprintf("consecutive fetch errors (%d)", consecErrors), map[string]any{
+					"last_error": err.Error(),
+				})
+			}
+			time.Sleep(5 * time.Second) // Wait before retrying
+			continue
+		}
+		consecErrors = 0 // Reset error count on success
 		if len(tasks) == 0 {
 			log.Printf("No tasks available, retrying in 5 seconds...")
 			time.Sleep(5 * time.Second) // No tasks, wait before retrying
@@ -325,15 +348,39 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.Resiz
 		}
 
 		for _, task := range tasks {
-			task.Status = "C" // Mark as "C" (Accepted)
+			task.Status = "C" // Accepted
 			activeTasks.Store(task.TaskId, struct{}{})
-			updateTaskStatus(client, task.TaskId, task.Status)
+			reporter.UpdateTask(task.TaskId, task.Status, "")
 			log.Printf("📝 Task %d accepted", task.TaskId)
+
+			failed := false
 			for _, folder := range []string{"input", "output", "tmp", "resource"} {
-				if err := os.MkdirAll(store+"/tasks/"+fmt.Sprint(task.TaskId)+"/"+folder, 0777); err != nil {
+				path := filepath.Join(store, "tasks", fmt.Sprint(task.TaskId), folder)
+				if err := os.MkdirAll(path, 0777); err != nil {
 					log.Printf("⚠️ Failed to create directory %s for task %d: %v", folder, task.TaskId, err)
+
+					// Report event
+					reporter.Event("E", "task", fmt.Sprintf("failed to create directory %s for task %d", folder, task.TaskId), map[string]any{
+						"task_id":    task.TaskId,
+						"folder":     folder,
+						"store_path": path,
+						"error":      err.Error(),
+					})
+
+					// Mark as failed
+					reporter.UpdateTask(task.TaskId, "F", fmt.Sprintf("failed to create directory %s for task %d: %v", folder, task.TaskId, err))
+					failed = true
+					break
 				}
 			}
+
+			if failed {
+				// Clean up bookkeeping
+				activeTasks.Delete(task.TaskId)
+				continue // do not enqueue into TaskQueue
+			}
+
+			// Only enqueue if all folders were created successfully
 			dm.TaskQueue <- task
 		}
 
@@ -343,6 +390,7 @@ func workerLoop(client pb.TaskQueueClient, config WorkerConfig, sem *utils.Resiz
 func excuterThread(
 	exexQueue chan *pb.Task,
 	client pb.TaskQueueClient,
+	reporter event.Reporter,
 	sem *utils.ResizableSemaphore,
 	store string,
 	dm *DownloadManager,
@@ -364,12 +412,20 @@ func excuterThread(
 
 		go func(t *pb.Task, w float64) {
 			if err := sem.AcquireWithWeight(context.Background(), w, t.TaskId); err != nil {
-				log.Printf("❌ Failed to acquire semaphore for task %d: %v", t.TaskId, err)
+				message := fmt.Sprintf("Failed to acquire semaphore for task %d: %v", t.TaskId, err)
+				log.Printf("❌ %s", message)
+				reporter.Event("E", "task", message, map[string]any{
+					"task_id": t.TaskId,
+					"status":  t.Status,
+					"command": t.Command,
+				})
+				t.Status = "F" // Mark as failed
+				reporter.UpdateTask(t.TaskId, "F", message)
 				wg.Done()
 				return
 			}
 
-			executeTask(client, t, &wg, store, dm)
+			executeTask(client, reporter, t, &wg, store, dm)
 
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
@@ -399,6 +455,7 @@ func Run(serverAddr string, concurrency uint32, name, store, token string) error
 		log.Printf("⚠️ Rclone config file not found, creating a new one.")
 		rCloneConfig, err := qclient.Client.GetRcloneConfig(context.Background(), &emptypb.Empty{})
 		if err != nil {
+			event.SendRuntimeEventWithRetry(config.ServerAddr, config.Token, 0, config.Name, "E", "rclone", "Failed to get Rclone config", map[string]any{"error": err.Error()})
 			return fmt.Errorf("could not get Rclone config: %v", err)
 		}
 		install.InstallRcloneConfig(rCloneConfig.Config, fetch.DefaultRcloneConfig)
@@ -407,18 +464,25 @@ func Run(serverAddr string, concurrency uint32, name, store, token string) error
 	config.registerWorker(qclient.Client)
 	sem := utils.NewResizableSemaphore(float64(config.Concurrency))
 
+	reporter := event.Reporter{
+		Client:     qclient.Client,
+		WorkerID:   config.WorkerId,
+		WorkerName: config.Name,
+		Timeout:    5 * time.Second,
+	}
+
 	//TODO: we need to add somehow an error state (or we could update the task status in the task with the error notably in case download fails)
 
 	// Launching download Manager
-	dm := RunDownloader(store)
+	dm := RunDownloader(store, reporter)
 
 	// Launching upload Manager
-	um := RunUploader(store, qclient.Client, activeTasks)
+	um := RunUploader(store, qclient.Client, activeTasks, reporter)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, sem, store, dm, um, taskWeights, activeTasks)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks)
 
 	// Start processing tasks
-	go workerLoop(qclient.Client, config, sem, dm, taskWeights, activeTasks)
+	go workerLoop(qclient.Client, reporter, config, sem, dm, taskWeights, activeTasks)
 	select {} // Block forever
 }

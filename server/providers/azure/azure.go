@@ -169,7 +169,7 @@ func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidenti
 }
 
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
-func (ap *AzureProvider) Create(workerName, flavor, location string) (string, error) {
+func (ap *AzureProvider) Create(workerName, flavor, location string, jobId uint32) (string, error) {
 	var ipAddress string
 	var pubIPID string
 
@@ -184,11 +184,12 @@ func (ap *AzureProvider) Create(workerName, flavor, location string) (string, er
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s"`,
+  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s" -jobid %d`,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
 			ap.cfg.Scitq.DockerRegistry, ap.cfg.Scitq.DockerAuthentication,
-			ap.cfg.Scitq.SwapProportion, ap.cfg.Scitq.WorkerToken)
+			ap.cfg.Scitq.SwapProportion, ap.cfg.Scitq.WorkerToken,
+			jobId)
 		customData := base64.StdEncoding.EncodeToString([]byte(cloudInit))
 
 		// Create credential.
