@@ -308,8 +308,8 @@ func (w *WorkerConfig) fetchTasks(
 				first := v.(time.Time)
 				// if it has remained unknown for ≥ one fetch cycle (or e.g. ≥3s), warn once
 				if now.Sub(first) >= 3*time.Second {
-					// emit a single ERROR event (high signal), but do NOT change status here
-					reporter.Event("E", "task", fmt.Sprintf("lost track of task %d", tid), map[string]any{
+					// emit a single WARNING event, cllient will catch up later
+					reporter.Event("W", "task", fmt.Sprintf("lost track of task %d", tid), map[string]any{
 						"task_id":      tid,
 						"component":    "fetchTasks",
 						"active_count": func() int { n := 0; activeTasks.Range(func(_, _ any) bool { n++; return true }); return n }(),

@@ -12,6 +12,8 @@ import (
 	"github.com/scitq/scitq/lib"
 )
 
+const idleTimeout = 60 * time.Second
+
 // send simple log message
 func LogMessage(msg string, client pb.TaskQueueClient, taskID uint32) {
 	stream, serr := client.SendTaskLogs(context.Background())
@@ -185,11 +187,17 @@ func (r *Reporter) runWorker(taskID uint32, w *taskWorker) {
 	defer r.wg.Done()
 	for {
 		var it item
-		// Wait for next item or quit
 		select {
 		case <-w.quit:
 			return
 		case it = <-w.ch:
+			// got an item, proceed
+		case <-time.After(idleTimeout):
+			// idle timeout, remove worker and exit
+			r.mu.Lock()
+			delete(r.workers, taskID)
+			r.mu.Unlock()
+			return
 		}
 
 		switch it.kind {
