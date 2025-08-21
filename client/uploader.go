@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -53,11 +52,11 @@ type UploadManager struct {
 	Completion     chan *pb.Task
 	Store          string
 	Client         pb.TaskQueueClient
-	reporter       event.Reporter
+	reporter       *event.Reporter
 	pendingUploads SyncCounter // taskID → remaining files
 }
 
-func NewUploadManager(store string, client pb.TaskQueueClient, reporter event.Reporter) *UploadManager {
+func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.Reporter) *UploadManager {
 	return &UploadManager{
 		UploadQueue:    make(chan *UploadFile, maxUploads),
 		Completion:     make(chan *pb.Task, maxQueueSize),
@@ -149,40 +148,12 @@ func (um *UploadManager) uploadFile(file *UploadFile) error {
 	return err
 }
 
-func retryUpdateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
-	retries := 0
-	maxRetries := 1000
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		_, err := client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
-			TaskId:    taskID,
-			NewStatus: status,
-		})
-		if err == nil {
-			log.Printf("✅ Task %d updated to status: %s", taskID, status)
-			return
-		}
-
-		retries++
-		log.Printf("⚠️ Failed to update task %d to %s (attempt %d): %v", taskID, status, retries, err)
-
-		if retries >= maxRetries {
-			log.Printf("❌ Gave up updating task %d after %d retries.", taskID, retries)
-			return
-		}
-
-		time.Sleep(5 * time.Second)
-	}
-}
-
 func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 	for task := range um.Completion {
 		taskID := task.TaskId
 		if remaining, done := um.pendingUploads.Decrement(taskID); done {
 			log.Printf("📤 Upload completed for task %d, marking as %s", taskID, task.Status)
-			retryUpdateTaskStatus(um.Client, taskID, task.Status)
+			um.reporter.UpdateTaskAsync(taskID, task.Status, "")
 			activeTasks.Delete(taskID)
 		} else {
 			log.Printf("📤 Remaining uploads for task %d: %d", taskID, remaining)
@@ -191,7 +162,7 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 }
 
 // RunUploader starts upload workers and returns the manager.
-func RunUploader(store string, client pb.TaskQueueClient, activeTasks *sync.Map, reporter event.Reporter) *UploadManager {
+func RunUploader(store string, client pb.TaskQueueClient, activeTasks *sync.Map, reporter *event.Reporter) *UploadManager {
 	um := NewUploadManager(store, client, reporter)
 	go um.StartUploadWorkers(activeTasks)
 	return um

@@ -1060,8 +1060,12 @@ func (c *CLI) WorkerEventList() error {
 
 	fmt.Println("📋 Worker Events:")
 	for _, e := range res.Events {
-		fmt.Printf("🆔 %d | %s | WID:%v Name:%s | %s/%s | %s\n",
-			e.EventId, e.CreatedAt, e.WorkerId, e.WorkerName,
+		wid := "-"
+		if e.WorkerId != nil {
+			wid = fmt.Sprintf("%d", *e.WorkerId)
+		}
+		fmt.Printf("🆔 %d | %s | WID:%s Name:%s | %s/%s | %s\n",
+			e.EventId, e.CreatedAt, wid, e.WorkerName,
 			e.Level, e.EventClass, e.Message)
 		if e.DetailsJson != "" {
 			fmt.Printf("   Details: %s\n", e.DetailsJson)

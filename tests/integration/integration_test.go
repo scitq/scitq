@@ -297,13 +297,22 @@ func TestIntegration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, output, "👷 Worker List:\n🔹 ID: 1 | Name: test-worker-1 | Concurrency: 1")
 
-	// Allow some time for the client to accept and execute task
-	time.Sleep(5 * time.Second)
-
-	// looking up Task and check status is now S
-	output, err = runCLICommand(c, []string{"task", "list"})
-	assert.NoError(t, err)
-	assert.Contains(t, output, "📋 Task List:\n🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: S\n")
+	// looking up Task and check status is now S (allow a short convergence window)
+	var ok bool
+	for i := 0; i < 20; i++ { // 20 * 500ms = ~10s max wait
+		output, err = runCLICommand(c, []string{"task", "list"})
+		assert.NoError(t, err)
+		if strings.Contains(output, "📋 Task List:\n🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: S\n") {
+			ok = true
+			break
+		}
+		log.Printf("Waiting for task to reach status S, current output:\n%s", output)
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !ok {
+		// show what we saw last to aid debugging
+		t.Fatalf("task did not reach S; last output:\n%s", output)
+	}
 
 	// look for task output
 	output, err = runCLICommand(c, []string{"task", "output", "--id", "1"})

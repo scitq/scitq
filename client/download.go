@@ -66,11 +66,11 @@ type DownloadManager struct {
 	CompletionQueue chan *FileMetadata // Completed downloads
 	ExecQueue       chan *pb.Task      // Tasks ready for execution
 	Store           string
-	reporter        event.Reporter
+	reporter        *event.Reporter
 }
 
 // NewDownloadManager initializes the download manager.
-func NewDownloadManager(store string, reporter event.Reporter) *DownloadManager {
+func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager {
 	return &DownloadManager{
 		TaskDownloads:     make(map[uint32]int),
 		ResourceDownloads: make(map[string][]*pb.Task),
@@ -447,7 +447,7 @@ func extractFilename(path string) string {
 }
 
 // run downloader
-func RunDownloader(store string, reporter event.Reporter) *DownloadManager {
+func RunDownloader(store string, reporter *event.Reporter) *DownloadManager {
 	dm := NewDownloadManager(store, reporter)
 	go func() { dm.StartDownloadWorkers() }()
 	go func() {

@@ -47,6 +47,8 @@ type WorkerConfig struct {
 	Token       string
 }
 
+var lostTrackSeen sync.Map // map[uint32]time.Time
+
 // auto detect self specs
 func (w *WorkerConfig) registerSpecs(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -124,7 +126,7 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 //}
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -138,12 +140,8 @@ func executeTask(client pb.TaskQueueClient, reporter event.Reporter, task *pb.Ta
 		})
 		return
 	}
-	err := reporter.UpdateTask(task.TaskId, "R", "")
-	if err != nil {
-		log.Printf("⚠️ Task %d could not be acknowledged, giving up execution: %v", task.TaskId, err)
-		return // ❌ Do not execute if acknowledgment failed.
-	}
 	task.Status = "R"
+	reporter.UpdateTaskAsync(task.TaskId, "R", "")
 
 	//TODO: linking resource
 	for _, r := range task.Resource {
@@ -244,19 +242,19 @@ func executeTask(client pb.TaskQueueClient, reporter event.Reporter, task *pb.Ta
 			"task_id": task.TaskId,
 			"command": task.Command,
 		})
-		task.Status = "F"                         // Mark as failed
-		reporter.UpdateTask(task.TaskId, "V", "") // Mark as failed
+		task.Status = "F"                              // Mark as failed
+		reporter.UpdateTaskAsync(task.TaskId, "V", "") // Mark as failed
 	} else {
 		log.Printf("✅ Task %d completed successfully", task.TaskId)
 		task.Status = "S" // Mark as success
-		reporter.UpdateTask(task.TaskId, "U", "")
+		reporter.UpdateTaskAsync(task.TaskId, "U", "")
 	}
 }
 
 // fetchTasks requests new tasks from the server.
 func (w *WorkerConfig) fetchTasks(
 	client pb.TaskQueueClient,
-	reporter event.Reporter,
+	reporter *event.Reporter,
 	id uint32,
 	sem *utils.ResizableSemaphore,
 	taskWeights *sync.Map,
@@ -295,21 +293,40 @@ func (w *WorkerConfig) fetchTasks(
 	sem.ResizeTasks(updates)
 
 	// Check activeTasks map
+	// 1) Build a set of server-active tasks
 	serverActiveTasks := make(map[uint32]struct{})
 	for _, tid := range res.ActiveTasks {
 		serverActiveTasks[tid] = struct{}{}
-		_, known := activeTasks.Load(tid)
-		if !known {
-			log.Printf("⚠️ Server believes task %d is active, but client lost track. Reporting failure.", tid)
-			go func(tid uint32) {
-				reporter.Event("E", "task", fmt.Sprintf("lost track of task %d", tid), map[string]any{
-					"task_id": tid,
-					"status":  "F",
-				})
-				reporter.UpdateTask(tid, "F", "Client lost track of task")
-			}(tid)
+	}
+
+	// 2) For any server-active task we don't know locally, debounce before failing
+	now := time.Now()
+	for tid := range serverActiveTasks {
+		if _, known := activeTasks.Load(tid); !known {
+			// have we seen this "unknown" before?
+			if v, ok := lostTrackSeen.Load(tid); ok {
+				first := v.(time.Time)
+				// if it has remained unknown for ≥ one fetch cycle (or e.g. ≥3s), warn once
+				if now.Sub(first) >= 3*time.Second {
+					// emit a single ERROR event (high signal), but do NOT change status here
+					reporter.Event("E", "task", fmt.Sprintf("lost track of task %d", tid), map[string]any{
+						"task_id":      tid,
+						"component":    "fetchTasks",
+						"active_count": func() int { n := 0; activeTasks.Range(func(_, _ any) bool { n++; return true }); return n }(),
+					})
+					lostTrackSeen.Delete(tid)
+				}
+			} else {
+				// first time we see this mismatch: remember it and give the worker loop a chance to store
+				lostTrackSeen.Store(tid, now)
+				log.Printf("⏳ Server says task %d active but client doesn't know it yet; deferring decision.", tid)
+			}
+		} else {
+			// if we do know it locally, clear any lingering first-seen marker
+			lostTrackSeen.Delete(tid)
 		}
 	}
+
 	activeTasks.Range(func(key, _ any) bool {
 		taskID := key.(uint32)
 		if _, known := serverActiveTasks[taskID]; !known {
@@ -322,7 +339,7 @@ func (w *WorkerConfig) fetchTasks(
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(client pb.TaskQueueClient, reporter event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
+func workerLoop(client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
 	store := dm.Store
 
 	var consecErrors int
@@ -350,7 +367,7 @@ func workerLoop(client pb.TaskQueueClient, reporter event.Reporter, config Worke
 		for _, task := range tasks {
 			task.Status = "C" // Accepted
 			activeTasks.Store(task.TaskId, struct{}{})
-			reporter.UpdateTask(task.TaskId, task.Status, "")
+			reporter.UpdateTaskAsync(task.TaskId, task.Status, "")
 			log.Printf("📝 Task %d accepted", task.TaskId)
 
 			failed := false
@@ -390,7 +407,7 @@ func workerLoop(client pb.TaskQueueClient, reporter event.Reporter, config Worke
 func excuterThread(
 	exexQueue chan *pb.Task,
 	client pb.TaskQueueClient,
-	reporter event.Reporter,
+	reporter *event.Reporter,
 	sem *utils.ResizableSemaphore,
 	store string,
 	dm *DownloadManager,
@@ -464,12 +481,8 @@ func Run(serverAddr string, concurrency uint32, name, store, token string) error
 	config.registerWorker(qclient.Client)
 	sem := utils.NewResizableSemaphore(float64(config.Concurrency))
 
-	reporter := event.Reporter{
-		Client:     qclient.Client,
-		WorkerID:   config.WorkerId,
-		WorkerName: config.Name,
-		Timeout:    5 * time.Second,
-	}
+	reporter := event.NewReporter(qclient.Client, config.WorkerId, config.Name, 5*time.Second)
+	defer reporter.StopOutbox()
 
 	//TODO: we need to add somehow an error state (or we could update the task status in the task with the error notably in case download fails)
 
