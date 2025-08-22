@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -13,7 +14,7 @@ import (
 
 const DefaultAssignTrigger uint32 = 500 // 5 sec
 
-func (s *taskQueueServer) waitForAssignEvents() {
+func (s *taskQueueServer) waitForAssignEvents(context context.Context) {
 	for {
 		s.assignPendingTasks()
 
@@ -22,6 +23,11 @@ func (s *taskQueueServer) waitForAssignEvents() {
 		}
 
 		s.assignTrigger = DefaultAssignTrigger
+		select {
+		case <-context.Done():
+			return
+		default:
+		}
 	}
 }
 

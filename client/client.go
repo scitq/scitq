@@ -253,6 +253,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 
 // fetchTasks requests new tasks from the server.
 func (w *WorkerConfig) fetchTasks(
+	ctx context.Context,
 	client pb.TaskQueueClient,
 	reporter *event.Reporter,
 	id uint32,
@@ -260,7 +261,7 @@ func (w *WorkerConfig) fetchTasks(
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
 ) ([]*pb.Task, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	var query *pb.PingAndGetNewTasksRequest
@@ -274,7 +275,7 @@ func (w *WorkerConfig) fetchTasks(
 
 	res, err := client.PingAndTakeNewTasks(ctx, query)
 	if err != nil {
-		log.Printf("⚠️ Error fetching tasks: %v", err)
+		log.Printf("⚠️ Error calling fetch tasks: %v", err)
 		return nil, err
 	}
 
@@ -339,13 +340,18 @@ func (w *WorkerConfig) fetchTasks(
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
+func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
 	store := dm.Store
 
 	var consecErrors int
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 
-		tasks, err := config.fetchTasks(client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
+		tasks, err := config.fetchTasks(ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -354,13 +360,21 @@ func workerLoop(client pb.TaskQueueClient, reporter *event.Reporter, config Work
 					"last_error": err.Error(),
 				})
 			}
-			time.Sleep(5 * time.Second) // Wait before retrying
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 		consecErrors = 0 // Reset error count on success
 		if len(tasks) == 0 {
 			log.Printf("No tasks available, retrying in 5 seconds...")
-			time.Sleep(5 * time.Second) // No tasks, wait before retrying
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 
@@ -455,7 +469,7 @@ func excuterThread(
 }
 
 // / client launcher
-func Run(serverAddr string, concurrency uint32, name, store, token string) error {
+func Run(ctx context.Context, serverAddr string, concurrency uint32, name, store, token string) error {
 
 	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token}
 	taskWeights := &sync.Map{}
@@ -470,7 +484,7 @@ func Run(serverAddr string, concurrency uint32, name, store, token string) error
 
 	if _, err := os.Stat(fetch.DefaultRcloneConfig); os.IsNotExist(err) {
 		log.Printf("⚠️ Rclone config file not found, creating a new one.")
-		rCloneConfig, err := qclient.Client.GetRcloneConfig(context.Background(), &emptypb.Empty{})
+		rCloneConfig, err := qclient.Client.GetRcloneConfig(ctx, &emptypb.Empty{})
 		if err != nil {
 			event.SendRuntimeEventWithRetry(config.ServerAddr, config.Token, 0, config.Name, "E", "rclone", "Failed to get Rclone config", map[string]any{"error": err.Error()})
 			return fmt.Errorf("could not get Rclone config: %v", err)
@@ -496,6 +510,8 @@ func Run(serverAddr string, concurrency uint32, name, store, token string) error
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks)
 
 	// Start processing tasks
-	go workerLoop(qclient.Client, reporter, config, sem, dm, taskWeights, activeTasks)
-	select {} // Block forever
+	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, taskWeights, activeTasks)
+	// Block until context is canceled
+	<-ctx.Done()
+	return ctx.Err()
 }

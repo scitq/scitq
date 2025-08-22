@@ -40,6 +40,9 @@ type Config struct {
 		AdminUser            string  `yaml:"admin_user" default:"admin"`
 		AdminHashedPassword  string  `yaml:"admin_hashed_password" default:""`
 		AdminEmail           string  `yaml:"admin_email" default:""`
+		DisableHTTPS         bool    `yaml:"disable_https" default:"false"`
+		DisableGRPCWeb       bool    `yaml:"disable_grpcweb" default:"false"`
+		HTTPSPort            int     `yaml:"https_port" default:"443"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`

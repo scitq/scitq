@@ -141,8 +141,18 @@ install2: all
 	install -m 755 $(BINARY_FETCH) /usr/local/bin/scitq2-fetch
 
 
+
 # Helper for cross-compilation
 define build_binary
 	mkdir -p $(OUTDIR)/$(1)
 	GOOS=$(2) GOARCH=$(3) go build -o $(OUTDIR)/$(1)/$(4) ./cmd/$(4)
 endef
+
+.PHONY: integration-test
+integration-test:
+	cd tests/integration && \
+	if [ -n "$(TEST)" ]; then \
+		go test -v -run '$(TEST)' ./...; \
+	else \
+		go test -v ./...; \
+	fi

@@ -193,5 +193,7 @@ func main() {
 		}
 	}
 
-	client.Run(*serverAddr, uint32(*concurrency), *name, *store, *token)
+	// Start the client
+	ctx := context.Background()
+	client.Run(ctx, *serverAddr, uint32(*concurrency), *name, *store, *token)
 }

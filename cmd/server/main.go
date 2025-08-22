@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -56,7 +57,8 @@ func main() {
 	// Launch the gRPC server as a goroutine.
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(*cfg); err != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := server.Serve(*cfg, ctx, cancel); err != nil {
 			log.Fatalf("gRPC server error: %v", err)
 		}
 	}()

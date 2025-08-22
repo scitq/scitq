@@ -205,6 +205,7 @@ func (r *Reporter) runWorker(taskID uint32, w *taskWorker) {
 			// Send status with small retries
 			timeout := max(r.Timeout, 5*time.Second)
 			for attempt := 0; attempt < 3; attempt++ {
+				log.Printf("🔄 Updating task %d status to %s (attempt %d)", taskID, it.status, attempt+1)
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				_, err := r.Client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
 					TaskId:    taskID,
@@ -214,6 +215,7 @@ func (r *Reporter) runWorker(taskID uint32, w *taskWorker) {
 				if err == nil {
 					break
 				}
+				log.Printf("⚠️ update task %d to %s failed: %v", taskID, it.status, err)
 				time.Sleep(2 * time.Second)
 				if timeout < 15*time.Second {
 					timeout += 5 * time.Second

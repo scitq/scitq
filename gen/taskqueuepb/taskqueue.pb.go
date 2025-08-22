@@ -313,6 +313,7 @@ type Task struct {
 	TaskName         *string                `protobuf:"bytes,19,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
 	RetryCount       uint32                 `protobuf:"varint,20,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
 	Hidden           bool                   `protobuf:"varint,21,opt,name=hidden,proto3" json:"hidden,omitempty"`
+	PreviousTaskId   *uint32                `protobuf:"varint,22,opt,name=previous_task_id,json=previousTaskId,proto3,oneof" json:"previous_task_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -492,6 +493,13 @@ func (x *Task) GetHidden() bool {
 		return x.Hidden
 	}
 	return false
+}
+
+func (x *Task) GetPreviousTaskId() uint32 {
+	if x != nil && x.PreviousTaskId != nil {
+		return *x.PreviousTaskId
+	}
+	return 0
 }
 
 type TaskList struct {
@@ -5876,7 +5884,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10_running_timeoutB\x11\n" +
 	"\x0f_upload_timeoutB\f\n" +
 	"\n" +
-	"_task_name\"\xfa\x06\n" +
+	"_task_name\"\xbe\a\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\rR\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -5903,7 +5911,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\ttask_name\x18\x13 \x01(\tH\fR\btaskName\x88\x01\x01\x12\x1f\n" +
 	"\vretry_count\x18\x14 \x01(\rR\n" +
 	"retryCount\x12\x16\n" +
-	"\x06hidden\x18\x15 \x01(\bR\x06hiddenB\b\n" +
+	"\x06hidden\x18\x15 \x01(\bR\x06hidden\x12-\n" +
+	"\x10previous_task_id\x18\x16 \x01(\rH\rR\x0epreviousTaskId\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -5919,7 +5928,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"_worker_idB\x0e\n" +
 	"\f_workflow_idB\f\n" +
 	"\n" +
-	"_task_name\"1\n" +
+	"_task_nameB\x13\n" +
+	"\x11_previous_task_id\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\x83\x02\n" +
 	"\x06Worker\x12\x1b\n" +

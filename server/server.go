@@ -76,7 +76,10 @@ type taskQueueServer struct {
 	watchdog       *watchdog.Watchdog
 
 	stopWatchdog       chan struct{}
+	done               chan struct{}
 	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
+	ctx                context.Context
+	cancel             context.CancelFunc
 	workerStats        *sync.Map
 	sslCertificatePEM  string
 }
@@ -93,7 +96,7 @@ var (
 	lastBroadcastedStatus sync.Map // key: uint32 taskId, value: string status
 )
 
-func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueueServer {
+func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx context.Context, cancel context.CancelFunc) *taskQueueServer {
 	workerWeightMemory, err := memory.LoadWeightMemory(context.Background(), db, "weight_memory")
 	if err != nil {
 		log.Printf("⚠️ Creating a new weight memory: %v", err)
@@ -110,10 +113,13 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
 		stopWatchdog:       make(chan struct{}),
+		done:               make(chan struct{}),
+		ctx:                ctx,
+		cancel:             cancel,
 		workerStats:        &sync.Map{},
 	}
 	//go s.assignTasksLoop()
-	go s.waitForAssignEvents()
+	go s.waitForAssignEvents(s.ctx)
 
 	s.watchdog = watchdog.NewWatchdog(
 		time.Duration(cfg.Scitq.IdleTimeout)*time.Second,
@@ -140,55 +146,85 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string) *taskQueu
 
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
-		for range ticker.C {
-			batchMutex.Lock()
-			if len(taskUpdateQueue) == 0 {
-				batchMutex.Unlock()
-				continue
-			}
-			drained := taskUpdateQueue
-			taskUpdateQueue = nil
-			batchMutex.Unlock()
-
-			latest := make(map[uint32]TaskUpdateBroadcast, 64)
-			for _, u := range drained {
-				latest[u.TaskId] = u
-			}
-
-			// 3) Broadcast only if status actually changed vs last sent
-			for _, u := range latest {
-				if prev, ok := lastBroadcastedStatus.Load(u.TaskId); ok && prev.(string) == u.Status {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				batchMutex.Lock()
+				if len(taskUpdateQueue) == 0 {
+					batchMutex.Unlock()
 					continue
 				}
-				lastBroadcastedStatus.Store(u.TaskId, u.Status)
+				drained := taskUpdateQueue
+				taskUpdateQueue = nil
+				batchMutex.Unlock()
 
-				payload := struct {
-					Type    string `json:"type"`
-					Payload struct {
-						TaskId   uint32 `json:"taskId"`
-						Status   string `json:"status"`
-						WorkerId uint32 `json:"workerId,omitempty"`
-					} `json:"payload"`
-				}{
-					Type: "task-updated",
-					Payload: struct {
-						TaskId   uint32 `json:"taskId"`
-						Status   string `json:"status"`
-						WorkerId uint32 `json:"workerId,omitempty"`
-					}{
-						TaskId:   u.TaskId,
-						Status:   u.Status,
-						WorkerId: u.WorkerId,
-					},
+				latest := make(map[uint32]TaskUpdateBroadcast, 64)
+				for _, u := range drained {
+					latest[u.TaskId] = u
 				}
-				if jsonData, err := json.Marshal(payload); err == nil {
-					ws.Broadcast(jsonData)
+
+				// 3) Broadcast only if status actually changed vs last sent
+				for _, u := range latest {
+					if prev, ok := lastBroadcastedStatus.Load(u.TaskId); ok && prev.(string) == u.Status {
+						continue
+					}
+					lastBroadcastedStatus.Store(u.TaskId, u.Status)
+
+					payload := struct {
+						Type    string `json:"type"`
+						Payload struct {
+							TaskId   uint32 `json:"taskId"`
+							Status   string `json:"status"`
+							WorkerId uint32 `json:"workerId,omitempty"`
+						} `json:"payload"`
+					}{
+						Type: "task-updated",
+						Payload: struct {
+							TaskId   uint32 `json:"taskId"`
+							Status   string `json:"status"`
+							WorkerId uint32 `json:"workerId,omitempty"`
+						}{
+							TaskId:   u.TaskId,
+							Status:   u.Status,
+							WorkerId: u.WorkerId,
+						},
+					}
+					if jsonData, err := json.Marshal(payload); err == nil {
+						ws.Broadcast(jsonData)
+					}
 				}
 			}
 		}
 	}()
 
 	return s
+}
+
+// Shutdown cleanly stops background goroutines launched by taskQueueServer.
+// It is safe to call multiple times.
+func (s *taskQueueServer) Shutdown() {
+	// cancel context-driven loops (recruiter, etc.)
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	// Stop watchdog loop
+	select {
+	case <-s.stopWatchdog:
+		// already closed
+	default:
+		close(s.stopWatchdog)
+	}
+	// Stop other background goroutines (e.g., WS broadcaster, assign events loop when adapted)
+	select {
+	case <-s.done:
+		// already closed
+	default:
+		close(s.done)
+	}
 }
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
@@ -313,7 +349,7 @@ func shouldTriggerAssignFor(status string) bool {
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
 	var workerID sql.NullInt32
 	var oldStatus string
-	var curRetry int
+	var curRetry sql.NullInt32
 	err := s.db.QueryRowContext(ctx, `
         WITH prior AS (
             SELECT status AS old_status, retry
@@ -417,8 +453,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	}
 
 	// Retry (rare path): clone a fresh task and detach the failed parent in a single tx.
-	if req.NewStatus == "F" && curRetry > 0 {
-		log.Printf("🔄 retrying task %d (status: %s, retry count: %d)", req.TaskId, req.NewStatus, curRetry)
+	if req.NewStatus == "F" && curRetry.Valid && curRetry.Int32 > 0 {
+		log.Printf("🔄 retrying task %d (status: %s, retry count: %d)", req.TaskId, req.NewStatus, curRetry.Int32)
 		tx, txErr := s.db.BeginTx(ctx, nil)
 		if txErr == nil {
 			var newID int64
@@ -1399,7 +1435,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	// Build SQL query with safe parameterized queries
 	query := `
         SELECT t.task_id, t.task_name, t.command, t.container, t.status, 
-               t.worker_id, t.step_id, t.retry_count, t.hidden
+               t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden
         FROM task t
         WHERE ($1 = '' OR t.status = $1)          -- Status filter (if provided)
         AND ($2 = 0 OR t.worker_id = $2)          -- Worker filter (if provided)
@@ -1449,8 +1485,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	for rows.Next() {
 		var task pb.Task
 		var (
-			taskName sql.NullString
-			stepID   sql.NullInt32
+			taskName   sql.NullString
+			stepID     sql.NullInt32
+			prevTaskID sql.NullInt32
 		)
 		var retryCount int32
 		var hidden bool
@@ -1464,6 +1501,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&task.Status,
 			&task.WorkerId,
 			&stepID,
+			&prevTaskID,
 			&retryCount,
 			&hidden,
 		)
@@ -1478,6 +1516,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		}
 		if stepID.Valid {
 			task.StepId = proto.Uint32(uint32(stepID.Int32))
+		}
+		if prevTaskID.Valid {
+			task.PreviousTaskId = proto.Uint32(uint32(prevTaskID.Int32))
 		}
 		task.RetryCount = uint32(retryCount)
 		task.Hidden = hidden
@@ -2781,12 +2822,7 @@ func LoadEmbeddedCertificates() (tls.Certificate, string, error) {
 	return serverCert, string(serverCertPEM), err
 }
 
-func (s *taskQueueServer) Shutdown() {
-	close(s.stopWatchdog)
-	// Other cleanup if needed later
-}
-
-func Serve(cfg config.Config) error {
+func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) error {
 	// ✅ 1. Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
@@ -2815,7 +2851,7 @@ func Serve(cfg config.Config) error {
 	}
 
 	// Create the main server instance
-	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot)
+	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot, ctx, cancel)
 
 	// Configure database connection pool settings for concurrency
 	db.SetMaxOpenConns(cfg.Scitq.MaxDBConcurrency * 2)
@@ -2865,6 +2901,7 @@ func Serve(cfg config.Config) error {
 	}
 
 	// 🔐 6. TLS + static files via HttpServer
+	// We always build the static handler; the certificate is only used if HTTPS is enabled.
 	serverCert, _, staticHandler, err := HttpServer(cfg)
 	if err != nil {
 		return fmt.Errorf("TLS/static server error: %v", err)
@@ -2882,7 +2919,7 @@ func Serve(cfg config.Config) error {
 		defer s.Shutdown()
 
 		s.qm = *recruitment.NewQuotaManager(&cfg)
-		recruitment.StartRecruiterLoop(context.Background(), s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
+		recruitment.StartRecruiterLoop(s.ctx, s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
 
 		if err := s.checkProviders(); err != nil {
 			log.Fatalf("failed to check providers: %v", err)
@@ -2896,6 +2933,16 @@ func Serve(cfg config.Config) error {
 			log.Fatalf("failed to listen: %v", err)
 		}
 
+		// Stop gRPC cleanly when the server context is canceled.
+		go func() {
+			<-s.ctx.Done()
+			log.Println("🛑 context canceled: stopping gRPC server...")
+			// Allow in-flight RPCs to finish.
+			grpcServer.GracefulStop()
+			// Close the listener to unblock Serve immediately.
+			_ = lis.Close()
+		}()
+
 		s.triggerAssign()
 		log.Printf("🚀 gRPC server listening on port %d...", cfg.Scitq.Port)
 
@@ -2904,11 +2951,16 @@ func Serve(cfg config.Config) error {
 		}
 	}()
 
-	// 🌐 9. gRPC-Web wrapper
-	grpcWebServer := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(origin string) bool {
-		log.Printf("🌐 CORS check: origin = %s", origin)
-		return origin == fmt.Sprintf("https://%s:5173", cfg.Scitq.ServerFQDN)
-	}))
+	// 🌐 9. gRPC-Web wrapper (optional)
+	var grpcWebServer *grpcweb.WrappedGrpcServer
+	if !cfg.Scitq.DisableGRPCWeb {
+		grpcWebServer = grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(origin string) bool {
+			log.Printf("🌐 CORS check: origin = %s", origin)
+			return origin == fmt.Sprintf("https://%s:5173", cfg.Scitq.ServerFQDN)
+		}))
+	} else {
+		log.Printf("🌙 gRPC-Web disabled by config (scitq.disable_grpc_web=true)")
+	}
 
 	// 📦 10. HTTP/REST mux
 	mux := http.NewServeMux()
@@ -2925,7 +2977,7 @@ func Serve(cfg config.Config) error {
 	// 🔄 11. Final handler with gRPC-Web + fallback
 	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📩 %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
-		if grpcWebServer.IsGrpcWebRequest(r) || grpcWebServer.IsAcceptableGrpcCorsRequest(r) {
+		if grpcWebServer != nil && (grpcWebServer.IsGrpcWebRequest(r) || grpcWebServer.IsAcceptableGrpcCorsRequest(r)) {
 			grpcWebServer.ServeHTTP(w, r)
 		} else {
 			mux.ServeHTTP(w, r)
@@ -2948,16 +3000,27 @@ func Serve(cfg config.Config) error {
 		})
 	}
 
-	// 🌍 13. Unified HTTPS server
-	httpsServer := &http.Server{
-		Addr:      ":443",
-		Handler:   corsMiddleware(finalHandler),
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{serverCert}},
+	// 🌍 13. Unified HTTPS server (optional)
+	httpsPort := cfg.Scitq.HTTPSPort
+	if httpsPort == 0 {
+		httpsPort = 443
 	}
 
-	log.Println("🌍 Unified HTTPS server listening on :443")
-	if err := httpsServer.ListenAndServeTLS("", ""); err != nil {
-		log.Fatalf("HTTPS server failed: %v", err)
+	if !cfg.Scitq.DisableHTTPS {
+		httpsServer := &http.Server{
+			Addr:      fmt.Sprintf(":%d", httpsPort),
+			Handler:   corsMiddleware(finalHandler),
+			TLSConfig: &tls.Config{Certificates: []tls.Certificate{serverCert}},
+		}
+
+		log.Printf("🌍 Unified HTTPS server listening on :%d", httpsPort)
+		if err := httpsServer.ListenAndServeTLS("", ""); err != nil {
+			log.Fatalf("HTTPS server failed: %v", err)
+		}
+	} else {
+		log.Printf("🌙 HTTPS disabled by config (scitq.disable_https=true)")
+		// Keep Serve() alive even when only gRPC is enabled.
+		select {}
 	}
 
 	return nil

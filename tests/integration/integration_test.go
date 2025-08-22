@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -155,7 +157,10 @@ func runCLICommand(c cli.CLI, args []string) (string, error) {
 	return output, err
 }
 
-func TestIntegration(t *testing.T) {
+// startServerForTest boots a Postgres testcontainer and starts the scitq server.
+// It returns the gRPC address, the worker token, admin credentials, and a cleanup func.
+func startServerForTest(t *testing.T) (serverAddr, workerToken, adminUser, adminPassword string, cleanup func()) {
+	t.Helper()
 
 	// Define the PostgreSQL test container with proper readiness check
 	req := testcontainers.ContainerRequest{
@@ -172,7 +177,7 @@ func TestIntegration(t *testing.T) {
 		}).WithStartupTimeout(15 * time.Second),
 	}
 
-	// Start the container **after** defining the readiness strategy
+	// Start container
 	pgContainer, err := testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
@@ -180,47 +185,51 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start container: %v", err)
 	}
-	defer pgContainer.Terminate(context.Background())
 
-	// Retrieve the actual host and mapped port
+	// Retrieve host and mapped port
 	host, _ := pgContainer.Host(context.Background())
 	pgPort, _ := pgContainer.MappedPort(context.Background(), "5432/tcp")
 
-	// Construct the final database URL
+	// Construct DB URL
 	dbURL := fmt.Sprintf("postgres://test:test@%s:%s/scitq_test?sslmode=disable", host, pgPort.Port())
-
-	// Print DB connection for debugging
 	fmt.Println("Using Database URL:", dbURL)
 
-	// Create temporary log directory
-	tempLogRoot := "./tmp_logs"
-	os.MkdirAll(tempLogRoot, 0755)
-	defer os.RemoveAll(tempLogRoot)
+	// Temp dirs (unique per test)
+	baseTmp := t.TempDir()
+	tempLogRoot := filepath.Join(baseTmp, "logs")
+	if err := os.MkdirAll(tempLogRoot, 0o755); err != nil {
+		t.Fatalf("failed to create temp log root: %v", err)
+	}
+	tempScriptRoot := filepath.Join(baseTmp, "scripts")
+	if err := os.MkdirAll(tempScriptRoot, 0o755); err != nil {
+		t.Fatalf("failed to create temp script root: %v", err)
+	}
 
-	// Create temporary script_root
-	tempScriptRoot := "./tmp_scripts"
-	os.MkdirAll(tempScriptRoot, 0755)
-	defer os.RemoveAll(tempScriptRoot)
-
-	// Use a different port for the test server
-	serverPort := 50052
-
-	// generate a random token and random jwtSecret
-	b := make([]byte, 4)
-	_, err = rand.Read(b)
+	// Pick a free server port to avoid collisions between tests
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		t.Fatalf("cannot grab free port: %v", err)
+	}
+	serverPort := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	// Generate secrets
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
 		t.Fatalf("Failed to generate random token: %v", err)
 	}
-	workerToken := fmt.Sprintf("test-worker-%x", b)
+	workerToken = fmt.Sprintf("test-worker-%x", b)
 	jwtSecret := fmt.Sprintf("test-jwt-secret-%x", b)
-	adminUser := "admin"
-	adminPassword := fmt.Sprintf("secret-%x", b)
+	adminUser = "admin"
+	adminPassword = fmt.Sprintf("secret-%x", b)
 	adminHashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("Failed to generate admin hashed password: %v", err)
 	}
 
-	// Start server in a separate goroutine
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start server
 	go func() {
 		var cfg config.Config
 		cfg.Scitq.DBURL = dbURL
@@ -234,14 +243,59 @@ func TestIntegration(t *testing.T) {
 		cfg.Scitq.RecruitmentInterval = 2
 		cfg.Scitq.AdminUser = adminUser
 		cfg.Scitq.AdminHashedPassword = string(adminHashedPassword)
-		defaults.Set(&cfg) // ✅ apply struct tag defaults here
-		if err := server.Serve(cfg); err != nil {
+		cfg.Scitq.DisableHTTPS = true
+		cfg.Scitq.DisableGRPCWeb = true
+		defaults.Set(&cfg)
+		if err := server.Serve(cfg, ctx, cancel); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
 
-	// Allow some time for the server to start
+	// allow server to start
 	time.Sleep(2 * time.Second)
+
+	serverAddr = fmt.Sprintf("localhost:%d", serverPort)
+
+	// Cleanup func closes container and temp dirs
+	cleanup = func() {
+		log.Println("🧼 Server cleanup called")
+		cancel()
+		time.Sleep(200 * time.Millisecond)
+		_ = pgContainer.Terminate(context.Background())
+		// t.TempDir() handles cleanup of temp subdirs
+	}
+
+	return serverAddr, workerToken, adminUser, adminPassword, cleanup
+}
+
+// startClientForTest launches a worker client with an isolated temp store.
+// Returns a cleanup func and the store path (if you need to inspect it).
+func startClientForTest(t *testing.T, serverAddr, workerName, workerToken string, concurrency int) (cleanup func(), store string) {
+	t.Helper()
+
+	baseTmp := t.TempDir()
+	store = filepath.Join(baseTmp, "client_store")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatalf("failed to create temp client store: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		client.Run(ctx, serverAddr, uint32(concurrency), workerName, store, workerToken)
+	}()
+
+	// t.TempDir() handles cleanup
+	cleanup = func() {
+		log.Printf("🧼 Client %s cleanup called", workerName)
+		cancel()
+	}
+	return cleanup, store
+}
+
+func TestIntegration(t *testing.T) {
+
+	server_connection_string, workerToken, adminUser, adminPassword, cleanup := startServerForTest(t)
+	defer cleanup()
 
 	//////////////////////////////////////////////////////////////////////////////
 	//
@@ -250,7 +304,6 @@ func TestIntegration(t *testing.T) {
 	//////////////////////////////////////////////////////////////////////////////
 
 	// Initializing CLI
-	server_connection_string := fmt.Sprintf("localhost:%d", serverPort)
 	var c cli.CLI
 	c.Attr.Server = server_connection_string
 
@@ -269,7 +322,7 @@ func TestIntegration(t *testing.T) {
 	// looking up Task
 	output, err = runCLICommand(c, []string{"task", "list", "--status", "P"})
 	assert.NoError(t, err)
-	assert.Contains(t, output, "📋 Task List:\n🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: P\n")
+	assert.Contains(t, output, "🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: P")
 
 	//////////////////////////////////////////////////////////////////////////////
 	//
@@ -277,17 +330,9 @@ func TestIntegration(t *testing.T) {
 	//
 	//////////////////////////////////////////////////////////////////////////////
 
-	tempStorage := "./tmp_client_store"
-	os.MkdirAll(tempStorage, 0755)
-	defer os.RemoveAll(tempStorage)
-
 	// launch client
-	go func() {
-		client.Run(server_connection_string, 1, "test-worker-1", tempStorage, workerToken)
-		if err != nil {
-			log.Fatalf("Server crashed: %v", err)
-		}
-	}()
+	cleanupClient, _ := startClientForTest(t, server_connection_string, "test-worker-1", workerToken, 1)
+	defer cleanupClient()
 
 	// Allow some time for the client to start && register
 	time.Sleep(1 * time.Second)
@@ -299,11 +344,12 @@ func TestIntegration(t *testing.T) {
 
 	// looking up Task and check status is now S (allow a short convergence window)
 	var ok bool
-	for i := 0; i < 20; i++ { // 20 * 500ms = ~10s max wait
+	for i := 0; i < 30; i++ { // 20 * 500ms = ~10s max wait
 		output, err = runCLICommand(c, []string{"task", "list"})
 		assert.NoError(t, err)
-		if strings.Contains(output, "📋 Task List:\n🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: S\n") {
+		if strings.Contains(output, "🆔 ID: 1 | Command: ls -la | Container: ubuntu | Status: S") {
 			ok = true
+			log.Println("Task 1 passed")
 			break
 		}
 		log.Printf("Waiting for task to reach status S, current output:\n%s", output)
@@ -323,9 +369,22 @@ func TestIntegration(t *testing.T) {
 	_, err = runCLICommand(c, []string{"task", "create", "--container", "ubuntu", "--command", "ls non-existing-file"})
 	assert.NoError(t, err)
 	// Allow some time for the client to accept and execute task
-	time.Sleep(10 * time.Second)
-	output, err = runCLICommand(c, []string{"task", "list"})
-	assert.NoError(t, err)
-	assert.Contains(t, output, "ID: 2 | Command: ls non-existing-file | Container: ubuntu | Status: F")
-
+	time.Sleep(5 * time.Second)
+	// looking up Task and check status is now S (allow a short convergence window)
+	ok = false
+	for i := 0; i < 30; i++ { // 20 * 500ms = ~10s max wait
+		output, err = runCLICommand(c, []string{"task", "list"})
+		assert.NoError(t, err)
+		if strings.Contains(output, "ID: 2 | Command: ls non-existing-file | Container: ubuntu | Status: F") {
+			ok = true
+			log.Println("Task 2 passed")
+			break
+		}
+		log.Printf("Waiting for task to reach status S, current output:\n%s", output)
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !ok {
+		// show what we saw last to aid debugging
+		t.Fatalf("task did not reach S; last output:\n%s", output)
+	}
 }

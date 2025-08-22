@@ -114,6 +114,7 @@ message Task {
     optional string task_name = 19;
     uint32 retry_count = 20;
     bool hidden = 21;
+    optional uint32 previous_task_id = 22;
 }
 
 message TaskList {
