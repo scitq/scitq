@@ -112,6 +112,8 @@ message Task {
     optional uint32 worker_id = 17;
     optional uint32 workflow_id = 18;
     optional string task_name = 19;
+    uint32 retry_count = 20;
+    bool hidden = 21;
 }
 
 message TaskList {
@@ -234,6 +236,7 @@ message ListTasksRequest {
     optional string command_filter = 5;    
     optional uint32 limit = 6;            
     optional uint32 offset = 7;                
+    optional bool show_hidden = 8;
 }
 
 message WorkerRequest {

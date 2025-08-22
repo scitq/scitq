@@ -74,6 +74,11 @@ docs:
 	mkdir -p docs
 	protoc --doc_out=./docs --doc_opt=markdown,api.md proto/*.proto
 
+# Generate Go code from proto definitions
+.PHONY: proto
+proto:
+	protoc --go_out=. --go-grpc_out=. --proto_path=proto proto/taskqueue.proto
+
 # --- UI build/embed (opt-out with SKIP_UI=1) -------------------------------
 .PHONY: ui-deps ui-build ui-embed
 

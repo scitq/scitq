@@ -312,12 +312,29 @@ func shouldTriggerAssignFor(status string) bool {
 
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
 	var workerID sql.NullInt32
+	var oldStatus string
+	var curRetry int
 	err := s.db.QueryRowContext(ctx, `
-        UPDATE task
-        SET status = $1
-        WHERE task_id = $2
-        RETURNING worker_id
-    `, req.NewStatus, req.TaskId).Scan(&workerID)
+        WITH prior AS (
+            SELECT status AS old_status, retry
+            FROM task
+            WHERE task_id = $2
+        ), upd AS (
+            UPDATE task
+               SET status = $1,
+                   modified_at = NOW()
+             WHERE task_id = $2
+               AND status <> $1
+             RETURNING worker_id
+        )
+        SELECT u.worker_id, p.old_status, p.retry
+          FROM upd u, prior p;
+    `, req.NewStatus, req.TaskId).Scan(&workerID, &oldStatus, &curRetry)
+	if err == sql.ErrNoRows {
+		// Idempotent/same-status update: nothing changed. Log and return success Ack.
+		log.Printf("⚠️ no-op status update for task %d: already %s", req.TaskId, req.NewStatus)
+		return &pb.Ack{Success: true}, nil
+	}
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
 	}
@@ -397,6 +414,97 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 
 	if shouldTriggerAssignFor(req.NewStatus) {
 		s.triggerAssign()
+	}
+
+	// Retry (rare path): clone a fresh task and detach the failed parent in a single tx.
+	if req.NewStatus == "F" && curRetry > 0 {
+		log.Printf("🔄 retrying task %d (status: %s, retry count: %d)", req.TaskId, req.NewStatus, curRetry)
+		tx, txErr := s.db.BeginTx(ctx, nil)
+		if txErr == nil {
+			var newID int64
+			txErr = tx.QueryRowContext(ctx, `
+				INSERT INTO task (
+					step_id, command, shell, container, container_options,
+					status, worker_id, input, resource,
+					output, output_files, output_is_compressed,
+					retry, is_final, uses_cache,
+					download_timeout, running_timeout, upload_timeout,
+					input_hash, previous_task_id, retry_count,
+					task_name
+				)
+				SELECT
+					step_id, command, shell, container, container_options,
+					'P', NULL, input, resource,
+					'', '{}', FALSE,
+					GREATEST(retry - 1, 0), is_final, uses_cache,
+					download_timeout, running_timeout, upload_timeout,
+					input_hash, task_id, retry_count + 1,
+					task_name
+				FROM task
+				WHERE task_id = $1
+				RETURNING task_id
+			`, req.TaskId).Scan(&newID)
+			if txErr == nil {
+				// Hide the failed parent; keep step_id so lineage is intact and default views can filter it out
+				_, txErr = tx.ExecContext(ctx, `
+					UPDATE task
+					   SET hidden = TRUE,
+						   modified_at = NOW()
+					 WHERE task_id = $1
+				`, req.TaskId)
+			}
+
+			// 3c) Move dependencies from failed parent to new task
+			if txErr == nil {
+				// Copy prerequisites: failed (dep=parent) -> new (dep=newID)
+				_, txErr = tx.ExecContext(ctx, `
+					INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+					SELECT $2, td.prerequisite_task_id
+					FROM task_dependencies td
+					WHERE td.dependent_task_id = $1
+					ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
+				`, req.TaskId, newID)
+			}
+
+			if txErr == nil {
+				// Remove old prerequisite edges from the failed parent
+				_, txErr = tx.ExecContext(ctx, `
+					DELETE FROM task_dependencies
+					WHERE dependent_task_id = $1
+				`, req.TaskId)
+			}
+
+			if txErr == nil {
+				// Repoint dependents that required the failed parent to now require the new task
+				_, txErr = tx.ExecContext(ctx, `
+					INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+					SELECT td.dependent_task_id, $2
+					FROM task_dependencies td
+					WHERE td.prerequisite_task_id = $1
+					ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
+				`, req.TaskId, newID)
+			}
+
+			if txErr == nil {
+				// Remove old prerequisite edges pointing to the failed parent
+				_, txErr = tx.ExecContext(ctx, `
+					DELETE FROM task_dependencies
+					WHERE prerequisite_task_id = $1
+				`, req.TaskId)
+			}
+
+			if txErr == nil {
+				_ = tx.Commit()
+				// Best-effort: trigger assign for the fresh pending task
+				s.triggerAssign()
+				// (Optional) notify via event/log; we keep it minimal here.
+			} else {
+				_ = tx.Rollback()
+				log.Printf("❌ retry clone failed for parent task %d: %v", req.TaskId, txErr)
+			}
+		} else {
+			log.Printf("❌ failed to begin retry tx for task %d: %v", req.TaskId, txErr)
+		}
 	}
 
 	var workerId uint32
@@ -1282,15 +1390,22 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		params.Offset = int(*req.Offset)
 	}
 
+	// Add showHidden param
+	showHidden := false
+	if req.ShowHidden != nil && *req.ShowHidden {
+		showHidden = true
+	}
+
 	// Build SQL query with safe parameterized queries
 	query := `
         SELECT t.task_id, t.task_name, t.command, t.container, t.status, 
-               t.worker_id, t.step_id
+               t.worker_id, t.step_id, t.retry_count, t.hidden
         FROM task t
         WHERE ($1 = '' OR t.status = $1)          -- Status filter (if provided)
         AND ($2 = 0 OR t.worker_id = $2)          -- Worker filter (if provided)
         AND ($3 = 0 OR t.step_id = $3)            -- Step filter (if provided)
         AND ($4 = '' OR t.command LIKE '%' || $4 || '%')  -- Command filter (substring match)
+        AND ($5::boolean OR t.hidden = FALSE)
         ORDER BY t.task_id DESC                   -- Always sort by task_id DESC
     `
 
@@ -1300,23 +1415,25 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 
 	if params.Limit != nil {
 		// Query with limit and offset
-		query += " LIMIT $5 OFFSET $6"
+		query += " LIMIT $6 OFFSET $7"
 		rows, err = s.db.Query(query,
 			params.Status,
 			params.WorkerID,
 			params.StepID,
 			params.Command,
+			showHidden,
 			*params.Limit,
 			params.Offset,
 		)
 	} else {
 		// Query with offset only
-		query += " OFFSET $5"
+		query += " OFFSET $6"
 		rows, err = s.db.Query(query,
 			params.Status,
 			params.WorkerID,
 			params.StepID,
 			params.Command,
+			showHidden,
 			params.Offset,
 		)
 	}
@@ -1335,6 +1452,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			taskName sql.NullString
 			stepID   sql.NullInt32
 		)
+		var retryCount int32
+		var hidden bool
 
 		// Scan row into variables
 		err := rows.Scan(
@@ -1345,6 +1464,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&task.Status,
 			&task.WorkerId,
 			&stepID,
+			&retryCount,
+			&hidden,
 		)
 
 		if err != nil {
@@ -1358,6 +1479,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		if stepID.Valid {
 			task.StepId = proto.Uint32(uint32(stepID.Int32))
 		}
+		task.RetryCount = uint32(retryCount)
+		task.Hidden = hidden
 
 		tasks = append(tasks, &task)
 	}

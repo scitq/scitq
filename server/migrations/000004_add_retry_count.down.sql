@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS idx_task_retry_count;
+DROP INDEX IF EXISTS idx_task_hidden;
+ALTER TABLE task DROP COLUMN IF EXISTS retry_count;
+ALTER TABLE task DROP COLUMN IF EXISTS hidden;

@@ -39,7 +39,8 @@ type Attr struct {
 		} `arg:"subcommand:create" help:"Create a new task"`
 
 		List *struct {
-			Status string `arg:"--status" help:"Filter tasks by status"`
+			Status     string `arg:"--status" help:"Filter tasks by status"`
+			ShowHidden bool   `arg:"--show-hidden" help:"Include tasks marked as hidden (e.g., previous failed attempts)"`
 		} `arg:"subcommand:list" help:"List all tasks"`
 
 		Output *struct {
@@ -271,6 +272,10 @@ func (c *CLI) TaskList() error {
 	if c.Attr.Task.List.Status != "" {
 		req.StatusFilter = &c.Attr.Task.List.Status
 	}
+	if c.Attr.Task.List.ShowHidden {
+		v := true
+		req.ShowHidden = &v
+	}
 
 	res, err := c.QC.Client.ListTasks(ctx, req)
 	if err != nil {
@@ -285,8 +290,16 @@ func (c *CLI) TaskList() error {
 		} else {
 			name = ""
 		}
-		fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s\n",
-			task.TaskId, name, task.Command, task.Container, task.Status)
+		retries := ""
+		if task.RetryCount > 0 {
+			retries = fmt.Sprintf(" | Retries: %d", task.RetryCount)
+		}
+		hidden := ""
+		if c.Attr.Task.List.ShowHidden {
+			hidden = fmt.Sprintf(" | Hidden: %t", task.Hidden)
+		}
+		fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s%s%s\n",
+			task.TaskId, name, task.Command, task.Container, task.Status, retries, hidden)
 	}
 	return nil
 }

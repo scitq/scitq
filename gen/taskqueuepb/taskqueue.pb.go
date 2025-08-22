@@ -311,6 +311,8 @@ type Task struct {
 	WorkerId         *uint32                `protobuf:"varint,17,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
 	WorkflowId       *uint32                `protobuf:"varint,18,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	TaskName         *string                `protobuf:"bytes,19,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
+	RetryCount       uint32                 `protobuf:"varint,20,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
+	Hidden           bool                   `protobuf:"varint,21,opt,name=hidden,proto3" json:"hidden,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -476,6 +478,20 @@ func (x *Task) GetTaskName() string {
 		return *x.TaskName
 	}
 	return ""
+}
+
+func (x *Task) GetRetryCount() uint32 {
+	if x != nil {
+		return x.RetryCount
+	}
+	return 0
+}
+
+func (x *Task) GetHidden() bool {
+	if x != nil {
+		return x.Hidden
+	}
+	return false
 }
 
 type TaskList struct {
@@ -1639,6 +1655,7 @@ type ListTasksRequest struct {
 	CommandFilter    *string                `protobuf:"bytes,5,opt,name=command_filter,json=commandFilter,proto3,oneof" json:"command_filter,omitempty"`
 	Limit            *uint32                `protobuf:"varint,6,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
 	Offset           *uint32                `protobuf:"varint,7,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
+	ShowHidden       *bool                  `protobuf:"varint,8,opt,name=show_hidden,json=showHidden,proto3,oneof" json:"show_hidden,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1720,6 +1737,13 @@ func (x *ListTasksRequest) GetOffset() uint32 {
 		return *x.Offset
 	}
 	return 0
+}
+
+func (x *ListTasksRequest) GetShowHidden() bool {
+	if x != nil && x.ShowHidden != nil {
+		return *x.ShowHidden
+	}
+	return false
 }
 
 type WorkerRequest struct {
@@ -5852,7 +5876,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10_running_timeoutB\x11\n" +
 	"\x0f_upload_timeoutB\f\n" +
 	"\n" +
-	"_task_name\"\xc1\x06\n" +
+	"_task_name\"\xfa\x06\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\rR\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -5876,7 +5900,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"R\bworkerId\x88\x01\x01\x12$\n" +
 	"\vworkflow_id\x18\x12 \x01(\rH\vR\n" +
 	"workflowId\x88\x01\x01\x12 \n" +
-	"\ttask_name\x18\x13 \x01(\tH\fR\btaskName\x88\x01\x01B\b\n" +
+	"\ttask_name\x18\x13 \x01(\tH\fR\btaskName\x88\x01\x01\x12\x1f\n" +
+	"\vretry_count\x18\x14 \x01(\rR\n" +
+	"retryCount\x12\x16\n" +
+	"\x06hidden\x18\x15 \x01(\bR\x06hiddenB\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -5969,7 +5996,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tworker_id\x18\x01 \x01(\rR\bworkerId\x12,\n" +
 	"\x05stats\x18\x02 \x01(\v2\x16.taskqueue.WorkerStatsR\x05stats\"\x1f\n" +
 	"\x03Ack\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xa6\x03\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xdc\x03\n" +
 	"\x10ListTasksRequest\x12(\n" +
 	"\rstatus_filter\x18\x01 \x01(\tH\x00R\fstatusFilter\x88\x01\x01\x12-\n" +
 	"\x10worker_id_filter\x18\x02 \x01(\rH\x01R\x0eworkerIdFilter\x88\x01\x01\x121\n" +
@@ -5977,14 +6004,17 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0estep_id_filter\x18\x04 \x01(\rH\x03R\fstepIdFilter\x88\x01\x01\x12*\n" +
 	"\x0ecommand_filter\x18\x05 \x01(\tH\x04R\rcommandFilter\x88\x01\x01\x12\x19\n" +
 	"\x05limit\x18\x06 \x01(\rH\x05R\x05limit\x88\x01\x01\x12\x1b\n" +
-	"\x06offset\x18\a \x01(\rH\x06R\x06offset\x88\x01\x01B\x10\n" +
+	"\x06offset\x18\a \x01(\rH\x06R\x06offset\x88\x01\x01\x12$\n" +
+	"\vshow_hidden\x18\b \x01(\bH\aR\n" +
+	"showHidden\x88\x01\x01B\x10\n" +
 	"\x0e_status_filterB\x13\n" +
 	"\x11_worker_id_filterB\x15\n" +
 	"\x13_workflow_id_filterB\x11\n" +
 	"\x0f_step_id_filterB\x11\n" +
 	"\x0f_command_filterB\b\n" +
 	"\x06_limitB\t\n" +
-	"\a_offset\"\xea\x01\n" +
+	"\a_offsetB\x0e\n" +
+	"\f_show_hidden\"\xea\x01\n" +
 	"\rWorkerRequest\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\rR\n" +
 	"providerId\x12\x1b\n" +
