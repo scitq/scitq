@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -43,8 +42,8 @@ import (
 // ---------- Public entrypoint ----------
 
 // RunOVH mirrors your Python run(): get_flavors() then get_metrics()
-func RunOVH(cfg config.Config, _ config.OpenstackConfig) error {
-	client, serviceName, regions, err := newOVHClientFromEnv()
+func RunOVH(cfg config.Config, c config.OpenstackConfig) error {
+	client, serviceName, regions, err := newOVHClientFromConfig(c)
 	if err != nil {
 		return err
 	}
@@ -102,18 +101,56 @@ type ovhRegion struct {
 	Name string `json:"name"`
 }
 
-func newOVHClientFromEnv() (*ovh.Client, string, []string, error) {
-	app := os.Getenv("OVH_APPLICATIONKEY")
-	sec := os.Getenv("OVH_APPLICATIONSECRET")
-	ck := os.Getenv("OVH_CONSUMERKEY")
+// newOVHClientFromConfig builds an OVH API client using YAML config values.
+// Generic OpenStack fields remain in OpenstackConfig; OVH commercial API creds live under c.Custom:
+//
+//	custom:
+//	  ovh_endpoint: "ovh-eu"
+//	  ovh_application_key: "<appKey>"
+//	  ovh_application_secret: "<appSecret>"
+//	  ovh_consumer_key: "<consumerKey>"
+//	  ovh_project_id: "<serviceName UUID>"
+func newOVHClientFromConfig(c config.OpenstackConfig) (*ovh.Client, string, []string, error) {
+	// Extract OVH-specific values from Custom
+	getStr := func(key string) string {
+		if c.Custom == nil {
+			return ""
+		}
+		if v, ok := c.Custom[key]; ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+		return ""
+	}
+	app := getStr("ovh_application_key")
+	sec := getStr("ovh_application_secret")
+	ck := getStr("ovh_consumer_key")
 	if app == "" || sec == "" || ck == "" {
-		return nil, "", nil, errors.New("OVH_APPLICATIONKEY/OVH_APPLICATIONSECRET/OVH_CONSUMERKEY must be set")
+		return nil, "", nil, errors.New("missing OVH credentials in config.openstack.custom: ovh_application_key / ovh_application_secret / ovh_consumer_key")
 	}
-	service := os.Getenv("OS_PROJECT_ID")
+
+	// Project/Service name (aka OS_PROJECT_ID in v1); prefer explicit custom key, else ProjectID, else TenantName
+	service := getStr("ovh_project_id")
 	if service == "" {
-		return nil, "", nil, errors.New("OS_PROJECT_ID must be set to your OVH project id (service name)")
+		service = c.ProjectID
 	}
-	endpoint := os.Getenv("OVH_ENDPOINT")
+	if service == "" {
+		service = c.TenantName
+	}
+	if service == "" {
+		// As a last resort, attempt discovery: if the account has exactly one project, use it.
+		client, _ := ovh.NewClient(getStr("ovh_endpoint"), app, sec, ck)
+		var projects []string
+		if err := client.Get("/cloud/project", &projects); err == nil && len(projects) == 1 {
+			service = projects[0]
+		}
+	}
+	if service == "" {
+		return nil, "", nil, errors.New("missing OVH project identifier: set custom.ovh_project_id or project_id or tenant_name (or ensure a single project on the OVH account)")
+	}
+
+	endpoint := getStr("ovh_endpoint")
 	if endpoint == "" {
 		endpoint = "ovh-eu"
 	}
@@ -123,7 +160,8 @@ func newOVHClientFromEnv() (*ovh.Client, string, []string, error) {
 		return nil, "", nil, fmt.Errorf("ovh client: %w", err)
 	}
 
-	regions := strings.Fields(os.Getenv("OVH_REGIONS"))
+	// Regions: use provider regions from YAML if provided; otherwise discover via OVH API
+	regions := c.Regions
 	if len(regions) == 0 {
 		var rlist []ovhRegion
 		if err := client.Get(fmt.Sprintf("/cloud/project/%s/region", service), &rlist); err != nil {
@@ -133,7 +171,7 @@ func newOVHClientFromEnv() (*ovh.Client, string, []string, error) {
 			regions = append(regions, r.Name)
 		}
 		if len(regions) == 0 {
-			return nil, "", nil, errors.New("no regions discovered; set OVH_REGIONS")
+			return nil, "", nil, errors.New("no regions discovered; configure providers.openstack.<name>.regions")
 		}
 	}
 	return client, service, regions, nil

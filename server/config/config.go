@@ -80,12 +80,31 @@ type AzureImage struct {
 }
 
 type OpenstackConfig struct {
-	Name                string                 `yaml:"-"`
-	AuthURL             string                 `yaml:"auth_url"`
-	Username            string                 `yaml:"username"`
-	Password            string                 `yaml:"password"`
-	DomainName          string                 `yaml:"domain_name"`
-	TenantName          string                 `yaml:"tenant_name"`
+	Name       string `yaml:"-"`
+	AuthURL    string `yaml:"auth_url"`
+	Username   string `yaml:"username"`
+	Password   string `yaml:"password"`
+	DomainName string `yaml:"domain_name"`
+	TenantName string `yaml:"tenant_name"`
+
+	// Keystone project identifiers (either one can be used)
+	ProjectID   string `yaml:"project_id"`
+	ProjectName string `yaml:"project_name"`
+
+	// Domain scoping (Keystone v3)
+	UserDomainName  string `yaml:"user_domain_name"`
+	ProjectDomainID string `yaml:"project_domain_id"`
+
+	// Optional: prefer Application Credentials when provided (portable OpenStack)
+	ApplicationCredentialID     string `yaml:"application_credential_id"`
+	ApplicationCredentialSecret string `yaml:"application_credential_secret"`
+
+	// Optional interface selection for service endpoints (public/internal/admin)
+	Interface string `yaml:"interface"`
+
+	// Optional: Keystone identity API version (default 3)
+	IdentityAPIVersion int `yaml:"identity_api_version" default:"3"`
+
 	DefaultRegion       string                 `yaml:"region"`
 	ImageID             string                 `yaml:"image_id"`
 	FlavorID            string                 `yaml:"flavor_id"`
