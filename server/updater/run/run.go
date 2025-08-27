@@ -2,18 +2,20 @@ package run
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/scitq/scitq/server/config"
 	"github.com/scitq/scitq/server/updater/azure"
-	//"github.com/scitq/scitq/server/updater/openstack"
+	"github.com/scitq/scitq/server/updater/openstack"
 )
 
 func Run(cfg config.Config, providerCfg config.ProviderConfig) error {
 	switch c := providerCfg.(type) {
 	case *config.AzureConfig:
 		return azure.Run(cfg, *c)
-	//case *config.OpenstackConfig:
-	//	return openstack.Run(cfg, *c)
+	case *config.OpenstackConfig:
+		log.Printf("TEMP Starting OpenStack updater for provider %s", c.GetName())
+		return openstack.Run(cfg, *c)
 	default:
 		return fmt.Errorf("unsupported provider configuration type: %T", providerCfg)
 	}

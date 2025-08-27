@@ -3,6 +3,7 @@ package updater
 import (
 	"database/sql"
 	"fmt"
+	"log"
 
 	"github.com/scitq/scitq/server/config"
 )
@@ -110,6 +111,7 @@ func (ps *PostgresSession) DeleteFlavor(f *Flavor) error {
 
 // AddFlavor inserts a new flavor into the database.
 func (ps *PostgresSession) AddFlavor(f *Flavor) error {
+	log.Printf("TEMP Adding new flavor %s for provider %d", f.Name, f.ProviderID)
 	query := `
 	INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, bandwidth, gpu, gpumem)
 	VALUES (

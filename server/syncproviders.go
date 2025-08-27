@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/scitq/scitq/server/providers/azure"
+	"github.com/scitq/scitq/server/providers/openstack"
 )
 
 func (s *taskQueueServer) checkProviders() error {
@@ -85,6 +86,28 @@ func (s *taskQueueServer) checkProviders() error {
 				}
 				log.Printf("Azure provider %s: %v", p.ProviderName, paramConfigName)
 			}
+		case "openstack":
+			for paramConfigName, config := range s.cfg.Providers.Openstack {
+				if p.ConfigName == paramConfigName {
+					provider, err := openstack.NewFromConfig(*config)
+					if err != nil {
+						log.Printf("⚠️ Failed to create openstack provider from config %s: %v", paramConfigName, err)
+						continue
+					}
+					s.providers[p.ProviderID] = provider
+					s.providerConfig[fmt.Sprintf("openstack.%s", paramConfigName)] = config
+
+					if mappedConfig[p.ProviderName] == nil {
+						mappedConfig[p.ProviderName] = make(map[string]bool)
+					}
+					mappedConfig[p.ProviderName][p.ConfigName] = true
+					// ✅ Now it's safe to sync regions inside this loop
+					if err := s.syncRegions(tx, p.ProviderID, config.Regions, config.DefaultRegion); err != nil {
+						log.Printf("⚠️ Failed to sync regions for provider %s: %v", p.ConfigName, err)
+					}
+				}
+				log.Printf("Openstack provider %s: %v", p.ProviderName, paramConfigName)
+			}
 		case "local":
 			// Do nothing: local is registered unconditionally
 			log.Printf("✅ Detected local provider in DB: %q", p.ConfigName)
@@ -115,8 +138,28 @@ func (s *taskQueueServer) checkProviders() error {
 		}
 	}
 
-	for provider, config := range s.cfg.Providers.Openstack {
-		return fmt.Errorf("openstack provider unsupported yet %s: %v", provider, config)
+	for configName, config := range s.cfg.Providers.Openstack {
+		if _, ok := mappedConfig["openstack"][configName]; !ok {
+			var providerId uint32
+			log.Printf("Adding Openstack provider %s", configName)
+			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
+				"openstack", configName).Scan(&providerId)
+			if err != nil {
+				log.Printf("⚠️ Failed to add provider: %v", err)
+				continue
+			}
+			provider, err := openstack.NewFromConfig(*config)
+			if err != nil {
+				return fmt.Errorf("failed to create openstack provider from config %s: %w", configName, err)
+			}
+			s.providers[providerId] = provider
+			s.providerConfig[fmt.Sprintf("openstack.%s", configName)] = config
+
+			// Manage regions for this newly created provider
+			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {
+				return fmt.Errorf("failed to sync regions for new provider %s: %w", configName, err)
+			}
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

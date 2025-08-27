@@ -23,6 +23,7 @@ func runUpdater(cfg config.Config, providerCfg config.ProviderConfig) {
 		}
 	}()
 
+	log.Printf("TEMP Starting updater for provider %s", providerCfg.GetName())
 	if err := run.Run(cfg, providerCfg); err != nil {
 		log.Printf("Updater for provider %s error: %v", providerCfg.GetName(), err)
 	}
