@@ -445,9 +445,10 @@ func (p *Provider) findFlavorID(cc *gophercloud.ServiceClient, nameOrID string) 
 func (p *Provider) findImageID(cc *gophercloud.ServiceClient, nameOrID string) (string, error) {
 	if nameOrID == "" {
 		// Fallback strategy: list images, pick the newest Ubuntu 22.04
-		return newestUbuntu2204ImageID(cc)
+		return defaultImageID(cc)
 	}
 	if looksLikeUUID(nameOrID) {
+		log.Printf("OpenStack: using image UUID %s", nameOrID)
 		return nameOrID, nil
 	}
 
@@ -472,6 +473,7 @@ func (p *Provider) findImageID(cc *gophercloud.ServiceClient, nameOrID string) (
 	if id == "" {
 		return "", fmt.Errorf("image not found: %s", nameOrID)
 	}
+	log.Printf("OpenStack: resolved image %q to ID %s", nameOrID, id)
 	return id, nil
 }
 
@@ -790,7 +792,7 @@ func looksLikeUUID(s string) bool {
 	return len(s) >= 8 && strings.Count(s, "-") >= 2
 }
 
-func newestUbuntu2204ImageID(cc *gophercloud.ServiceClient) (string, error) {
+func defaultImageID(cc *gophercloud.ServiceClient) (string, error) {
 	// Try to find an Ubuntu 22.04 image and pick the most recent by Created time
 	var imgs []images.Image
 	pager := images.ListDetail(cc, images.ListOpts{})
@@ -801,7 +803,7 @@ func newestUbuntu2204ImageID(cc *gophercloud.ServiceClient) (string, error) {
 		}
 		for _, im := range list {
 			name := strings.ToLower(im.Name)
-			if strings.Contains(name, "ubuntu") && (strings.Contains(name, "22.04") || strings.Contains(name, "jammy")) {
+			if strings.Contains(name, "ubuntu") && (strings.Contains(name, "24.04") || strings.Contains(name, "noble")) {
 				imgs = append(imgs, im)
 			}
 		}
@@ -811,7 +813,7 @@ func newestUbuntu2204ImageID(cc *gophercloud.ServiceClient) (string, error) {
 		return "", err
 	}
 	if len(imgs) == 0 {
-		return "", errors.New("no Ubuntu 22.04 image found; set OPENSTACK_IMAGE explicitly")
+		return "", errors.New("no Ubuntu 24.04 image found; set OPENSTACK_IMAGE explicitly")
 	}
 	// Sort by Created descending if available (may be empty on some clouds); fallback to name
 	sort.Slice(imgs, func(i, j int) bool {
