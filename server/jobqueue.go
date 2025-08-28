@@ -107,7 +107,8 @@ func (s *taskQueueServer) processJob(job Job) error {
 		}
 	case 'D': // Delete
 		// Delete the worker
-		err := s.providers[job.ProviderID].Delete(job.WorkerName)
+		log.Printf("🗑️ Deleting worker %s : %s", job.WorkerName, job.Region)
+		err := s.providers[job.ProviderID].Delete(job.WorkerName, job.Region)
 		if err != nil {
 			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
 		}
@@ -136,7 +137,7 @@ func (s *taskQueueServer) processJob(job Job) error {
 		// Update watchdog
 		s.watchdog.WorkerDeleted(job.WorkerID)
 	case 'R': // Restart
-		return s.providers[job.ProviderID].Restart(job.WorkerName)
+		return s.providers[job.ProviderID].Restart(job.WorkerName, job.Region)
 	default:
 		return fmt.Errorf("unknown action: %c", job.Action)
 	}

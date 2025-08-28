@@ -4,6 +4,6 @@ package providers
 type Provider interface {
 	Create(workerName, flavor, location string, jobId uint32) (string, error)
 	List() (map[string]string, error)
-	Restart(workerName string) error
-	Delete(workerName string) error
+	Restart(workerName, location string) error
+	Delete(workerName, location string) error
 }

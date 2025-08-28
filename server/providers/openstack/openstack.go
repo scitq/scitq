@@ -16,8 +16,8 @@ package openstack
 //   Prefer OS_APPLICATION_CREDENTIAL_ID / OS_APPLICATION_CREDENTIAL_SECRET when present.
 // - Region: provided by the `location` argument of Create(), or by OS_REGION_NAME
 // - Image: choose via env OPENSTACK_IMAGE (name or ID). Defaults to latest Ubuntu 22.04 if resolvable.
-// - Network (tenant/private): env OPENSTACK_NETWORK_ID (recommended) or first non-external network.
-// - External network for Floating IPs: env OPENSTACK_EXTNET_ID or first external network.
+// - Network (tenant/private): env OPENSTACK_NETWORK_ID or YAML openstack.network_id; falls back to a suitable tenant net.
+// - External network for Floating IPs: env OPENSTACK_EXTNET_ID or YAML openstack.ext_network_id; falls back to first external.
 // - User data (cloud‑init):
 //     * env OPENSTACK_USERDATA_FILE: path to a file whose raw contents are passed as cloud‑init user-data
 //     * env OPENSTACK_USERDATA: inline string for small snippets
@@ -28,12 +28,13 @@ package openstack
 // Notes for OVH:
 // - Regions look like: GRA7, SBG5, DE1, etc. Use the same string as your Public Cloud region.
 // - Images vary by project; name resolution is done server-side. You can also pass the image ID.
-// - You usually must provide your own keypair name (OPENSTACK_KEYPAIR) that already exists in the region.
+// - Keypair: standard OpenStack keypair name via env OPENSTACK_KEYPAIR or YAML openstack.keypair.
 
 import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"os"
 	"sort"
@@ -59,7 +60,8 @@ import (
 // Fields are mostly optional; when empty, values are discovered via env or API lookups.
 // Keep this struct very lightweight so it can be created easily in tests.
 type Provider struct {
-	C config.OpenstackConfig
+	cfg config.Config // full YAML config (to access cfg.Scitq like Azure)
+	C   config.OpenstackConfig
 	// Defaults used when arguments are empty
 	DefaultRegion string // fallback region when Create() location is empty
 	Image         string // name or ID (env OPENSTACK_IMAGE)
@@ -70,22 +72,17 @@ type Provider struct {
 }
 
 // NewFromConfig constructs a Provider from YAML OpenstackConfig (no env required).
-func NewFromConfig(c config.OpenstackConfig) (*Provider, error) {
+func NewFromConfig(cfg config.Config, c config.OpenstackConfig) (*Provider, error) {
 	p := &Provider{
+		cfg:           cfg,
 		C:             c,
 		DefaultRegion: c.DefaultRegion,
 		Image:         c.ImageID, // supports name or ID
 		NetworkID:     c.NetworkID,
-		ExtNetworkID:  "",
-		Keypair:       "",
+		ExtNetworkID:  c.ExtNetworkID,
+		Keypair:       c.Keypair,
 	}
 	if c.Custom != nil {
-		if v, ok := c.Custom["ext_network_id"].(string); ok {
-			p.ExtNetworkID = v
-		}
-		if v, ok := c.Custom["keypair"].(string); ok {
-			p.Keypair = v
-		}
 		if path, ok := c.Custom["userdata_file"].(string); ok && path != "" {
 			if b, err := ioutil.ReadFile(path); err == nil {
 				p.UserData = b
@@ -128,6 +125,35 @@ func getenvAny(keys ...string) string {
 	return ""
 }
 
+// effectiveUserData returns explicit user-data if set; otherwise builds a default cloud-init
+// snippet from cfg.Scitq (like Azure) to install and start scitq-client.
+func (p *Provider) effectiveUserData(jobId uint32) []byte {
+	if len(p.UserData) > 0 {
+		return p.UserData
+	}
+
+	if p.cfg.Scitq.ServerFQDN == "" || p.cfg.Scitq.ClientDownloadToken == "" || p.cfg.Scitq.Port == 0 || p.cfg.Scitq.WorkerToken == "" {
+		log.Printf("OpenStack provider: missing required cfg.Scitq fields; no user-data will be set")
+		return nil
+	}
+
+	cloudInit := fmt.Sprintf(`#cloud-config
+runcmd:
+  - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
+  - chmod a+x /usr/local/bin/scitq-client
+  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s" -job %d
+`,
+		p.cfg.Scitq.ServerFQDN,
+		p.cfg.Scitq.ClientDownloadToken,
+		p.cfg.Scitq.ServerFQDN,
+		p.cfg.Scitq.Port,
+		p.cfg.Scitq.DockerRegistry,
+		p.cfg.Scitq.DockerAuthentication,
+		p.cfg.Scitq.SwapProportion,
+		p.cfg.Scitq.WorkerToken, jobId)
+	return []byte(cloudInit)
+}
+
 // ===== helpers to create scoped service clients =====
 
 func (p *Provider) newProviderClient(region string) (*gophercloud.ProviderClient, error) {
@@ -136,13 +162,32 @@ func (p *Provider) newProviderClient(region string) (*gophercloud.ProviderClient
 	if c.AuthURL != "" {
 		ao := gophercloud.AuthOptions{
 			IdentityEndpoint: c.AuthURL,
-			Username:         c.Username,
-			Password:         c.Password,
-			DomainName:       c.DomainName,
-			TenantID:         c.ProjectID,
-			TenantName:       firstNonEmpty(c.ProjectName, c.TenantName),
 			AllowReauth:      true,
 		}
+		// Prefer Application Credentials if provided
+		if c.ApplicationCredentialID != "" && c.ApplicationCredentialSecret != "" {
+			ao.ApplicationCredentialID = c.ApplicationCredentialID
+			ao.ApplicationCredentialSecret = c.ApplicationCredentialSecret
+		} else {
+			// Username/Password flow requires a domain: DomainID or DomainName
+			ao.Username = c.Username
+			ao.Password = c.Password
+			if c.DomainID != "" {
+				ao.DomainID = c.DomainID
+			} else if c.DomainName != "" {
+				ao.DomainName = c.DomainName
+			} else {
+				// OVH commonly uses "Default" as the user domain
+				ao.DomainName = "Default"
+			}
+		}
+		// Project scope
+		if c.ProjectID != "" {
+			ao.TenantID = c.ProjectID
+		} else {
+			ao.TenantName = firstNonEmpty(c.ProjectName, c.TenantName)
+		}
+
 		pc, err := openstack.AuthenticatedClient(ao)
 		if err != nil {
 			return nil, err
@@ -209,9 +254,15 @@ func (p *Provider) Create(workerName, flavorName, location string, jobId uint32)
 	}
 
 	// Resolve tenant network ID to plug NIC
-	netID := p.NetworkID
-	if netID == "" {
-		id, err := p.findFirstTenantNetworkID(nc)
+	var netID string
+	if p.NetworkID != "" {
+		id, err := p.resolveNetworkID(nc, p.NetworkID)
+		if err != nil {
+			return "", err
+		}
+		netID = id
+	} else {
+		id, err := p.findPreferredTenantNetworkID(nc)
 		if err != nil {
 			return "", err
 		}
@@ -234,8 +285,8 @@ func (p *Provider) Create(workerName, flavorName, location string, jobId uint32)
 		Networks:  nics,
 		Metadata:  metadata,
 	}
-	if len(p.UserData) > 0 {
-		createOpts.UserData = p.UserData
+	if ud := p.effectiveUserData(jobId); len(ud) > 0 {
+		createOpts.UserData = ud
 	}
 
 	// Wrap with keypairs extension if a keypair is specified
@@ -258,9 +309,17 @@ func (p *Provider) Create(workerName, flavorName, location string, jobId uint32)
 		return "", err
 	}
 
-	// Try to allocate + associate a floating IP from an external network.
+	// If NIC is already on an external network (e.g., OVH Ext-Net), don't allocate a FIP—return that IP.
+	if ext, ip := p.externalIPv4IfOnExternal(nc, cc, server.ID); ext {
+		if ip != "" {
+			return ip, nil
+		}
+		// if external but no IPv4 found, continue to try FIP or IPv4 discovery
+	}
+
+	// Otherwise, allocate + associate a floating IP from an external network.
 	pubIP := ""
-	if ext := firstNonEmpty(p.ExtNetworkID); ext == "" {
+	if extNet := firstNonEmpty(p.ExtNetworkID); extNet == "" {
 		if id, err := p.findFirstExternalNetworkID(nc); err == nil {
 			pubIP, _ = p.attachFIP(nc, cc, server.ID, id)
 		}
@@ -271,7 +330,8 @@ func (p *Provider) Create(workerName, flavorName, location string, jobId uint32)
 	if pubIP != "" {
 		return pubIP, nil
 	}
-	// Fallback to first private IPv4
+
+	// Fallback: return first IPv4 (private or public)
 	if ip, err := p.firstIPv4(cc, server.ID); err == nil && ip != "" {
 		return ip, nil
 	}
@@ -308,8 +368,12 @@ func (p *Provider) List() (map[string]string, error) {
 	return out, nil
 }
 
-func (p *Provider) Restart(workerName string) error {
-	cc, err := p.computeClient(p.DefaultRegion)
+func (p *Provider) Restart(workerName, location string) error {
+	region := firstNonEmpty(location, p.DefaultRegion)
+	if region == "" {
+		return errors.New("region is required for Restart()")
+	}
+	cc, err := p.computeClient(region)
 	if err != nil {
 		return err
 	}
@@ -320,12 +384,11 @@ func (p *Provider) Restart(workerName string) error {
 	return servers.Reboot(cc, s.ID, servers.RebootOpts{Type: servers.SoftReboot}).ExtractErr()
 }
 
-func (p *Provider) Delete(workerName string) error {
-	region := p.DefaultRegion
+func (p *Provider) Delete(workerName, location string) error {
+	region := firstNonEmpty(location, p.DefaultRegion)
 	if region == "" {
-		return errors.New("default region is required for Delete(); set it in OpenstackConfig.region or pass location")
+		return errors.New("region is required for Delete()")
 	}
-
 	cc, err := p.computeClient(region)
 	if err != nil {
 		return err
@@ -340,9 +403,7 @@ func (p *Provider) Delete(workerName string) error {
 		return err
 	}
 
-	// Best effort: detach & delete any floating IPs pointing to this server's ports
-	_ = p.detachAndDeleteFIPs(nc, cc, s.ID)
-
+	_ = p.detachAndDeleteFIPs(nc, cc, s.ID) // best effort
 	return servers.Delete(cc, s.ID).ExtractErr()
 }
 
@@ -412,6 +473,80 @@ func (p *Provider) findImageID(cc *gophercloud.ServiceClient, nameOrID string) (
 		return "", fmt.Errorf("image not found: %s", nameOrID)
 	}
 	return id, nil
+}
+
+// resolveNetworkID returns the network UUID from a name or ID.
+func (p *Provider) resolveNetworkID(nc *gophercloud.ServiceClient, nameOrID string) (string, error) {
+	if nameOrID == "" {
+		return "", errors.New("network is required")
+	}
+	if looksLikeUUID(nameOrID) {
+		return nameOrID, nil
+	}
+	var id string
+	pager := networks.List(nc, networks.ListOpts{Name: nameOrID})
+	err := pager.EachPage(func(page pagination.Page) (bool, error) {
+		list, err := networks.ExtractNetworks(page)
+		if err != nil {
+			return false, err
+		}
+		for _, n := range list {
+			if strings.EqualFold(n.Name, nameOrID) {
+				id = n.ID
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		return "", fmt.Errorf("network not found: %s", nameOrID)
+	}
+	return id, nil
+}
+
+// findPreferredTenantNetworkID chooses a non-external, ACTIVE network with at least one subnet,
+// preferring project (non-shared) networks. This avoids routed provider networks not present on hosts.
+func (p *Provider) findPreferredTenantNetworkID(nc *gophercloud.ServiceClient) (string, error) {
+	trueVal := true
+	pager := networks.List(nc, networks.ListOpts{AdminStateUp: &trueVal, Status: "ACTIVE"})
+	var candidate string
+	err := pager.EachPage(func(page pagination.Page) (bool, error) {
+		list, err := networks.ExtractNetworks(page)
+		if err != nil {
+			return false, err
+		}
+		for _, n := range list {
+			// external flag via extension (best-effort)
+			var ne struct{ external.NetworkExternalExt }
+			_ = networks.Get(nc, n.ID).ExtractInto(&ne) // ignore error; treat missing ext as non-external
+			if ne.External {
+				continue
+			}
+			// must have at least one subnet (typically IPv4 DHCP)
+			if len(n.Subnets) == 0 {
+				continue
+			}
+			// Prefer project-scoped networks (non-shared)
+			if !n.Shared {
+				candidate = n.ID
+				return false, nil
+			}
+			if candidate == "" {
+				candidate = n.ID
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if candidate == "" {
+		return "", errors.New("no suitable tenant network found; set providers.openstack.network_id in YAML")
+	}
+	return candidate, nil
 }
 
 func (p *Provider) findFirstTenantNetworkID(nc *gophercloud.ServiceClient) (string, error) {
@@ -534,6 +669,32 @@ func (p *Provider) portsOfServer(nc *gophercloud.ServiceClient, serverID string)
 		return true, nil
 	})
 	return res, err
+}
+
+// externalIPv4IfOnExternal returns (true, IPv4) if the server's NIC is on an external network (e.g., OVH Ext-Net).
+// If external but no IPv4 can be found, it returns (true, ""). If NIC is not external, it returns (false, "").
+func (p *Provider) externalIPv4IfOnExternal(nc, cc *gophercloud.ServiceClient, serverID string) (bool, string) {
+	prts, err := p.portsOfServer(nc, serverID)
+	if err != nil || len(prts) == 0 {
+		return false, ""
+	}
+	for _, pt := range prts {
+		var ne struct{ external.NetworkExternalExt }
+		if err := networks.Get(nc, pt.NetworkID).ExtractInto(&ne); err == nil && ne.External {
+			// Try IPv4 from the port's fixed IPs first
+			for _, f := range pt.FixedIPs {
+				if ip := net.ParseIP(f.IPAddress); ip != nil && ip.To4() != nil {
+					return true, ip.String()
+				}
+			}
+			// Fallback to server view
+			if ip, err := p.firstIPv4(cc, serverID); err == nil && ip != "" {
+				return true, ip
+			}
+			return true, ""
+		}
+	}
+	return false, ""
 }
 
 func waitForStatus(cc *gophercloud.ServiceClient, serverID, target string, timeout time.Duration) error {

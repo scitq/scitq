@@ -184,7 +184,7 @@ func (ap *AzureProvider) Create(workerName, flavor, location string, jobId uint3
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s" -jobid %d`,
+  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s" -job %d`,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
 			ap.cfg.Scitq.DockerRegistry, ap.cfg.Scitq.DockerAuthentication,
@@ -477,7 +477,7 @@ func (ap *AzureProvider) List() (map[string]string, error) {
 }
 
 // Delete removes the VM and its resource group for the given worker with retry logic.
-func (ap *AzureProvider) Delete(workerName string) error {
+func (ap *AzureProvider) Delete(workerName, region string) error {
 	vmName := workerName
 	rgName := ap.resourceGroupName(workerName)
 
@@ -558,7 +558,7 @@ func (ap *AzureProvider) Delete(workerName string) error {
 }
 
 // Restart restarts the VM for the given worker with retry logic.
-func (ap *AzureProvider) Restart(workerName string) error {
+func (ap *AzureProvider) Restart(workerName, region string) error {
 	vmName := workerName
 	rgName := ap.resourceGroupName(workerName)
 

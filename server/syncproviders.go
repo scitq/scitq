@@ -89,7 +89,7 @@ func (s *taskQueueServer) checkProviders() error {
 		case "openstack":
 			for paramConfigName, config := range s.cfg.Providers.Openstack {
 				if p.ConfigName == paramConfigName {
-					provider, err := openstack.NewFromConfig(*config)
+					provider, err := openstack.NewFromConfig(s.cfg, *config)
 					if err != nil {
 						log.Printf("⚠️ Failed to create openstack provider from config %s: %v", paramConfigName, err)
 						continue
@@ -148,7 +148,7 @@ func (s *taskQueueServer) checkProviders() error {
 				log.Printf("⚠️ Failed to add provider: %v", err)
 				continue
 			}
-			provider, err := openstack.NewFromConfig(*config)
+			provider, err := openstack.NewFromConfig(s.cfg, *config)
 			if err != nil {
 				return fmt.Errorf("failed to create openstack provider from config %s: %w", configName, err)
 			}

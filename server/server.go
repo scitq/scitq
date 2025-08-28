@@ -904,7 +904,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 
 		err = tx.QueryRow(`WITH insertquery AS (
 			INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
-			VALUES (NULLIF($1,0), $5 || 'Worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
+			VALUES (NULLIF($1,0), $5 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
 			RETURNING worker_id, worker_name, region_id, flavor_id
 		)
 		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem
@@ -1108,11 +1108,12 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 	var workerName string
 	var providerId int
 	var regionId int
+	var regionName string
 	var is_permanent bool
 	var statusStr string
-	err = tx.QueryRow(`SELECT w.worker_name, r.provider_id, r.region_id, w.is_permanent, w.status FROM worker w
+	err = tx.QueryRow(`SELECT w.worker_name, r.provider_id, r.region_id, r.region_name, w.is_permanent, w.status FROM worker w
 	JOIN region r ON w.region_id=r.region_id
-	WHERE w.worker_id=$1`, req.WorkerId).Scan(&workerName, &providerId, &regionId, &is_permanent, &statusStr)
+	WHERE w.worker_id=$1`, req.WorkerId).Scan(&workerName, &providerId, &regionId, &regionName, &is_permanent, &statusStr)
 	status := rune(statusStr[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to find worker %d: %w", req.WorkerId, err)
@@ -1130,6 +1131,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 			WorkerID:   req.WorkerId,
 			WorkerName: workerName,
 			ProviderID: uint32(providerId),
+			Region:     regionName,
 			Action:     'D',
 			Retry:      defaultJobRetry,
 			Timeout:    defaultJobTimeout,

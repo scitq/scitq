@@ -85,6 +85,7 @@ type OpenstackConfig struct {
 	Username   string `yaml:"username"`
 	Password   string `yaml:"password"`
 	DomainName string `yaml:"domain_name"`
+	DomainID   string `yaml:"domain_id"`
 	TenantName string `yaml:"tenant_name"`
 
 	// Keystone project identifiers (either one can be used)
@@ -100,7 +101,7 @@ type OpenstackConfig struct {
 	ApplicationCredentialSecret string `yaml:"application_credential_secret"`
 
 	// Optional interface selection for service endpoints (public/internal/admin)
-	Interface string `yaml:"interface"`
+	Interface string `yaml:"interface"` // Unsure this is used - prefer NetworkID
 
 	// Optional: Keystone identity API version (default 3)
 	IdentityAPIVersion int `yaml:"identity_api_version" default:"3"`
@@ -109,11 +110,13 @@ type OpenstackConfig struct {
 	ImageID             string                 `yaml:"image_id"`
 	FlavorID            string                 `yaml:"flavor_id"`
 	NetworkID           string                 `yaml:"network_id"`
+	ExtNetworkID        string                 `yaml:"ext_network_id"`
 	Quotas              map[string]Quota       `yaml:"quotas"` // key: region
 	Regions             []string               `yaml:"regions"`
 	Custom              map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
 	UpdatePeriodicity   string                 `yaml:"update_periodicity"` // Update periodicity in minutes
 	LocalWorkspaceRoots map[string]string      `yaml:"local_workspaces"`
+	Keypair             string                 `yaml:"keypair"` // Name of the keypair to use for SSH access
 }
 
 func (c *Config) Validate() error {
