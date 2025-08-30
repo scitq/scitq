@@ -7,12 +7,16 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"path"
+	"regexp"
 	"strings"
 
 	"github.com/rclone/rclone/fs"
 )
 
 var defaultOptions = []string{"ena-aspera", "ena-ftp", "sra-tools"}
+
+var fastqParity = regexp.MustCompile(`.*(1|2)\.f.*q(\.gz)?$`)
 
 // FastqBackend handles downloading FASTQ files using FTP, Aspera, or SRA.
 type FastqBackend struct{}
@@ -43,18 +47,26 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 	// finding appropriate options
 	var options []string
 	var srcOptions []string
-	if len(src.Options) > 0 {
-		srcOptions = src.Options
-	} else {
-		srcOptions = defaultOptions
-	}
-	for _, option := range srcOptions {
-		if !isLocal && (option == "ena-aspera" || option == "sra-tools") {
-			log.Printf("Refection option %s as dst is not local\n", option)
+	onlyRead1 := false
+
+	for _, option := range src.Options {
+		if option == "only-read1" { // modifier, not a transfer method
+			onlyRead1 = true
 			continue
 		}
-		options = append(options, option)
+		if !isLocal && (option == "ena-aspera" || option == "sra-tools") {
+			log.Printf("Rejecting option %s as dst is not local\n", option)
+			continue
+		}
+		srcOptions = append(srcOptions, option)
 	}
+
+	if len(srcOptions) > 0 {
+		options = srcOptions
+	} else {
+		options = defaultOptions
+	}
+
 	if len(options) == 0 {
 		return fmt.Errorf("no more options remain for FastqBackend, try using less restrictive conditions")
 	}
@@ -69,7 +81,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 	// testing the different options in right order
 	for _, option := range options {
 		if option == "sra-tools" {
-			err := fb.fetchFromSRA(runAccession, absPath)
+			err := fb.fetchFromSRA(runAccession, absPath, onlyRead1)
 			sraToolTested = true
 			if err == nil {
 				return nil
@@ -95,7 +107,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			if apiResponse.StatusCode == 204 {
 				log.Println("ENA API returned no data, falling back to SRA")
 				if !sraToolTested && stringInSlice("sra-tools", options) {
-					return fb.fetchFromSRA(runAccession, absPath)
+					return fb.fetchFromSRA(runAccession, absPath, onlyRead1)
 				} else {
 					if sraToolTested {
 						return fmt.Errorf("FastqBackend failed as ENA and SRA metadata retrieval failed")
@@ -114,7 +126,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			err = json.Unmarshal(body, &runs)
 			if err != nil || len(runs) == 0 {
 				log.Println("ENA API returned no valid data, falling back to SRA")
-				return fb.fetchFromSRA(runAccession, absPath)
+				return fb.fetchFromSRA(runAccession, absPath, onlyRead1)
 			}
 
 			run = runs[0]
@@ -138,7 +150,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 		}
 
 		urlList := strings.Split(urls, ";")
-		success := fb.downloadFastqs(method, urlList, md5s, dst, otherFs)
+		success := fb.downloadFastqs(method, urlList, md5s, dst, otherFs, onlyRead1)
 		if success {
 			return nil
 		}
@@ -150,7 +162,33 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 }
 
 // downloadFastqs handles downloading FASTQ files using Aspera, FTP, or SRA.
-func (fb *FastqBackend) downloadFastqs(method string, urls, md5s []string, folderDst URI, dstFs FileSystemInterface) bool {
+func (fb *FastqBackend) downloadFastqs(method string, urls, md5s []string, folderDst URI, dstFs FileSystemInterface, onlyRead1 bool) bool {
+	// If onlyRead1 is requested, filter out R2 entries while preserving md5 alignment
+	if onlyRead1 {
+		filteredURLs := make([]string, 0, len(urls))
+		filteredMD5s := make([]string, 0, len(md5s))
+		for i, u := range urls {
+			base := path.Base(u)
+			m := fastqParity.FindStringSubmatch(base)
+			if len(m) == 0 {
+				// If we cannot determine parity, keep the file to be safe
+				filteredURLs = append(filteredURLs, u)
+				if i < len(md5s) {
+					filteredMD5s = append(filteredMD5s, md5s[i])
+				}
+				continue
+			}
+			if m[1] == "1" {
+				filteredURLs = append(filteredURLs, u)
+				if i < len(md5s) {
+					filteredMD5s = append(filteredMD5s, md5s[i])
+				}
+			}
+		}
+		urls = filteredURLs
+		md5s = filteredMD5s
+	}
+
 	for i, url := range urls {
 		dst := folderDst
 		md5 := md5s[i]
@@ -236,14 +274,23 @@ func (fb *FastqBackend) downloadFastqs(method string, urls, md5s []string, folde
 }
 
 // fetchFromSRA downloads a FASTQ file using SRA toolkit inside Docker.
-func (fb *FastqBackend) fetchFromSRA(runAccession, destination string) error {
+func (fb *FastqBackend) fetchFromSRA(runAccession, destination string, onlyRead1 bool) error {
 	//log.Printf("Fetching FASTQ from SRA: %s", runAccession)
+
+	// Build an optional step to drop R2 fastqs before compression if requested
+	dropR2 := ""
+	if onlyRead1 {
+		dropR2 = "for f in *2.fastq; do [ -e \"$f\" ] && rm \"$f\" ; done; "
+	}
 
 	cmd := exec.Command("docker", "run", "--rm",
 		"-v", destination+":/destination",
 		"ncbi/sra-tools",
 		"sh", "-c",
-		fmt.Sprintf("cd /destination && prefetch -X 9999999999999 %s && fasterq-dump -f --split-files %s && (for f in *.fastq; do gzip \"$f\" & done; wait; rm -fr %s) || exit 1", runAccession, runAccession, runAccession),
+		fmt.Sprintf(
+			"cd /destination && prefetch -X 9999999999999 %s && fasterq-dump -f --split-files %s && (%sfor f in *.fastq; do gzip \"$f\" & done; wait; rm -fr %s) || exit 1",
+			runAccession, runAccession, dropR2, runAccession,
+		),
 	)
 
 	output, err := cmd.CombinedOutput()
