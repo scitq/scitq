@@ -47,6 +47,7 @@ service TaskQueue {
     rpc DeleteStep(StepId) returns (Ack);
     rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
     rpc FetchList (FetchListRequest) returns (FetchListResponse);
+    rpc FetchInfo (FetchListRequest) returns (FetchInfoResponse);
     // Template system
     rpc UploadTemplate(UploadTemplateRequest) returns (UploadTemplateResponse);
     rpc RunTemplate(RunTemplateRequest) returns (TemplateRun);
@@ -515,6 +516,16 @@ message FetchListRequest {
 message FetchListResponse {
   repeated string files = 1; // Absolute paths from the given URI
 }
+
+message FetchInfoResponse {
+  string uri = 1;
+  string filename = 2;
+  string description = 3;
+  int64 size = 4;
+  bool is_file = 5;
+  bool is_dir = 6;
+}
+
 
 message UploadTemplateRequest {
   bytes script = 1;

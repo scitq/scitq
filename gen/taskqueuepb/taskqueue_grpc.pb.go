@@ -60,6 +60,7 @@ const (
 	TaskQueue_DeleteStep_FullMethodName             = "/taskqueue.TaskQueue/DeleteStep"
 	TaskQueue_GetWorkerStats_FullMethodName         = "/taskqueue.TaskQueue/GetWorkerStats"
 	TaskQueue_FetchList_FullMethodName              = "/taskqueue.TaskQueue/FetchList"
+	TaskQueue_FetchInfo_FullMethodName              = "/taskqueue.TaskQueue/FetchInfo"
 	TaskQueue_UploadTemplate_FullMethodName         = "/taskqueue.TaskQueue/UploadTemplate"
 	TaskQueue_RunTemplate_FullMethodName            = "/taskqueue.TaskQueue/RunTemplate"
 	TaskQueue_ListTemplates_FullMethodName          = "/taskqueue.TaskQueue/ListTemplates"
@@ -118,6 +119,7 @@ type TaskQueueClient interface {
 	DeleteStep(ctx context.Context, in *StepId, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkerStats(ctx context.Context, in *GetWorkerStatsRequest, opts ...grpc.CallOption) (*GetWorkerStatsResponse, error)
 	FetchList(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchListResponse, error)
+	FetchInfo(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchInfoResponse, error)
 	// Template system
 	UploadTemplate(ctx context.Context, in *UploadTemplateRequest, opts ...grpc.CallOption) (*UploadTemplateResponse, error)
 	RunTemplate(ctx context.Context, in *RunTemplateRequest, opts ...grpc.CallOption) (*TemplateRun, error)
@@ -563,6 +565,16 @@ func (c *taskQueueClient) FetchList(ctx context.Context, in *FetchListRequest, o
 	return out, nil
 }
 
+func (c *taskQueueClient) FetchInfo(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FetchInfoResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_FetchInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) UploadTemplate(ctx context.Context, in *UploadTemplateRequest, opts ...grpc.CallOption) (*UploadTemplateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UploadTemplateResponse)
@@ -727,6 +739,7 @@ type TaskQueueServer interface {
 	DeleteStep(context.Context, *StepId) (*Ack, error)
 	GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error)
 	FetchList(context.Context, *FetchListRequest) (*FetchListResponse, error)
+	FetchInfo(context.Context, *FetchListRequest) (*FetchInfoResponse, error)
 	// Template system
 	UploadTemplate(context.Context, *UploadTemplateRequest) (*UploadTemplateResponse, error)
 	RunTemplate(context.Context, *RunTemplateRequest) (*TemplateRun, error)
@@ -870,6 +883,9 @@ func (UnimplementedTaskQueueServer) GetWorkerStats(context.Context, *GetWorkerSt
 }
 func (UnimplementedTaskQueueServer) FetchList(context.Context, *FetchListRequest) (*FetchListResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FetchList not implemented")
+}
+func (UnimplementedTaskQueueServer) FetchInfo(context.Context, *FetchListRequest) (*FetchInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FetchInfo not implemented")
 }
 func (UnimplementedTaskQueueServer) UploadTemplate(context.Context, *UploadTemplateRequest) (*UploadTemplateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UploadTemplate not implemented")
@@ -1623,6 +1639,24 @@ func _TaskQueue_FetchList_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_FetchInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FetchListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).FetchInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_FetchInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).FetchInfo(ctx, req.(*FetchListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_UploadTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UploadTemplateRequest)
 	if err := dec(in); err != nil {
@@ -1993,6 +2027,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FetchList",
 			Handler:    _TaskQueue_FetchList_Handler,
+		},
+		{
+			MethodName: "FetchInfo",
+			Handler:    _TaskQueue_FetchInfo_Handler,
 		},
 		{
 			MethodName: "UploadTemplate",

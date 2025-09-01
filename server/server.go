@@ -2647,10 +2647,26 @@ func (s *taskQueueServer) GetWorkerStats(ctx context.Context, req *pb.GetWorkerS
 func (s *taskQueueServer) FetchList(ctx context.Context, req *pb.FetchListRequest) (*pb.FetchListResponse, error) {
 	files, err := fetch.List(DefaultRcloneConfig, req.Uri)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fetch list failed: %v", err)
+		return nil, status.Errorf(codes.Internal, "fetch list for %s failed: %v", req.Uri, err)
 	}
 
 	return &pb.FetchListResponse{Files: files}, nil
+}
+
+func (s *taskQueueServer) FetchInfo(ctx context.Context, req *pb.FetchListRequest) (*pb.FetchInfoResponse, error) {
+	cloudObject, err := fetch.Info(DefaultRcloneConfig, req.Uri)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fetch info for %s failed: %v", req.Uri, err)
+	}
+
+	return &pb.FetchInfoResponse{
+		Uri:         cloudObject.Remote(),
+		Filename:    filepath.Base(cloudObject.Remote()),
+		Description: cloudObject.String(),
+		Size:        cloudObject.Size(),
+		IsFile:      fetch.IsFile(cloudObject),
+		IsDir:       fetch.IsDir(cloudObject),
+	}, nil
 }
 
 func (s *taskQueueServer) GetWorkspaceRoot(ctx context.Context, req *taskqueuepb.WorkspaceRootRequest) (*taskqueuepb.WorkspaceRootResponse, error) {
