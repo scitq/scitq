@@ -432,14 +432,15 @@ func (lb LocalBackend) AbsolutePath(path string) (string, error) {
 }
 
 type Operation struct {
-	src    *MetaFileSystem
-	dst    *MetaFileSystem
-	srcUri URI
-	dstUri URI
+	src            *MetaFileSystem
+	dst            *MetaFileSystem
+	srcUri         URI
+	dstUri         URI
+	tempConfigPath string
 }
 
 // Load Rclone config from a file into memory
-func loadConfigFromFile(configPath string) {
+func loadConfigFromFile(configPath string) (string, error) {
 	config.SetConfigPath(configPath)
 	configfile.Install()
 
@@ -459,29 +460,37 @@ func loadConfigFromFile(configPath string) {
 
 	tmpFile, err := os.CreateTemp("", "rclone-config-*.conf")
 	if err != nil {
-		log.Fatalf("failed to create temp file: %v", err)
+		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	//defer os.Remove(tmpFile.Name())
-
-	//config.SetData(cfg)
-	//configfile.Install()
-	//config.Data().Save()
+	tmpName := tmpFile.Name()
 
 	// Write the cloned config to the temporary file
 	for name, options := range tempConfig {
-		fmt.Fprintf(tmpFile, "[%s]\n", name)
+		_, err := fmt.Fprintf(tmpFile, "[%s]\n", name)
+		if err != nil {
+			tmpFile.Close()
+			return "", fmt.Errorf("failed to write temp config: %w", err)
+		}
 		for k, v := range options {
-			fmt.Fprintf(tmpFile, "%s = %s\n", k, v)
+			_, err := fmt.Fprintf(tmpFile, "%s = %s\n", k, v)
+			if err != nil {
+				tmpFile.Close()
+				return "", fmt.Errorf("failed to write temp config: %w", err)
+			}
 		}
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close temp config: %w", err)
+	}
 
 	// Set the fake config path
-	config.SetConfigPath(tmpFile.Name())
+	config.SetConfigPath(tmpName)
 	configfile.Install()
 
 	RcloneRemotes = config.GetRemoteNames()
 	log.Printf("Rclone config loaded from %s [remotes %s]", configPath, RcloneRemotes)
+	return tmpName, nil
 }
 
 // Add a new remote in memory without modifying the config file
@@ -508,14 +517,36 @@ func addRemoteInMemory(protocol string, options map[string]string) (string, erro
 	return uniqueName, nil
 }
 
-func CleanConfig() {
-	configTemp := config.GetConfigPath()
-	fmt.Printf("Cleaning temporary conf %s\n", configTemp)
-	os.Remove(configTemp)
+func CleanOperation(op *Operation) {
+	if op != nil {
+		CleanConfig(op.tempConfigPath)
+	}
+}
+
+func CleanConfig(tempPath string) {
+	if tempPath == "" {
+		return
+	}
+	base := filepath.Base(tempPath)
+	// Only remove files that match our temp naming and live in the system temp dir
+	if strings.HasPrefix(base, "rclone-config-") && strings.HasSuffix(base, ".conf") {
+		// Best-effort: ensure the path is under os.TempDir
+		tmpDir := os.TempDir()
+		rel, err := filepath.Rel(tmpDir, tempPath)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			fmt.Printf("Cleaning temporary conf %s\n", tempPath)
+			_ = os.Remove(tempPath)
+			return
+		}
+	}
+	// Do not delete non-temp config files
 }
 
 func NewOperation(rcloneConfig, srcStr, dstStr string) (*Operation, error) {
-	loadConfigFromFile(rcloneConfig)
+	tmpPath, err := loadConfigFromFile(rcloneConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	src, err := ParseURI(srcStr)
 	if err != nil {
@@ -527,7 +558,7 @@ func NewOperation(rcloneConfig, srcStr, dstStr string) (*Operation, error) {
 	}
 
 	if dstStr == "" {
-		return &Operation{src: srcFs, srcUri: *src}, nil
+		return &Operation{src: srcFs, srcUri: *src, tempConfigPath: tmpPath}, nil
 	}
 
 	dst, err := ParseURI(dstStr)
@@ -540,10 +571,11 @@ func NewOperation(rcloneConfig, srcStr, dstStr string) (*Operation, error) {
 	}
 
 	return &Operation{
-		src:    srcFs,
-		dst:    dstFs,
-		srcUri: *src,
-		dstUri: *dst,
+		src:            srcFs,
+		dst:            dstFs,
+		srcUri:         *src,
+		dstUri:         *dst,
+		tempConfigPath: tmpPath,
 	}, nil
 }
 
@@ -656,7 +688,9 @@ func (op *Operation) Info() (fs.DirEntry, error) {
 
 func Copy(rcloneConfig, srcStr, dstStr string) error {
 	op, err := NewOperation(rcloneConfig, srcStr, dstStr)
-	defer CleanConfig()
+	if op != nil {
+		defer CleanConfig(op.tempConfigPath)
+	}
 	if err != nil {
 		return fmt.Errorf("could not initiate copy operation %v", err)
 	}
@@ -666,7 +700,9 @@ func Copy(rcloneConfig, srcStr, dstStr string) error {
 
 func RawList(rcloneConfig, srcStr string) (fs.DirEntries, error) {
 	op, err := NewOperation(rcloneConfig, srcStr, "")
-	defer CleanConfig()
+	if op != nil {
+		defer CleanConfig(op.tempConfigPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("could not initiate list operation %v", err)
 	}
@@ -675,7 +711,9 @@ func RawList(rcloneConfig, srcStr string) (fs.DirEntries, error) {
 
 func List(rcloneConfig, srcStr string) ([]string, error) {
 	op, err := NewOperation(rcloneConfig, srcStr, "")
-	defer CleanConfig()
+	if op != nil {
+		defer CleanConfig(op.tempConfigPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("could not initiate list operation %v", err)
 	}
@@ -697,7 +735,9 @@ func List(rcloneConfig, srcStr string) ([]string, error) {
 
 func Info(rcloneConfig, srcStr string) (fs.DirEntry, error) {
 	op, err := NewOperation(rcloneConfig, srcStr, "")
-	defer CleanConfig()
+	if op != nil {
+		defer CleanConfig(op.tempConfigPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("could not initiate info operation %v", err)
 	}

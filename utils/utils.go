@@ -93,6 +93,11 @@ func (s *ResizableSemaphore) Resize(newSize float64) {
 	}
 }
 
+// return current size of semaphore
+func (s *ResizableSemaphore) Size() float64 {
+	return s.maxSize
+}
+
 // ResizeTask updates the weight of a task (if the semaphore knows of it) and adjusts the semaphore accordingly.
 func (s *ResizableSemaphore) ResizeTaskIfRunning(taskID uint32, newWeight float64) {
 	s.mu.Lock()

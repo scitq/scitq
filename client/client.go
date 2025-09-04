@@ -126,7 +126,7 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 //}
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -152,7 +152,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return // ❌ Do not execute if task is marked as failed
 	}
 
-	command := []string{"run", "--rm"}
+	command := []string{"run", "--rm", "-e", fmt.Sprintf("CPU=%d", cpu)}
 	for _, folder := range []string{"input", "output", "tmp", "resource"} {
 		command = append(command, "-v", store+"/tasks/"+fmt.Sprint(task.TaskId)+"/"+folder+":/"+folder)
 	}
@@ -456,7 +456,9 @@ func excuterThread(
 				return
 			}
 
-			executeTask(client, reporter, t, &wg, store, dm)
+			cpu := max(int32(float64(runtime.NumCPU())/sem.Size()), 1)
+			log.Printf("Available CPU threads estimated to %d", cpu)
+			executeTask(client, reporter, t, &wg, store, dm, cpu)
 
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)

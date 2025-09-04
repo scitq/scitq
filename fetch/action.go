@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -35,7 +36,7 @@ func gunzip(uri *URI, fs *MetaFileSystem, isEarly bool) error {
 			}
 			srcPath, err := v.AbsolutePath(uri.Path + uri.Separator + uri.File)
 			if err != nil {
-				return fmt.Errorf("error while getting path to %s", err)
+				return fmt.Errorf("error while getting path: %w", err)
 			}
 			cmd := exec.Command(cmdName, "-d", srcPath)
 
@@ -46,7 +47,7 @@ func gunzip(uri *URI, fs *MetaFileSystem, isEarly bool) error {
 			return nil
 		}
 	default:
-		return fmt.Errorf("unsupported file system: %s", v)
+		return fmt.Errorf("unsupported file system: %T", v)
 	}
 }
 
@@ -60,12 +61,15 @@ func untar(uri *URI, fs *MetaFileSystem, isEarly bool) error {
 
 			srcPath, err := v.AbsolutePath(uri.Path + uri.Separator + uri.File)
 			if err != nil {
-				return fmt.Errorf("error while getting path to %w", err)
+				return fmt.Errorf("error while getting path: %w", err)
 			}
 
-			cmd := exec.Command("tar", "xf", srcPath)
+			destDir := filepath.Dir(srcPath)
+			cmd := exec.Command("tar", "-C", destDir, "-xf", srcPath)
+			// Also set the process working directory as a safety net
+			cmd.Dir = destDir
 			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("failed to run tar: %w", err)
+				return fmt.Errorf("failed to run tar in %s: %w", destDir, err)
 			}
 
 			// Remove the archive itself after successful extraction

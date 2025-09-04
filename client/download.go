@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -410,34 +411,70 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 // resourceLink creates hard links for resources in the task's resource folder.
 func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string) {
 	fileMeta := dm.ResourceMemory[resourcePath]
-	entries, err := os.ReadDir(fileMeta.FilePath)
-	if err != nil {
-		message := fmt.Sprintf("Error reading directory %s: %v", fileMeta.FilePath, err)
+
+	// Ensure destination root exists
+	if err := os.MkdirAll(taskResourceFolder, 0o755); err != nil {
+		message := fmt.Sprintf("Error creating destination directory %s: %v", taskResourceFolder, err)
 		log.Printf("❌ %s", message)
 		dm.reporter.Event("E", "resource_link", message, map[string]any{
 			"resource_path": fileMeta.FilePath,
 			"task_id":       fileMeta.TaskId,
 			"error":         err.Error(),
 		})
-		fileMeta.Task.Status = "F"
-		dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
-		return
-	}
-	for _, entry := range entries {
-		err := os.Link(fileMeta.FilePath+"/"+entry.Name(), taskResourceFolder+"/"+entry.Name())
-		if err != nil {
-			message := fmt.Sprintf("Error creating hard link for %s: %v", entry.Name(), err)
-			log.Printf("❌ %s", message)
-			dm.reporter.Event("E", "resource_link", message, map[string]any{
-				"resource_path": fileMeta.FilePath,
-				"task_id":       fileMeta.TaskId,
-				"error":         err.Error(),
-			})
+		if fileMeta.Task != nil {
 			fileMeta.Task.Status = "F"
 			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
 		}
+		return
 	}
-	log.Printf("Linked %s in %s", resourcePath, taskResourceFolder)
+
+	// Recursive function to mirror directory structure and hard-link files
+	var linkTree func(src, dst string) error
+	linkTree = func(src, dst string) error {
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return fmt.Errorf("read dir %s: %w", src, err)
+		}
+		for _, entry := range entries {
+			srcPath := filepath.Join(src, entry.Name())
+			dstPath := filepath.Join(dst, entry.Name())
+
+			// Directories: create and recurse
+			if entry.IsDir() {
+				if err := os.MkdirAll(dstPath, 0o755); err != nil {
+					return fmt.Errorf("mkdir %s: %w", dstPath, err)
+				}
+				if err := linkTree(srcPath, dstPath); err != nil {
+					return err
+				}
+				continue
+			}
+
+			// Non-directories: attempt hard link
+			// Note: we ignore symlinks specially; if present, we link the symlink inode itself
+			if err := os.Link(srcPath, dstPath); err != nil {
+				return fmt.Errorf("link %s -> %s: %w", srcPath, dstPath, err)
+			}
+		}
+		return nil
+	}
+
+	if err := linkTree(fileMeta.FilePath, taskResourceFolder); err != nil {
+		message := fmt.Sprintf("Error linking resource tree %s -> %s: %v", fileMeta.FilePath, taskResourceFolder, err)
+		log.Printf("❌ %s", message)
+		dm.reporter.Event("E", "resource_link", message, map[string]any{
+			"resource_path": fileMeta.FilePath,
+			"task_id":       fileMeta.TaskId,
+			"error":         err.Error(),
+		})
+		if fileMeta.Task != nil {
+			fileMeta.Task.Status = "F"
+			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
+		}
+		return
+	}
+
+	log.Printf("Linked resource tree %s -> %s", resourcePath, taskResourceFolder)
 }
 
 // extractFilename extracts filename from a path.

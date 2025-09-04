@@ -32,7 +32,7 @@ func checkScratch() error {
 		} else {
 			log.Printf("NVMe disks found and unmounted, looking for MD array")
 			command := "mdadm --examine --scan "
-			for i := range nvme {
+			for i := 0; i < nvme; i++ {
 				command += fmt.Sprintf("| grep nvme%dn1 ", i)
 			}
 			command += "|wc -l"
@@ -43,7 +43,7 @@ func checkScratch() error {
 			}
 			if hasMdArray == 0 {
 				command = fmt.Sprintf("mdadm --create /dev/md127 --force --level=0 --raid-devices=%d ", nvme)
-				for i := range nvme {
+				for i := 0; i < nvme; i++ {
 					command += fmt.Sprintf("/dev/nvme%dn1 ", i)
 				}
 				err = executeCommands(3, command)
@@ -218,14 +218,20 @@ WantedBy=multi-user.target`, serverAddr, dockerRegistry, dockerAuthentication, s
 }
 
 func InstallRcloneConfig(rcloneConfig, rcloneConfigPath string) error {
-	var err error
 	if fileNotExist(rcloneConfigPath) {
-		err = writeFile(rcloneConfigPath, rcloneConfig, false)
+		if err := writeFile(rcloneConfigPath, rcloneConfig, false); err != nil {
+			return fmt.Errorf("could not create rclone config: %w", err)
+		}
 	}
-	return fmt.Errorf("could not create rclone config %w", err)
+	return nil
 }
 
 func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32, serverAddress string, concurrency int, token string, report Reporter) error {
+	// Provide a no-op reporter if none is supplied to avoid nil deref
+	if report == nil {
+		report = func(int, string) {}
+	}
+
 	err := checkScratch()
 	if err == nil {
 		report(20, "scratch: ok")

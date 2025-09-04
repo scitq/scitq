@@ -26,19 +26,21 @@ type RecruiterState struct {
 }
 
 type Recruiter struct {
-	StepID            uint32
-	Rank              int
-	TimeoutSeconds    int
-	Protofilter       string
-	WorkerConcurrency int
-	WorkerPrefetch    int
-	MaximumWorkers    *int
-	Rounds            int
-	PendingTasks      int
-	ActiveWorkers     int
-	NeededWorkers     int
-	WorkflowID        uint32
-	TimeoutPassed     bool // <- new field
+	StepID                uint32
+	Rank                  int
+	TimeoutSeconds        int
+	Protofilter           string
+	WorkerConcurrency     int
+	WorkerPrefetch        int
+	MaximumWorkers        *int
+	Rounds                int
+	PendingTasks          int
+	ActiveWorkers         int
+	NeededWorkers         int
+	WorkflowID            uint32
+	TimeoutPassed         bool // <- new field
+	LastTrigger           time.Time
+	RemainingUntilTimeout time.Duration
 }
 
 func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[uint32]WorkflowCounter) ([]Recruiter, error) {
@@ -118,13 +120,22 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 		key := RecruiterKey{StepID: r.StepID, Rank: r.Rank}
 		state, seen := recruiterTimers[key]
 		if !seen {
-			// we set it to now
+			// Start the timeout window now (seconds-based)
 			state.LastTrigger = now
 			r.TimeoutPassed = false
+			r.LastTrigger = state.LastTrigger
+			r.RemainingUntilTimeout = time.Duration(r.TimeoutSeconds) * time.Second
 			recruiterTimers[key] = state
 		} else {
 			timeout := time.Duration(r.TimeoutSeconds) * time.Second
-			r.TimeoutPassed = now.Sub(state.LastTrigger) >= timeout
+			elapsed := now.Sub(state.LastTrigger)
+			r.TimeoutPassed = elapsed >= timeout
+			r.LastTrigger = state.LastTrigger
+			if !r.TimeoutPassed {
+				r.RemainingUntilTimeout = timeout - elapsed
+			} else {
+				r.RemainingUntilTimeout = 0
+			}
 		}
 
 		// Update the workflow counter memory
@@ -616,6 +627,7 @@ func RecruiterCycle(
 
 		needed := recruiter.NeededWorkers
 		if needed <= 0 {
+			log.Printf("No recruitment needed.")
 			continue
 		}
 
@@ -641,14 +653,23 @@ func RecruiterCycle(
 		}
 
 		if needed <= 0 {
+			log.Printf("No recruitment needed anymore.")
 			continue
 		}
+
+		// Verbose timeout diagnostics (seconds-based)
 		if !recruiter.TimeoutPassed {
-			log.Printf("Timeout not ellapsed, deploy is not allowed yet")
+			log.Printf("⏳ Recruiter step=%d rank=%d waiting %s before cloud deploy (timeout=%ds since %s)",
+				recruiter.StepID,
+				recruiter.Rank,
+				recruiter.RemainingUntilTimeout.Truncate(time.Second),
+				recruiter.TimeoutSeconds,
+				recruiter.LastTrigger.Format(time.RFC3339))
 			continue
 		}
 
 		// Try deploying if still needed
+		log.Printf("⏱️ Timeout passed for step=%d rank=%d; attempting cloud deploy (need=%d)", recruiter.StepID, recruiter.Rank, needed)
 		wfc := workflowCounterMemory[recruiter.WorkflowID]
 
 		deployed, err := deployWorkers(
@@ -672,6 +693,7 @@ func RecruiterCycle(
 			continue
 		}
 		log.Printf("🚀 Deployed %d workers for step=%d", deployed, recruiter.StepID)
+		recruiterTimers[key] = RecruiterState{LastTrigger: now}
 	}
 
 	return nil
