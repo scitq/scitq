@@ -28,6 +28,7 @@ service TaskQueue {
     rpc UpdateJob(JobUpdate) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
+    rpc GetDockerCredentials(google.protobuf.Empty) returns (DockerCredentials);
     rpc Login(LoginRequest) returns (LoginResponse);
     rpc Logout(Token) returns (Ack);
     rpc CreateUser(CreateUserRequest) returns (UserId);
@@ -342,6 +343,15 @@ message JobUpdate {
 
 message RcloneConfig {
     string config = 1;
+}
+
+message DockerCredential {
+  string registry = 1;   // e.g., "3jfz1gy8.gra7.container-registry.ovh.net"
+  string auth = 2;   // auth string as found in .docker/config.json
+}
+
+message DockerCredentials {
+  repeated DockerCredential credentials = 1;
 }
 
 message LoginRequest {

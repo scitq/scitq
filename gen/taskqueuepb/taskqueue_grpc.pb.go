@@ -41,6 +41,7 @@ const (
 	TaskQueue_UpdateJob_FullMethodName              = "/taskqueue.TaskQueue/UpdateJob"
 	TaskQueue_ListFlavors_FullMethodName            = "/taskqueue.TaskQueue/ListFlavors"
 	TaskQueue_GetRcloneConfig_FullMethodName        = "/taskqueue.TaskQueue/GetRcloneConfig"
+	TaskQueue_GetDockerCredentials_FullMethodName   = "/taskqueue.TaskQueue/GetDockerCredentials"
 	TaskQueue_Login_FullMethodName                  = "/taskqueue.TaskQueue/Login"
 	TaskQueue_Logout_FullMethodName                 = "/taskqueue.TaskQueue/Logout"
 	TaskQueue_CreateUser_FullMethodName             = "/taskqueue.TaskQueue/CreateUser"
@@ -100,6 +101,7 @@ type TaskQueueClient interface {
 	UpdateJob(ctx context.Context, in *JobUpdate, opts ...grpc.CallOption) (*Ack, error)
 	ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error)
 	GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneConfig, error)
+	GetDockerCredentials(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*DockerCredentials, error)
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 	Logout(ctx context.Context, in *Token, opts ...grpc.CallOption) (*Ack, error)
 	CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*UserId, error)
@@ -369,6 +371,16 @@ func (c *taskQueueClient) GetRcloneConfig(ctx context.Context, in *emptypb.Empty
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RcloneConfig)
 	err := c.cc.Invoke(ctx, TaskQueue_GetRcloneConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) GetDockerCredentials(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*DockerCredentials, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DockerCredentials)
+	err := c.cc.Invoke(ctx, TaskQueue_GetDockerCredentials_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -720,6 +732,7 @@ type TaskQueueServer interface {
 	UpdateJob(context.Context, *JobUpdate) (*Ack, error)
 	ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error)
 	GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error)
+	GetDockerCredentials(context.Context, *emptypb.Empty) (*DockerCredentials, error)
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	Logout(context.Context, *Token) (*Ack, error)
 	CreateUser(context.Context, *CreateUserRequest) (*UserId, error)
@@ -826,6 +839,9 @@ func (UnimplementedTaskQueueServer) ListFlavors(context.Context, *ListFlavorsReq
 }
 func (UnimplementedTaskQueueServer) GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRcloneConfig not implemented")
+}
+func (UnimplementedTaskQueueServer) GetDockerCredentials(context.Context, *emptypb.Empty) (*DockerCredentials, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDockerCredentials not implemented")
 }
 func (UnimplementedTaskQueueServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Login not implemented")
@@ -1293,6 +1309,24 @@ func _TaskQueue_GetRcloneConfig_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).GetRcloneConfig(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_GetDockerCredentials_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetDockerCredentials(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetDockerCredentials_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetDockerCredentials(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1951,6 +1985,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRcloneConfig",
 			Handler:    _TaskQueue_GetRcloneConfig_Handler,
+		},
+		{
+			MethodName: "GetDockerCredentials",
+			Handler:    _TaskQueue_GetDockerCredentials_Handler,
 		},
 		{
 			MethodName: "Login",

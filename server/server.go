@@ -337,6 +337,20 @@ func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empt
 	return &pb.RcloneConfig{Config: string(data)}, nil
 }
 
+func (s *taskQueueServer) GetDockerCredentials(ctx context.Context, _ *emptypb.Empty) (*pb.DockerCredentials, error) {
+	credsMap := s.cfg.GetDockerCredentials()
+	out := &pb.DockerCredentials{Credentials: make([]*pb.DockerCredential, 0, len(credsMap))}
+
+	for registry, secret := range credsMap {
+		out.Credentials = append(out.Credentials, &pb.DockerCredential{
+			Registry: registry,
+			Auth:     secret,
+		})
+	}
+
+	return out, nil
+}
+
 func shouldTriggerAssignFor(status string) bool {
 	switch status {
 	case "P", "S", "F", "C", "R", "U", "V", "X":

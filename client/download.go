@@ -66,6 +66,7 @@ type DownloadManager struct {
 	TaskQueue       chan *pb.Task      // Unlimited queue (tasks waiting for download)
 	CompletionQueue chan *FileMetadata // Completed downloads
 	ExecQueue       chan *pb.Task      // Tasks ready for execution
+	FailedQueue     chan *pb.Task      // Tasks that failed during downloads
 	Store           string
 	reporter        *event.Reporter
 }
@@ -80,6 +81,7 @@ func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager
 		TaskQueue:         make(chan *pb.Task, maxQueueSize),
 		CompletionQueue:   make(chan *FileMetadata, maxQueueSize),
 		ExecQueue:         make(chan *pb.Task, maxQueueSize),
+		FailedQueue:       make(chan *pb.Task, maxQueueSize),
 		Store:             store,
 		reporter:          reporter,
 	}
@@ -372,6 +374,14 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 					log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)
 				}
 			}
+			if !fm.Success || fm.Task.Status == "F" {
+				// Inform client loop to clear local active flag
+				select {
+				case dm.FailedQueue <- fm.Task:
+				default:
+					log.Printf("⚠️ FailedQueue full; could not enqueue task %d", fm.TaskId)
+				}
+			}
 		}
 	case ResourceFile, DockerImage:
 		{
@@ -380,8 +390,15 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 					if count, ok := dm.TaskDownloads[task.TaskId]; ok {
 						if !fm.Success {
 							log.Printf("❌ Task %d failed due to download error for resource %s", task.TaskId, fm.SourcePath)
-							dm.reporter.UpdateTask(fm.TaskId, "F", fmt.Sprintf("Download failed for resource %s", fm.SourcePath))
+							dm.reporter.UpdateTask(task.TaskId, "F", fmt.Sprintf("Download failed for resource %s", fm.SourcePath))
 							task.Status = "F"
+							// Notify the client loop so it can clear activeTasks and avoid waiting on a never-executing task
+							select {
+							case dm.FailedQueue <- task:
+							default:
+								// if queue is full, log but continue
+								log.Printf("⚠️ FailedQueue full; could not enqueue task %d", task.TaskId)
+							}
 						}
 						dm.TaskDownloads[task.TaskId] = count - 1
 						if count <= 1 {
@@ -393,7 +410,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 								log.Printf("❌ Task %d failed due to previous download errors", task.TaskId)
 							}
 						} else {
-							log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)
+							log.Printf("📝 Task %d still waiting for %d files", task.TaskId, count-1)
 						}
 					}
 				}

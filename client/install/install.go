@@ -1,11 +1,18 @@
 package install
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
 type Reporter func(prog int, msg string)
+
+const DockerCredentialFile = "/root/.docker/config.json"
 
 func checkScratch() error {
 	log.Printf("Checking scratch")
@@ -93,7 +100,7 @@ func checkScratch() error {
 }
 
 // test if docker is installed and install it if it is not present
-func checkDocker(dockerRegistry string, dockerAuthentication string) error {
+func checkDocker() error {
 	// testing for docker
 	log.Printf("Checking docker")
 
@@ -142,20 +149,6 @@ func checkDocker(dockerRegistry string, dockerAuthentication string) error {
 		}
 	}
 
-	if dockerRegistry != "" && dockerAuthentication != "" {
-		log.Printf("Installing registry config")
-		err := writeFile("/root/.docker/config.json", fmt.Sprintf(`{
-    "auths": {
-        "{{ %s }}": {
-            "auth": "{{ %s }}"
-        }
-    }
-}`, dockerRegistry, dockerAuthentication), true)
-		if err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -188,7 +181,7 @@ func checkSwap(swapProportion float32) error {
 	return err
 }
 
-func checkService(dockerRegistry, dockerAuthentication string, swapProportion float32, serverAddr string, concurrency int, token string) error {
+func checkService(swapProportion float32, serverAddr string, concurrency int, token string) error {
 
 	if fileNotExist("/etc/systemd/system/scitq-client.service") {
 		err := writeFile("/etc/systemd/system/scitq-client.service", fmt.Sprintf(`[Unit]
@@ -198,10 +191,10 @@ After=multi-user.target
 [Service]
 Environment=PATH=/usr/bin:/usr/local/bin:/usr/sbin
 Type=simple
-ExecStart=/usr/local/bin/scitq-client -server %s -install -docker "%s:%s" -swap "%f" -concurrency %d -token %s
+ExecStart=/usr/local/bin/scitq-client -server %s -install -swap "%f" -concurrency %d -token %s
 
 [Install]
-WantedBy=multi-user.target`, serverAddr, dockerRegistry, dockerAuthentication, swapProportion, concurrency, token), false)
+WantedBy=multi-user.target`, serverAddr, swapProportion, concurrency, token), false)
 		if err != nil {
 			return fmt.Errorf("could not create service %w", err)
 		}
@@ -226,7 +219,55 @@ func InstallRcloneConfig(rcloneConfig, rcloneConfigPath string) error {
 	return nil
 }
 
-func Run(dockerRegistry string, dockerAuthentication string, swapProportion float32, serverAddress string, concurrency int, token string, report Reporter) error {
+// InstallDockerCredentials writes /root/.docker/config.json atomically from the server-provided proto.
+func InstallDockerCredentials(creds *pb.DockerCredentials) error {
+	if creds == nil || len(creds.Credentials) == 0 {
+		log.Printf("No docker credentials provided by server; skipping docker config installation")
+		return nil
+	}
+
+	type authEntry struct {
+		Auth string `json:"auth"`
+	}
+	cfg := struct {
+		Auths map[string]authEntry `json:"auths"`
+	}{Auths: map[string]authEntry{}}
+
+	for _, c := range creds.Credentials {
+		reg := c.GetRegistry()
+		auth := c.GetAuth()
+		if reg == "" || auth == "" {
+			continue
+		}
+		cfg.Auths[reg] = authEntry{Auth: auth}
+	}
+	if len(cfg.Auths) == 0 {
+		log.Printf("No valid docker credentials in response; skipping docker config installation")
+		return nil
+	}
+
+	dir := filepath.Dir(DockerCredentialFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal docker config: %w", err)
+	}
+	tmp := DockerCredentialFile + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return fmt.Errorf("write tmp docker config: %w", err)
+	}
+	if err := os.Rename(tmp, DockerCredentialFile); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename docker config: %w", err)
+	}
+	log.Printf("Installed docker credentials for %d registries", len(cfg.Auths))
+	return nil
+}
+
+func Run(swapProportion float32, serverAddress string, concurrency int, token string, report Reporter) error {
 	// Provide a no-op reporter if none is supplied to avoid nil deref
 	if report == nil {
 		report = func(int, string) {}
@@ -235,7 +276,7 @@ func Run(dockerRegistry string, dockerAuthentication string, swapProportion floa
 	err := checkScratch()
 	if err == nil {
 		report(20, "scratch: ok")
-		err = checkDocker(dockerRegistry, dockerAuthentication)
+		err = checkDocker()
 	}
 	if err == nil {
 		report(50, "docker: ok")
@@ -245,7 +286,7 @@ func Run(dockerRegistry string, dockerAuthentication string, swapProportion floa
 	}
 	if err == nil {
 		report(80, "swap: ok")
-		err = checkService(dockerRegistry, dockerAuthentication, swapProportion, serverAddress, concurrency, token)
+		err = checkService(swapProportion, serverAddress, concurrency, token)
 	}
 	if err == nil {
 		report(100, "service: ok")

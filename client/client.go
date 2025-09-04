@@ -351,6 +351,21 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 		default:
 		}
 
+		// Drain any failed-download notifications so we don't keep thinking those tasks are active
+		for {
+			select {
+			case failedTask := <-dm.FailedQueue:
+				if failedTask != nil {
+					activeTasks.Delete(failedTask.TaskId)
+					log.Printf("🧹 Cleared local active flag for failed task %d", failedTask.TaskId)
+				}
+				// keep draining until channel is empty
+				continue
+			default:
+			}
+			break
+		}
+
 		tasks, err := config.fetchTasks(ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
@@ -383,6 +398,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			activeTasks.Store(task.TaskId, struct{}{})
 			reporter.UpdateTaskAsync(task.TaskId, task.Status, "")
 			log.Printf("📝 Task %d accepted", task.TaskId)
+			log.Printf("📌 Marked task %d active locally", task.TaskId)
 
 			failed := false
 			for _, folder := range []string{"input", "output", "tmp", "resource"} {
@@ -463,6 +479,10 @@ func excuterThread(
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
 
+			// Mark task as no longer active on the client side
+			activeTasks.Delete(t.TaskId)
+			log.Printf("🧹 Cleared local active flag for task %d", t.TaskId)
+
 			// Clean up memory if task is done
 			taskWeights.Delete(t.TaskId)
 
@@ -492,6 +512,20 @@ func Run(ctx context.Context, serverAddr string, concurrency uint32, name, store
 			return fmt.Errorf("could not get Rclone config: %v", err)
 		}
 		install.InstallRcloneConfig(rCloneConfig.Config, fetch.DefaultRcloneConfig)
+	}
+
+	// Ensure docker credentials are present (write once)
+	if _, err := os.Stat(install.DockerCredentialFile); os.IsNotExist(err) {
+		log.Printf("⚠️ Docker credentials file not found, creating a new one.")
+		creds, err := qclient.Client.GetDockerCredentials(ctx, &emptypb.Empty{})
+		if err != nil {
+			event.SendRuntimeEventWithRetry(config.ServerAddr, config.Token, 0, config.Name, "E", "docker", "Failed to get Docker credentials", map[string]any{"error": err.Error()})
+			return fmt.Errorf("could not get Docker credentials: %v", err)
+		}
+		if err := install.InstallDockerCredentials(creds); err != nil {
+			event.SendRuntimeEventWithRetry(config.ServerAddr, config.Token, 0, config.Name, "E", "docker", "Failed to install Docker credentials", map[string]any{"error": err.Error()})
+			return fmt.Errorf("could not install Docker credentials: %v", err)
+		}
 	}
 
 	config.registerWorker(qclient.Client)

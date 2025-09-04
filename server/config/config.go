@@ -14,35 +14,38 @@ import (
 
 type Config struct {
 	Scitq struct {
-		Port                 int     `yaml:"port" default:"50051"`
-		DBURL                string  `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
-		MaxDBConcurrency     int     `yaml:"max_db_concurrency" default:"50"`
-		LogLevel             string  `yaml:"log_level" default:"info"`
-		LogRoot              string  `yaml:"log_root" default:"log"`
-		ScriptRoot           string  `yaml:"script_root" default:"scripts"`
-		ScriptInterpreter    string  `yaml:"script_interpreter" default:"python3"`
-		ScriptRunnerUser     string  `yaml:"script_runner_user" default:"nobody"`
-		ClientBinaryPath     string  `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
-		ClientDownloadToken  string  `yaml:"client_download_token"`
-		CertificateKey       string  `yaml:"certificate_key"`
-		CertificatePem       string  `yaml:"certificate_pem"`
-		ServerName           string  `yaml:"server_name"`
-		ServerFQDN           string  `yaml:"server_fqdn"`
-		DockerRegistry       string  `yaml:"docker_registry"`
-		DockerAuthentication string  `yaml:"docker_authentication"`
-		SwapProportion       float32 `yaml:"swap_proportion" default:"0.1"`
-		WorkerToken          string  `yaml:"worker_token"`
-		JwtSecret            string  `yaml:"jwt_secret"`
-		RecruitmentInterval  int     `yaml:"recruiter_interval" default:"15"`
-		IdleTimeout          int     `yaml:"idle_timeout" default:"300"`
-		NewWorkerIdleTimeout int     `yaml:"new_worker_idle_timeout" default:"900"`
-		OfflineTimeout       int     `yaml:"offline_timeout" default:"30"`
-		AdminUser            string  `yaml:"admin_user" default:"admin"`
-		AdminHashedPassword  string  `yaml:"admin_hashed_password" default:""`
-		AdminEmail           string  `yaml:"admin_email" default:""`
-		DisableHTTPS         bool    `yaml:"disable_https" default:"false"`
-		DisableGRPCWeb       bool    `yaml:"disable_grpcweb" default:"false"`
-		HTTPSPort            int     `yaml:"https_port" default:"443"`
+		Port                 int    `yaml:"port" default:"50051"`
+		DBURL                string `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
+		MaxDBConcurrency     int    `yaml:"max_db_concurrency" default:"50"`
+		LogLevel             string `yaml:"log_level" default:"info"`
+		LogRoot              string `yaml:"log_root" default:"log"`
+		ScriptRoot           string `yaml:"script_root" default:"scripts"`
+		ScriptInterpreter    string `yaml:"script_interpreter" default:"python3"`
+		ScriptRunnerUser     string `yaml:"script_runner_user" default:"nobody"`
+		ClientBinaryPath     string `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
+		ClientDownloadToken  string `yaml:"client_download_token"`
+		CertificateKey       string `yaml:"certificate_key"`
+		CertificatePem       string `yaml:"certificate_pem"`
+		ServerName           string `yaml:"server_name"`
+		ServerFQDN           string `yaml:"server_fqdn"`
+		DockerRegistry       string `yaml:"docker_registry"`
+		DockerAuthentication string `yaml:"docker_authentication"`
+		// Multiple registry credentials; each entry is a registry→secret pair.
+		// If empty, legacy fields DockerRegistry/DockerAuthentication (single pair) are used if set.
+		DockerCredentials    []DockerCredential `yaml:"docker_credentials"`
+		SwapProportion       float32            `yaml:"swap_proportion" default:"0.1"`
+		WorkerToken          string             `yaml:"worker_token"`
+		JwtSecret            string             `yaml:"jwt_secret"`
+		RecruitmentInterval  int                `yaml:"recruiter_interval" default:"15"`
+		IdleTimeout          int                `yaml:"idle_timeout" default:"300"`
+		NewWorkerIdleTimeout int                `yaml:"new_worker_idle_timeout" default:"900"`
+		OfflineTimeout       int                `yaml:"offline_timeout" default:"30"`
+		AdminUser            string             `yaml:"admin_user" default:"admin"`
+		AdminHashedPassword  string             `yaml:"admin_hashed_password" default:""`
+		AdminEmail           string             `yaml:"admin_email" default:""`
+		DisableHTTPS         bool               `yaml:"disable_https" default:"false"`
+		DisableGRPCWeb       bool               `yaml:"disable_grpcweb" default:"false"`
+		HTTPSPort            int                `yaml:"https_port" default:"443"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`
@@ -53,6 +56,12 @@ type Config struct {
 type Quota struct {
 	MaxCPU   int32   `yaml:"cpu"`
 	MaxMemGB float32 `yaml:"mem,omitempty"` // optional
+}
+
+// DockerCredential represents a registry→secret pair used by clients to auth to a container registry
+type DockerCredential struct {
+	Registry string `yaml:"registry"`
+	Secret   string `yaml:"secret"`
 }
 
 type AzureConfig struct {
@@ -132,6 +141,9 @@ func (c *Config) Validate() error {
 	if c.Scitq.WorkerToken == "" {
 		return fmt.Errorf("switq.worker_token must be provided")
 	}
+	if len(c.Scitq.DockerCredentials) > 0 && (c.Scitq.DockerRegistry != "" || c.Scitq.DockerAuthentication != "") {
+		log.Printf("warning: both scitq.docker_credentials and legacy scitq.docker_registry/docker_authentication are set; using docker_credentials only")
+	}
 	// You can add more rules as needed
 	return nil
 }
@@ -145,6 +157,24 @@ type ProviderConfig interface {
 	SetName(string)
 	GetDefaultRegion() string
 	GetWorkspaceRoot(region string) (string, bool)
+}
+
+// GetDockerCredentials returns all configured docker registry credentials.
+// It supports the new multi-credential form and the legacy single-pair fields.
+func (c *Config) GetDockerCredentials() map[string]string {
+	creds := make(map[string]string)
+	// New format
+	for _, dc := range c.Scitq.DockerCredentials {
+		if dc.Registry == "" || dc.Secret == "" {
+			continue
+		}
+		creds[dc.Registry] = dc.Secret
+	}
+	// Legacy fallback (single pair)
+	if len(creds) == 0 && c.Scitq.DockerRegistry != "" && c.Scitq.DockerAuthentication != "" {
+		creds[c.Scitq.DockerRegistry] = c.Scitq.DockerAuthentication
+	}
+	return creds
 }
 
 func parsePeriodicity(periodicity string, name string) time.Duration {

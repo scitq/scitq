@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -150,7 +149,6 @@ func main() {
 
 	name := flag.String("name", hostname, "Worker name")
 	do_install := flag.Bool("install", false, "Perform automatic install check")
-	dockerStr := flag.String("docker", ":", "Docker private registry configuration")
 	swapProportion := flag.Float64("swap", 0.1, "Add automatically a swapfile in scratch of this proportion (0 to disable)")
 
 	flag.Parse()
@@ -170,15 +168,7 @@ func main() {
 			reporter(5, "install: started")
 		}
 
-		dockerCfg := strings.Split(*dockerStr, ":")
-		var dockerRegistry string
-		var dockerAuthentication string
-		if len(dockerCfg) == 2 && dockerCfg[0] != "" && dockerCfg[1] != "" {
-			dockerRegistry = dockerCfg[0]
-			dockerAuthentication = dockerCfg[1]
-		}
-
-		err := install.Run(dockerRegistry, dockerAuthentication, float32(*swapProportion), *serverAddr, int(*concurrency), *token, reporter)
+		err := install.Run(float32(*swapProportion), *serverAddr, int(*concurrency), *token, reporter)
 		if err != nil {
 			if reporter != nil {
 				// best-effort final failure (include error text)
