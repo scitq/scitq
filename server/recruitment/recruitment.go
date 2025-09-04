@@ -617,14 +617,6 @@ func RecruiterCycle(
 			continue
 		}
 
-		// Enforce workflow-level maximum early
-		wfc := workflowCounterMemory[recruiter.WorkflowID]
-		if wfc.Maximum != nil && wfc.Counter >= *wfc.Maximum {
-			log.Printf("⚠️ Workflow %d has reached maximum workers (%d), skipping recruiter step=%d rank=%d",
-				recruiter.WorkflowID, *wfc.Maximum, recruiter.StepID, recruiter.Rank)
-			continue
-		}
-
 		// Build recruiter-specific allowed flavor/region sets
 		recruiterFlavorIDs := make(map[uint32]struct{})
 		recruiterRegionIDs := make(map[uint32]struct{})
@@ -673,6 +665,14 @@ func RecruiterCycle(
 				recruiter.RemainingUntilTimeout.Truncate(time.Second),
 				recruiter.TimeoutSeconds,
 				recruiter.LastTrigger.Format(time.RFC3339))
+			continue
+		}
+
+		// Enforce workflow-level maximum before cloud deploy (recycling is allowed to exceed caps)
+		wfc := workflowCounterMemory[recruiter.WorkflowID]
+		if wfc.Maximum != nil && wfc.Counter >= *wfc.Maximum {
+			log.Printf("⚠️ Workflow %d at maximum workers (%d) — skipping cloud deploy for step=%d rank=%d (recycling allowed)",
+				recruiter.WorkflowID, *wfc.Maximum, recruiter.StepID, recruiter.Rank)
 			continue
 		}
 
