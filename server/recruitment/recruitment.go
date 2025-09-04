@@ -617,6 +617,14 @@ func RecruiterCycle(
 			continue
 		}
 
+		// Enforce workflow-level maximum early
+		wfc := workflowCounterMemory[recruiter.WorkflowID]
+		if wfc.Maximum != nil && wfc.Counter >= *wfc.Maximum {
+			log.Printf("⚠️ Workflow %d has reached maximum workers (%d), skipping recruiter step=%d rank=%d",
+				recruiter.WorkflowID, *wfc.Maximum, recruiter.StepID, recruiter.Rank)
+			continue
+		}
+
 		// Build recruiter-specific allowed flavor/region sets
 		recruiterFlavorIDs := make(map[uint32]struct{})
 		recruiterRegionIDs := make(map[uint32]struct{})
@@ -670,7 +678,6 @@ func RecruiterCycle(
 
 		// Try deploying if still needed
 		log.Printf("⏱️ Timeout passed for step=%d rank=%d; attempting cloud deploy (need=%d)", recruiter.StepID, recruiter.Rank, needed)
-		wfc := workflowCounterMemory[recruiter.WorkflowID]
 
 		deployed, err := deployWorkers(
 			ctx,
@@ -743,12 +750,14 @@ func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[uint32]Workflo
 
 		mem, exists := workflowCounterMemory[workflowID]
 		if !exists {
-			// We didn't recruit for this workflow yet, ignore
+			// Initialize memory from live state; Maximum will be filled/updated during ListActiveRecruiters
+			workflowCounterMemory[workflowID] = WorkflowCounter{Counter: liveCount, Maximum: nil}
+			log.Printf("ℹ️ Initialized workflow %d counter from live state: %d", workflowID, liveCount)
 			continue
 		}
 
-		if liveCount < mem.Counter {
-			log.Printf("⚠️ Workflow %d live workers (%d) < memory counter (%d), adjusting", workflowID, liveCount, mem.Counter)
+		if liveCount != mem.Counter {
+			log.Printf("ℹ️ Syncing workflow %d counter from %d to live %d", workflowID, mem.Counter, liveCount)
 			mem.Counter = liveCount
 			workflowCounterMemory[workflowID] = mem
 		}
