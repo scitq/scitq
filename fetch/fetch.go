@@ -548,6 +548,13 @@ func NewOperation(rcloneConfig, srcStr, dstStr string) (*Operation, error) {
 		return nil, err
 	}
 
+	// Normalize: when performing a COPY (dstStr != ""), interpret a trailing slash on the
+	// source as "copy contents" by appending a wildcard. Example:
+	//   azswed://bucket/dir/  => azswed://bucket/dir/*
+	if dstStr != "" && strings.HasSuffix(srcStr, "/") {
+		srcStr += "*"
+	}
+
 	src, err := ParseURI(srcStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse source URI: %v", err)
