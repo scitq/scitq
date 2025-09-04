@@ -485,7 +485,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				SELECT
 					step_id, command, shell, container, container_options,
 					'P', NULL, input, resource,
-					'', '{}', FALSE,
+					output, '{}', FALSE,
 					GREATEST(retry - 1, 0), is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, task_id, retry_count + 1,
