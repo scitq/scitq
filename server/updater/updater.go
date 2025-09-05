@@ -208,6 +208,11 @@ func (gp *GenericProvider) UpdateFlavorMetrics(newMetrics []*FlavorMetrics) erro
 	defer gp.Session.Rollback()
 	newMap := make(map[string]*FlavorMetrics)
 	for _, fm := range newMetrics {
+		if fm.Cost == 0 {
+			// Skip zero-cost metrics (Azure joke: undisclosed price)
+			log.Printf("Remove metrics %v associated with no cost.", fm)
+			continue
+		}
 		key := fmt.Sprintf("%d|%s|%s", fm.ProviderID, fm.FlavorName, fm.RegionName)
 		newMap[key] = fm
 	}
