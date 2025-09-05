@@ -9,14 +9,17 @@
   [✅] Implement server-side logic for RegisterSpecifications
   [✅] Implement client-side logic for RegisterSpecifications
   [✅] Test recruitment and worker visibility
+[✅] add proper version in code, report in UI
+[✅] add reporting of error of client (called worker events) in the server, accessible by CLI
+[✅] add OVH support
+[✅] check task retries
 
 # TODO short term
 
-[ ] add proper version in code, report in UI
-[ ] add reporting of error of client (at least installation phase) in the server (show in the UI)
-[ ] check task retries
+
+[ ] show worker event in UI
 [ ] step view stats in UI
-[ ] add OVH support
+
 
 # TODO later
 
@@ -24,3 +27,4 @@
 [ ] implement debug mode
 [ ] implement workflow strategy (sticky)
 [ ] add run duration measurement
+[ ] add helper as `source /resource/shell_helpers.sh` (or `source /builtinresource/shell_helpers.sh` ?), rather than copying it in all scripts, same for find_pairs, (`source /builtinresource/shell_biology.sh`)

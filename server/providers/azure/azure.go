@@ -184,10 +184,9 @@ func (ap *AzureProvider) Create(workerName, flavor, location string, jobId uint3
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s" -job %d`,
+  - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d`,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
-			ap.cfg.Scitq.DockerRegistry, ap.cfg.Scitq.DockerAuthentication,
 			ap.cfg.Scitq.SwapProportion, ap.cfg.Scitq.WorkerToken,
 			jobId)
 		customData := base64.StdEncoding.EncodeToString([]byte(cloudInit))

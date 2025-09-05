@@ -153,9 +153,14 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	command := []string{"run", "--rm", "-e", fmt.Sprintf("CPU=%d", cpu)}
+	option := ""
 	for _, folder := range []string{"input", "output", "tmp", "resource"} {
-		command = append(command, "-v", store+"/tasks/"+fmt.Sprint(task.TaskId)+"/"+folder+":/"+folder)
+		if folder == "resource" {
+			option = ":ro"
+		}
+		command = append(command, "-v", store+"/tasks/"+fmt.Sprint(task.TaskId)+"/"+folder+":/"+folder+option)
 	}
+	command = append(command, "-v", filepath.Join(store, helperFolder)+":/builtin:ro")
 
 	if task.ContainerOptions != nil {
 		options := strings.Fields(*task.ContainerOptions)
@@ -529,6 +534,7 @@ func Run(ctx context.Context, serverAddr string, concurrency uint32, name, store
 	}
 
 	config.registerWorker(qclient.Client)
+	createHelpers(config.Store)
 	sem := utils.NewResizableSemaphore(float64(config.Concurrency))
 
 	reporter := event.NewReporter(qclient.Client, config.WorkerId, config.Name, 5*time.Second)

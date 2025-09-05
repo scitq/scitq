@@ -141,14 +141,12 @@ func (p *Provider) effectiveUserData(jobId uint32) []byte {
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client -server %s:%d -install -docker "%s:%s" -swap "%f" -token "%s" -job %d
+  - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d
 `,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.ClientDownloadToken,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.Port,
-		p.cfg.Scitq.DockerRegistry,
-		p.cfg.Scitq.DockerAuthentication,
 		p.cfg.Scitq.SwapProportion,
 		p.cfg.Scitq.WorkerToken, jobId)
 	return []byte(cloudInit)
