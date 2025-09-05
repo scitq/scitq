@@ -26,6 +26,9 @@ const (
 	maxQueueSize = 200
 )
 
+// Max time allowed for a single `docker pull` attempt before killing it.
+const dockerPullTimeout = 2 * time.Minute
+
 // FileTransfer represents a download task.
 type FileType int
 
@@ -124,12 +127,21 @@ func (dm *DownloadManager) StartDownloadWorkers() {
 	}
 }
 
-// pullDockerImage pulls a docker image using the `docker pull` command.
-func pullDockerImage(image string) error {
+// pullDockerImage pulls a docker image using the `docker pull` command with a timeout.
+func pullDockerImage(image string, timeout time.Duration) error {
 	image = strings.TrimPrefix(image, "docker:")
-	cmd := exec.Command("docker", "pull", image)
 
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "pull", image)
 	output, err := cmd.CombinedOutput()
+
+	// If the context timed out, CommandContext will have killed the process.
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("docker pull timed out after %s for image %s\nOutput:\n%s", timeout, image, output)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to pull docker image %s: %v\nOutput:\n%s", image, err, output)
 	}
@@ -153,7 +165,7 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 			err = fetch.Copy(fetch.DefaultRcloneConfig, file.SourcePath, file.TargetPath)
 
 		case DockerImage:
-			err = pullDockerImage(file.SourcePath)
+			err = pullDockerImage(file.SourcePath, dockerPullTimeout)
 		}
 
 		if err == nil {
