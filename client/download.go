@@ -26,8 +26,11 @@ const (
 	maxQueueSize = 200
 )
 
-// Max time allowed for a single `docker pull` attempt before killing it.
-const dockerPullTimeout = 2 * time.Minute
+// Timeouts for `docker pull` attempts (exponential backoff with cap).
+const (
+	dockerPullTimeoutBase = 2 * time.Minute
+	dockerPullTimeoutMax  = 10 * time.Minute
+)
 
 // FileTransfer represents a download task.
 type FileType int
@@ -165,7 +168,12 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 			err = fetch.Copy(fetch.DefaultRcloneConfig, file.SourcePath, file.TargetPath)
 
 		case DockerImage:
-			err = pullDockerImage(file.SourcePath, dockerPullTimeout)
+			// Exponential backoff for docker pull timeout, capped at dockerPullTimeoutMax
+			timeout := dockerPullTimeoutBase * time.Duration(1<<uint(attempt-1))
+			if timeout > dockerPullTimeoutMax {
+				timeout = dockerPullTimeoutMax
+			}
+			err = pullDockerImage(file.SourcePath, timeout)
 		}
 
 		if err == nil {
