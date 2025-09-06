@@ -75,6 +75,8 @@ type DownloadManager struct {
 	FailedQueue     chan *pb.Task      // Tasks that failed during downloads
 	Store           string
 	reporter        *event.Reporter
+	// Tracks tasks currently being scheduled for downloads to ensure idempotency at the boundary.
+	EnqueuedTasks map[uint32]bool
 }
 
 // NewDownloadManager initializes the download manager.
@@ -90,6 +92,7 @@ func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager
 		FailedQueue:       make(chan *pb.Task, maxQueueSize),
 		Store:             store,
 		reporter:          reporter,
+		EnqueuedTasks:     make(map[uint32]bool),
 	}
 }
 
@@ -209,7 +212,7 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 	var md5Str string
 	info, err := fetch.Info(fetch.DefaultRcloneConfig, file.SourcePath)
 	if err != nil {
-		log.Printf("Error fetching file info: %v", err)
+		log.Printf("Error fetching file info for %s: %v", file.SourcePath, err)
 	} else {
 		size = info.Size() // Correctly call the Size function
 		md5Str = fetch.GetMD5(info)
@@ -245,6 +248,12 @@ func (dm *DownloadManager) ProcessDownloads() {
 // handleNewTask enqueues necessary downloads.
 func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 	log.Printf("📝 Processing new task %d for downloads", task.TaskId)
+	// Idempotency boundary: if we've already started scheduling this task, ignore duplicates.
+	if dm.EnqueuedTasks[task.TaskId] {
+		log.Printf("🔁 Task %d already scheduled for downloads — ignoring duplicate", task.TaskId)
+		return
+	}
+	dm.EnqueuedTasks[task.TaskId] = true
 	numFiles := 0
 
 	// Queue input files
@@ -353,6 +362,7 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 	dm.TaskDownloads[task.TaskId] = numFiles
 	if numFiles == 0 {
 		log.Printf("🚀 Task %d ready for execution", task.TaskId)
+		delete(dm.EnqueuedTasks, task.TaskId)
 		dm.ExecQueue <- task
 	} else {
 		log.Printf("📝 Task %d waiting for %d files", task.TaskId, numFiles)
@@ -384,6 +394,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 				if count <= 1 {
 					// no more input/resource files to wait we can queue task for execution
 					delete(dm.TaskDownloads, fm.TaskId)
+					delete(dm.EnqueuedTasks, fm.TaskId)
 					if fm.Task.Status != "F" {
 						log.Printf("🚀 Task %d ready for execution", fm.TaskId)
 						dm.ExecQueue <- fm.Task
@@ -401,10 +412,17 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 				default:
 					log.Printf("⚠️ FailedQueue full; could not enqueue task %d", fm.TaskId)
 				}
+				delete(dm.EnqueuedTasks, fm.TaskId)
 			}
 		}
 	case ResourceFile, DockerImage:
 		{
+			// On success, publish metadata before waking waiting tasks to avoid a race
+			if fm.Success {
+				dm.ResourceMemory[fm.SourcePath] = *fileMeta
+				dm.saveResourceMemory()
+			}
+
 			if tasks, exists := dm.ResourceDownloads[fm.SourcePath]; exists {
 				for _, task := range tasks {
 					if count, ok := dm.TaskDownloads[task.TaskId]; ok {
@@ -416,18 +434,23 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 							select {
 							case dm.FailedQueue <- task:
 							default:
-								// if queue is full, log but continue
 								log.Printf("⚠️ FailedQueue full; could not enqueue task %d", task.TaskId)
 							}
+							delete(dm.EnqueuedTasks, task.TaskId)
 						}
+
+						// Decrement remaining count for this task
 						dm.TaskDownloads[task.TaskId] = count - 1
+
+						// If this was the last pending download for the task, and all succeeded, queue for execution
 						if count <= 1 {
 							delete(dm.TaskDownloads, task.TaskId)
-							if fm.Task.Status != "F" {
+							delete(dm.EnqueuedTasks, task.TaskId)
+							if task.Status != "F" && fm.Success {
 								log.Printf("🚀 Task %d ready for execution", task.TaskId)
 								dm.ExecQueue <- task
 							} else {
-								log.Printf("❌ Task %d failed due to previous download errors", task.TaskId)
+								log.Printf("❌ Task %d not ready for execution (status=%s, resource success=%v)", task.TaskId, task.Status, fm.Success)
 							}
 						} else {
 							log.Printf("📝 Task %d still waiting for %d files", task.TaskId, count-1)
@@ -436,8 +459,6 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 				}
 				delete(dm.ResourceDownloads, fm.SourcePath)
 			}
-			dm.ResourceMemory[fm.SourcePath] = *fileMeta
-			dm.saveResourceMemory()
 		}
 	default:
 		log.Printf("Unknown file type for %s", fm.SourcePath)
@@ -446,7 +467,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 }
 
 // resourceLink creates hard links for resources in the task's resource folder.
-func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string) {
+func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string) error {
 	fileMeta := dm.ResourceMemory[resourcePath]
 
 	// Ensure destination root exists
@@ -462,7 +483,7 @@ func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string)
 			fileMeta.Task.Status = "F"
 			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
 		}
-		return
+		return fmt.Errorf("error creating destination directory %s: %w", taskResourceFolder, err)
 	}
 
 	// Recursive function to mirror directory structure and hard-link files
@@ -508,10 +529,11 @@ func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string)
 			fileMeta.Task.Status = "F"
 			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
 		}
-		return
+		return fmt.Errorf("error linking resource tree %s -> %s: %w", fileMeta.FilePath, taskResourceFolder, err)
 	}
 
 	log.Printf("Linked resource tree %s -> %s", resourcePath, taskResourceFolder)
+	return nil
 }
 
 // extractFilename extracts filename from a path.

@@ -399,6 +399,16 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 		}
 
 		for _, task := range tasks {
+			// Drop duplicates from the server: if this task is already active or already being scheduled for downloads, ignore it.
+			if _, alreadyActive := activeTasks.Load(task.TaskId); alreadyActive {
+				log.Printf("🔁 Server returned duplicate task %d — already active; ignoring", task.TaskId)
+				continue
+			}
+			if dm != nil && dm.EnqueuedTasks != nil && dm.EnqueuedTasks[task.TaskId] {
+				log.Printf("🔁 Server returned duplicate task %d — already scheduled for downloads; ignoring", task.TaskId)
+				continue
+			}
+
 			task.Status = "C" // Accepted
 			activeTasks.Store(task.TaskId, struct{}{})
 			reporter.UpdateTaskAsync(task.TaskId, task.Status, "")
