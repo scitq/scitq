@@ -1,16 +1,8 @@
 <script lang="ts">
   import { Home, ListChecks, Package, Settings, Power, ChevronDown, SunMoon, Copy } from 'lucide-svelte';
-  import logo from '../assets/icons/logoGMT.png';
   import '../styles/dashboard.css';
   import { theme } from '../lib/Stores/theme';
-  import { isLoggedIn } from '../lib/Stores/user';
   import { logout } from '../lib/auth';
-  import Router from 'svelte-spa-router';
-  import Dashboard from '../pages/Dashboard.svelte';
-  import SettingPage from '../pages/SettingPage.svelte';
-  import TaskPage from '../pages/TaskPage.svelte';
-  import WorkflowPage from '../pages/WorkflowPage.svelte';
-  import WfTemplatePage from '../pages/WfTemplatePage.svelte';
   import { uiVersion } from '../version';
 
   /**
@@ -29,19 +21,6 @@
    * @type {boolean}
    */
   let showLogoutPopup = false;
-
-  /**
-   * Application route configuration
-   * Maps URL paths to Svelte components
-   * @type {Object.<string, SvelteComponent>}
-   */
-  const routes = {
-    '/dashboard': Dashboard,
-    '/settings': SettingPage,
-    '/tasks': TaskPage,
-    '/workflows': WorkflowPage,
-    '/workflowsTemplate': WfTemplatePage
-  };
 
   /**
    * Toggles between dark and light theme
