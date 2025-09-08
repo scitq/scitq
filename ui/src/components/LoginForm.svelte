@@ -62,7 +62,6 @@
 
     try {
       await getLogin(username, password);
-      isLoggedIn.set(true); // Update global auth state
       push('/'); // Navigate to home on success
     } catch (error) {
       console.error("Login error: ", error);
