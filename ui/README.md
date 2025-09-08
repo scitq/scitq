@@ -107,6 +107,8 @@ This starts the Vite server, which will automatically refresh the app in the bro
 ### 📦 Production Build
 To prepare the app for production:
 
+NB: this is now partly obsolete, production build is included in Makefile so you can compile it specifically with `make ui-build` or if you simply `make install` the UI will be embedded in the server binary. In production, the client is served by a simple Go HTTP server bundle in the server, so once it is loaded in your browser in can contact the gRPCweb server (also embedded in the server) which acts as a proxy to the gRPC server that the main server implement.
+
 1. Build the optimized frontend:
 ```bash
 npm run build
@@ -152,11 +154,16 @@ npm run gen-proto
 ```
 This script runs:
 ```bash
-protoc --ts_out ./gen --proto_path=../proto taskqueue.proto
+protoc \                                                     
+  --plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts \
+  --ts_out=./gen \
+  -I ../proto \
+  taskqueue.proto
 ```
  - `--ts_out ./gen`: Specifies that the generated `.ts` files will be saved in the gen/ folder.
  - `--proto_path=../proto`: Points to the folder containing the `.proto` files.
  - `taskqueue.proto`: The Protobuf file used to describe services like workers and jobs.
+
 
 The protoc-gen-ts plugin is already included in the project’s dev dependencies, so no extra installation is required.
 
@@ -443,6 +450,9 @@ Thanks to WebSocket integration, this system supports real-time dashboards where
 This is ideal for **scientific task pipelines, shared admin panels,** and **real-time monitoring** environments.
 
 ### 🎯 Targeted Real-Time Messaging with WebSockets
+/!\ It seems this whole section is mostly chatGPT chit chat on how should targeted websocket be implemented. But it never made it up to the code.
+Current code only makes use of ws.Broadcast().
+
 This section explains how to **send WebSocket updates only to the user who submitted the task** in your current Svelte + Go WebSocket setup, improving efficiency and security by avoiding broadcasting to all clients.
 
 #### 🛠️ Why Targeted Messaging?
@@ -510,6 +520,10 @@ func sendToClient(clientId string, message []byte) {
 ```
 
 ##### 3️⃣ Update Your Database Schema (SQL Migration)
+
+/!\ This whole paragraph is very surprising, it makes very little sense (using the database is not appropriate at all) and it does not seem applied at all.
+
+
 Add a `submitted_by` or `client_id` field to the task table to record who submitted the task.
 Example SQL:
 ```sql
@@ -984,7 +998,7 @@ npm run build
 ```
 4. Deploy the built static files (usually in `dist/`) to your production server or CDN.
 5. Your Go server’s static file handler serves these files over HTTPS (already set up).
-6. Access your app securely via `https://alpha2.gmt.bio`.
+6. Access your app securely via `https://<serverFQDN>`.
 
 ### 🧰 About the HTTP mux & gRPC-Web
 - Your HTTP mux handles static files, gRPC endpoints, and gRPC-Web requests all in one unified HTTPS server on port 443.

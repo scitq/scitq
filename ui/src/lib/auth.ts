@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 import {isLoggedIn } from '../lib/Stores/user';
 import { client } from './grpcClient';
 import { getUser } from "./api";
+import { CONFIG } from './config';
 
 /**
  * Authenticates a user with the provided credentials and manages user session.
@@ -27,7 +28,7 @@ import { getUser } from "./api";
  */
 export async function getLogin(username: string, password: string) {
   try {
-    const response = await fetch('https://alpha2.gmt.bio/login', {
+    const response = await fetch(`${CONFIG.apiHttp}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -72,7 +73,7 @@ export async function getLogin(username: string, password: string) {
  */
 export async function getToken(): Promise<string | null> {
   try {
-    const response = await fetch('https://alpha2.gmt.bio/fetchCookie', {
+    const response = await fetch(`${CONFIG.apiHttp}/fetchCookie`, {
       method: 'GET',
       credentials: 'include',
     });
@@ -106,7 +107,7 @@ export async function logout() {
   }
 
   try {
-    const response = await fetch('https://alpha2.gmt.bio/logout', {
+    const response = await fetch(`${CONFIG.apiHttp}/logout`, {
       method: 'POST',
       credentials: 'include',
     });
@@ -145,7 +146,7 @@ export async function callOptionsUserToken(): Promise<RpcOptions> {
  */
 export async function getWorkerToken(): Promise<string | null> {
   try {
-    const res = await fetch("https://alpha2.gmt.bio/fetchCookie", {
+    const res = await fetch(`${CONFIG.apiHttp}/fetchCookie`, {
       credentials: "include",
     });
 
@@ -153,7 +154,7 @@ export async function getWorkerToken(): Promise<string | null> {
 
     const { token } = await res.json();
 
-    const workerRes = await fetch("https://alpha2.gmt.bio/WorkerToken", {
+    const workerRes = await fetch(`${CONFIG.apiHttp}/WorkerToken`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`, // Pass JWT manually here

@@ -5,8 +5,9 @@ import { GrpcWebFetchTransport } from '@protobuf-ts/grpcweb-transport';
  * Sets up the gRPC transport layer using GrpcWebFetchTransport.
  * Configured to use the base URL for the backend and include credentials with fetch requests.
  */
+import { CONFIG } from './config';
 const transport = new GrpcWebFetchTransport({
-  baseUrl: 'https://alpha2.gmt.bio',
+  baseUrl: CONFIG.apiGrpc,
   fetchInit: { credentials: 'include' },
 });
 

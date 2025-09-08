@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { CONFIG } from './config';
 
 type WSMessage = any; // adapte selon tes types
 type MessageHandler = (data: WSMessage) => void;
@@ -16,7 +17,7 @@ function createWebSocketStore() {
   function connect() {
     if (socket && socket.readyState === WebSocket.OPEN) return;
 
-    socket = new WebSocket('wss://alpha2.gmt.bio/ws');
+    socket = new WebSocket(`${CONFIG.apiWs}/ws`);
 
     socket.onopen = () => {
       console.log('✅ WebSocket connected');

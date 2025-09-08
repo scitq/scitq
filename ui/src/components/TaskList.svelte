@@ -129,7 +129,7 @@
         {#each displayedTasks as task (task.taskId)}
           <tr data-testid={`task-${task.taskId}`}>
             <td>{task.taskId}</td>
-            <td>{task.name}</td>
+            <td>{task.taskName}</td>
             <td>
               <div class="tasks-truncate-command" title={task.command}>{task.command}</div>
             </td>

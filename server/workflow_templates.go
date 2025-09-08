@@ -120,7 +120,7 @@ func (s *taskQueueServer) scriptRunner(
 	// 🌍 Inject environment variables
 	serverName := s.cfg.Scitq.ServerFQDN
 	if serverName == "" {
-		serverName = "https://alpha2.gmt.bio"
+		serverName = "localhost"
 	}
 	env := []string{
 		fmt.Sprintf("SCITQ_SERVER=%s:%d", serverName, s.cfg.Scitq.Port),
@@ -573,19 +573,19 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			Type: "template-uploaded",
 			Payload: func() json.RawMessage {
 				data, _ := json.Marshal(struct {
-					ID      uint32 `json:"workflowTemplateId"`
-					Name    string `json:"name"`
-					Version string `json:"version"`
+					ID          uint32 `json:"workflowTemplateId"`
+					Name        string `json:"name"`
+					Version     string `json:"version"`
 					Description string `json:"description"`
-					ParamJson string `json:"paramJson"`
-					UploadedAt string `json:"uploadedAt"`
+					ParamJson   string `json:"paramJson"`
+					UploadedAt  string `json:"uploadedAt"`
 				}{
-					ID:      templateID,
-					Name:    meta.Name,
-					Version: meta.Version,
+					ID:          templateID,
+					Name:        meta.Name,
+					Version:     meta.Version,
 					Description: meta.Description,
-					ParamJson:         processedParams,
-					UploadedAt:        time.Now().Format(time.RFC3339),
+					ParamJson:   processedParams,
+					UploadedAt:  time.Now().Format(time.RFC3339),
 				})
 				return data
 			}(),
@@ -595,7 +595,6 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		} else {
 			log.Printf("❌ Failed to marshal template upload payload: %v", err)
 		}
-
 
 		return &pb.UploadTemplateResponse{
 			Success:            success,

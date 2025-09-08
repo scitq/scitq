@@ -215,7 +215,7 @@
   overflow: visible;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  /*justify-content: center;*/
 }
 
 /* Worker section styling */
