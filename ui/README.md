@@ -254,7 +254,7 @@ import * as taskqueue from '../../gen/taskqueue';
  */
 export async function getWorkers(): Promise<taskqueue.Worker[]> {
   try {
-    const workerUnary = await client.listWorkers(taskqueue.ListWorkersRequest, await callOptionsUserToken());
+    const workerUnary = await client.listWorkers({}, await callOptionsUserToken());
     return workerUnary.response?.workers || [];
   } catch (error) {
     console.error("Error while retrieving workers:", error);
