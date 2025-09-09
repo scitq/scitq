@@ -268,7 +268,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 
 	// 🏃 Actually run the script
 	authToken := extractTokenFromContext(ctx)
-	_, stderr, exitCode, runErr := s.scriptRunner(
+	stdout, stderr, exitCode, runErr := s.scriptRunner(
 		ctx,
 		filepath.Join(s.cfg.Scitq.ScriptRoot, fmt.Sprintf("%d.py", req.WorkflowTemplateId)),
 		"run",               // mode
@@ -284,6 +284,9 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		_, _ = s.db.ExecContext(ctx, `
 			UPDATE template_run SET error_message = $1, status = 'F' WHERE template_run_id = $2
 		`, errMsg, templateRunId)
+		_, _ = s.db.ExecContext(ctx, `
+			DELETE FROM workflow WHERE workflow_id = (SELECT workflow_id FROM template_run WHERE template_run_id = $1)
+		`, templateRunId)
 
 		return &pb.TemplateRun{
 			TemplateRunId:      templateRunId,
@@ -361,6 +364,11 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		}
 	}
 
+	log.Printf("✅ RunTemplate script completed successfully: %s", stdout)
+	if stderr != "" {
+		log.Printf("⚠️ Warning: %s", stderr)
+	}
+
 	// ✅ Script ran successfully (but workflow_id will be updated later by Python)
 	return &pb.TemplateRun{
 		TemplateRunId:      templateRunId,
@@ -368,6 +376,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		CreatedAt:          createdAt.Format(time.RFC3339),
 		ParamValuesJson:    req.ParamValuesJson,
 		Status:             "S",
+		ErrorMessage:       proto.String(stderr),
 	}, nil
 }
 

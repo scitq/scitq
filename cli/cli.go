@@ -973,6 +973,10 @@ func (c *CLI) TemplateRun() error {
 	}
 
 	fmt.Printf("🚀 Template run created with ID %d\n", res.TemplateRunId)
+	if res.ErrorMessage != nil {
+		errMsg := *res.ErrorMessage
+		fmt.Printf("⚠️  Warning: %s\n", errMsg)
+	}
 	return nil
 }
 
