@@ -3057,3 +3057,165 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 
 	return nil
 }
+
+//////////////////////////////////////////////////////////////////
+// region stats
+//////////////////////////////////////////////////////////////////
+
+// GetStepStats implements the gRPC endpoint for step-level statistics aggregation.
+func (s *taskQueueServer) GetStepStats(ctx context.Context, req *pb.StepStatsRequest) (*pb.StepStatsResponse, error) {
+	// Build dynamic SQL with optional filters: workflow_id, step_ids, include_hidden
+	args := []any{}
+	where := []string{"1=1"}
+
+	// Hidden filter (default: exclude hidden)
+	includeHidden := req.IncludeHidden != nil && *req.IncludeHidden
+	if !includeHidden {
+		where = append(where, "t.hidden = FALSE")
+	}
+
+	// Workflow filter
+	if req.WorkflowId != nil && *req.WorkflowId != 0 {
+		where = append(where, fmt.Sprintf("s.workflow_id = $%d", len(args)+1))
+		args = append(args, *req.WorkflowId)
+	}
+
+	// Step IDs filter
+	if len(req.StepIds) > 0 {
+		placeholders := make([]string, len(req.StepIds))
+		for i, id := range req.StepIds {
+			args = append(args, id)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		where = append(where, fmt.Sprintf("s.step_id IN (%s)", strings.Join(placeholders, ", ")))
+	}
+
+	// Aggregate query
+	query := fmt.Sprintf(`
+		SELECT 
+		  s.step_id,
+		  s.step_name,
+		  COUNT(*) AS total_tasks,
+		  COUNT(*) FILTER (WHERE t.status = 'W') AS waiting_tasks,
+		  COUNT(*) FILTER (WHERE t.status = 'P') AS pending_tasks,
+		  COUNT(*) FILTER (WHERE t.status = 'C') AS accepted_tasks,
+		  COUNT(*) FILTER (WHERE t.status = 'O') AS onhold_tasks,
+		  COUNT(*) FILTER (WHERE t.status = 'R') AS running_tasks,
+		  COUNT(*) FILTER (WHERE t.status = 'S') AS successful_tasks,
+		  COUNT(*) FILTER (WHERE t.status = 'F') AS failed_tasks,
+
+		  -- Success run stats (only succeeded tasks)
+		  AVG(t.run_duration::float8)    FILTER (WHERE t.status = 'S') AS success_run_avg,
+		  MIN(t.run_duration::float8)    FILTER (WHERE t.status = 'S') AS success_run_min,
+		  MAX(t.run_duration::float8)    FILTER (WHERE t.status = 'S') AS success_run_max,
+
+		  -- Failed run stats (only failed tasks)
+		  AVG(t.run_duration::float8)    FILTER (WHERE t.status = 'F') AS failed_run_avg,
+		  MIN(t.run_duration::float8)    FILTER (WHERE t.status = 'F') AS failed_run_min,
+		  MAX(t.run_duration::float8)    FILTER (WHERE t.status = 'F') AS failed_run_max,
+
+		  -- Current running tasks (elapsed since run_started_at)
+		  AVG(EXTRACT(EPOCH FROM (NOW() - t.run_started_at))) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS current_run_avg,
+		  MIN(EXTRACT(EPOCH FROM (NOW() - t.run_started_at))) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS current_run_min,
+		  MAX(EXTRACT(EPOCH FROM (NOW() - t.run_started_at))) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS current_run_max,
+
+		  -- Download stats (ignore zeros)
+		  AVG(t.download_duration::float8) AS download_avg,
+		  MIN(t.download_duration::float8) AS download_min,
+		  MAX(t.download_duration::float8) AS download_max,
+
+		  -- Upload stats (ignore zeros)
+		  AVG(t.upload_duration::float8) AS upload_avg,
+		  MIN(t.upload_duration::float8) AS upload_min,
+		  MAX(t.upload_duration::float8) AS upload_max,
+
+		  -- Overall step activity period
+		  EXTRACT(EPOCH FROM MIN(t.created_at)) AS started_at,
+		  EXTRACT(EPOCH FROM MAX(t.modified_at)) AS last_active_at
+		FROM task t
+		LEFT JOIN step s ON s.step_id = t.step_id
+		WHERE %s
+		GROUP BY s.step_id, s.step_name
+		ORDER BY s.step_id ASC
+	`, strings.Join(where, " AND "))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query step stats: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*pb.StepStats
+	for rows.Next() {
+		var (
+			stepID                                                         int32
+			stepName                                                       sql.NullString
+			total, waiting, pending, accepted, onhold, running, succ, fail int32
+			successAvg, successMin, successMax                             sql.NullFloat64
+			failedAvg, failedMin, failedMax                                sql.NullFloat64
+			curAvg, curMin, curMax                                         sql.NullFloat64
+			dlAvg, dlMin, dlMax                                            sql.NullFloat64
+			upAvg, upMin, upMax                                            sql.NullFloat64
+			startedAt, lastActiveAt                                        sql.NullFloat64
+		)
+
+		if err := rows.Scan(
+			&stepID, &stepName,
+			&total, &waiting, &pending, &accepted, &onhold, &running, &succ, &fail,
+			&successAvg, &successMin, &successMax,
+			&failedAvg, &failedMin, &failedMax,
+			&curAvg, &curMin, &curMax,
+			&dlAvg, &dlMin, &dlMax,
+			&upAvg, &upMin, &upMax,
+			&startedAt, &lastActiveAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan step stats: %w", err)
+		}
+
+		makeDur := func(avg, min, max sql.NullFloat64) *pb.DurationStats {
+			ds := &pb.DurationStats{}
+			if avg.Valid {
+				ds.Average = float32(avg.Float64)
+			}
+			if min.Valid {
+				ds.Min = float32(min.Float64)
+			}
+			if max.Valid {
+				ds.Max = float32(max.Float64)
+			}
+			return ds
+		}
+
+		stats := &pb.StepStats{
+			StepId: stepID,
+		}
+		if stepName.Valid {
+			stats.StepName = stepName.String
+		}
+		stats.TotalTasks = total
+		stats.SuccessfulTasks = succ
+		stats.FailedTasks = fail
+
+		stats.SuccessRunStats = makeDur(successAvg, successMin, successMax)
+		stats.FailedRunStats = makeDur(failedAvg, failedMin, failedMax)
+		stats.CurrentRunStats = makeDur(curAvg, curMin, curMax)
+		stats.DownloadStats = makeDur(dlAvg, dlMin, dlMax)
+		stats.UploadStats = makeDur(upAvg, upMin, upMax)
+
+		if startedAt.Valid {
+			v := float32(startedAt.Float64)
+			stats.StartTime = &v
+		}
+		if lastActiveAt.Valid {
+			v := float32(lastActiveAt.Float64)
+			stats.EndTime = &v
+		}
+
+		out = append(out, stats)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating step stats: %w", err)
+	}
+
+	return &pb.StepStatsResponse{Stats: out}, nil
+}

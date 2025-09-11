@@ -59,6 +59,7 @@ const (
 	TaskQueue_ListSteps_FullMethodName              = "/taskqueue.TaskQueue/ListSteps"
 	TaskQueue_CreateStep_FullMethodName             = "/taskqueue.TaskQueue/CreateStep"
 	TaskQueue_DeleteStep_FullMethodName             = "/taskqueue.TaskQueue/DeleteStep"
+	TaskQueue_GetStepStats_FullMethodName           = "/taskqueue.TaskQueue/GetStepStats"
 	TaskQueue_GetWorkerStats_FullMethodName         = "/taskqueue.TaskQueue/GetWorkerStats"
 	TaskQueue_FetchList_FullMethodName              = "/taskqueue.TaskQueue/FetchList"
 	TaskQueue_FetchInfo_FullMethodName              = "/taskqueue.TaskQueue/FetchInfo"
@@ -119,6 +120,7 @@ type TaskQueueClient interface {
 	ListSteps(ctx context.Context, in *StepFilter, opts ...grpc.CallOption) (*StepList, error)
 	CreateStep(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepId, error)
 	DeleteStep(ctx context.Context, in *StepId, opts ...grpc.CallOption) (*Ack, error)
+	GetStepStats(ctx context.Context, in *StepStatsRequest, opts ...grpc.CallOption) (*StepStatsResponse, error)
 	GetWorkerStats(ctx context.Context, in *GetWorkerStatsRequest, opts ...grpc.CallOption) (*GetWorkerStatsResponse, error)
 	FetchList(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchListResponse, error)
 	FetchInfo(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchInfoResponse, error)
@@ -557,6 +559,16 @@ func (c *taskQueueClient) DeleteStep(ctx context.Context, in *StepId, opts ...gr
 	return out, nil
 }
 
+func (c *taskQueueClient) GetStepStats(ctx context.Context, in *StepStatsRequest, opts ...grpc.CallOption) (*StepStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StepStatsResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_GetStepStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) GetWorkerStats(ctx context.Context, in *GetWorkerStatsRequest, opts ...grpc.CallOption) (*GetWorkerStatsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetWorkerStatsResponse)
@@ -750,6 +762,7 @@ type TaskQueueServer interface {
 	ListSteps(context.Context, *StepFilter) (*StepList, error)
 	CreateStep(context.Context, *StepRequest) (*StepId, error)
 	DeleteStep(context.Context, *StepId) (*Ack, error)
+	GetStepStats(context.Context, *StepStatsRequest) (*StepStatsResponse, error)
 	GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error)
 	FetchList(context.Context, *FetchListRequest) (*FetchListResponse, error)
 	FetchInfo(context.Context, *FetchListRequest) (*FetchInfoResponse, error)
@@ -893,6 +906,9 @@ func (UnimplementedTaskQueueServer) CreateStep(context.Context, *StepRequest) (*
 }
 func (UnimplementedTaskQueueServer) DeleteStep(context.Context, *StepId) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteStep not implemented")
+}
+func (UnimplementedTaskQueueServer) GetStepStats(context.Context, *StepStatsRequest) (*StepStatsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStepStats not implemented")
 }
 func (UnimplementedTaskQueueServer) GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkerStats not implemented")
@@ -1637,6 +1653,24 @@ func _TaskQueue_DeleteStep_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_GetStepStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetStepStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetStepStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetStepStats(ctx, req.(*StepStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_GetWorkerStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetWorkerStatsRequest)
 	if err := dec(in); err != nil {
@@ -2057,6 +2091,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteStep",
 			Handler:    _TaskQueue_DeleteStep_Handler,
+		},
+		{
+			MethodName: "GetStepStats",
+			Handler:    _TaskQueue_GetStepStats_Handler,
 		},
 		{
 			MethodName: "GetWorkerStats",

@@ -46,6 +46,7 @@ service TaskQueue {
     rpc ListSteps(StepFilter) returns (StepList);
     rpc CreateStep(StepRequest) returns (StepId);
     rpc DeleteStep(StepId) returns (Ack);
+    rpc GetStepStats(StepStatsRequest) returns (StepStatsResponse);
     rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
     rpc FetchList (FetchListRequest) returns (FetchListResponse);
     rpc FetchInfo (FetchListRequest) returns (FetchInfoResponse);
@@ -480,6 +481,43 @@ message StepRequest {
 message StepList {
     repeated Step steps = 1;
 }
+
+message StepStatsRequest {
+    optional int32 workflow_id = 1;
+    repeated int32 step_ids = 2;
+    optional bool include_hidden = 3;
+}
+
+message DurationStats {
+    float average = 1; // in seconds
+    float min = 2;     // in seconds
+    float max = 3;     // in seconds
+}
+
+message StepStats {
+    int32 step_id = 1;
+    string step_name = 2;
+    int32 total_tasks = 3;
+    int32 waiting_tasks = 4;
+    int32 pending_tasks = 5;
+    int32 accepted_tasks = 6;
+    int32 onhold_tasks = 7;
+    int32 running_tasks = 8;
+    int32 successful_tasks = 9;
+    int32 failed_tasks = 10;
+    DurationStats success_run_stats = 11;
+    DurationStats failed_run_stats = 12;
+    DurationStats current_run_stats = 13;
+    DurationStats download_stats = 14;
+    DurationStats upload_stats = 15;
+    optional float start_time = 16; // epoch timestamp of the first task start time
+    optional float end_time = 17;   // epoch timestamp of the last task end time
+}
+
+message StepStatsResponse {
+    repeated StepStats stats = 1;
+}
+
 
 message WorkerStats {
     float cpu_usage_percent = 1;      // 0-100, float

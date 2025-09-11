@@ -148,6 +148,14 @@ type Attr struct {
 		Delete *struct {
 			StepId int32 `arg:"--id,required" help:"Step ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a step"`
+		Stats *struct {
+			WorkflowId    *int32  `arg:"--workflow-id" help:"Workflow ID to get step stats for"`
+			WorkflowName  string  `arg:"--workflow-name" help:"Workflow name (alternative to ID, used to resolve ID)"`
+			StepIds       []int32 `arg:"--step-id,separate" help:"Step IDs to get stats for (repeatable)"`
+			IncludeHidden bool    `arg:"--include-hidden" help:"Include hidden tasks/steps in stats"`
+			TaskName      string  `arg:"--task-name" help:"Filter relevant step IDs by tasks whose name matches substring (case-insensitive, client-side)"`
+			Totals        bool    `arg:"--totals" help:"Add totals line at the end of the stats"`
+		} `arg:"subcommand:stats" help:"Show step statistics"`
 	} `arg:"subcommand:step" help:"Manage steps"`
 
 	// File commands
@@ -1177,6 +1185,277 @@ func (c *CLI) WorkerEventPrune() error {
 	return nil
 }
 
+// containsIgnoreCase returns true if needle is a substring of hay, case-insensitive.
+func containsIgnoreCase(hay, needle string) bool {
+	hay = strings.ToLower(hay)
+	needle = strings.ToLower(needle)
+	return strings.Contains(hay, needle)
+}
+
+// int32Set returns a map[int32]struct{} from a slice (for set operations).
+func int32Set(slice []int32) map[int32]struct{} {
+	s := make(map[int32]struct{}, len(slice))
+	for _, v := range slice {
+		s[v] = struct{}{}
+	}
+	return s
+}
+
+// int32SetToSlice returns a sorted slice from a set.
+func int32SetToSlice(set map[int32]struct{}) []int32 {
+	res := make([]int32, 0, len(set))
+	for v := range set {
+		res = append(res, v)
+	}
+	// Optionally sort for stable output
+	if len(res) > 1 {
+		// Use sort
+		ints := make([]int, len(res))
+		for i, v := range res {
+			ints[i] = int(v)
+		}
+		// sort
+		for i := 0; i < len(ints); i++ {
+			for j := i + 1; j < len(ints); j++ {
+				if ints[i] > ints[j] {
+					ints[i], ints[j] = ints[j], ints[i]
+				}
+			}
+		}
+		for i := range ints {
+			res[i] = int32(ints[i])
+		}
+	}
+	return res
+}
+
+// int32SetIntersect returns intersection of two sets.
+func int32SetIntersect(a, b map[int32]struct{}) map[int32]struct{} {
+	out := make(map[int32]struct{})
+	for v := range a {
+		if _, ok := b[v]; ok {
+			out[v] = struct{}{}
+		}
+	}
+	return out
+}
+
+// int32SetUnion returns the union of two sets.
+func int32SetUnion(a, b map[int32]struct{}) map[int32]struct{} {
+	out := make(map[int32]struct{})
+	for v := range a {
+		out[v] = struct{}{}
+	}
+	for v := range b {
+		out[v] = struct{}{}
+	}
+	return out
+}
+
+// StepStats implements the stats subcommand for steps.
+func (c *CLI) StepStats() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	attr := c.Attr.Step.Stats
+	var workflowId *int32
+	// Step 1: Resolve workflowId from WorkflowName if provided.
+	if attr.WorkflowName != "" {
+		// List workflows and find exact match
+		req := &pb.WorkflowFilter{}
+		res, err := c.QC.Client.ListWorkflows(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to list workflows: %w", err)
+		}
+		var found *pb.Workflow
+		for _, w := range res.Workflows {
+			if w.Name == attr.WorkflowName {
+				found = w
+				break
+			}
+		}
+		if found == nil {
+			return fmt.Errorf("no workflow found with exact name: %s", attr.WorkflowName)
+		}
+		workflowId = &found.WorkflowId
+	} else if attr.WorkflowId != nil && *attr.WorkflowId != 0 {
+		workflowId = attr.WorkflowId
+	}
+
+	// Step 2: Build stepIds set
+	var stepIDsFromTaskName map[int32]struct{}
+	if attr.TaskName != "" {
+		// List tasks, filter by TaskName substring and workflowId if set
+		req := &pb.ListTasksRequest{}
+		if attr.IncludeHidden {
+			v := true
+			req.ShowHidden = &v
+		}
+		res, err := c.QC.Client.ListTasks(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to list tasks: %w", err)
+		}
+		stepIDsFromTaskName = make(map[int32]struct{})
+		for _, t := range res.Tasks {
+			// Filter by workflowId if set
+			if workflowId != nil && t.WorkflowId != nil && *t.WorkflowId != *workflowId {
+				continue
+			}
+			if t.TaskName != nil && containsIgnoreCase(*t.TaskName, attr.TaskName) {
+				if t.StepId != nil {
+					stepIDsFromTaskName[*t.StepId] = struct{}{}
+				}
+			}
+		}
+	}
+	userStepIDs := int32Set(attr.StepIds)
+	var stepIDs map[int32]struct{}
+	if attr.TaskName != "" && len(attr.StepIds) > 0 {
+		// Intersection
+		stepIDs = int32SetIntersect(stepIDsFromTaskName, userStepIDs)
+	} else if attr.TaskName != "" {
+		stepIDs = stepIDsFromTaskName
+	} else if len(attr.StepIds) > 0 {
+		stepIDs = userStepIDs
+	} else {
+		// No step IDs specified, fetch all steps for workflow if workflowId is set
+		if workflowId != nil {
+			stepsRes, err := c.QC.Client.ListSteps(ctx, &pb.StepFilter{WorkflowId: *workflowId})
+			if err != nil {
+				return fmt.Errorf("failed to list steps: %w", err)
+			}
+			stepIDs = make(map[int32]struct{})
+			for _, s := range stepsRes.Steps {
+				stepIDs[s.StepId] = struct{}{}
+			}
+		} else {
+			return fmt.Errorf("must specify at least one of --workflow-id/--workflow-name, --step-id, or --task-name")
+		}
+	}
+	finalStepIds := int32SetToSlice(stepIDs)
+	if len(finalStepIds) == 0 {
+		fmt.Println("No step IDs found for the given filters.")
+		return nil
+	}
+
+	// Step 3: Build StepStatsRequest
+	req := &pb.StepStatsRequest{
+		StepIds: finalStepIds,
+	}
+	if workflowId != nil {
+		req.WorkflowId = workflowId
+	}
+	if attr.IncludeHidden {
+		v := true
+		req.IncludeHidden = &v
+	}
+
+	// Step 4: Call GetStepStats and print human-friendly table
+	res, err := c.QC.Client.GetStepStats(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to get step stats: %w", err)
+	}
+	if len(res.Stats) == 0 {
+		fmt.Println("No stats found for the selected steps.")
+		return nil
+	}
+	fmt.Printf("%-8s %-24s %-8s %-8s %-8s %-8s %-8s %-8s %-8s %-8s | %-22s %-22s %-22s %-22s %-22s\n",
+		"StepID", "Name", "Total", "Wait", "Pend", "Acc.", "On H", "Runn", "Succ", "Fail", "SuccRun", "FailRun", "CurrRun", "Download", "Upload")
+	fmt.Println(strings.Repeat("-", 222))
+	var totalSuccess, totalFailed, totalRunning, totalDownload, totalUpload float32
+	var startTime, endTime *float32
+
+	for _, stat := range res.Stats {
+		name := stat.StepName
+		if name == "" {
+			name = fmt.Sprintf("Step id=%d", stat.StepId)
+		}
+		fmt.Printf("%-8d %-24s %-8d %-8d %-8d %-8d %-8d %-8d %-8d %-8d | %-22s %-22s %-22s %-22s %-22s\n",
+			stat.StepId,
+			name,
+			stat.TotalTasks,
+			stat.WaitingTasks,
+			stat.PendingTasks,
+			stat.AcceptedTasks,
+			stat.OnholdTasks,
+			stat.RunningTasks,
+			stat.SuccessfulTasks,
+			stat.FailedTasks,
+			formatDurationStats(stat.SuccessRunStats),
+			formatDurationStats(stat.FailedRunStats),
+			formatDurationStats(stat.CurrentRunStats),
+			formatDurationStats(stat.DownloadStats),
+			formatDurationStats(stat.UploadStats),
+		)
+		if attr.Totals {
+			totalSuccess += float32(stat.SuccessfulTasks) * stat.SuccessRunStats.Average
+			totalFailed += float32(stat.FailedTasks) * stat.FailedRunStats.Average
+			totalRunning += float32(stat.RunningTasks) * stat.CurrentRunStats.Average
+			totalDownload += float32(stat.TotalTasks) * stat.DownloadStats.Average
+			totalUpload += float32(stat.TotalTasks) * stat.UploadStats.Average
+
+			if endTime == nil || (stat.EndTime != nil && *stat.EndTime > *endTime) {
+				endTime = stat.EndTime
+			}
+			if stat.StartTime != nil && (startTime == nil || *stat.StartTime < *startTime) {
+				startTime = stat.StartTime
+			}
+		}
+	}
+	if attr.Totals {
+		fmt.Println(strings.Repeat("-", 222))
+		ellapsedTime := float32(0)
+		if startTime != nil && endTime != nil {
+			ellapsedTime = *endTime - *startTime
+		}
+		fmt.Printf("Ellapsed time: %-10s %-65sCumulated times: %-22s %-22s %-22s %-22s %-22s\n", formatDuration(ellapsedTime), "",
+			formatDuration(totalSuccess),
+			formatDuration(totalFailed),
+			formatDuration(totalRunning),
+			formatDuration(totalDownload),
+			formatDuration(totalUpload),
+		)
+	}
+
+	return nil
+}
+
+// formatDuration prints a duration in a human-friendly way:
+// - "0" if durSeconds == 0
+// - "<1s" if 0 < durSeconds < 1
+// - "Xs" if under 60 seconds
+// - "YmZs" if under 3600 seconds (minutes + leftover seconds)
+// - "XhYm" if 3600 seconds or more (hours + leftover minutes, omit seconds)
+func formatDuration(durSeconds float32) string {
+	if durSeconds == 0 {
+		return "0"
+	}
+	if durSeconds > 0 && durSeconds < 1 {
+		return "<1s"
+	}
+	if durSeconds < 60 {
+		// Xs
+		return fmt.Sprintf("%ds", int(durSeconds+0.5))
+	}
+	if durSeconds < 3600 {
+		// YmZs
+		min := int(durSeconds) / 60
+		sec := int(durSeconds) % 60
+		return fmt.Sprintf("%dm%ds", min, sec)
+	}
+	// XhYm
+	h := int(durSeconds) / 3600
+	m := (int(durSeconds) % 3600) / 60
+	return fmt.Sprintf("%dh%dm", h, m)
+}
+
+func formatDurationStats(dur *pb.DurationStats) string {
+	if dur == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%s [%s-%s]", formatDuration(dur.Average), formatDuration(dur.Min), formatDuration(dur.Max))
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -1300,6 +1579,8 @@ func Run(c CLI) error {
 			err = c.StepCreate()
 		case c.Attr.Step.Delete != nil:
 			err = c.StepDelete()
+		case c.Attr.Step.Stats != nil:
+			err = c.StepStats()
 		}
 	case c.Attr.File != nil:
 		switch {
