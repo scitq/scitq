@@ -431,9 +431,9 @@ async function handleWebSocketMessage(message) {
     const query = new URLSearchParams();
 
     if (status) query.set('status', status);
-    if (selectedWorkerId) query.set('workerId', selectedWorkerId.toString());
-    if (selectedWfId) query.set('workflowId', selectedWfId.toString());
-    if (selectedStepId) query.set('stepId', selectedStepId.toString());
+    if (selectedWorkerId !== undefined && selectedWorkerId !== '') query.set('workerId', String(selectedWorkerId));
+    if (selectedWfId !== undefined && selectedWfId !== '') query.set('workflowId', String(selectedWfId));
+    if (selectedStepId !== undefined && selectedStepId !== '') query.set('stepId', String(selectedStepId));
     if (selectedCommand) {
         query.set('command', encodeURIComponent(selectedCommand));
     }

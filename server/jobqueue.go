@@ -11,10 +11,10 @@ import (
 
 // Job represents a task to be executed.
 type Job struct {
-	JobID         uint32
-	WorkerID      uint32
+	JobID         int32
+	WorkerID      int32
 	WorkerName    string
-	ProviderID    uint32
+	ProviderID    int32
 	Region        string
 	Flavor        string
 	Action        rune // "C", "D", "R"
@@ -145,7 +145,7 @@ func (s *taskQueueServer) processJob(job Job) error {
 }
 
 // updateJobStatus updates the job status in the database.
-func (s *taskQueueServer) updateJobStatus(jobID uint32, status string) error {
+func (s *taskQueueServer) updateJobStatus(jobID int32, status string) error {
 	_, err := s.db.Exec("UPDATE job SET status=$1,modified_at=NOW() WHERE job_id=$2", status, jobID)
 	return err
 }

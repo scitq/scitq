@@ -66,12 +66,12 @@ service TaskQueue {
 }   
 
 message TaskResponse {
-    uint32 task_id = 1;
+    int32 task_id = 1;
 }
 
 message WorkerInfo {
     string name = 1;
-    optional uint32 concurrency = 2;
+    optional int32 concurrency = 2;
 }
 
 message TaskRequest {
@@ -79,44 +79,44 @@ message TaskRequest {
     optional string shell = 2;
     string container = 3;
     optional string container_options = 4;
-    optional uint32 step_id = 5;
+    optional int32 step_id = 5;
     repeated string input = 6;
     repeated string resource = 7;
     optional string output = 8;
-    optional uint32 retry = 9;
+    optional int32 retry = 9;
     optional bool is_final  = 10;
     optional bool uses_cache  = 11;
     optional float download_timeout  = 12;
     optional float running_timeout  = 13;
     optional float upload_timeout  = 14;
     string status = 15;
-    repeated uint32 dependency = 16; // IDs of tasks that this task depends on
+    repeated int32 dependency = 16; // IDs of tasks that this task depends on
     optional string task_name = 17;
 }
 
 message Task {
-    uint32 task_id = 1;
+    int32 task_id = 1;
     string command = 2;
     optional string shell = 3;
     string container = 4;
     optional string container_options = 5;
-    optional uint32 step_id = 6;
+    optional int32 step_id = 6;
     repeated string input = 7;
     repeated string resource = 8;
     optional string output = 9;
-    optional uint32 retry = 10;
+    optional int32 retry = 10;
     optional bool is_final  = 11;
     optional bool uses_cache  = 12;
     optional float download_timeout  = 13;
     optional float running_timeout  = 14;
     optional float upload_timeout  = 15;
     string status = 16;
-    optional uint32 worker_id = 17;
-    optional uint32 workflow_id = 18;
+    optional int32 worker_id = 17;
+    optional int32 workflow_id = 18;
     optional string task_name = 19;
-    uint32 retry_count = 20;
+    int32 retry_count = 20;
     bool hidden = 21;
-    optional uint32 previous_task_id = 22;
+    optional int32 previous_task_id = 22;
 }
 
 message TaskList {
@@ -124,10 +124,10 @@ message TaskList {
 }
 
 message Worker {
-    uint32 worker_id = 1;
+    int32 worker_id = 1;
     string name = 2;
-    uint32 concurrency = 3;
-    uint32 prefetch = 4;
+    int32 concurrency = 3;
+    int32 prefetch = 4;
     string status = 5;
     string ipv4 = 6;
     string ipv6 = 7;
@@ -149,36 +149,36 @@ message TaskUpdate {
 }
 
 message TaskUpdateList {
-    map<uint32, TaskUpdate> updates = 1; // optional — can be empty
+    map<int32, TaskUpdate> updates = 1; // optional — can be empty
 }
 
 message TaskListAndOther {
     repeated Task tasks = 1;
-    uint32 concurrency = 2;
+    int32 concurrency = 2;
     TaskUpdateList updates = 3;
-    repeated uint32 active_tasks = 4;
+    repeated int32 active_tasks = 4;
 }
 
 message TaskStatusUpdate {
-    uint32 task_id = 1;
+    int32 task_id = 1;
     string new_status = 2;
 }
 
 message TaskLog {
-    uint32 task_id = 1;
+    int32 task_id = 1;
     string log_type = 2; // 'O' for stdout, 'E' for stderr
     string log_text = 3;
 }
 
 message GetLogsRequest {
-  repeated uint32 taskIds = 1;
-    uint32 chunkSize = 2;
-  optional uint32 skipFromEnd = 3;
+  repeated int32 taskIds = 1;
+    int32 chunkSize = 2;
+  optional int32 skipFromEnd = 3;
   optional string log_type = 4;
 }
 
 message LogChunk {
-  uint32 taskId = 1;
+  int32 taskId = 1;
   repeated string stdout = 2;
   repeated string stderr = 3;
 }
@@ -188,23 +188,23 @@ message LogChunkList {
 }
 
 message TaskIds {
-    repeated uint32 task_ids = 1;
+    repeated int32 task_ids = 1;
 }
 
 message TaskId {
-    uint32 task_id = 1;
+    int32 task_id = 1;
 }
 
 message WorkerId {
-    uint32 worker_id = 1;
+    int32 worker_id = 1;
 }
 
 message WorkerStatusRequest {
-  repeated uint32 worker_ids = 1;
+  repeated int32 worker_ids = 1;
 }
 
 message WorkerStatus {
-  uint32 worker_id = 1;
+  int32 worker_id = 1;
   string status = 2;
 }
 
@@ -213,9 +213,9 @@ message WorkerStatusResponse {
 }
 
 message WorkerDetails {
-  uint32 worker_id = 1;
+  int32 worker_id = 1;
   string worker_name = 2;
-  uint32 job_id = 3;
+  int32 job_id = 3;
 }
 
 message WorkerIds {
@@ -223,7 +223,7 @@ message WorkerIds {
 }
 
 message PingAndGetNewTasksRequest {
-    uint32 worker_id = 1;
+    int32 worker_id = 1;
     WorkerStats stats = 2; // Optional
 }
 
@@ -233,45 +233,45 @@ message Ack {
 
 message ListTasksRequest {
     optional string status_filter = 1;      
-    optional uint32 worker_id_filter = 2;   
-    optional uint32 workflow_id_filter = 3;  
-    optional uint32 step_id_filter = 4;   
+    optional int32 worker_id_filter = 2;   
+    optional int32 workflow_id_filter = 3;  
+    optional int32 step_id_filter = 4;   
     optional string command_filter = 5;    
-    optional uint32 limit = 6;            
-    optional uint32 offset = 7;                
+    optional int32 limit = 6;            
+    optional int32 offset = 7;                
     optional bool show_hidden = 8;
 }
 
 message WorkerRequest {
-    uint32 provider_id = 1;
-    uint32 flavor_id = 2;
-    uint32 region_id = 3;
-    uint32 number = 4;
-    uint32 concurrency = 5;
-    uint32 prefetch = 6;
-    optional uint32 step_id = 7;
+    int32 provider_id = 1;
+    int32 flavor_id = 2;
+    int32 region_id = 3;
+    int32 number = 4;
+    int32 concurrency = 5;
+    int32 prefetch = 6;
+    optional int32 step_id = 7;
 }
 
 message WorkerUpdateRequest {
-    uint32 worker_id = 1;
-    optional uint32 provider_id = 2;
-    optional uint32 flavor_id = 3;
-    optional uint32 region_id = 4;
-    optional uint32 concurrency = 5;
-    optional uint32 prefetch = 6;
-    optional uint32 step_id = 7;
+    int32 worker_id = 1;
+    optional int32 provider_id = 2;
+    optional int32 flavor_id = 3;
+    optional int32 region_id = 4;
+    optional int32 concurrency = 5;
+    optional int32 prefetch = 6;
+    optional int32 step_id = 7;
 }
 
 message ListFlavorsRequest {
-    uint32 limit = 1 ;
+    int32 limit = 1 ;
     string filter = 2 ; 
 }
 
 message Flavor {
   // Fields from the "flavor" table
-  uint32 flavor_id      = 1;  // PRIMARY KEY
+  int32 flavor_id      = 1;  // PRIMARY KEY
   string flavor_name    = 2;  // Name of the flavor
-  uint32 provider_id    = 3;  // Foreign key to provider table
+  int32 provider_id    = 3;  // Foreign key to provider table
   string provider = 4; // Name of the provider (provider_name.config_name)
   int32  cpu            = 5;  // Number of CPU cores
   float mem             = 6;  // Memory in GB (or as needed)
@@ -283,7 +283,7 @@ message Flavor {
   bool   has_quick_disks = 12; // Whether quick disks are supported
 
   // Fields from the "flavor_region" table
-  uint32 region_id      = 13; // Foreign key to region table
+  int32 region_id      = 13; // Foreign key to region table
   string region         = 14; // (Optional) Region name
   float  eviction       = 15; // Eviction rate value
   float  cost           = 16; // Cost value
@@ -294,25 +294,25 @@ message FlavorsList {
 }
 
 message ListJobsRequest {
-  optional uint32 limit = 1;
-  optional uint32 offset = 2; 
+  optional int32 limit = 1;
+  optional int32 offset = 2; 
 }
 
 message Job {
-  uint32 job_id = 1;
+  int32 job_id = 1;
   string status = 2;         
-  uint32 flavor_id = 3;      
-  uint32 retry = 4;          
-  uint32 worker_id = 5;      
+  int32 flavor_id = 3;      
+  int32 retry = 4;          
+  int32 worker_id = 5;      
   string action = 6;         
   string created_at = 7;     
   string modified_at = 8;    
-  uint32 progression = 9;    
+  int32 progression = 9;    
   string log = 10;
 }
 
 message JobId {
-    uint32 job_id = 1;
+    int32 job_id = 1;
 }
 
 
@@ -321,13 +321,13 @@ message JobsList {
 }
 
 message JobStatusRequest {
-  repeated uint32 job_ids = 1;
+  repeated int32 job_ids = 1;
 }
 
 message JobStatus {
-  uint32 job_id = 1;
+  int32 job_id = 1;
   string status = 2;
-  uint32 progression = 3;
+  int32 progression = 3;
 }
 
 message JobStatusResponse {
@@ -335,10 +335,10 @@ message JobStatusResponse {
 }
 
 message JobUpdate {
-  uint32 job_id          = 1;             // which job to update
+  int32 job_id          = 1;             // which job to update
   optional string status = 2;             // 'P'|'R'|'S'|'F'|'X' (only if you want to set it)
   optional string append_log = 3;         // text appended to job.log (server prepends timestamp)
-  optional uint32 progression = 4;        // 0..100 (server clamps)
+  optional int32 progression = 4;        // 0..100 (server clamps)
 }
 
 message RcloneConfig {
@@ -375,11 +375,11 @@ message CreateUserRequest {
 }
 
 message UserId {
-  uint32 user_id = 1;
+  int32 user_id = 1;
 }
 
 message User {
-  uint32 user_id = 1;
+  int32 user_id = 1;
   optional string username = 2;
   optional string email = 3;
   optional bool is_admin = 4;
@@ -396,34 +396,34 @@ message ChangePasswordRequest {
 }
 
 message RecruiterFilter {
-    optional uint32 step_id = 1;
+    optional int32 step_id = 1;
 }
 
 message RecruiterId {
-    uint32 step_id = 1;
-    uint32 rank = 2;
+    int32 step_id = 1;
+    int32 rank = 2;
 }
 
 message Recruiter {
-    uint32 step_id = 1;
-    uint32 rank = 2;
+    int32 step_id = 1;
+    int32 rank = 2;
     string protofilter = 3;
-    uint32 concurrency = 4;
-    uint32 prefetch = 5;
-    optional uint32 max_workers = 6;
-    uint32 rounds = 7;
-    uint32 timeout = 8;
+    int32 concurrency = 4;
+    int32 prefetch = 5;
+    optional int32 max_workers = 6;
+    int32 rounds = 7;
+    int32 timeout = 8;
 }
 
 message RecruiterUpdate {
-  uint32 step_id = 1;
-  uint32 rank = 2;
+  int32 step_id = 1;
+  int32 rank = 2;
   optional string protofilter = 3;
-  optional uint32 concurrency = 4;
-  optional uint32 prefetch = 5;
-  optional uint32 max_workers = 6;
-  optional uint32 rounds = 7;
-  optional uint32 timeout = 8;
+  optional int32 concurrency = 4;
+  optional int32 prefetch = 5;
+  optional int32 max_workers = 6;
+  optional int32 rounds = 7;
+  optional int32 timeout = 8;
 }
 
 message RecruiterList {
@@ -432,24 +432,24 @@ message RecruiterList {
 
 message WorkflowFilter {
     optional string name_like = 1;
-    optional uint32 limit = 2;
-    optional uint32 offset = 3;
+    optional int32 limit = 2;
+    optional int32 offset = 3;
 }
 
 message WorkflowId {
-    uint32 workflow_id = 1;
+    int32 workflow_id = 1;
 }
 
 message Workflow {
-    uint32 workflow_id = 1;
+    int32 workflow_id = 1;
     string name = 2;
     string run_strategy = 4;
-    optional uint32 maximum_workers = 5;
+    optional int32 maximum_workers = 5;
 }
 message WorkflowRequest {
     string name = 1;
     optional string run_strategy = 2;
-    optional uint32 maximum_workers = 3;
+    optional int32 maximum_workers = 3;
 }
 
 message WorkflowList {
@@ -457,23 +457,23 @@ message WorkflowList {
 }
 
 message StepFilter {
-    uint32 WorkflowId = 1;
-    optional uint32 limit = 2;
-    optional uint32 offset = 3;
+    int32 WorkflowId = 1;
+    optional int32 limit = 2;
+    optional int32 offset = 3;
 }
 
 message StepId {
-    uint32 step_id = 1;
+    int32 step_id = 1;
 }
 message Step {
-    uint32 step_id = 1;
+    int32 step_id = 1;
     string workflow_name = 2;
-    uint32 workflow_id = 3;
+    int32 workflow_id = 3;
     string name = 4;
 }
 message StepRequest {
     optional string workflow_name = 1;
-    optional uint32 workflow_id = 2;
+    optional int32 workflow_id = 2;
     string name = 3;
 }
 message StepList {
@@ -512,11 +512,11 @@ message NetIOStats {
 }
 
 message GetWorkerStatsRequest {
-    repeated uint32 worker_ids = 1;
+    repeated int32 worker_ids = 1;
 }
 
 message GetWorkerStatsResponse {
-    map<uint32, WorkerStats> worker_stats = 1;
+    map<int32, WorkerStats> worker_stats = 1;
 }
 
 message FetchListRequest {
@@ -545,7 +545,7 @@ message UploadTemplateRequest {
 message UploadTemplateResponse {
   bool success = 1;
   string message = 2;
-  optional uint32 workflow_template_id = 3;
+  optional int32 workflow_template_id = 3;
   optional string name = 4;
   optional string version = 5;
   optional string description = 6;
@@ -554,24 +554,24 @@ message UploadTemplateResponse {
 
 
 message RunTemplateRequest {
-  uint32 workflow_template_id = 1;
+  int32 workflow_template_id = 1;
   string param_values_json = 2;
 }
 
 message TemplateFilter {
-  optional uint32 workflow_template_id = 1;
+  optional int32 workflow_template_id = 1;
   optional string name = 2;
   optional string version = 3;
 }
 
 message Template {
-  uint32 workflow_template_id = 1;
+  int32 workflow_template_id = 1;
   string name = 2;
   string version = 3;
   string description = 4;
   string param_json = 5;
   string uploaded_at = 6;
-  optional uint32 uploaded_by = 7;
+  optional int32 uploaded_by = 7;
 }
 
 message TemplateList {
@@ -579,14 +579,14 @@ message TemplateList {
 }
 
 message TemplateRun {
-  uint32 template_run_id = 1;
-  uint32 workflow_template_id = 2;
+  int32 template_run_id = 1;
+  int32 workflow_template_id = 2;
   optional string template_name = 3;
   optional string template_version = 4;
   optional string workflow_name = 5;
-  optional uint32 run_by = 6;
+  optional int32 run_by = 6;
   string status = 7;
-  optional uint32 workflow_id = 8;
+  optional int32 workflow_id = 8;
   string created_at = 9;
   string param_values_json = 10;
   optional string error_message = 11;
@@ -598,12 +598,12 @@ message TemplateRunList {
 }
 
 message TemplateRunFilter {
-  optional uint32 workflow_template_id = 1;
+  optional int32 workflow_template_id = 1;
 }
 
 message UpdateTemplateRunRequest {
-  uint32 template_run_id = 1;
-  optional uint32 workflow_id = 2;
+  int32 template_run_id = 1;
+  optional int32 workflow_id = 2;
   optional string error_message = 3;
 }
 
@@ -617,7 +617,7 @@ message WorkspaceRootResponse {
 }
 
 message DeleteTemplateRunRequest {
-  uint32 template_run_id = 1;
+  int32 template_run_id = 1;
 }
 
 message ResourceSpec {
@@ -629,7 +629,7 @@ message ResourceSpec {
 
 message WorkerEvent {
   // optional because a worker may fail before registration
-  optional uint32 worker_id   = 1;
+  optional int32 worker_id   = 1;
   string  worker_name         = 2;  // free text (hostname or generated name)
   string  level               = 3;  // single letter: D/I/W/E
   string  event_class         = 4;  // e.g. "install", "bootstrap", "runtime", "network"
@@ -638,16 +638,16 @@ message WorkerEvent {
 }
 
 message WorkerEventFilter {
-  optional uint32 worker_id = 1;
+  optional int32 worker_id = 1;
   optional string level     = 2; // 'D','I','W','E'
   optional string class     = 3; // event_class filter
-  optional uint32 limit     = 4; // max number of events (default 50)
+  optional int32 limit     = 4; // max number of events (default 50)
 }
 
 message WorkerEventRecord {
-  uint32 event_id   = 1;
+  int32 event_id   = 1;
   string created_at = 2;
-  optional uint32 worker_id = 3;
+  optional int32 worker_id = 3;
   string  worker_name = 4;
   string  level       = 5;
   string  event_class = 6;
@@ -660,18 +660,18 @@ message WorkerEventList {
 }
 
 message WorkerEventId {
-  uint32 event_id = 1;
+  int32 event_id = 1;
 }
 
 message WorkerEventPruneFilter {
   optional string before   = 1; // RFC3339 UTC, e.g. "2025-08-19T00:00:00Z"
   optional string level    = 2; // 'D'|'I'|'W'|'E'
   optional string class    = 3; // event_class exact match
-  optional uint32 worker_id = 4;
+  optional int32 worker_id = 4;
   bool dry_run             = 5; // if true, count only; no deletion
 }
 
 message WorkerEventPruneResult {
-  uint32 matched = 1;
-  uint32 deleted = 2;
+  int32 matched = 1;
+  int32 deleted = 2;
 }

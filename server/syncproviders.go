@@ -18,7 +18,7 @@ func (s *taskQueueServer) checkProviders() error {
 	defer tx.Rollback()
 
 	// Ensure "local" provider and region exist unconditionally
-	var localProviderId uint32
+	var localProviderId int32
 	err = tx.QueryRow(`INSERT INTO provider (provider_name, config_name)
                    VALUES ('local', 'local')
                    ON CONFLICT (provider_name, config_name)
@@ -47,7 +47,7 @@ func (s *taskQueueServer) checkProviders() error {
 
 	// ✅ Store rows into memory before processing (to avoid querying while iterating)
 	type ProviderInfo struct {
-		ProviderID   uint32
+		ProviderID   int32
 		ProviderName string
 		ConfigName   string
 	}
@@ -119,7 +119,7 @@ func (s *taskQueueServer) checkProviders() error {
 	// Then adding new providers
 	for configName, config := range s.cfg.Providers.Azure {
 		if _, ok := mappedConfig["azure"][configName]; !ok {
-			var providerId uint32
+			var providerId int32
 			log.Printf("Adding Azure provider %s: %v", "azure", configName)
 			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
 				"azure", configName).Scan(&providerId)
@@ -140,7 +140,7 @@ func (s *taskQueueServer) checkProviders() error {
 
 	for configName, config := range s.cfg.Providers.Openstack {
 		if _, ok := mappedConfig["openstack"][configName]; !ok {
-			var providerId uint32
+			var providerId int32
 			log.Printf("Adding Openstack provider %s", configName)
 			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
 				"openstack", configName).Scan(&providerId)
@@ -169,10 +169,10 @@ func (s *taskQueueServer) checkProviders() error {
 	return nil
 }
 
-func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredRegions []string, defaultRegion string) error {
+func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId int32, configuredRegions []string, defaultRegion string) error {
 	log.Printf("🔄 Syncing regions for provider %d : %v", providerId, configuredRegions)
 	// Track existing regions
-	existingRegions := make(map[string]uint32)
+	existingRegions := make(map[string]int32)
 	defaultRegions := make(map[string]bool)
 	rows, err := tx.Query(`SELECT region_id, region_name, is_default FROM region WHERE provider_id = $1`, providerId)
 	if err != nil {
@@ -182,7 +182,7 @@ func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredR
 	defer rows.Close()
 
 	for rows.Next() {
-		var regionId uint32
+		var regionId int32
 		var regionName string
 		var isDefault bool
 		if err := rows.Scan(&regionId, &regionName, &isDefault); err != nil {
@@ -227,7 +227,7 @@ func (s *taskQueueServer) syncRegions(tx *sql.Tx, providerId uint32, configuredR
 	return nil
 }
 
-func (s *taskQueueServer) cleanupRegion(tx *sql.Tx, regionId uint32, regionName string, providerId uint32) error {
+func (s *taskQueueServer) cleanupRegion(tx *sql.Tx, regionId int32, regionName string, providerId int32) error {
 	log.Printf("🛑 Removing region %s (ID: %d) for provider %d", regionName, regionId, providerId)
 
 	_, err := tx.Exec(`DELETE FROM region WHERE region_id = $1`, regionId)

@@ -100,7 +100,7 @@ func (s *taskQueueServer) scriptRunner(
 	scriptPath string,
 	mode string, // "metadata", "params", or "run"
 	paramJSON string, // only used for "run"
-	templateRunID uint32, // only used for "run"
+	templateRunID int32, // only used for "run"
 	authToken string, // extracted from context
 ) (stdout string, stderr string, exitCode int, err error) {
 	var args []string
@@ -247,7 +247,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		return nil, fmt.Errorf("param_values_json is required")
 	}
 
-	var templateRunId uint32
+	var templateRunId int32
 	var createdAt time.Time
 	user := GetUserFromContext(ctx)
 
@@ -304,8 +304,8 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		if err != nil {
 			log.Printf("⚠️ failed to update template_run status: %v", err)
 		}
-		var workflowID sql.NullInt64
-		var tasksActivated int64
+		var workflowID sql.NullInt32
+		var tasksActivated int32
 
 		err = s.db.QueryRowContext(ctx, `
 				WITH run_info AS (
@@ -358,9 +358,9 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		}
 
 		if tasksActivated == 0 {
-			log.Printf("⚠️ No tasks activated for workflow_id=%d (template_run_id=%d)", uint32(workflowID.Int64), templateRunId)
+			log.Printf("⚠️ No tasks activated for workflow_id=%d (template_run_id=%d)", workflowID.Int32, templateRunId)
 		} else {
-			log.Printf("✅ %d tasks activated for workflow_id=%d (template_run_id=%d)", tasksActivated, uint32(workflowID.Int64), templateRunId)
+			log.Printf("✅ %d tasks activated for workflow_id=%d (template_run_id=%d)", tasksActivated, workflowID.Int32, templateRunId)
 		}
 	}
 
@@ -440,7 +440,7 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 	}
 
 	// 4️⃣ Check if name/version exists
-	var existingID uint32
+	var existingID int32
 	err = s.db.QueryRowContext(ctx,
 		`SELECT workflow_template_id FROM workflow_template WHERE name = $1 AND version = $2`,
 		meta.Name, meta.Version,
@@ -528,7 +528,7 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		}, fmt.Errorf("📎 Template upload warnings and no force:\n%s\n%s", stderrMeta, stderrParams)
 	} else {
 		// 6️⃣ Insert or replace into workflow_template
-		var templateID uint32
+		var templateID int32
 		if req.Force && existingID != 0 {
 			_, err := s.db.ExecContext(ctx,
 				`UPDATE workflow_template 
@@ -582,7 +582,7 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			Type: "template-uploaded",
 			Payload: func() json.RawMessage {
 				data, _ := json.Marshal(struct {
-					ID          uint32 `json:"workflowTemplateId"`
+					ID          int32  `json:"workflowTemplateId"`
 					Name        string `json:"name"`
 					Version     string `json:"version"`
 					Description string `json:"description"`
@@ -667,7 +667,7 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 
 		t.UploadedAt = uploadedAt.Format(time.RFC3339)
 		if uploadedBy.Valid {
-			t.UploadedBy = proto.Uint32(uint32(uploadedBy.Int32))
+			t.UploadedBy = proto.Int32(uploadedBy.Int32)
 		}
 		if rawParams.Valid {
 			t.ParamJson, err = transformParamSchema(rawParams.String, s.cfg)
@@ -749,7 +749,7 @@ func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.Template
 
 		r.CreatedAt = createdAt.Format(time.RFC3339)
 		if workflowID.Valid {
-			r.WorkflowId = proto.Uint32(uint32(workflowID.Int32))
+			r.WorkflowId = proto.Int32(workflowID.Int32)
 		}
 		if errorMsg.Valid {
 			r.ErrorMessage = proto.String(errorMsg.String)

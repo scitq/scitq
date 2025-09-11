@@ -42,7 +42,7 @@ const (
 )
 
 type FileTransfer struct {
-	TaskId     uint32
+	TaskId     int32
 	Task       *pb.Task
 	FileType   FileType
 	SourcePath string
@@ -51,7 +51,7 @@ type FileTransfer struct {
 
 // ResourceMetadata stores metadata for downloaded resources.
 type FileMetadata struct {
-	TaskId     uint32
+	TaskId     int32
 	Task       *pb.Task
 	SourcePath string
 	FilePath   string
@@ -64,7 +64,7 @@ type FileMetadata struct {
 
 // DownloadManager manages task downloads.
 type DownloadManager struct {
-	TaskDownloads     map[uint32]int          // Task ID → Remaining file count
+	TaskDownloads     map[int32]int           // Task ID → Remaining file count
 	ResourceDownloads map[string][]*pb.Task   // SourcePath → Tasks waiting
 	ResourceMemory    map[string]FileMetadata // SourcePath → Metadata
 
@@ -76,13 +76,13 @@ type DownloadManager struct {
 	Store           string
 	reporter        *event.Reporter
 	// Tracks tasks currently being scheduled for downloads to ensure idempotency at the boundary.
-	EnqueuedTasks map[uint32]bool
+	EnqueuedTasks map[int32]bool
 }
 
 // NewDownloadManager initializes the download manager.
 func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager {
 	return &DownloadManager{
-		TaskDownloads:     make(map[uint32]int),
+		TaskDownloads:     make(map[int32]int),
 		ResourceDownloads: make(map[string][]*pb.Task),
 		ResourceMemory:    make(map[string]FileMetadata),
 		FileQueue:         make(chan *FileTransfer, maxDownloads),
@@ -92,7 +92,7 @@ func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager
 		FailedQueue:       make(chan *pb.Task, maxQueueSize),
 		Store:             store,
 		reporter:          reporter,
-		EnqueuedTasks:     make(map[uint32]bool),
+		EnqueuedTasks:     make(map[int32]bool),
 	}
 }
 

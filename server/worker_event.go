@@ -30,7 +30,7 @@ func (s *taskQueueServer) ReportWorkerEvent(ctx context.Context, e *pb.WorkerEve
 
 func (s *taskQueueServer) ListWorkerEvents(ctx context.Context, f *pb.WorkerEventFilter) (*pb.WorkerEventList, error) {
 	// Defaults
-	limit := uint32(50)
+	limit := int32(50)
 	if f.Limit != nil && *f.Limit > 0 {
 		limit = *f.Limit
 		if limit > 1000 { // hard cap to avoid huge responses
@@ -85,9 +85,9 @@ func (s *taskQueueServer) ListWorkerEvents(ctx context.Context, f *pb.WorkerEven
 	out := &pb.WorkerEventList{Events: []*pb.WorkerEventRecord{}}
 	for rows.Next() {
 		var (
-			eventID    uint32
+			eventID    int32
 			createdAt  time.Time
-			workerID   sql.NullInt64
+			workerID   sql.NullInt32
 			workerName sql.NullString
 			level      string
 			class      string
@@ -117,7 +117,7 @@ func (s *taskQueueServer) ListWorkerEvents(ctx context.Context, f *pb.WorkerEven
 			Message:    message,
 		}
 		if workerID.Valid {
-			id := uint32(workerID.Int64)
+			id := workerID.Int32
 			rec.WorkerId = &id
 		}
 		if details.Valid {
@@ -215,7 +215,7 @@ func (s *taskQueueServer) PruneWorkerEvents(ctx context.Context, f *pb.WorkerEve
 
 	// Dry run → COUNT(*)
 	if f.DryRun {
-		var cnt uint32
+		var cnt int32
 		q := "SELECT COUNT(*) FROM worker_event" + queryWhere
 		if err := s.db.QueryRowContext(ctx, q, args...).Scan(&cnt); err != nil {
 			return nil, err
@@ -233,5 +233,5 @@ func (s *taskQueueServer) PruneWorkerEvents(ctx context.Context, f *pb.WorkerEve
 	if err != nil {
 		return nil, err
 	}
-	return &pb.WorkerEventPruneResult{Matched: uint32(aff), Deleted: uint32(aff)}, nil
+	return &pb.WorkerEventPruneResult{Matched: int32(aff), Deleted: int32(aff)}, nil
 }

@@ -127,7 +127,7 @@ func getenvAny(keys ...string) string {
 
 // effectiveUserData returns explicit user-data if set; otherwise builds a default cloud-init
 // snippet from cfg.Scitq (like Azure) to install and start scitq-client.
-func (p *Provider) effectiveUserData(jobId uint32) []byte {
+func (p *Provider) effectiveUserData(jobId int32) []byte {
 	if len(p.UserData) > 0 {
 		return p.UserData
 	}
@@ -224,7 +224,7 @@ func (p *Provider) networkClient(region string) (*gophercloud.ServiceClient, err
 
 // Create boots a VM and attaches a floating IP when an external network is available.
 // Returns the chosen public IP, or a private IP if no FIP could be allocated.
-func (p *Provider) Create(workerName, flavorName, location string, jobId uint32) (string, error) {
+func (p *Provider) Create(workerName, flavorName, location string, jobId int32) (string, error) {
 	region := firstNonEmpty(location, p.DefaultRegion)
 	if region == "" {
 		return "", errors.New("region is required (pass location or set DefaultRegion in OpenstackConfig)")

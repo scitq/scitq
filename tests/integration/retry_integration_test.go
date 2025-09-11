@@ -38,7 +38,7 @@ func TestRetryClonesHiddenParent(t *testing.T) {
 	sub, err := qc.SubmitTask(mdCtx, &pb.TaskRequest{
 		Command:   "false", // will fail immediately
 		Container: "alpine",
-		Retry:     uint32Ptr(1),
+		Retry:     int32Ptr(1),
 		TaskName:  strPtr("retry-demo"),
 		Status:    "P",
 	})
@@ -84,8 +84,8 @@ func TestRetryClonesHiddenParent(t *testing.T) {
 	}, 3*time.Second, 100*time.Millisecond, "child retry not created / parent not hidden")
 
 	// 7) Validate child fields
-	require.Equal(t, "P", child.Status)           // pending retry
-	require.Equal(t, uint32(1), child.RetryCount) // incremented
+	require.Equal(t, "P", child.Status)          // pending retry
+	require.Equal(t, int32(1), child.RetryCount) // incremented
 	require.NotNil(t, child.PreviousTaskId)
 	require.Equal(t, parentID, *child.PreviousTaskId)
 	require.Equal(t, "retry-demo", child.GetTaskName())
@@ -102,7 +102,7 @@ func TestRetryClonesHiddenParent(t *testing.T) {
 	require.True(t, containsTask(ltAll.Tasks, parentID))
 }
 
-func containsTask(ts []*pb.Task, id uint32) bool {
+func containsTask(ts []*pb.Task, id int32) bool {
 	for _, t := range ts {
 		if t.TaskId == id {
 			return true
@@ -112,6 +112,6 @@ func containsTask(ts []*pb.Task, id uint32) bool {
 }
 func boolPtr(b bool) *bool { return &b }
 
-func uint32Ptr(i uint32) *uint32 { return &i }
+func int32Ptr(i int32) *int32 { return &i }
 
 func strPtr(s string) *string { return &s }

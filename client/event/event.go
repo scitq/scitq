@@ -15,7 +15,7 @@ import (
 const idleTimeout = 60 * time.Second
 
 // send simple log message
-func LogMessage(msg string, client pb.TaskQueueClient, taskID uint32) {
+func LogMessage(msg string, client pb.TaskQueueClient, taskID int32) {
 	stream, serr := client.SendTaskLogs(context.Background())
 	if serr != nil {
 		log.Printf("❌ Failed to open error log stream: %v", serr)
@@ -49,7 +49,7 @@ func ReportInstallError(c pb.TaskQueueClient, workerName, msg string, err error,
 
 // in cmd/client (or client/event), mirroring sendInstallErrorWithRetry
 // prefer using the Reporter struct instead: this function is used in case ther Reporter is not available
-func SendRuntimeEventWithRetry(serverAddr, token string, workerID uint32, workerName, level, class, msg string, details map[string]any) {
+func SendRuntimeEventWithRetry(serverAddr, token string, workerID int32, workerName, level, class, msg string, details map[string]any) {
 	const maxAttempts = 4
 	backoff := 2 * time.Second
 	timeout := 5 * time.Second
@@ -120,28 +120,28 @@ type taskWorker struct {
 // Reporter now manages per-task workers instead of a global outbox.
 type Reporter struct {
 	Client     pb.TaskQueueClient
-	WorkerID   uint32
+	WorkerID   int32
 	WorkerName string
 	Timeout    time.Duration // per-call timeout, e.g. 5s
 
 	mu      sync.Mutex
-	workers map[uint32]*taskWorker // taskID -> worker
-	wg      sync.WaitGroup         // wait for workers to stop
+	workers map[int32]*taskWorker // taskID -> worker
+	wg      sync.WaitGroup        // wait for workers to stop
 }
 
 // NewReporter constructs a Reporter; workers are created lazily per task on first update.
-func NewReporter(client pb.TaskQueueClient, workerID uint32, workerName string, timeout time.Duration) *Reporter {
+func NewReporter(client pb.TaskQueueClient, workerID int32, workerName string, timeout time.Duration) *Reporter {
 	return &Reporter{
 		Client:     client,
 		WorkerID:   workerID,
 		WorkerName: workerName,
 		Timeout:    timeout,
-		workers:    make(map[uint32]*taskWorker),
+		workers:    make(map[int32]*taskWorker),
 	}
 }
 
 // getWorker returns (or creates) the per-task worker responsible for serializing sends.
-func (r *Reporter) getWorker(taskID uint32) *taskWorker {
+func (r *Reporter) getWorker(taskID int32) *taskWorker {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if w := r.workers[taskID]; w != nil {
@@ -159,7 +159,7 @@ func (r *Reporter) getWorker(taskID uint32) *taskWorker {
 
 // UpdateTaskAsync enqueues the latest desired status for a task. Newer updates overwrite
 // any queued older one (latest-wins coalescing). Sending is serialized per task by its worker.
-func (r *Reporter) UpdateTaskAsync(taskID uint32, status, msg string) {
+func (r *Reporter) UpdateTaskAsync(taskID int32, status, msg string) {
 	if r.Client == nil || taskID == 0 || status == "" {
 		return
 	}
@@ -173,7 +173,7 @@ func (r *Reporter) UpdateTaskAsync(taskID uint32, status, msg string) {
 }
 
 // QueueLog enqueues a log message to be sent for the given task.
-func (r *Reporter) QueueLog(taskID uint32, msg string) {
+func (r *Reporter) QueueLog(taskID int32, msg string) {
 	if r.Client == nil || taskID == 0 || msg == "" {
 		return
 	}
@@ -183,7 +183,7 @@ func (r *Reporter) QueueLog(taskID uint32, msg string) {
 
 // runWorker serializes status updates for a single task and ensures the server
 // eventually observes the latest state. It performs a few retries per send.
-func (r *Reporter) runWorker(taskID uint32, w *taskWorker) {
+func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 	defer r.wg.Done()
 	for {
 		var it item
@@ -266,7 +266,7 @@ func (r *Reporter) Event(level, class, msg string, details map[string]any) {
 	})
 }
 
-func (r *Reporter) UpdateTask(taskID uint32, status string, logMessage string) error {
+func (r *Reporter) UpdateTask(taskID int32, status string, logMessage string) error {
 	if r.Client == nil || taskID == 0 || status == "" {
 		return fmt.Errorf("invalid reporter or task parameters")
 	}

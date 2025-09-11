@@ -35,7 +35,7 @@ type Attr struct {
 			Input     []string `arg:"--input,separate" help:"Input values for the task (can be repeated)"`
 			Resource  []string `arg:"--resource,separate" help:"Input values for the task (can be repeated)"`
 			Output    string   `arg:"--output,separate" help:"Output folder where results are copied for the task"`
-			StepId    *uint32  `arg:"--step-id" help:"Step ID if task is affected to a step"`
+			StepId    *int32   `arg:"--step-id" help:"Step ID if task is affected to a step"`
 		} `arg:"subcommand:create" help:"Create a new task"`
 
 		List *struct {
@@ -44,7 +44,7 @@ type Attr struct {
 		} `arg:"subcommand:list" help:"List all tasks"`
 
 		Output *struct {
-			ID uint32 `arg:"--id,required" help:"Task ID"`
+			ID int32 `arg:"--id,required" help:"Task ID"`
 		} `arg:"subcommand:output" help:"Fetch task output logs"`
 	} `arg:"subcommand:task" help:"Manage tasks"`
 
@@ -56,15 +56,15 @@ type Attr struct {
 			Provider    string `arg:"--provider,required" help:"Worker provider in the form providerName.configName like azure.primary"`
 			Region      string `arg:"--region" help:"Worker region, default to provider default region"`
 			Count       int    `arg:"--count" help:"How many worker to create" default:"1"`
-			StepId      uint32 `arg:"--step" help:"Worker step ID if worker is affected to a task"`
+			StepId      int32  `arg:"--step" help:"Worker step ID if worker is affected to a task"`
 			Concurrency int    `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
 			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
 		} `arg:"subcommand:deploy" help:"Create and deploy a new worker instance"`
 		Delete *struct {
-			WorkerId uint32 `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
+			WorkerId int32 `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
 		} `arg:"subcommand:delete" help:"Delete a worker instance"`
 		Stats *struct {
-			WorkerIds []uint32 `arg:"--worker-id,separate,required" help:"Worker IDs to get stats for"`
+			WorkerIds []int32 `arg:"--worker-id,separate,required" help:"Worker IDs to get stats for"`
 		} `arg:"subcommand:stats" help:"Fetch current stats for workers"`
 	} `arg:"subcommand:worker" help:"Manage workers"`
 
@@ -80,7 +80,7 @@ type Attr struct {
 	User *struct {
 		List   *struct{} `arg:"subcommand:list" help:"List all users"`
 		Update *struct {
-			UserId   uint32  `arg:"--id,required" help:"User ID to update"`
+			UserId   int32   `arg:"--id,required" help:"User ID to update"`
 			Username *string `arg:"--username" help:"New username"`
 			Email    *string `arg:"--email" help:"New email"`
 			Admin    bool    `arg:"--admin" help:"Set admin status"`
@@ -93,7 +93,7 @@ type Attr struct {
 			Admin    bool   `arg:"--admin" help:"Set admin status"`
 		} `arg:"subcommand:create" help:"Create a new user"`
 		Delete *struct {
-			UserId uint32 `arg:"--id,required" help:"User ID to delete"`
+			UserId int32 `arg:"--id,required" help:"User ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a user"`
 		ChangePassword *struct {
 			Username string `arg:"--username,required" help:"Username for which password will be changed"`
@@ -102,21 +102,21 @@ type Attr struct {
 
 	Recruiter *struct {
 		List *struct {
-			StepId uint32 `arg:"--step-id" help:"Step ID to filter"`
+			StepId int32 `arg:"--step-id" help:"Step ID to filter"`
 		} `arg:"subcommand:list" help:"List all recruiters"`
 		Create *struct {
-			StepId      uint32  `arg:"--step-id,required" help:"Step ID"`
-			Rank        uint32  `arg:"--rank" default:"1" help:"Recruiter rank"`
-			Protofilter string  `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
-			Concurrency uint32  `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
-			Prefetch    uint32  `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
-			MaxWorkers  *uint32 `arg:"--max-workers" help:"Maximum number of workers"`
-			Rounds      int     `arg:"--rounds" help:"Number of rounds"`
-			Timeout     int     `arg:"--timeout" default:"10" help:"Timeout in seconds"`
+			StepId      int32  `arg:"--step-id,required" help:"Step ID"`
+			Rank        int32  `arg:"--rank" default:"1" help:"Recruiter rank"`
+			Protofilter string `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
+			Concurrency int32  `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
+			Prefetch    int32  `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
+			MaxWorkers  *int32 `arg:"--max-workers" help:"Maximum number of workers"`
+			Rounds      int    `arg:"--rounds" help:"Number of rounds"`
+			Timeout     int    `arg:"--timeout" default:"10" help:"Timeout in seconds"`
 		} `arg:"subcommand:create" help:"Create a new recruiter"`
 		Delete *struct {
-			StepId uint32 `arg:"--step-id,required" help:"Step ID to delete"`
-			Rank   int    `arg:"--rank,required" help:"Recruiter rank to delete"`
+			StepId int32 `arg:"--step-id,required" help:"Step ID to delete"`
+			Rank   int   `arg:"--rank,required" help:"Recruiter rank to delete"`
 		} `arg:"subcommand:delete" help:"Delete a recruiter"`
 	} `arg:"subcommand:recruiter" help:"Recruiter management"`
 
@@ -126,27 +126,27 @@ type Attr struct {
 			NameLike string `arg:"--name-like" help:"Filter workflows by name"`
 		} `arg:"subcommand:list" help:"List workflows"`
 		Create *struct {
-			Name           string  `arg:"--name,required" help:"Workflow name"`
-			RunStrategy    string  `arg:"--run-strategy" help:"Run strategy (one letter B/T/D or Z, defaulting to B): \n\t(B)atch wise, e.g. workers do all tasks of a certain step (default)\n\t(T)hread wise, e.g. workers focus on going as far as possible in the workflow for each entry point\n\t(D)ebug\n\t(Z)suspended"`
-			MaximumWorkers *uint32 `arg:"--maximum-workers" help:"Maximum number of workers"`
+			Name           string `arg:"--name,required" help:"Workflow name"`
+			RunStrategy    string `arg:"--run-strategy" help:"Run strategy (one letter B/T/D or Z, defaulting to B): \n\t(B)atch wise, e.g. workers do all tasks of a certain step (default)\n\t(T)hread wise, e.g. workers focus on going as far as possible in the workflow for each entry point\n\t(D)ebug\n\t(Z)suspended"`
+			MaximumWorkers *int32 `arg:"--maximum-workers" help:"Maximum number of workers"`
 		} `arg:"subcommand:create" help:"Create a new workflow"`
 		Delete *struct {
-			WorkflowId uint32 `arg:"--id,required" help:"Workflow ID to delete"`
+			WorkflowId int32 `arg:"--id,required" help:"Workflow ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a workflow"`
 	} `arg:"subcommand:workflow" help:"Manage workflows"`
 
 	// Step commands
 	Step *struct {
 		List *struct {
-			WorkflowId uint32 `arg:"--workflow-id,required" help:"Workflow ID to list steps for"`
+			WorkflowId int32 `arg:"--workflow-id,required" help:"Workflow ID to list steps for"`
 		} `arg:"subcommand:list" help:"List steps for a workflow"`
 		Create *struct {
-			WorkflowId   uint32 `arg:"--workflow-id" help:"Workflow ID"`
+			WorkflowId   int32  `arg:"--workflow-id" help:"Workflow ID"`
 			WorkflowName string `arg:"--workflow-name" help:"Workflow name (alternative to ID)"`
 			Name         string `arg:"--name,required" help:"Step name"`
 		} `arg:"subcommand:create" help:"Create a step"`
 		Delete *struct {
-			StepId uint32 `arg:"--id,required" help:"Step ID to delete"`
+			StepId int32 `arg:"--id,required" help:"Step ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a step"`
 	} `arg:"subcommand:step" help:"Manage steps"`
 
@@ -166,7 +166,7 @@ type Attr struct {
 		} `arg:"subcommand:upload" help:"Upload a new workflow template"`
 
 		Run *struct {
-			TemplateId uint32  `arg:"--id,required" help:"ID of the template to run"`
+			TemplateId int32   `arg:"--id,required" help:"ID of the template to run"`
 			ParamPairs *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
@@ -177,18 +177,18 @@ type Attr struct {
 		} `arg:"subcommand:list" help:"List all uploaded workflow templates"`
 
 		Detail *struct {
-			TemplateId uint32 `arg:"--id,required" help:"Show detailed information for this template ID"`
+			TemplateId int32 `arg:"--id,required" help:"Show detailed information for this template ID"`
 		} `arg:"subcommand:detail" help:"Show a template's param JSON and metadata"`
 	} `arg:"subcommand:template" help:"Manage workflow templates"`
 
 	// (Workflow) Template run commands
 	Run *struct {
 		List *struct {
-			TemplateId *uint32 `arg:"--template-id" help:"Filter runs by template ID"`
+			TemplateId *int32 `arg:"--template-id" help:"Filter runs by template ID"`
 		} `arg:"subcommand:list" help:"List template runs"`
 
 		Delete *struct {
-			RunId uint32 `arg:"--id,required" help:"ID of the template run to delete"`
+			RunId int32 `arg:"--id,required" help:"ID of the template run to delete"`
 		} `arg:"subcommand:delete" help:"Delete a template run"`
 	} `arg:"subcommand:run" help:"Manage template runs"`
 
@@ -209,16 +209,16 @@ type Attr struct {
 			Limit    int    `arg:"--limit" default:"20" help:"Max number of events to show"`
 			Level    string `arg:"--level" help:"Filter by level D/I/W/E as D:Debug/I:Info/W:Warning/E:Error"`
 			Class    string `arg:"--class" help:"Filter by event_class"`
-			WorkerId uint32 `arg:"--worker-id" help:"Filter by worker id"`
+			WorkerId int32  `arg:"--worker-id" help:"Filter by worker id"`
 		} `arg:"subcommand:list" help:"List worker events"`
 		Delete *struct {
-			Id uint32 `arg:"--id,required" help:"Worker event ID to delete"`
+			Id int32 `arg:"--id,required" help:"Worker event ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a worker event by ID"`
 		Prune *struct {
 			OlderThan string `arg:"--older-than" help:"Age to prune, e.g. 7d, 12h, 30m (required unless --dry-run)"`
 			Level     string `arg:"--level" help:"Optional level filter D/I/W/E as D:Debug/I:Info/W:Warning/E:Error"`
 			Class     string `arg:"--class" help:"Optional event_class filter"`
-			WorkerId  uint32 `arg:"--worker-id" help:"Optional worker id filter"`
+			WorkerId  int32  `arg:"--worker-id" help:"Optional worker id filter"`
 			DryRun    bool   `arg:"--dry-run" help:"Only count matched rows; do not delete"`
 		} `arg:"subcommand:prune" help:"Prune worker events by age and optional filters"`
 	} `arg:"subcommand:worker-event" help:"Worker event logs"`
@@ -392,7 +392,7 @@ func (c *CLI) WorkerStats() error {
 }
 
 // ListFlavors handles listing flavors.
-func (c *CLI) FlavorList(limit uint32, filter string) error {
+func (c *CLI) FlavorList(limit int32, filter string) error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
@@ -443,10 +443,10 @@ func (c *CLI) WorkerDeploy() error {
 		ProviderId:  flavor.ProviderId,
 		FlavorId:    flavor.FlavorId,
 		RegionId:    flavor.RegionId,
-		Number:      uint32(c.Attr.Worker.Deploy.Count),
+		Number:      int32(c.Attr.Worker.Deploy.Count),
 		StepId:      &c.Attr.Worker.Deploy.StepId,
-		Concurrency: uint32(c.Attr.Worker.Deploy.Concurrency),
-		Prefetch:    uint32(c.Attr.Worker.Deploy.Prefetch),
+		Concurrency: int32(c.Attr.Worker.Deploy.Concurrency),
+		Prefetch:    int32(c.Attr.Worker.Deploy.Prefetch),
 	}
 
 	// Call the gRPC DeployWorker RPC.
@@ -467,7 +467,7 @@ func (c *CLI) WorkerDelete() error {
 	defer cancel()
 
 	// Call the gRPC DeleteWorker RPC.
-	res, err := c.QC.Client.DeleteWorker(ctx, &pb.WorkerId{WorkerId: uint32(c.Attr.Worker.Delete.WorkerId)})
+	res, err := c.QC.Client.DeleteWorker(ctx, &pb.WorkerId{WorkerId: int32(c.Attr.Worker.Delete.WorkerId)})
 	if err != nil {
 		return fmt.Errorf("error deleting worker: %w", err)
 	}
@@ -497,7 +497,7 @@ func ListUsers(client pb.TaskQueueClient) error {
 	return nil
 }
 
-func DeleteUser(client pb.TaskQueueClient, userId uint32) error {
+func DeleteUser(client pb.TaskQueueClient, userId int32) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -622,8 +622,8 @@ func (c *CLI) RecruiterCreate() error {
 		Concurrency: c.Attr.Recruiter.Create.Concurrency,
 		Prefetch:    c.Attr.Recruiter.Create.Prefetch,
 		MaxWorkers:  c.Attr.Recruiter.Create.MaxWorkers,
-		Rounds:      uint32(c.Attr.Recruiter.Create.Rounds),
-		Timeout:     uint32(c.Attr.Recruiter.Create.Timeout),
+		Rounds:      int32(c.Attr.Recruiter.Create.Rounds),
+		Timeout:     int32(c.Attr.Recruiter.Create.Timeout),
 	}
 
 	_, err := c.QC.Client.CreateRecruiter(ctx, req)
@@ -640,7 +640,7 @@ func (c *CLI) RecruiterDelete() error {
 
 	req := &pb.RecruiterId{
 		StepId: c.Attr.Recruiter.Delete.StepId,
-		Rank:   uint32(c.Attr.Recruiter.Delete.Rank),
+		Rank:   int32(c.Attr.Recruiter.Delete.Rank),
 	}
 
 	_, err := c.QC.Client.DeleteRecruiter(ctx, req)
@@ -1061,7 +1061,7 @@ func (c *CLI) WorkerEventList() error {
 		f.Class = &c.Attr.WorkerEvent.List.Class
 	}
 	if c.Attr.WorkerEvent.List.Limit > 0 {
-		l := uint32(c.Attr.WorkerEvent.List.Limit)
+		l := int32(c.Attr.WorkerEvent.List.Limit)
 		f.Limit = &l
 	}
 
@@ -1233,7 +1233,7 @@ func Run(c CLI) error {
 	case c.Attr.Flavor != nil:
 		switch {
 		case c.Attr.Flavor.List != nil:
-			err = c.FlavorList(uint32(c.Attr.Flavor.List.Limit), c.Attr.Flavor.List.Filter)
+			err = c.FlavorList(int32(c.Attr.Flavor.List.Limit), c.Attr.Flavor.List.Filter)
 		}
 	// In Run(), after handling Flavor, add:
 	case c.Attr.User != nil:

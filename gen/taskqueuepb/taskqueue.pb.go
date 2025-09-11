@@ -24,7 +24,7 @@ const (
 
 type TaskResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        uint32                 `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -59,7 +59,7 @@ func (*TaskResponse) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *TaskResponse) GetTaskId() uint32 {
+func (x *TaskResponse) GetTaskId() int32 {
 	if x != nil {
 		return x.TaskId
 	}
@@ -69,7 +69,7 @@ func (x *TaskResponse) GetTaskId() uint32 {
 type WorkerInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Concurrency   *uint32                `protobuf:"varint,2,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
+	Concurrency   *int32                 `protobuf:"varint,2,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -111,7 +111,7 @@ func (x *WorkerInfo) GetName() string {
 	return ""
 }
 
-func (x *WorkerInfo) GetConcurrency() uint32 {
+func (x *WorkerInfo) GetConcurrency() int32 {
 	if x != nil && x.Concurrency != nil {
 		return *x.Concurrency
 	}
@@ -124,18 +124,18 @@ type TaskRequest struct {
 	Shell            *string                `protobuf:"bytes,2,opt,name=shell,proto3,oneof" json:"shell,omitempty"`
 	Container        string                 `protobuf:"bytes,3,opt,name=container,proto3" json:"container,omitempty"`
 	ContainerOptions *string                `protobuf:"bytes,4,opt,name=container_options,json=containerOptions,proto3,oneof" json:"container_options,omitempty"`
-	StepId           *uint32                `protobuf:"varint,5,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	StepId           *int32                 `protobuf:"varint,5,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	Input            []string               `protobuf:"bytes,6,rep,name=input,proto3" json:"input,omitempty"`
 	Resource         []string               `protobuf:"bytes,7,rep,name=resource,proto3" json:"resource,omitempty"`
 	Output           *string                `protobuf:"bytes,8,opt,name=output,proto3,oneof" json:"output,omitempty"`
-	Retry            *uint32                `protobuf:"varint,9,opt,name=retry,proto3,oneof" json:"retry,omitempty"`
+	Retry            *int32                 `protobuf:"varint,9,opt,name=retry,proto3,oneof" json:"retry,omitempty"`
 	IsFinal          *bool                  `protobuf:"varint,10,opt,name=is_final,json=isFinal,proto3,oneof" json:"is_final,omitempty"`
 	UsesCache        *bool                  `protobuf:"varint,11,opt,name=uses_cache,json=usesCache,proto3,oneof" json:"uses_cache,omitempty"`
 	DownloadTimeout  *float32               `protobuf:"fixed32,12,opt,name=download_timeout,json=downloadTimeout,proto3,oneof" json:"download_timeout,omitempty"`
 	RunningTimeout   *float32               `protobuf:"fixed32,13,opt,name=running_timeout,json=runningTimeout,proto3,oneof" json:"running_timeout,omitempty"`
 	UploadTimeout    *float32               `protobuf:"fixed32,14,opt,name=upload_timeout,json=uploadTimeout,proto3,oneof" json:"upload_timeout,omitempty"`
 	Status           string                 `protobuf:"bytes,15,opt,name=status,proto3" json:"status,omitempty"`
-	Dependency       []uint32               `protobuf:"varint,16,rep,packed,name=dependency,proto3" json:"dependency,omitempty"` // IDs of tasks that this task depends on
+	Dependency       []int32                `protobuf:"varint,16,rep,packed,name=dependency,proto3" json:"dependency,omitempty"` // IDs of tasks that this task depends on
 	TaskName         *string                `protobuf:"bytes,17,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -199,7 +199,7 @@ func (x *TaskRequest) GetContainerOptions() string {
 	return ""
 }
 
-func (x *TaskRequest) GetStepId() uint32 {
+func (x *TaskRequest) GetStepId() int32 {
 	if x != nil && x.StepId != nil {
 		return *x.StepId
 	}
@@ -227,7 +227,7 @@ func (x *TaskRequest) GetOutput() string {
 	return ""
 }
 
-func (x *TaskRequest) GetRetry() uint32 {
+func (x *TaskRequest) GetRetry() int32 {
 	if x != nil && x.Retry != nil {
 		return *x.Retry
 	}
@@ -276,7 +276,7 @@ func (x *TaskRequest) GetStatus() string {
 	return ""
 }
 
-func (x *TaskRequest) GetDependency() []uint32 {
+func (x *TaskRequest) GetDependency() []int32 {
 	if x != nil {
 		return x.Dependency
 	}
@@ -292,28 +292,28 @@ func (x *TaskRequest) GetTaskName() string {
 
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	TaskId           uint32                 `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	Command          string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
 	Shell            *string                `protobuf:"bytes,3,opt,name=shell,proto3,oneof" json:"shell,omitempty"`
 	Container        string                 `protobuf:"bytes,4,opt,name=container,proto3" json:"container,omitempty"`
 	ContainerOptions *string                `protobuf:"bytes,5,opt,name=container_options,json=containerOptions,proto3,oneof" json:"container_options,omitempty"`
-	StepId           *uint32                `protobuf:"varint,6,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	StepId           *int32                 `protobuf:"varint,6,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	Input            []string               `protobuf:"bytes,7,rep,name=input,proto3" json:"input,omitempty"`
 	Resource         []string               `protobuf:"bytes,8,rep,name=resource,proto3" json:"resource,omitempty"`
 	Output           *string                `protobuf:"bytes,9,opt,name=output,proto3,oneof" json:"output,omitempty"`
-	Retry            *uint32                `protobuf:"varint,10,opt,name=retry,proto3,oneof" json:"retry,omitempty"`
+	Retry            *int32                 `protobuf:"varint,10,opt,name=retry,proto3,oneof" json:"retry,omitempty"`
 	IsFinal          *bool                  `protobuf:"varint,11,opt,name=is_final,json=isFinal,proto3,oneof" json:"is_final,omitempty"`
 	UsesCache        *bool                  `protobuf:"varint,12,opt,name=uses_cache,json=usesCache,proto3,oneof" json:"uses_cache,omitempty"`
 	DownloadTimeout  *float32               `protobuf:"fixed32,13,opt,name=download_timeout,json=downloadTimeout,proto3,oneof" json:"download_timeout,omitempty"`
 	RunningTimeout   *float32               `protobuf:"fixed32,14,opt,name=running_timeout,json=runningTimeout,proto3,oneof" json:"running_timeout,omitempty"`
 	UploadTimeout    *float32               `protobuf:"fixed32,15,opt,name=upload_timeout,json=uploadTimeout,proto3,oneof" json:"upload_timeout,omitempty"`
 	Status           string                 `protobuf:"bytes,16,opt,name=status,proto3" json:"status,omitempty"`
-	WorkerId         *uint32                `protobuf:"varint,17,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
-	WorkflowId       *uint32                `protobuf:"varint,18,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
+	WorkerId         *int32                 `protobuf:"varint,17,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
+	WorkflowId       *int32                 `protobuf:"varint,18,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	TaskName         *string                `protobuf:"bytes,19,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
-	RetryCount       uint32                 `protobuf:"varint,20,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
+	RetryCount       int32                  `protobuf:"varint,20,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
 	Hidden           bool                   `protobuf:"varint,21,opt,name=hidden,proto3" json:"hidden,omitempty"`
-	PreviousTaskId   *uint32                `protobuf:"varint,22,opt,name=previous_task_id,json=previousTaskId,proto3,oneof" json:"previous_task_id,omitempty"`
+	PreviousTaskId   *int32                 `protobuf:"varint,22,opt,name=previous_task_id,json=previousTaskId,proto3,oneof" json:"previous_task_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -348,7 +348,7 @@ func (*Task) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *Task) GetTaskId() uint32 {
+func (x *Task) GetTaskId() int32 {
 	if x != nil {
 		return x.TaskId
 	}
@@ -383,7 +383,7 @@ func (x *Task) GetContainerOptions() string {
 	return ""
 }
 
-func (x *Task) GetStepId() uint32 {
+func (x *Task) GetStepId() int32 {
 	if x != nil && x.StepId != nil {
 		return *x.StepId
 	}
@@ -411,7 +411,7 @@ func (x *Task) GetOutput() string {
 	return ""
 }
 
-func (x *Task) GetRetry() uint32 {
+func (x *Task) GetRetry() int32 {
 	if x != nil && x.Retry != nil {
 		return *x.Retry
 	}
@@ -460,14 +460,14 @@ func (x *Task) GetStatus() string {
 	return ""
 }
 
-func (x *Task) GetWorkerId() uint32 {
+func (x *Task) GetWorkerId() int32 {
 	if x != nil && x.WorkerId != nil {
 		return *x.WorkerId
 	}
 	return 0
 }
 
-func (x *Task) GetWorkflowId() uint32 {
+func (x *Task) GetWorkflowId() int32 {
 	if x != nil && x.WorkflowId != nil {
 		return *x.WorkflowId
 	}
@@ -481,7 +481,7 @@ func (x *Task) GetTaskName() string {
 	return ""
 }
 
-func (x *Task) GetRetryCount() uint32 {
+func (x *Task) GetRetryCount() int32 {
 	if x != nil {
 		return x.RetryCount
 	}
@@ -495,7 +495,7 @@ func (x *Task) GetHidden() bool {
 	return false
 }
 
-func (x *Task) GetPreviousTaskId() uint32 {
+func (x *Task) GetPreviousTaskId() int32 {
 	if x != nil && x.PreviousTaskId != nil {
 		return *x.PreviousTaskId
 	}
@@ -548,10 +548,10 @@ func (x *TaskList) GetTasks() []*Task {
 
 type Worker struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      uint32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Concurrency   uint32                 `protobuf:"varint,3,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
-	Prefetch      uint32                 `protobuf:"varint,4,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
+	Concurrency   int32                  `protobuf:"varint,3,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Prefetch      int32                  `protobuf:"varint,4,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
 	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
 	Ipv4          string                 `protobuf:"bytes,6,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
 	Ipv6          string                 `protobuf:"bytes,7,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
@@ -592,7 +592,7 @@ func (*Worker) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *Worker) GetWorkerId() uint32 {
+func (x *Worker) GetWorkerId() int32 {
 	if x != nil {
 		return x.WorkerId
 	}
@@ -606,14 +606,14 @@ func (x *Worker) GetName() string {
 	return ""
 }
 
-func (x *Worker) GetConcurrency() uint32 {
+func (x *Worker) GetConcurrency() int32 {
 	if x != nil {
 		return x.Concurrency
 	}
 	return 0
 }
 
-func (x *Worker) GetPrefetch() uint32 {
+func (x *Worker) GetPrefetch() int32 {
 	if x != nil {
 		return x.Prefetch
 	}
@@ -788,7 +788,7 @@ func (x *TaskUpdate) GetWeight() float64 {
 
 type TaskUpdateList struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Updates       map[uint32]*TaskUpdate `protobuf:"bytes,1,rep,name=updates,proto3" json:"updates,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // optional — can be empty
+	Updates       map[int32]*TaskUpdate  `protobuf:"bytes,1,rep,name=updates,proto3" json:"updates,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // optional — can be empty
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -823,7 +823,7 @@ func (*TaskUpdateList) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *TaskUpdateList) GetUpdates() map[uint32]*TaskUpdate {
+func (x *TaskUpdateList) GetUpdates() map[int32]*TaskUpdate {
 	if x != nil {
 		return x.Updates
 	}
@@ -833,9 +833,9 @@ func (x *TaskUpdateList) GetUpdates() map[uint32]*TaskUpdate {
 type TaskListAndOther struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tasks         []*Task                `protobuf:"bytes,1,rep,name=tasks,proto3" json:"tasks,omitempty"`
-	Concurrency   uint32                 `protobuf:"varint,2,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Concurrency   int32                  `protobuf:"varint,2,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
 	Updates       *TaskUpdateList        `protobuf:"bytes,3,opt,name=updates,proto3" json:"updates,omitempty"`
-	ActiveTasks   []uint32               `protobuf:"varint,4,rep,packed,name=active_tasks,json=activeTasks,proto3" json:"active_tasks,omitempty"`
+	ActiveTasks   []int32                `protobuf:"varint,4,rep,packed,name=active_tasks,json=activeTasks,proto3" json:"active_tasks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -877,7 +877,7 @@ func (x *TaskListAndOther) GetTasks() []*Task {
 	return nil
 }
 
-func (x *TaskListAndOther) GetConcurrency() uint32 {
+func (x *TaskListAndOther) GetConcurrency() int32 {
 	if x != nil {
 		return x.Concurrency
 	}
@@ -891,7 +891,7 @@ func (x *TaskListAndOther) GetUpdates() *TaskUpdateList {
 	return nil
 }
 
-func (x *TaskListAndOther) GetActiveTasks() []uint32 {
+func (x *TaskListAndOther) GetActiveTasks() []int32 {
 	if x != nil {
 		return x.ActiveTasks
 	}
@@ -900,7 +900,7 @@ func (x *TaskListAndOther) GetActiveTasks() []uint32 {
 
 type TaskStatusUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        uint32                 `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	NewStatus     string                 `protobuf:"bytes,2,opt,name=new_status,json=newStatus,proto3" json:"new_status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -936,7 +936,7 @@ func (*TaskStatusUpdate) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *TaskStatusUpdate) GetTaskId() uint32 {
+func (x *TaskStatusUpdate) GetTaskId() int32 {
 	if x != nil {
 		return x.TaskId
 	}
@@ -952,7 +952,7 @@ func (x *TaskStatusUpdate) GetNewStatus() string {
 
 type TaskLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        uint32                 `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	LogType       string                 `protobuf:"bytes,2,opt,name=log_type,json=logType,proto3" json:"log_type,omitempty"` // 'O' for stdout, 'E' for stderr
 	LogText       string                 `protobuf:"bytes,3,opt,name=log_text,json=logText,proto3" json:"log_text,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -989,7 +989,7 @@ func (*TaskLog) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *TaskLog) GetTaskId() uint32 {
+func (x *TaskLog) GetTaskId() int32 {
 	if x != nil {
 		return x.TaskId
 	}
@@ -1012,9 +1012,9 @@ func (x *TaskLog) GetLogText() string {
 
 type GetLogsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskIds       []uint32               `protobuf:"varint,1,rep,packed,name=taskIds,proto3" json:"taskIds,omitempty"`
-	ChunkSize     uint32                 `protobuf:"varint,2,opt,name=chunkSize,proto3" json:"chunkSize,omitempty"`
-	SkipFromEnd   *uint32                `protobuf:"varint,3,opt,name=skipFromEnd,proto3,oneof" json:"skipFromEnd,omitempty"`
+	TaskIds       []int32                `protobuf:"varint,1,rep,packed,name=taskIds,proto3" json:"taskIds,omitempty"`
+	ChunkSize     int32                  `protobuf:"varint,2,opt,name=chunkSize,proto3" json:"chunkSize,omitempty"`
+	SkipFromEnd   *int32                 `protobuf:"varint,3,opt,name=skipFromEnd,proto3,oneof" json:"skipFromEnd,omitempty"`
 	LogType       *string                `protobuf:"bytes,4,opt,name=log_type,json=logType,proto3,oneof" json:"log_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1050,21 +1050,21 @@ func (*GetLogsRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *GetLogsRequest) GetTaskIds() []uint32 {
+func (x *GetLogsRequest) GetTaskIds() []int32 {
 	if x != nil {
 		return x.TaskIds
 	}
 	return nil
 }
 
-func (x *GetLogsRequest) GetChunkSize() uint32 {
+func (x *GetLogsRequest) GetChunkSize() int32 {
 	if x != nil {
 		return x.ChunkSize
 	}
 	return 0
 }
 
-func (x *GetLogsRequest) GetSkipFromEnd() uint32 {
+func (x *GetLogsRequest) GetSkipFromEnd() int32 {
 	if x != nil && x.SkipFromEnd != nil {
 		return *x.SkipFromEnd
 	}
@@ -1080,7 +1080,7 @@ func (x *GetLogsRequest) GetLogType() string {
 
 type LogChunk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        uint32                 `protobuf:"varint,1,opt,name=taskId,proto3" json:"taskId,omitempty"`
+	TaskId        int32                  `protobuf:"varint,1,opt,name=taskId,proto3" json:"taskId,omitempty"`
 	Stdout        []string               `protobuf:"bytes,2,rep,name=stdout,proto3" json:"stdout,omitempty"`
 	Stderr        []string               `protobuf:"bytes,3,rep,name=stderr,proto3" json:"stderr,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1117,7 +1117,7 @@ func (*LogChunk) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *LogChunk) GetTaskId() uint32 {
+func (x *LogChunk) GetTaskId() int32 {
 	if x != nil {
 		return x.TaskId
 	}
@@ -1184,7 +1184,7 @@ func (x *LogChunkList) GetLogs() []*LogChunk {
 
 type TaskIds struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskIds       []uint32               `protobuf:"varint,1,rep,packed,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
+	TaskIds       []int32                `protobuf:"varint,1,rep,packed,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1219,7 +1219,7 @@ func (*TaskIds) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *TaskIds) GetTaskIds() []uint32 {
+func (x *TaskIds) GetTaskIds() []int32 {
 	if x != nil {
 		return x.TaskIds
 	}
@@ -1228,7 +1228,7 @@ func (x *TaskIds) GetTaskIds() []uint32 {
 
 type TaskId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        uint32                 `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1263,7 +1263,7 @@ func (*TaskId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *TaskId) GetTaskId() uint32 {
+func (x *TaskId) GetTaskId() int32 {
 	if x != nil {
 		return x.TaskId
 	}
@@ -1272,7 +1272,7 @@ func (x *TaskId) GetTaskId() uint32 {
 
 type WorkerId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      uint32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1307,7 +1307,7 @@ func (*WorkerId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *WorkerId) GetWorkerId() uint32 {
+func (x *WorkerId) GetWorkerId() int32 {
 	if x != nil {
 		return x.WorkerId
 	}
@@ -1316,7 +1316,7 @@ func (x *WorkerId) GetWorkerId() uint32 {
 
 type WorkerStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerIds     []uint32               `protobuf:"varint,1,rep,packed,name=worker_ids,json=workerIds,proto3" json:"worker_ids,omitempty"`
+	WorkerIds     []int32                `protobuf:"varint,1,rep,packed,name=worker_ids,json=workerIds,proto3" json:"worker_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1351,7 +1351,7 @@ func (*WorkerStatusRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *WorkerStatusRequest) GetWorkerIds() []uint32 {
+func (x *WorkerStatusRequest) GetWorkerIds() []int32 {
 	if x != nil {
 		return x.WorkerIds
 	}
@@ -1360,7 +1360,7 @@ func (x *WorkerStatusRequest) GetWorkerIds() []uint32 {
 
 type WorkerStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      uint32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1396,7 +1396,7 @@ func (*WorkerStatus) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *WorkerStatus) GetWorkerId() uint32 {
+func (x *WorkerStatus) GetWorkerId() int32 {
 	if x != nil {
 		return x.WorkerId
 	}
@@ -1456,9 +1456,9 @@ func (x *WorkerStatusResponse) GetStatuses() []*WorkerStatus {
 
 type WorkerDetails struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      uint32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	WorkerName    string                 `protobuf:"bytes,2,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"`
-	JobId         uint32                 `protobuf:"varint,3,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	JobId         int32                  `protobuf:"varint,3,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1493,7 +1493,7 @@ func (*WorkerDetails) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *WorkerDetails) GetWorkerId() uint32 {
+func (x *WorkerDetails) GetWorkerId() int32 {
 	if x != nil {
 		return x.WorkerId
 	}
@@ -1507,7 +1507,7 @@ func (x *WorkerDetails) GetWorkerName() string {
 	return ""
 }
 
-func (x *WorkerDetails) GetJobId() uint32 {
+func (x *WorkerDetails) GetJobId() int32 {
 	if x != nil {
 		return x.JobId
 	}
@@ -1560,7 +1560,7 @@ func (x *WorkerIds) GetWorkersDetails() []*WorkerDetails {
 
 type PingAndGetNewTasksRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      uint32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	Stats         *WorkerStats           `protobuf:"bytes,2,opt,name=stats,proto3" json:"stats,omitempty"` // Optional
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1596,7 +1596,7 @@ func (*PingAndGetNewTasksRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{24}
 }
 
-func (x *PingAndGetNewTasksRequest) GetWorkerId() uint32 {
+func (x *PingAndGetNewTasksRequest) GetWorkerId() int32 {
 	if x != nil {
 		return x.WorkerId
 	}
@@ -1657,12 +1657,12 @@ func (x *Ack) GetSuccess() bool {
 type ListTasksRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	StatusFilter     *string                `protobuf:"bytes,1,opt,name=status_filter,json=statusFilter,proto3,oneof" json:"status_filter,omitempty"`
-	WorkerIdFilter   *uint32                `protobuf:"varint,2,opt,name=worker_id_filter,json=workerIdFilter,proto3,oneof" json:"worker_id_filter,omitempty"`
-	WorkflowIdFilter *uint32                `protobuf:"varint,3,opt,name=workflow_id_filter,json=workflowIdFilter,proto3,oneof" json:"workflow_id_filter,omitempty"`
-	StepIdFilter     *uint32                `protobuf:"varint,4,opt,name=step_id_filter,json=stepIdFilter,proto3,oneof" json:"step_id_filter,omitempty"`
+	WorkerIdFilter   *int32                 `protobuf:"varint,2,opt,name=worker_id_filter,json=workerIdFilter,proto3,oneof" json:"worker_id_filter,omitempty"`
+	WorkflowIdFilter *int32                 `protobuf:"varint,3,opt,name=workflow_id_filter,json=workflowIdFilter,proto3,oneof" json:"workflow_id_filter,omitempty"`
+	StepIdFilter     *int32                 `protobuf:"varint,4,opt,name=step_id_filter,json=stepIdFilter,proto3,oneof" json:"step_id_filter,omitempty"`
 	CommandFilter    *string                `protobuf:"bytes,5,opt,name=command_filter,json=commandFilter,proto3,oneof" json:"command_filter,omitempty"`
-	Limit            *uint32                `protobuf:"varint,6,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
-	Offset           *uint32                `protobuf:"varint,7,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
+	Limit            *int32                 `protobuf:"varint,6,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	Offset           *int32                 `protobuf:"varint,7,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
 	ShowHidden       *bool                  `protobuf:"varint,8,opt,name=show_hidden,json=showHidden,proto3,oneof" json:"show_hidden,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -1705,21 +1705,21 @@ func (x *ListTasksRequest) GetStatusFilter() string {
 	return ""
 }
 
-func (x *ListTasksRequest) GetWorkerIdFilter() uint32 {
+func (x *ListTasksRequest) GetWorkerIdFilter() int32 {
 	if x != nil && x.WorkerIdFilter != nil {
 		return *x.WorkerIdFilter
 	}
 	return 0
 }
 
-func (x *ListTasksRequest) GetWorkflowIdFilter() uint32 {
+func (x *ListTasksRequest) GetWorkflowIdFilter() int32 {
 	if x != nil && x.WorkflowIdFilter != nil {
 		return *x.WorkflowIdFilter
 	}
 	return 0
 }
 
-func (x *ListTasksRequest) GetStepIdFilter() uint32 {
+func (x *ListTasksRequest) GetStepIdFilter() int32 {
 	if x != nil && x.StepIdFilter != nil {
 		return *x.StepIdFilter
 	}
@@ -1733,14 +1733,14 @@ func (x *ListTasksRequest) GetCommandFilter() string {
 	return ""
 }
 
-func (x *ListTasksRequest) GetLimit() uint32 {
+func (x *ListTasksRequest) GetLimit() int32 {
 	if x != nil && x.Limit != nil {
 		return *x.Limit
 	}
 	return 0
 }
 
-func (x *ListTasksRequest) GetOffset() uint32 {
+func (x *ListTasksRequest) GetOffset() int32 {
 	if x != nil && x.Offset != nil {
 		return *x.Offset
 	}
@@ -1756,13 +1756,13 @@ func (x *ListTasksRequest) GetShowHidden() bool {
 
 type WorkerRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProviderId    uint32                 `protobuf:"varint,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	FlavorId      uint32                 `protobuf:"varint,2,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
-	RegionId      uint32                 `protobuf:"varint,3,opt,name=region_id,json=regionId,proto3" json:"region_id,omitempty"`
-	Number        uint32                 `protobuf:"varint,4,opt,name=number,proto3" json:"number,omitempty"`
-	Concurrency   uint32                 `protobuf:"varint,5,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
-	Prefetch      uint32                 `protobuf:"varint,6,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
-	StepId        *uint32                `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	ProviderId    int32                  `protobuf:"varint,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	FlavorId      int32                  `protobuf:"varint,2,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
+	RegionId      int32                  `protobuf:"varint,3,opt,name=region_id,json=regionId,proto3" json:"region_id,omitempty"`
+	Number        int32                  `protobuf:"varint,4,opt,name=number,proto3" json:"number,omitempty"`
+	Concurrency   int32                  `protobuf:"varint,5,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Prefetch      int32                  `protobuf:"varint,6,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
+	StepId        *int32                 `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1797,49 +1797,49 @@ func (*WorkerRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{27}
 }
 
-func (x *WorkerRequest) GetProviderId() uint32 {
+func (x *WorkerRequest) GetProviderId() int32 {
 	if x != nil {
 		return x.ProviderId
 	}
 	return 0
 }
 
-func (x *WorkerRequest) GetFlavorId() uint32 {
+func (x *WorkerRequest) GetFlavorId() int32 {
 	if x != nil {
 		return x.FlavorId
 	}
 	return 0
 }
 
-func (x *WorkerRequest) GetRegionId() uint32 {
+func (x *WorkerRequest) GetRegionId() int32 {
 	if x != nil {
 		return x.RegionId
 	}
 	return 0
 }
 
-func (x *WorkerRequest) GetNumber() uint32 {
+func (x *WorkerRequest) GetNumber() int32 {
 	if x != nil {
 		return x.Number
 	}
 	return 0
 }
 
-func (x *WorkerRequest) GetConcurrency() uint32 {
+func (x *WorkerRequest) GetConcurrency() int32 {
 	if x != nil {
 		return x.Concurrency
 	}
 	return 0
 }
 
-func (x *WorkerRequest) GetPrefetch() uint32 {
+func (x *WorkerRequest) GetPrefetch() int32 {
 	if x != nil {
 		return x.Prefetch
 	}
 	return 0
 }
 
-func (x *WorkerRequest) GetStepId() uint32 {
+func (x *WorkerRequest) GetStepId() int32 {
 	if x != nil && x.StepId != nil {
 		return *x.StepId
 	}
@@ -1848,13 +1848,13 @@ func (x *WorkerRequest) GetStepId() uint32 {
 
 type WorkerUpdateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      uint32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
-	ProviderId    *uint32                `protobuf:"varint,2,opt,name=provider_id,json=providerId,proto3,oneof" json:"provider_id,omitempty"`
-	FlavorId      *uint32                `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3,oneof" json:"flavor_id,omitempty"`
-	RegionId      *uint32                `protobuf:"varint,4,opt,name=region_id,json=regionId,proto3,oneof" json:"region_id,omitempty"`
-	Concurrency   *uint32                `protobuf:"varint,5,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
-	Prefetch      *uint32                `protobuf:"varint,6,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
-	StepId        *uint32                `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	ProviderId    *int32                 `protobuf:"varint,2,opt,name=provider_id,json=providerId,proto3,oneof" json:"provider_id,omitempty"`
+	FlavorId      *int32                 `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3,oneof" json:"flavor_id,omitempty"`
+	RegionId      *int32                 `protobuf:"varint,4,opt,name=region_id,json=regionId,proto3,oneof" json:"region_id,omitempty"`
+	Concurrency   *int32                 `protobuf:"varint,5,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
+	Prefetch      *int32                 `protobuf:"varint,6,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
+	StepId        *int32                 `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1889,49 +1889,49 @@ func (*WorkerUpdateRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{28}
 }
 
-func (x *WorkerUpdateRequest) GetWorkerId() uint32 {
+func (x *WorkerUpdateRequest) GetWorkerId() int32 {
 	if x != nil {
 		return x.WorkerId
 	}
 	return 0
 }
 
-func (x *WorkerUpdateRequest) GetProviderId() uint32 {
+func (x *WorkerUpdateRequest) GetProviderId() int32 {
 	if x != nil && x.ProviderId != nil {
 		return *x.ProviderId
 	}
 	return 0
 }
 
-func (x *WorkerUpdateRequest) GetFlavorId() uint32 {
+func (x *WorkerUpdateRequest) GetFlavorId() int32 {
 	if x != nil && x.FlavorId != nil {
 		return *x.FlavorId
 	}
 	return 0
 }
 
-func (x *WorkerUpdateRequest) GetRegionId() uint32 {
+func (x *WorkerUpdateRequest) GetRegionId() int32 {
 	if x != nil && x.RegionId != nil {
 		return *x.RegionId
 	}
 	return 0
 }
 
-func (x *WorkerUpdateRequest) GetConcurrency() uint32 {
+func (x *WorkerUpdateRequest) GetConcurrency() int32 {
 	if x != nil && x.Concurrency != nil {
 		return *x.Concurrency
 	}
 	return 0
 }
 
-func (x *WorkerUpdateRequest) GetPrefetch() uint32 {
+func (x *WorkerUpdateRequest) GetPrefetch() int32 {
 	if x != nil && x.Prefetch != nil {
 		return *x.Prefetch
 	}
 	return 0
 }
 
-func (x *WorkerUpdateRequest) GetStepId() uint32 {
+func (x *WorkerUpdateRequest) GetStepId() int32 {
 	if x != nil && x.StepId != nil {
 		return *x.StepId
 	}
@@ -1940,7 +1940,7 @@ func (x *WorkerUpdateRequest) GetStepId() uint32 {
 
 type ListFlavorsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Limit         uint32                 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
 	Filter        string                 `protobuf:"bytes,2,opt,name=filter,proto3" json:"filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1976,7 +1976,7 @@ func (*ListFlavorsRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{29}
 }
 
-func (x *ListFlavorsRequest) GetLimit() uint32 {
+func (x *ListFlavorsRequest) GetLimit() int32 {
 	if x != nil {
 		return x.Limit
 	}
@@ -1993,9 +1993,9 @@ func (x *ListFlavorsRequest) GetFilter() string {
 type Flavor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Fields from the "flavor" table
-	FlavorId      uint32  `protobuf:"varint,1,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`                   // PRIMARY KEY
+	FlavorId      int32   `protobuf:"varint,1,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`                   // PRIMARY KEY
 	FlavorName    string  `protobuf:"bytes,2,opt,name=flavor_name,json=flavorName,proto3" json:"flavor_name,omitempty"`              // Name of the flavor
-	ProviderId    uint32  `protobuf:"varint,3,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`             // Foreign key to provider table
+	ProviderId    int32   `protobuf:"varint,3,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`             // Foreign key to provider table
 	Provider      string  `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`                                    // Name of the provider (provider_name.config_name)
 	Cpu           int32   `protobuf:"varint,5,opt,name=cpu,proto3" json:"cpu,omitempty"`                                             // Number of CPU cores
 	Mem           float32 `protobuf:"fixed32,6,opt,name=mem,proto3" json:"mem,omitempty"`                                            // Memory in GB (or as needed)
@@ -2006,7 +2006,7 @@ type Flavor struct {
 	HasGpu        bool    `protobuf:"varint,11,opt,name=has_gpu,json=hasGpu,proto3" json:"has_gpu,omitempty"`                        // Whether a GPU is present
 	HasQuickDisks bool    `protobuf:"varint,12,opt,name=has_quick_disks,json=hasQuickDisks,proto3" json:"has_quick_disks,omitempty"` // Whether quick disks are supported
 	// Fields from the "flavor_region" table
-	RegionId      uint32  `protobuf:"varint,13,opt,name=region_id,json=regionId,proto3" json:"region_id,omitempty"` // Foreign key to region table
+	RegionId      int32   `protobuf:"varint,13,opt,name=region_id,json=regionId,proto3" json:"region_id,omitempty"` // Foreign key to region table
 	Region        string  `protobuf:"bytes,14,opt,name=region,proto3" json:"region,omitempty"`                      // (Optional) Region name
 	Eviction      float32 `protobuf:"fixed32,15,opt,name=eviction,proto3" json:"eviction,omitempty"`                // Eviction rate value
 	Cost          float32 `protobuf:"fixed32,16,opt,name=cost,proto3" json:"cost,omitempty"`                        // Cost value
@@ -2044,7 +2044,7 @@ func (*Flavor) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{30}
 }
 
-func (x *Flavor) GetFlavorId() uint32 {
+func (x *Flavor) GetFlavorId() int32 {
 	if x != nil {
 		return x.FlavorId
 	}
@@ -2058,7 +2058,7 @@ func (x *Flavor) GetFlavorName() string {
 	return ""
 }
 
-func (x *Flavor) GetProviderId() uint32 {
+func (x *Flavor) GetProviderId() int32 {
 	if x != nil {
 		return x.ProviderId
 	}
@@ -2128,7 +2128,7 @@ func (x *Flavor) GetHasQuickDisks() bool {
 	return false
 }
 
-func (x *Flavor) GetRegionId() uint32 {
+func (x *Flavor) GetRegionId() int32 {
 	if x != nil {
 		return x.RegionId
 	}
@@ -2202,8 +2202,8 @@ func (x *FlavorsList) GetFlavors() []*Flavor {
 
 type ListJobsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Limit         *uint32                `protobuf:"varint,1,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
-	Offset        *uint32                `protobuf:"varint,2,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
+	Limit         *int32                 `protobuf:"varint,1,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	Offset        *int32                 `protobuf:"varint,2,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2238,14 +2238,14 @@ func (*ListJobsRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{32}
 }
 
-func (x *ListJobsRequest) GetLimit() uint32 {
+func (x *ListJobsRequest) GetLimit() int32 {
 	if x != nil && x.Limit != nil {
 		return *x.Limit
 	}
 	return 0
 }
 
-func (x *ListJobsRequest) GetOffset() uint32 {
+func (x *ListJobsRequest) GetOffset() int32 {
 	if x != nil && x.Offset != nil {
 		return *x.Offset
 	}
@@ -2254,15 +2254,15 @@ func (x *ListJobsRequest) GetOffset() uint32 {
 
 type Job struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         uint32                 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	JobId         int32                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	FlavorId      uint32                 `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
-	Retry         uint32                 `protobuf:"varint,4,opt,name=retry,proto3" json:"retry,omitempty"`
-	WorkerId      uint32                 `protobuf:"varint,5,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	FlavorId      int32                  `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
+	Retry         int32                  `protobuf:"varint,4,opt,name=retry,proto3" json:"retry,omitempty"`
+	WorkerId      int32                  `protobuf:"varint,5,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	Action        string                 `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`
 	CreatedAt     string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ModifiedAt    string                 `protobuf:"bytes,8,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`
-	Progression   uint32                 `protobuf:"varint,9,opt,name=progression,proto3" json:"progression,omitempty"`
+	Progression   int32                  `protobuf:"varint,9,opt,name=progression,proto3" json:"progression,omitempty"`
 	Log           string                 `protobuf:"bytes,10,opt,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2298,7 +2298,7 @@ func (*Job) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{33}
 }
 
-func (x *Job) GetJobId() uint32 {
+func (x *Job) GetJobId() int32 {
 	if x != nil {
 		return x.JobId
 	}
@@ -2312,21 +2312,21 @@ func (x *Job) GetStatus() string {
 	return ""
 }
 
-func (x *Job) GetFlavorId() uint32 {
+func (x *Job) GetFlavorId() int32 {
 	if x != nil {
 		return x.FlavorId
 	}
 	return 0
 }
 
-func (x *Job) GetRetry() uint32 {
+func (x *Job) GetRetry() int32 {
 	if x != nil {
 		return x.Retry
 	}
 	return 0
 }
 
-func (x *Job) GetWorkerId() uint32 {
+func (x *Job) GetWorkerId() int32 {
 	if x != nil {
 		return x.WorkerId
 	}
@@ -2354,7 +2354,7 @@ func (x *Job) GetModifiedAt() string {
 	return ""
 }
 
-func (x *Job) GetProgression() uint32 {
+func (x *Job) GetProgression() int32 {
 	if x != nil {
 		return x.Progression
 	}
@@ -2370,7 +2370,7 @@ func (x *Job) GetLog() string {
 
 type JobId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         uint32                 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	JobId         int32                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2405,7 +2405,7 @@ func (*JobId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{34}
 }
 
-func (x *JobId) GetJobId() uint32 {
+func (x *JobId) GetJobId() int32 {
 	if x != nil {
 		return x.JobId
 	}
@@ -2458,7 +2458,7 @@ func (x *JobsList) GetJobs() []*Job {
 
 type JobStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobIds        []uint32               `protobuf:"varint,1,rep,packed,name=job_ids,json=jobIds,proto3" json:"job_ids,omitempty"`
+	JobIds        []int32                `protobuf:"varint,1,rep,packed,name=job_ids,json=jobIds,proto3" json:"job_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2493,7 +2493,7 @@ func (*JobStatusRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{36}
 }
 
-func (x *JobStatusRequest) GetJobIds() []uint32 {
+func (x *JobStatusRequest) GetJobIds() []int32 {
 	if x != nil {
 		return x.JobIds
 	}
@@ -2502,9 +2502,9 @@ func (x *JobStatusRequest) GetJobIds() []uint32 {
 
 type JobStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         uint32                 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	JobId         int32                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	Progression   uint32                 `protobuf:"varint,3,opt,name=progression,proto3" json:"progression,omitempty"`
+	Progression   int32                  `protobuf:"varint,3,opt,name=progression,proto3" json:"progression,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2539,7 +2539,7 @@ func (*JobStatus) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{37}
 }
 
-func (x *JobStatus) GetJobId() uint32 {
+func (x *JobStatus) GetJobId() int32 {
 	if x != nil {
 		return x.JobId
 	}
@@ -2553,7 +2553,7 @@ func (x *JobStatus) GetStatus() string {
 	return ""
 }
 
-func (x *JobStatus) GetProgression() uint32 {
+func (x *JobStatus) GetProgression() int32 {
 	if x != nil {
 		return x.Progression
 	}
@@ -2606,10 +2606,10 @@ func (x *JobStatusResponse) GetStatuses() []*JobStatus {
 
 type JobUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         uint32                 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                  // which job to update
+	JobId         int32                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                  // which job to update
 	Status        *string                `protobuf:"bytes,2,opt,name=status,proto3,oneof" json:"status,omitempty"`                        // 'P'|'R'|'S'|'F'|'X' (only if you want to set it)
 	AppendLog     *string                `protobuf:"bytes,3,opt,name=append_log,json=appendLog,proto3,oneof" json:"append_log,omitempty"` // text appended to job.log (server prepends timestamp)
-	Progression   *uint32                `protobuf:"varint,4,opt,name=progression,proto3,oneof" json:"progression,omitempty"`             // 0..100 (server clamps)
+	Progression   *int32                 `protobuf:"varint,4,opt,name=progression,proto3,oneof" json:"progression,omitempty"`             // 0..100 (server clamps)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2644,7 +2644,7 @@ func (*JobUpdate) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{39}
 }
 
-func (x *JobUpdate) GetJobId() uint32 {
+func (x *JobUpdate) GetJobId() int32 {
 	if x != nil {
 		return x.JobId
 	}
@@ -2665,7 +2665,7 @@ func (x *JobUpdate) GetAppendLog() string {
 	return ""
 }
 
-func (x *JobUpdate) GetProgression() uint32 {
+func (x *JobUpdate) GetProgression() int32 {
 	if x != nil && x.Progression != nil {
 		return *x.Progression
 	}
@@ -3022,7 +3022,7 @@ func (x *CreateUserRequest) GetIsAdmin() bool {
 
 type UserId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserId        int32                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3057,7 +3057,7 @@ func (*UserId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{47}
 }
 
-func (x *UserId) GetUserId() uint32 {
+func (x *UserId) GetUserId() int32 {
 	if x != nil {
 		return x.UserId
 	}
@@ -3066,7 +3066,7 @@ func (x *UserId) GetUserId() uint32 {
 
 type User struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserId        int32                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Username      *string                `protobuf:"bytes,2,opt,name=username,proto3,oneof" json:"username,omitempty"`
 	Email         *string                `protobuf:"bytes,3,opt,name=email,proto3,oneof" json:"email,omitempty"`
 	IsAdmin       *bool                  `protobuf:"varint,4,opt,name=is_admin,json=isAdmin,proto3,oneof" json:"is_admin,omitempty"`
@@ -3104,7 +3104,7 @@ func (*User) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{48}
 }
 
-func (x *User) GetUserId() uint32 {
+func (x *User) GetUserId() int32 {
 	if x != nil {
 		return x.UserId
 	}
@@ -3238,7 +3238,7 @@ func (x *ChangePasswordRequest) GetNewPassword() string {
 
 type RecruiterFilter struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StepId        *uint32                `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	StepId        *int32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3273,7 +3273,7 @@ func (*RecruiterFilter) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{51}
 }
 
-func (x *RecruiterFilter) GetStepId() uint32 {
+func (x *RecruiterFilter) GetStepId() int32 {
 	if x != nil && x.StepId != nil {
 		return *x.StepId
 	}
@@ -3282,8 +3282,8 @@ func (x *RecruiterFilter) GetStepId() uint32 {
 
 type RecruiterId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
-	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
+	StepId        int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	Rank          int32                  `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3318,14 +3318,14 @@ func (*RecruiterId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{52}
 }
 
-func (x *RecruiterId) GetStepId() uint32 {
+func (x *RecruiterId) GetStepId() int32 {
 	if x != nil {
 		return x.StepId
 	}
 	return 0
 }
 
-func (x *RecruiterId) GetRank() uint32 {
+func (x *RecruiterId) GetRank() int32 {
 	if x != nil {
 		return x.Rank
 	}
@@ -3334,14 +3334,14 @@ func (x *RecruiterId) GetRank() uint32 {
 
 type Recruiter struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
-	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
+	StepId        int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	Rank          int32                  `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
 	Protofilter   string                 `protobuf:"bytes,3,opt,name=protofilter,proto3" json:"protofilter,omitempty"`
-	Concurrency   uint32                 `protobuf:"varint,4,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
-	Prefetch      uint32                 `protobuf:"varint,5,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
-	MaxWorkers    *uint32                `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
-	Rounds        uint32                 `protobuf:"varint,7,opt,name=rounds,proto3" json:"rounds,omitempty"`
-	Timeout       uint32                 `protobuf:"varint,8,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Concurrency   int32                  `protobuf:"varint,4,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Prefetch      int32                  `protobuf:"varint,5,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
+	MaxWorkers    *int32                 `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
+	Rounds        int32                  `protobuf:"varint,7,opt,name=rounds,proto3" json:"rounds,omitempty"`
+	Timeout       int32                  `protobuf:"varint,8,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3376,14 +3376,14 @@ func (*Recruiter) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{53}
 }
 
-func (x *Recruiter) GetStepId() uint32 {
+func (x *Recruiter) GetStepId() int32 {
 	if x != nil {
 		return x.StepId
 	}
 	return 0
 }
 
-func (x *Recruiter) GetRank() uint32 {
+func (x *Recruiter) GetRank() int32 {
 	if x != nil {
 		return x.Rank
 	}
@@ -3397,35 +3397,35 @@ func (x *Recruiter) GetProtofilter() string {
 	return ""
 }
 
-func (x *Recruiter) GetConcurrency() uint32 {
+func (x *Recruiter) GetConcurrency() int32 {
 	if x != nil {
 		return x.Concurrency
 	}
 	return 0
 }
 
-func (x *Recruiter) GetPrefetch() uint32 {
+func (x *Recruiter) GetPrefetch() int32 {
 	if x != nil {
 		return x.Prefetch
 	}
 	return 0
 }
 
-func (x *Recruiter) GetMaxWorkers() uint32 {
+func (x *Recruiter) GetMaxWorkers() int32 {
 	if x != nil && x.MaxWorkers != nil {
 		return *x.MaxWorkers
 	}
 	return 0
 }
 
-func (x *Recruiter) GetRounds() uint32 {
+func (x *Recruiter) GetRounds() int32 {
 	if x != nil {
 		return x.Rounds
 	}
 	return 0
 }
 
-func (x *Recruiter) GetTimeout() uint32 {
+func (x *Recruiter) GetTimeout() int32 {
 	if x != nil {
 		return x.Timeout
 	}
@@ -3434,14 +3434,14 @@ func (x *Recruiter) GetTimeout() uint32 {
 
 type RecruiterUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
-	Rank          uint32                 `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
+	StepId        int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	Rank          int32                  `protobuf:"varint,2,opt,name=rank,proto3" json:"rank,omitempty"`
 	Protofilter   *string                `protobuf:"bytes,3,opt,name=protofilter,proto3,oneof" json:"protofilter,omitempty"`
-	Concurrency   *uint32                `protobuf:"varint,4,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
-	Prefetch      *uint32                `protobuf:"varint,5,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
-	MaxWorkers    *uint32                `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
-	Rounds        *uint32                `protobuf:"varint,7,opt,name=rounds,proto3,oneof" json:"rounds,omitempty"`
-	Timeout       *uint32                `protobuf:"varint,8,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
+	Concurrency   *int32                 `protobuf:"varint,4,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
+	Prefetch      *int32                 `protobuf:"varint,5,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
+	MaxWorkers    *int32                 `protobuf:"varint,6,opt,name=max_workers,json=maxWorkers,proto3,oneof" json:"max_workers,omitempty"`
+	Rounds        *int32                 `protobuf:"varint,7,opt,name=rounds,proto3,oneof" json:"rounds,omitempty"`
+	Timeout       *int32                 `protobuf:"varint,8,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3476,14 +3476,14 @@ func (*RecruiterUpdate) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{54}
 }
 
-func (x *RecruiterUpdate) GetStepId() uint32 {
+func (x *RecruiterUpdate) GetStepId() int32 {
 	if x != nil {
 		return x.StepId
 	}
 	return 0
 }
 
-func (x *RecruiterUpdate) GetRank() uint32 {
+func (x *RecruiterUpdate) GetRank() int32 {
 	if x != nil {
 		return x.Rank
 	}
@@ -3497,35 +3497,35 @@ func (x *RecruiterUpdate) GetProtofilter() string {
 	return ""
 }
 
-func (x *RecruiterUpdate) GetConcurrency() uint32 {
+func (x *RecruiterUpdate) GetConcurrency() int32 {
 	if x != nil && x.Concurrency != nil {
 		return *x.Concurrency
 	}
 	return 0
 }
 
-func (x *RecruiterUpdate) GetPrefetch() uint32 {
+func (x *RecruiterUpdate) GetPrefetch() int32 {
 	if x != nil && x.Prefetch != nil {
 		return *x.Prefetch
 	}
 	return 0
 }
 
-func (x *RecruiterUpdate) GetMaxWorkers() uint32 {
+func (x *RecruiterUpdate) GetMaxWorkers() int32 {
 	if x != nil && x.MaxWorkers != nil {
 		return *x.MaxWorkers
 	}
 	return 0
 }
 
-func (x *RecruiterUpdate) GetRounds() uint32 {
+func (x *RecruiterUpdate) GetRounds() int32 {
 	if x != nil && x.Rounds != nil {
 		return *x.Rounds
 	}
 	return 0
 }
 
-func (x *RecruiterUpdate) GetTimeout() uint32 {
+func (x *RecruiterUpdate) GetTimeout() int32 {
 	if x != nil && x.Timeout != nil {
 		return *x.Timeout
 	}
@@ -3579,8 +3579,8 @@ func (x *RecruiterList) GetRecruiters() []*Recruiter {
 type WorkflowFilter struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NameLike      *string                `protobuf:"bytes,1,opt,name=name_like,json=nameLike,proto3,oneof" json:"name_like,omitempty"`
-	Limit         *uint32                `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
-	Offset        *uint32                `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
+	Limit         *int32                 `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	Offset        *int32                 `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3622,14 +3622,14 @@ func (x *WorkflowFilter) GetNameLike() string {
 	return ""
 }
 
-func (x *WorkflowFilter) GetLimit() uint32 {
+func (x *WorkflowFilter) GetLimit() int32 {
 	if x != nil && x.Limit != nil {
 		return *x.Limit
 	}
 	return 0
 }
 
-func (x *WorkflowFilter) GetOffset() uint32 {
+func (x *WorkflowFilter) GetOffset() int32 {
 	if x != nil && x.Offset != nil {
 		return *x.Offset
 	}
@@ -3638,7 +3638,7 @@ func (x *WorkflowFilter) GetOffset() uint32 {
 
 type WorkflowId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowId    uint32                 `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	WorkflowId    int32                  `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3673,7 +3673,7 @@ func (*WorkflowId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{57}
 }
 
-func (x *WorkflowId) GetWorkflowId() uint32 {
+func (x *WorkflowId) GetWorkflowId() int32 {
 	if x != nil {
 		return x.WorkflowId
 	}
@@ -3682,10 +3682,10 @@ func (x *WorkflowId) GetWorkflowId() uint32 {
 
 type Workflow struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowId     uint32                 `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	WorkflowId     int32                  `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	RunStrategy    string                 `protobuf:"bytes,4,opt,name=run_strategy,json=runStrategy,proto3" json:"run_strategy,omitempty"`
-	MaximumWorkers *uint32                `protobuf:"varint,5,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
+	MaximumWorkers *int32                 `protobuf:"varint,5,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3720,7 +3720,7 @@ func (*Workflow) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{58}
 }
 
-func (x *Workflow) GetWorkflowId() uint32 {
+func (x *Workflow) GetWorkflowId() int32 {
 	if x != nil {
 		return x.WorkflowId
 	}
@@ -3741,7 +3741,7 @@ func (x *Workflow) GetRunStrategy() string {
 	return ""
 }
 
-func (x *Workflow) GetMaximumWorkers() uint32 {
+func (x *Workflow) GetMaximumWorkers() int32 {
 	if x != nil && x.MaximumWorkers != nil {
 		return *x.MaximumWorkers
 	}
@@ -3752,7 +3752,7 @@ type WorkflowRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	RunStrategy    *string                `protobuf:"bytes,2,opt,name=run_strategy,json=runStrategy,proto3,oneof" json:"run_strategy,omitempty"`
-	MaximumWorkers *uint32                `protobuf:"varint,3,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
+	MaximumWorkers *int32                 `protobuf:"varint,3,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3801,7 +3801,7 @@ func (x *WorkflowRequest) GetRunStrategy() string {
 	return ""
 }
 
-func (x *WorkflowRequest) GetMaximumWorkers() uint32 {
+func (x *WorkflowRequest) GetMaximumWorkers() int32 {
 	if x != nil && x.MaximumWorkers != nil {
 		return *x.MaximumWorkers
 	}
@@ -3854,9 +3854,9 @@ func (x *WorkflowList) GetWorkflows() []*Workflow {
 
 type StepFilter struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowId    uint32                 `protobuf:"varint,1,opt,name=WorkflowId,proto3" json:"WorkflowId,omitempty"`
-	Limit         *uint32                `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
-	Offset        *uint32                `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
+	WorkflowId    int32                  `protobuf:"varint,1,opt,name=WorkflowId,proto3" json:"WorkflowId,omitempty"`
+	Limit         *int32                 `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	Offset        *int32                 `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3891,21 +3891,21 @@ func (*StepFilter) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{61}
 }
 
-func (x *StepFilter) GetWorkflowId() uint32 {
+func (x *StepFilter) GetWorkflowId() int32 {
 	if x != nil {
 		return x.WorkflowId
 	}
 	return 0
 }
 
-func (x *StepFilter) GetLimit() uint32 {
+func (x *StepFilter) GetLimit() int32 {
 	if x != nil && x.Limit != nil {
 		return *x.Limit
 	}
 	return 0
 }
 
-func (x *StepFilter) GetOffset() uint32 {
+func (x *StepFilter) GetOffset() int32 {
 	if x != nil && x.Offset != nil {
 		return *x.Offset
 	}
@@ -3914,7 +3914,7 @@ func (x *StepFilter) GetOffset() uint32 {
 
 type StepId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	StepId        int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3949,7 +3949,7 @@ func (*StepId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{62}
 }
 
-func (x *StepId) GetStepId() uint32 {
+func (x *StepId) GetStepId() int32 {
 	if x != nil {
 		return x.StepId
 	}
@@ -3958,9 +3958,9 @@ func (x *StepId) GetStepId() uint32 {
 
 type Step struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StepId        uint32                 `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	StepId        int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
 	WorkflowName  string                 `protobuf:"bytes,2,opt,name=workflow_name,json=workflowName,proto3" json:"workflow_name,omitempty"`
-	WorkflowId    uint32                 `protobuf:"varint,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	WorkflowId    int32                  `protobuf:"varint,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3996,7 +3996,7 @@ func (*Step) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{63}
 }
 
-func (x *Step) GetStepId() uint32 {
+func (x *Step) GetStepId() int32 {
 	if x != nil {
 		return x.StepId
 	}
@@ -4010,7 +4010,7 @@ func (x *Step) GetWorkflowName() string {
 	return ""
 }
 
-func (x *Step) GetWorkflowId() uint32 {
+func (x *Step) GetWorkflowId() int32 {
 	if x != nil {
 		return x.WorkflowId
 	}
@@ -4027,7 +4027,7 @@ func (x *Step) GetName() string {
 type StepRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkflowName  *string                `protobuf:"bytes,1,opt,name=workflow_name,json=workflowName,proto3,oneof" json:"workflow_name,omitempty"`
-	WorkflowId    *uint32                `protobuf:"varint,2,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
+	WorkflowId    *int32                 `protobuf:"varint,2,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4070,7 +4070,7 @@ func (x *StepRequest) GetWorkflowName() string {
 	return ""
 }
 
-func (x *StepRequest) GetWorkflowId() uint32 {
+func (x *StepRequest) GetWorkflowId() int32 {
 	if x != nil && x.WorkflowId != nil {
 		return *x.WorkflowId
 	}
@@ -4410,7 +4410,7 @@ func (x *NetIOStats) GetSentBytesRate() float32 {
 
 type GetWorkerStatsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerIds     []uint32               `protobuf:"varint,1,rep,packed,name=worker_ids,json=workerIds,proto3" json:"worker_ids,omitempty"`
+	WorkerIds     []int32                `protobuf:"varint,1,rep,packed,name=worker_ids,json=workerIds,proto3" json:"worker_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4445,7 +4445,7 @@ func (*GetWorkerStatsRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{70}
 }
 
-func (x *GetWorkerStatsRequest) GetWorkerIds() []uint32 {
+func (x *GetWorkerStatsRequest) GetWorkerIds() []int32 {
 	if x != nil {
 		return x.WorkerIds
 	}
@@ -4453,8 +4453,8 @@ func (x *GetWorkerStatsRequest) GetWorkerIds() []uint32 {
 }
 
 type GetWorkerStatsResponse struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	WorkerStats   map[uint32]*WorkerStats `protobuf:"bytes,1,rep,name=worker_stats,json=workerStats,proto3" json:"worker_stats,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkerStats   map[int32]*WorkerStats `protobuf:"bytes,1,rep,name=worker_stats,json=workerStats,proto3" json:"worker_stats,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4489,7 +4489,7 @@ func (*GetWorkerStatsResponse) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{71}
 }
 
-func (x *GetWorkerStatsResponse) GetWorkerStats() map[uint32]*WorkerStats {
+func (x *GetWorkerStatsResponse) GetWorkerStats() map[int32]*WorkerStats {
 	if x != nil {
 		return x.WorkerStats
 	}
@@ -4724,7 +4724,7 @@ type UploadTemplateResponse struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Success            bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	Message            string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	WorkflowTemplateId *uint32                `protobuf:"varint,3,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
+	WorkflowTemplateId *int32                 `protobuf:"varint,3,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
 	Name               *string                `protobuf:"bytes,4,opt,name=name,proto3,oneof" json:"name,omitempty"`
 	Version            *string                `protobuf:"bytes,5,opt,name=version,proto3,oneof" json:"version,omitempty"`
 	Description        *string                `protobuf:"bytes,6,opt,name=description,proto3,oneof" json:"description,omitempty"`
@@ -4777,7 +4777,7 @@ func (x *UploadTemplateResponse) GetMessage() string {
 	return ""
 }
 
-func (x *UploadTemplateResponse) GetWorkflowTemplateId() uint32 {
+func (x *UploadTemplateResponse) GetWorkflowTemplateId() int32 {
 	if x != nil && x.WorkflowTemplateId != nil {
 		return *x.WorkflowTemplateId
 	}
@@ -4814,7 +4814,7 @@ func (x *UploadTemplateResponse) GetParamJson() string {
 
 type RunTemplateRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowTemplateId uint32                 `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
+	WorkflowTemplateId int32                  `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
 	ParamValuesJson    string                 `protobuf:"bytes,2,opt,name=param_values_json,json=paramValuesJson,proto3" json:"param_values_json,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
@@ -4850,7 +4850,7 @@ func (*RunTemplateRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{77}
 }
 
-func (x *RunTemplateRequest) GetWorkflowTemplateId() uint32 {
+func (x *RunTemplateRequest) GetWorkflowTemplateId() int32 {
 	if x != nil {
 		return x.WorkflowTemplateId
 	}
@@ -4866,7 +4866,7 @@ func (x *RunTemplateRequest) GetParamValuesJson() string {
 
 type TemplateFilter struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowTemplateId *uint32                `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
+	WorkflowTemplateId *int32                 `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
 	Name               *string                `protobuf:"bytes,2,opt,name=name,proto3,oneof" json:"name,omitempty"`
 	Version            *string                `protobuf:"bytes,3,opt,name=version,proto3,oneof" json:"version,omitempty"`
 	unknownFields      protoimpl.UnknownFields
@@ -4903,7 +4903,7 @@ func (*TemplateFilter) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{78}
 }
 
-func (x *TemplateFilter) GetWorkflowTemplateId() uint32 {
+func (x *TemplateFilter) GetWorkflowTemplateId() int32 {
 	if x != nil && x.WorkflowTemplateId != nil {
 		return *x.WorkflowTemplateId
 	}
@@ -4926,13 +4926,13 @@ func (x *TemplateFilter) GetVersion() string {
 
 type Template struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowTemplateId uint32                 `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
+	WorkflowTemplateId int32                  `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
 	Name               string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Version            string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
 	Description        string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	ParamJson          string                 `protobuf:"bytes,5,opt,name=param_json,json=paramJson,proto3" json:"param_json,omitempty"`
 	UploadedAt         string                 `protobuf:"bytes,6,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
-	UploadedBy         *uint32                `protobuf:"varint,7,opt,name=uploaded_by,json=uploadedBy,proto3,oneof" json:"uploaded_by,omitempty"`
+	UploadedBy         *int32                 `protobuf:"varint,7,opt,name=uploaded_by,json=uploadedBy,proto3,oneof" json:"uploaded_by,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -4967,7 +4967,7 @@ func (*Template) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{79}
 }
 
-func (x *Template) GetWorkflowTemplateId() uint32 {
+func (x *Template) GetWorkflowTemplateId() int32 {
 	if x != nil {
 		return x.WorkflowTemplateId
 	}
@@ -5009,7 +5009,7 @@ func (x *Template) GetUploadedAt() string {
 	return ""
 }
 
-func (x *Template) GetUploadedBy() uint32 {
+func (x *Template) GetUploadedBy() int32 {
 	if x != nil && x.UploadedBy != nil {
 		return *x.UploadedBy
 	}
@@ -5062,14 +5062,14 @@ func (x *TemplateList) GetTemplates() []*Template {
 
 type TemplateRun struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
-	TemplateRunId      uint32                 `protobuf:"varint,1,opt,name=template_run_id,json=templateRunId,proto3" json:"template_run_id,omitempty"`
-	WorkflowTemplateId uint32                 `protobuf:"varint,2,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
+	TemplateRunId      int32                  `protobuf:"varint,1,opt,name=template_run_id,json=templateRunId,proto3" json:"template_run_id,omitempty"`
+	WorkflowTemplateId int32                  `protobuf:"varint,2,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
 	TemplateName       *string                `protobuf:"bytes,3,opt,name=template_name,json=templateName,proto3,oneof" json:"template_name,omitempty"`
 	TemplateVersion    *string                `protobuf:"bytes,4,opt,name=template_version,json=templateVersion,proto3,oneof" json:"template_version,omitempty"`
 	WorkflowName       *string                `protobuf:"bytes,5,opt,name=workflow_name,json=workflowName,proto3,oneof" json:"workflow_name,omitempty"`
-	RunBy              *uint32                `protobuf:"varint,6,opt,name=run_by,json=runBy,proto3,oneof" json:"run_by,omitempty"`
+	RunBy              *int32                 `protobuf:"varint,6,opt,name=run_by,json=runBy,proto3,oneof" json:"run_by,omitempty"`
 	Status             string                 `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`
-	WorkflowId         *uint32                `protobuf:"varint,8,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
+	WorkflowId         *int32                 `protobuf:"varint,8,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	CreatedAt          string                 `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ParamValuesJson    string                 `protobuf:"bytes,10,opt,name=param_values_json,json=paramValuesJson,proto3" json:"param_values_json,omitempty"`
 	ErrorMessage       *string                `protobuf:"bytes,11,opt,name=error_message,json=errorMessage,proto3,oneof" json:"error_message,omitempty"`
@@ -5108,14 +5108,14 @@ func (*TemplateRun) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{81}
 }
 
-func (x *TemplateRun) GetTemplateRunId() uint32 {
+func (x *TemplateRun) GetTemplateRunId() int32 {
 	if x != nil {
 		return x.TemplateRunId
 	}
 	return 0
 }
 
-func (x *TemplateRun) GetWorkflowTemplateId() uint32 {
+func (x *TemplateRun) GetWorkflowTemplateId() int32 {
 	if x != nil {
 		return x.WorkflowTemplateId
 	}
@@ -5143,7 +5143,7 @@ func (x *TemplateRun) GetWorkflowName() string {
 	return ""
 }
 
-func (x *TemplateRun) GetRunBy() uint32 {
+func (x *TemplateRun) GetRunBy() int32 {
 	if x != nil && x.RunBy != nil {
 		return *x.RunBy
 	}
@@ -5157,7 +5157,7 @@ func (x *TemplateRun) GetStatus() string {
 	return ""
 }
 
-func (x *TemplateRun) GetWorkflowId() uint32 {
+func (x *TemplateRun) GetWorkflowId() int32 {
 	if x != nil && x.WorkflowId != nil {
 		return *x.WorkflowId
 	}
@@ -5238,7 +5238,7 @@ func (x *TemplateRunList) GetRuns() []*TemplateRun {
 
 type TemplateRunFilter struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowTemplateId *uint32                `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
+	WorkflowTemplateId *int32                 `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -5273,7 +5273,7 @@ func (*TemplateRunFilter) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{83}
 }
 
-func (x *TemplateRunFilter) GetWorkflowTemplateId() uint32 {
+func (x *TemplateRunFilter) GetWorkflowTemplateId() int32 {
 	if x != nil && x.WorkflowTemplateId != nil {
 		return *x.WorkflowTemplateId
 	}
@@ -5282,8 +5282,8 @@ func (x *TemplateRunFilter) GetWorkflowTemplateId() uint32 {
 
 type UpdateTemplateRunRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TemplateRunId uint32                 `protobuf:"varint,1,opt,name=template_run_id,json=templateRunId,proto3" json:"template_run_id,omitempty"`
-	WorkflowId    *uint32                `protobuf:"varint,2,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
+	TemplateRunId int32                  `protobuf:"varint,1,opt,name=template_run_id,json=templateRunId,proto3" json:"template_run_id,omitempty"`
+	WorkflowId    *int32                 `protobuf:"varint,2,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	ErrorMessage  *string                `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3,oneof" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5319,14 +5319,14 @@ func (*UpdateTemplateRunRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{84}
 }
 
-func (x *UpdateTemplateRunRequest) GetTemplateRunId() uint32 {
+func (x *UpdateTemplateRunRequest) GetTemplateRunId() int32 {
 	if x != nil {
 		return x.TemplateRunId
 	}
 	return 0
 }
 
-func (x *UpdateTemplateRunRequest) GetWorkflowId() uint32 {
+func (x *UpdateTemplateRunRequest) GetWorkflowId() int32 {
 	if x != nil && x.WorkflowId != nil {
 		return *x.WorkflowId
 	}
@@ -5438,7 +5438,7 @@ func (x *WorkspaceRootResponse) GetRootUri() string {
 
 type DeleteTemplateRunRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TemplateRunId uint32                 `protobuf:"varint,1,opt,name=template_run_id,json=templateRunId,proto3" json:"template_run_id,omitempty"`
+	TemplateRunId int32                  `protobuf:"varint,1,opt,name=template_run_id,json=templateRunId,proto3" json:"template_run_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5473,7 +5473,7 @@ func (*DeleteTemplateRunRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{87}
 }
 
-func (x *DeleteTemplateRunRequest) GetTemplateRunId() uint32 {
+func (x *DeleteTemplateRunRequest) GetTemplateRunId() int32 {
 	if x != nil {
 		return x.TemplateRunId
 	}
@@ -5551,12 +5551,12 @@ func (x *ResourceSpec) GetDisk() float32 {
 type WorkerEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// optional because a worker may fail before registration
-	WorkerId      *uint32 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
-	WorkerName    string  `protobuf:"bytes,2,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"`    // free text (hostname or generated name)
-	Level         string  `protobuf:"bytes,3,opt,name=level,proto3" json:"level,omitempty"`                                // single letter: D/I/W/E
-	EventClass    string  `protobuf:"bytes,4,opt,name=event_class,json=eventClass,proto3" json:"event_class,omitempty"`    // e.g. "install", "bootstrap", "runtime", "network"
-	Message       string  `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`                            // short human description
-	DetailsJson   string  `protobuf:"bytes,6,opt,name=details_json,json=detailsJson,proto3" json:"details_json,omitempty"` // raw JSON string (optional)
+	WorkerId      *int32 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
+	WorkerName    string `protobuf:"bytes,2,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"`    // free text (hostname or generated name)
+	Level         string `protobuf:"bytes,3,opt,name=level,proto3" json:"level,omitempty"`                                // single letter: D/I/W/E
+	EventClass    string `protobuf:"bytes,4,opt,name=event_class,json=eventClass,proto3" json:"event_class,omitempty"`    // e.g. "install", "bootstrap", "runtime", "network"
+	Message       string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`                            // short human description
+	DetailsJson   string `protobuf:"bytes,6,opt,name=details_json,json=detailsJson,proto3" json:"details_json,omitempty"` // raw JSON string (optional)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5591,7 +5591,7 @@ func (*WorkerEvent) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{89}
 }
 
-func (x *WorkerEvent) GetWorkerId() uint32 {
+func (x *WorkerEvent) GetWorkerId() int32 {
 	if x != nil && x.WorkerId != nil {
 		return *x.WorkerId
 	}
@@ -5635,10 +5635,10 @@ func (x *WorkerEvent) GetDetailsJson() string {
 
 type WorkerEventFilter struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      *uint32                `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
+	WorkerId      *int32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
 	Level         *string                `protobuf:"bytes,2,opt,name=level,proto3,oneof" json:"level,omitempty"`  // 'D','I','W','E'
 	Class         *string                `protobuf:"bytes,3,opt,name=class,proto3,oneof" json:"class,omitempty"`  // event_class filter
-	Limit         *uint32                `protobuf:"varint,4,opt,name=limit,proto3,oneof" json:"limit,omitempty"` // max number of events (default 50)
+	Limit         *int32                 `protobuf:"varint,4,opt,name=limit,proto3,oneof" json:"limit,omitempty"` // max number of events (default 50)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5673,7 +5673,7 @@ func (*WorkerEventFilter) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{90}
 }
 
-func (x *WorkerEventFilter) GetWorkerId() uint32 {
+func (x *WorkerEventFilter) GetWorkerId() int32 {
 	if x != nil && x.WorkerId != nil {
 		return *x.WorkerId
 	}
@@ -5694,7 +5694,7 @@ func (x *WorkerEventFilter) GetClass() string {
 	return ""
 }
 
-func (x *WorkerEventFilter) GetLimit() uint32 {
+func (x *WorkerEventFilter) GetLimit() int32 {
 	if x != nil && x.Limit != nil {
 		return *x.Limit
 	}
@@ -5703,9 +5703,9 @@ func (x *WorkerEventFilter) GetLimit() uint32 {
 
 type WorkerEventRecord struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	EventId       uint32                 `protobuf:"varint,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	EventId       int32                  `protobuf:"varint,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
 	CreatedAt     string                 `protobuf:"bytes,2,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	WorkerId      *uint32                `protobuf:"varint,3,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
+	WorkerId      *int32                 `protobuf:"varint,3,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
 	WorkerName    string                 `protobuf:"bytes,4,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"`
 	Level         string                 `protobuf:"bytes,5,opt,name=level,proto3" json:"level,omitempty"`
 	EventClass    string                 `protobuf:"bytes,6,opt,name=event_class,json=eventClass,proto3" json:"event_class,omitempty"`
@@ -5745,7 +5745,7 @@ func (*WorkerEventRecord) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{91}
 }
 
-func (x *WorkerEventRecord) GetEventId() uint32 {
+func (x *WorkerEventRecord) GetEventId() int32 {
 	if x != nil {
 		return x.EventId
 	}
@@ -5759,7 +5759,7 @@ func (x *WorkerEventRecord) GetCreatedAt() string {
 	return ""
 }
 
-func (x *WorkerEventRecord) GetWorkerId() uint32 {
+func (x *WorkerEventRecord) GetWorkerId() int32 {
 	if x != nil && x.WorkerId != nil {
 		return *x.WorkerId
 	}
@@ -5847,7 +5847,7 @@ func (x *WorkerEventList) GetEvents() []*WorkerEventRecord {
 
 type WorkerEventId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	EventId       uint32                 `protobuf:"varint,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	EventId       int32                  `protobuf:"varint,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5882,7 +5882,7 @@ func (*WorkerEventId) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{93}
 }
 
-func (x *WorkerEventId) GetEventId() uint32 {
+func (x *WorkerEventId) GetEventId() int32 {
 	if x != nil {
 		return x.EventId
 	}
@@ -5894,7 +5894,7 @@ type WorkerEventPruneFilter struct {
 	Before        *string                `protobuf:"bytes,1,opt,name=before,proto3,oneof" json:"before,omitempty"` // RFC3339 UTC, e.g. "2025-08-19T00:00:00Z"
 	Level         *string                `protobuf:"bytes,2,opt,name=level,proto3,oneof" json:"level,omitempty"`   // 'D'|'I'|'W'|'E'
 	Class         *string                `protobuf:"bytes,3,opt,name=class,proto3,oneof" json:"class,omitempty"`   // event_class exact match
-	WorkerId      *uint32                `protobuf:"varint,4,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
+	WorkerId      *int32                 `protobuf:"varint,4,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
 	DryRun        bool                   `protobuf:"varint,5,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"` // if true, count only; no deletion
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5951,7 +5951,7 @@ func (x *WorkerEventPruneFilter) GetClass() string {
 	return ""
 }
 
-func (x *WorkerEventPruneFilter) GetWorkerId() uint32 {
+func (x *WorkerEventPruneFilter) GetWorkerId() int32 {
 	if x != nil && x.WorkerId != nil {
 		return *x.WorkerId
 	}
@@ -5967,8 +5967,8 @@ func (x *WorkerEventPruneFilter) GetDryRun() bool {
 
 type WorkerEventPruneResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Matched       uint32                 `protobuf:"varint,1,opt,name=matched,proto3" json:"matched,omitempty"`
-	Deleted       uint32                 `protobuf:"varint,2,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	Matched       int32                  `protobuf:"varint,1,opt,name=matched,proto3" json:"matched,omitempty"`
+	Deleted       int32                  `protobuf:"varint,2,opt,name=deleted,proto3" json:"deleted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6003,14 +6003,14 @@ func (*WorkerEventPruneResult) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{95}
 }
 
-func (x *WorkerEventPruneResult) GetMatched() uint32 {
+func (x *WorkerEventPruneResult) GetMatched() int32 {
 	if x != nil {
 		return x.Matched
 	}
 	return 0
 }
 
-func (x *WorkerEventPruneResult) GetDeleted() uint32 {
+func (x *WorkerEventPruneResult) GetDeleted() int32 {
 	if x != nil {
 		return x.Deleted
 	}
@@ -6023,22 +6023,22 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\x0ftaskqueue.proto\x12\ttaskqueue\x1a\x1bgoogle/protobuf/empty.proto\"'\n" +
 	"\fTaskResponse\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\rR\x06taskId\"W\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"W\n" +
 	"\n" +
 	"WorkerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
-	"\vconcurrency\x18\x02 \x01(\rH\x00R\vconcurrency\x88\x01\x01B\x0e\n" +
+	"\vconcurrency\x18\x02 \x01(\x05H\x00R\vconcurrency\x88\x01\x01B\x0e\n" +
 	"\f_concurrency\"\xe9\x05\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
 	"\tcontainer\x18\x03 \x01(\tR\tcontainer\x120\n" +
 	"\x11container_options\x18\x04 \x01(\tH\x01R\x10containerOptions\x88\x01\x01\x12\x1c\n" +
-	"\astep_id\x18\x05 \x01(\rH\x02R\x06stepId\x88\x01\x01\x12\x14\n" +
+	"\astep_id\x18\x05 \x01(\x05H\x02R\x06stepId\x88\x01\x01\x12\x14\n" +
 	"\x05input\x18\x06 \x03(\tR\x05input\x12\x1a\n" +
 	"\bresource\x18\a \x03(\tR\bresource\x12\x1b\n" +
 	"\x06output\x18\b \x01(\tH\x03R\x06output\x88\x01\x01\x12\x19\n" +
-	"\x05retry\x18\t \x01(\rH\x04R\x05retry\x88\x01\x01\x12\x1e\n" +
+	"\x05retry\x18\t \x01(\x05H\x04R\x05retry\x88\x01\x01\x12\x1e\n" +
 	"\bis_final\x18\n" +
 	" \x01(\bH\x05R\aisFinal\x88\x01\x01\x12\"\n" +
 	"\n" +
@@ -6048,7 +6048,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0eupload_timeout\x18\x0e \x01(\x02H\tR\ruploadTimeout\x88\x01\x01\x12\x16\n" +
 	"\x06status\x18\x0f \x01(\tR\x06status\x12\x1e\n" +
 	"\n" +
-	"dependency\x18\x10 \x03(\rR\n" +
+	"dependency\x18\x10 \x03(\x05R\n" +
 	"dependency\x12 \n" +
 	"\ttask_name\x18\x11 \x01(\tH\n" +
 	"R\btaskName\x88\x01\x01B\b\n" +
@@ -6066,17 +6066,17 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_task_name\"\xbe\a\n" +
 	"\x04Task\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\rR\x06taskId\x12\x18\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x03 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
 	"\tcontainer\x18\x04 \x01(\tR\tcontainer\x120\n" +
 	"\x11container_options\x18\x05 \x01(\tH\x01R\x10containerOptions\x88\x01\x01\x12\x1c\n" +
-	"\astep_id\x18\x06 \x01(\rH\x02R\x06stepId\x88\x01\x01\x12\x14\n" +
+	"\astep_id\x18\x06 \x01(\x05H\x02R\x06stepId\x88\x01\x01\x12\x14\n" +
 	"\x05input\x18\a \x03(\tR\x05input\x12\x1a\n" +
 	"\bresource\x18\b \x03(\tR\bresource\x12\x1b\n" +
 	"\x06output\x18\t \x01(\tH\x03R\x06output\x88\x01\x01\x12\x19\n" +
 	"\x05retry\x18\n" +
-	" \x01(\rH\x04R\x05retry\x88\x01\x01\x12\x1e\n" +
+	" \x01(\x05H\x04R\x05retry\x88\x01\x01\x12\x1e\n" +
 	"\bis_final\x18\v \x01(\bH\x05R\aisFinal\x88\x01\x01\x12\"\n" +
 	"\n" +
 	"uses_cache\x18\f \x01(\bH\x06R\tusesCache\x88\x01\x01\x12.\n" +
@@ -6084,15 +6084,15 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0frunning_timeout\x18\x0e \x01(\x02H\bR\x0erunningTimeout\x88\x01\x01\x12*\n" +
 	"\x0eupload_timeout\x18\x0f \x01(\x02H\tR\ruploadTimeout\x88\x01\x01\x12\x16\n" +
 	"\x06status\x18\x10 \x01(\tR\x06status\x12 \n" +
-	"\tworker_id\x18\x11 \x01(\rH\n" +
+	"\tworker_id\x18\x11 \x01(\x05H\n" +
 	"R\bworkerId\x88\x01\x01\x12$\n" +
-	"\vworkflow_id\x18\x12 \x01(\rH\vR\n" +
+	"\vworkflow_id\x18\x12 \x01(\x05H\vR\n" +
 	"workflowId\x88\x01\x01\x12 \n" +
 	"\ttask_name\x18\x13 \x01(\tH\fR\btaskName\x88\x01\x01\x12\x1f\n" +
-	"\vretry_count\x18\x14 \x01(\rR\n" +
+	"\vretry_count\x18\x14 \x01(\x05R\n" +
 	"retryCount\x12\x16\n" +
 	"\x06hidden\x18\x15 \x01(\bR\x06hidden\x12-\n" +
-	"\x10previous_task_id\x18\x16 \x01(\rH\rR\x0epreviousTaskId\x88\x01\x01B\b\n" +
+	"\x10previous_task_id\x18\x16 \x01(\x05H\rR\x0epreviousTaskId\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -6113,10 +6113,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\x83\x02\n" +
 	"\x06Worker\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\rR\bworkerId\x12\x12\n" +
+	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
-	"\vconcurrency\x18\x03 \x01(\rR\vconcurrency\x12\x1a\n" +
-	"\bprefetch\x18\x04 \x01(\rR\bprefetch\x12\x16\n" +
+	"\vconcurrency\x18\x03 \x01(\x05R\vconcurrency\x12\x1a\n" +
+	"\bprefetch\x18\x04 \x01(\x05R\bprefetch\x12\x16\n" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12\x12\n" +
 	"\x04ipv4\x18\x06 \x01(\tR\x04ipv4\x12\x12\n" +
 	"\x04ipv6\x18\a \x01(\tR\x04ipv6\x12\x16\n" +
@@ -6133,68 +6133,68 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0eTaskUpdateList\x12@\n" +
 	"\aupdates\x18\x01 \x03(\v2&.taskqueue.TaskUpdateList.UpdatesEntryR\aupdates\x1aQ\n" +
 	"\fUpdatesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\rR\x03key\x12+\n" +
+	"\x03key\x18\x01 \x01(\x05R\x03key\x12+\n" +
 	"\x05value\x18\x02 \x01(\v2\x15.taskqueue.TaskUpdateR\x05value:\x028\x01\"\xb3\x01\n" +
 	"\x10TaskListAndOther\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\x12 \n" +
-	"\vconcurrency\x18\x02 \x01(\rR\vconcurrency\x123\n" +
+	"\vconcurrency\x18\x02 \x01(\x05R\vconcurrency\x123\n" +
 	"\aupdates\x18\x03 \x01(\v2\x19.taskqueue.TaskUpdateListR\aupdates\x12!\n" +
-	"\factive_tasks\x18\x04 \x03(\rR\vactiveTasks\"J\n" +
+	"\factive_tasks\x18\x04 \x03(\x05R\vactiveTasks\"J\n" +
 	"\x10TaskStatusUpdate\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\rR\x06taskId\x12\x1d\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\n" +
 	"new_status\x18\x02 \x01(\tR\tnewStatus\"X\n" +
 	"\aTaskLog\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\rR\x06taskId\x12\x19\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x19\n" +
 	"\blog_type\x18\x02 \x01(\tR\alogType\x12\x19\n" +
 	"\blog_text\x18\x03 \x01(\tR\alogText\"\xac\x01\n" +
 	"\x0eGetLogsRequest\x12\x18\n" +
-	"\ataskIds\x18\x01 \x03(\rR\ataskIds\x12\x1c\n" +
-	"\tchunkSize\x18\x02 \x01(\rR\tchunkSize\x12%\n" +
-	"\vskipFromEnd\x18\x03 \x01(\rH\x00R\vskipFromEnd\x88\x01\x01\x12\x1e\n" +
+	"\ataskIds\x18\x01 \x03(\x05R\ataskIds\x12\x1c\n" +
+	"\tchunkSize\x18\x02 \x01(\x05R\tchunkSize\x12%\n" +
+	"\vskipFromEnd\x18\x03 \x01(\x05H\x00R\vskipFromEnd\x88\x01\x01\x12\x1e\n" +
 	"\blog_type\x18\x04 \x01(\tH\x01R\alogType\x88\x01\x01B\x0e\n" +
 	"\f_skipFromEndB\v\n" +
 	"\t_log_type\"R\n" +
 	"\bLogChunk\x12\x16\n" +
-	"\x06taskId\x18\x01 \x01(\rR\x06taskId\x12\x16\n" +
+	"\x06taskId\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06stdout\x18\x02 \x03(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x03 \x03(\tR\x06stderr\"7\n" +
 	"\fLogChunkList\x12'\n" +
 	"\x04logs\x18\x01 \x03(\v2\x13.taskqueue.LogChunkR\x04logs\"$\n" +
 	"\aTaskIds\x12\x19\n" +
-	"\btask_ids\x18\x01 \x03(\rR\ataskIds\"!\n" +
+	"\btask_ids\x18\x01 \x03(\x05R\ataskIds\"!\n" +
 	"\x06TaskId\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\rR\x06taskId\"'\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"'\n" +
 	"\bWorkerId\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\rR\bworkerId\"4\n" +
+	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\"4\n" +
 	"\x13WorkerStatusRequest\x12\x1d\n" +
 	"\n" +
-	"worker_ids\x18\x01 \x03(\rR\tworkerIds\"C\n" +
+	"worker_ids\x18\x01 \x03(\x05R\tworkerIds\"C\n" +
 	"\fWorkerStatus\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\rR\bworkerId\x12\x16\n" +
+	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\"K\n" +
 	"\x14WorkerStatusResponse\x123\n" +
 	"\bstatuses\x18\x01 \x03(\v2\x17.taskqueue.WorkerStatusR\bstatuses\"d\n" +
 	"\rWorkerDetails\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\rR\bworkerId\x12\x1f\n" +
+	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x1f\n" +
 	"\vworker_name\x18\x02 \x01(\tR\n" +
 	"workerName\x12\x15\n" +
-	"\x06job_id\x18\x03 \x01(\rR\x05jobId\"N\n" +
+	"\x06job_id\x18\x03 \x01(\x05R\x05jobId\"N\n" +
 	"\tWorkerIds\x12A\n" +
 	"\x0fworkers_details\x18\x01 \x03(\v2\x18.taskqueue.WorkerDetailsR\x0eworkersDetails\"f\n" +
 	"\x19PingAndGetNewTasksRequest\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\rR\bworkerId\x12,\n" +
+	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12,\n" +
 	"\x05stats\x18\x02 \x01(\v2\x16.taskqueue.WorkerStatsR\x05stats\"\x1f\n" +
 	"\x03Ack\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xdc\x03\n" +
 	"\x10ListTasksRequest\x12(\n" +
 	"\rstatus_filter\x18\x01 \x01(\tH\x00R\fstatusFilter\x88\x01\x01\x12-\n" +
-	"\x10worker_id_filter\x18\x02 \x01(\rH\x01R\x0eworkerIdFilter\x88\x01\x01\x121\n" +
-	"\x12workflow_id_filter\x18\x03 \x01(\rH\x02R\x10workflowIdFilter\x88\x01\x01\x12)\n" +
-	"\x0estep_id_filter\x18\x04 \x01(\rH\x03R\fstepIdFilter\x88\x01\x01\x12*\n" +
+	"\x10worker_id_filter\x18\x02 \x01(\x05H\x01R\x0eworkerIdFilter\x88\x01\x01\x121\n" +
+	"\x12workflow_id_filter\x18\x03 \x01(\x05H\x02R\x10workflowIdFilter\x88\x01\x01\x12)\n" +
+	"\x0estep_id_filter\x18\x04 \x01(\x05H\x03R\fstepIdFilter\x88\x01\x01\x12*\n" +
 	"\x0ecommand_filter\x18\x05 \x01(\tH\x04R\rcommandFilter\x88\x01\x01\x12\x19\n" +
-	"\x05limit\x18\x06 \x01(\rH\x05R\x05limit\x88\x01\x01\x12\x1b\n" +
-	"\x06offset\x18\a \x01(\rH\x06R\x06offset\x88\x01\x01\x12$\n" +
+	"\x05limit\x18\x06 \x01(\x05H\x05R\x05limit\x88\x01\x01\x12\x1b\n" +
+	"\x06offset\x18\a \x01(\x05H\x06R\x06offset\x88\x01\x01\x12$\n" +
 	"\vshow_hidden\x18\b \x01(\bH\aR\n" +
 	"showHidden\x88\x01\x01B\x10\n" +
 	"\x0e_status_filterB\x13\n" +
@@ -6206,25 +6206,25 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\a_offsetB\x0e\n" +
 	"\f_show_hidden\"\xea\x01\n" +
 	"\rWorkerRequest\x12\x1f\n" +
-	"\vprovider_id\x18\x01 \x01(\rR\n" +
+	"\vprovider_id\x18\x01 \x01(\x05R\n" +
 	"providerId\x12\x1b\n" +
-	"\tflavor_id\x18\x02 \x01(\rR\bflavorId\x12\x1b\n" +
-	"\tregion_id\x18\x03 \x01(\rR\bregionId\x12\x16\n" +
-	"\x06number\x18\x04 \x01(\rR\x06number\x12 \n" +
-	"\vconcurrency\x18\x05 \x01(\rR\vconcurrency\x12\x1a\n" +
-	"\bprefetch\x18\x06 \x01(\rR\bprefetch\x12\x1c\n" +
-	"\astep_id\x18\a \x01(\rH\x00R\x06stepId\x88\x01\x01B\n" +
+	"\tflavor_id\x18\x02 \x01(\x05R\bflavorId\x12\x1b\n" +
+	"\tregion_id\x18\x03 \x01(\x05R\bregionId\x12\x16\n" +
+	"\x06number\x18\x04 \x01(\x05R\x06number\x12 \n" +
+	"\vconcurrency\x18\x05 \x01(\x05R\vconcurrency\x12\x1a\n" +
+	"\bprefetch\x18\x06 \x01(\x05R\bprefetch\x12\x1c\n" +
+	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_id\"\xd7\x02\n" +
 	"\x13WorkerUpdateRequest\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\rR\bworkerId\x12$\n" +
-	"\vprovider_id\x18\x02 \x01(\rH\x00R\n" +
+	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12$\n" +
+	"\vprovider_id\x18\x02 \x01(\x05H\x00R\n" +
 	"providerId\x88\x01\x01\x12 \n" +
-	"\tflavor_id\x18\x03 \x01(\rH\x01R\bflavorId\x88\x01\x01\x12 \n" +
-	"\tregion_id\x18\x04 \x01(\rH\x02R\bregionId\x88\x01\x01\x12%\n" +
-	"\vconcurrency\x18\x05 \x01(\rH\x03R\vconcurrency\x88\x01\x01\x12\x1f\n" +
-	"\bprefetch\x18\x06 \x01(\rH\x04R\bprefetch\x88\x01\x01\x12\x1c\n" +
-	"\astep_id\x18\a \x01(\rH\x05R\x06stepId\x88\x01\x01B\x0e\n" +
+	"\tflavor_id\x18\x03 \x01(\x05H\x01R\bflavorId\x88\x01\x01\x12 \n" +
+	"\tregion_id\x18\x04 \x01(\x05H\x02R\bregionId\x88\x01\x01\x12%\n" +
+	"\vconcurrency\x18\x05 \x01(\x05H\x03R\vconcurrency\x88\x01\x01\x12\x1f\n" +
+	"\bprefetch\x18\x06 \x01(\x05H\x04R\bprefetch\x88\x01\x01\x12\x1c\n" +
+	"\astep_id\x18\a \x01(\x05H\x05R\x06stepId\x88\x01\x01B\x0e\n" +
 	"\f_provider_idB\f\n" +
 	"\n" +
 	"_flavor_idB\f\n" +
@@ -6235,13 +6235,13 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_step_id\"B\n" +
 	"\x12ListFlavorsRequest\x12\x14\n" +
-	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x16\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xa9\x03\n" +
 	"\x06Flavor\x12\x1b\n" +
-	"\tflavor_id\x18\x01 \x01(\rR\bflavorId\x12\x1f\n" +
+	"\tflavor_id\x18\x01 \x01(\x05R\bflavorId\x12\x1f\n" +
 	"\vflavor_name\x18\x02 \x01(\tR\n" +
 	"flavorName\x12\x1f\n" +
-	"\vprovider_id\x18\x03 \x01(\rR\n" +
+	"\vprovider_id\x18\x03 \x01(\x05R\n" +
 	"providerId\x12\x1a\n" +
 	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x10\n" +
 	"\x03cpu\x18\x05 \x01(\x05R\x03cpu\x12\x10\n" +
@@ -6253,49 +6253,49 @@ const file_taskqueue_proto_rawDesc = "" +
 	" \x01(\x05R\x06gpumem\x12\x17\n" +
 	"\ahas_gpu\x18\v \x01(\bR\x06hasGpu\x12&\n" +
 	"\x0fhas_quick_disks\x18\f \x01(\bR\rhasQuickDisks\x12\x1b\n" +
-	"\tregion_id\x18\r \x01(\rR\bregionId\x12\x16\n" +
+	"\tregion_id\x18\r \x01(\x05R\bregionId\x12\x16\n" +
 	"\x06region\x18\x0e \x01(\tR\x06region\x12\x1a\n" +
 	"\beviction\x18\x0f \x01(\x02R\beviction\x12\x12\n" +
 	"\x04cost\x18\x10 \x01(\x02R\x04cost\":\n" +
 	"\vFlavorsList\x12+\n" +
 	"\aflavors\x18\x01 \x03(\v2\x11.taskqueue.FlavorR\aflavors\"^\n" +
 	"\x0fListJobsRequest\x12\x19\n" +
-	"\x05limit\x18\x01 \x01(\rH\x00R\x05limit\x88\x01\x01\x12\x1b\n" +
-	"\x06offset\x18\x02 \x01(\rH\x01R\x06offset\x88\x01\x01B\b\n" +
+	"\x05limit\x18\x01 \x01(\x05H\x00R\x05limit\x88\x01\x01\x12\x1b\n" +
+	"\x06offset\x18\x02 \x01(\x05H\x01R\x06offset\x88\x01\x01B\b\n" +
 	"\x06_limitB\t\n" +
 	"\a_offset\"\x90\x02\n" +
 	"\x03Job\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\rR\x05jobId\x12\x16\n" +
+	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1b\n" +
-	"\tflavor_id\x18\x03 \x01(\rR\bflavorId\x12\x14\n" +
-	"\x05retry\x18\x04 \x01(\rR\x05retry\x12\x1b\n" +
-	"\tworker_id\x18\x05 \x01(\rR\bworkerId\x12\x16\n" +
+	"\tflavor_id\x18\x03 \x01(\x05R\bflavorId\x12\x14\n" +
+	"\x05retry\x18\x04 \x01(\x05R\x05retry\x12\x1b\n" +
+	"\tworker_id\x18\x05 \x01(\x05R\bworkerId\x12\x16\n" +
 	"\x06action\x18\x06 \x01(\tR\x06action\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\a \x01(\tR\tcreatedAt\x12\x1f\n" +
 	"\vmodified_at\x18\b \x01(\tR\n" +
 	"modifiedAt\x12 \n" +
-	"\vprogression\x18\t \x01(\rR\vprogression\x12\x10\n" +
+	"\vprogression\x18\t \x01(\x05R\vprogression\x12\x10\n" +
 	"\x03log\x18\n" +
 	" \x01(\tR\x03log\"\x1e\n" +
 	"\x05JobId\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\rR\x05jobId\".\n" +
+	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\".\n" +
 	"\bJobsList\x12\"\n" +
 	"\x04jobs\x18\x01 \x03(\v2\x0e.taskqueue.JobR\x04jobs\"+\n" +
 	"\x10JobStatusRequest\x12\x17\n" +
-	"\ajob_ids\x18\x01 \x03(\rR\x06jobIds\"\\\n" +
+	"\ajob_ids\x18\x01 \x03(\x05R\x06jobIds\"\\\n" +
 	"\tJobStatus\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\rR\x05jobId\x12\x16\n" +
+	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12 \n" +
-	"\vprogression\x18\x03 \x01(\rR\vprogression\"E\n" +
+	"\vprogression\x18\x03 \x01(\x05R\vprogression\"E\n" +
 	"\x11JobStatusResponse\x120\n" +
 	"\bstatuses\x18\x01 \x03(\v2\x14.taskqueue.JobStatusR\bstatuses\"\xb4\x01\n" +
 	"\tJobUpdate\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\rR\x05jobId\x12\x1b\n" +
+	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\x12\x1b\n" +
 	"\x06status\x18\x02 \x01(\tH\x00R\x06status\x88\x01\x01\x12\"\n" +
 	"\n" +
 	"append_log\x18\x03 \x01(\tH\x01R\tappendLog\x88\x01\x01\x12%\n" +
-	"\vprogression\x18\x04 \x01(\rH\x02R\vprogression\x88\x01\x01B\t\n" +
+	"\vprogression\x18\x04 \x01(\x05H\x02R\vprogression\x88\x01\x01B\t\n" +
 	"\a_statusB\r\n" +
 	"\v_append_logB\x0e\n" +
 	"\f_progression\"&\n" +
@@ -6319,9 +6319,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05email\x18\x03 \x01(\tR\x05email\x12\x19\n" +
 	"\bis_admin\x18\x04 \x01(\bR\aisAdmin\"!\n" +
 	"\x06UserId\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\rR\x06userId\"\x9f\x01\n" +
+	"\auser_id\x18\x01 \x01(\x05R\x06userId\"\x9f\x01\n" +
 	"\x04User\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\rR\x06userId\x12\x1f\n" +
+	"\auser_id\x18\x01 \x01(\x05R\x06userId\x12\x1f\n" +
 	"\busername\x18\x02 \x01(\tH\x00R\busername\x88\x01\x01\x12\x19\n" +
 	"\x05email\x18\x03 \x01(\tH\x01R\x05email\x88\x01\x01\x12\x1e\n" +
 	"\bis_admin\x18\x04 \x01(\bH\x02R\aisAdmin\x88\x01\x01B\v\n" +
@@ -6335,33 +6335,33 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\fold_password\x18\x02 \x01(\tR\voldPassword\x12!\n" +
 	"\fnew_password\x18\x03 \x01(\tR\vnewPassword\";\n" +
 	"\x0fRecruiterFilter\x12\x1c\n" +
-	"\astep_id\x18\x01 \x01(\rH\x00R\x06stepId\x88\x01\x01B\n" +
+	"\astep_id\x18\x01 \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_id\":\n" +
 	"\vRecruiterId\x12\x17\n" +
-	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\rR\x04rank\"\x80\x02\n" +
+	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
+	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\x80\x02\n" +
 	"\tRecruiter\x12\x17\n" +
-	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\rR\x04rank\x12 \n" +
+	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
+	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12 \n" +
 	"\vprotofilter\x18\x03 \x01(\tR\vprotofilter\x12 \n" +
-	"\vconcurrency\x18\x04 \x01(\rR\vconcurrency\x12\x1a\n" +
-	"\bprefetch\x18\x05 \x01(\rR\bprefetch\x12$\n" +
-	"\vmax_workers\x18\x06 \x01(\rH\x00R\n" +
+	"\vconcurrency\x18\x04 \x01(\x05R\vconcurrency\x12\x1a\n" +
+	"\bprefetch\x18\x05 \x01(\x05R\bprefetch\x12$\n" +
+	"\vmax_workers\x18\x06 \x01(\x05H\x00R\n" +
 	"maxWorkers\x88\x01\x01\x12\x16\n" +
-	"\x06rounds\x18\a \x01(\rR\x06rounds\x12\x18\n" +
-	"\atimeout\x18\b \x01(\rR\atimeoutB\x0e\n" +
+	"\x06rounds\x18\a \x01(\x05R\x06rounds\x12\x18\n" +
+	"\atimeout\x18\b \x01(\x05R\atimeoutB\x0e\n" +
 	"\f_max_workers\"\xe3\x02\n" +
 	"\x0fRecruiterUpdate\x12\x17\n" +
-	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\rR\x04rank\x12%\n" +
+	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
+	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12%\n" +
 	"\vprotofilter\x18\x03 \x01(\tH\x00R\vprotofilter\x88\x01\x01\x12%\n" +
-	"\vconcurrency\x18\x04 \x01(\rH\x01R\vconcurrency\x88\x01\x01\x12\x1f\n" +
-	"\bprefetch\x18\x05 \x01(\rH\x02R\bprefetch\x88\x01\x01\x12$\n" +
-	"\vmax_workers\x18\x06 \x01(\rH\x03R\n" +
+	"\vconcurrency\x18\x04 \x01(\x05H\x01R\vconcurrency\x88\x01\x01\x12\x1f\n" +
+	"\bprefetch\x18\x05 \x01(\x05H\x02R\bprefetch\x88\x01\x01\x12$\n" +
+	"\vmax_workers\x18\x06 \x01(\x05H\x03R\n" +
 	"maxWorkers\x88\x01\x01\x12\x1b\n" +
-	"\x06rounds\x18\a \x01(\rH\x04R\x06rounds\x88\x01\x01\x12\x1d\n" +
-	"\atimeout\x18\b \x01(\rH\x05R\atimeout\x88\x01\x01B\x0e\n" +
+	"\x06rounds\x18\a \x01(\x05H\x04R\x06rounds\x88\x01\x01\x12\x1d\n" +
+	"\atimeout\x18\b \x01(\x05H\x05R\atimeout\x88\x01\x01B\x0e\n" +
 	"\f_protofilterB\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
@@ -6375,27 +6375,27 @@ const file_taskqueue_proto_rawDesc = "" +
 	"recruiters\"\x8d\x01\n" +
 	"\x0eWorkflowFilter\x12 \n" +
 	"\tname_like\x18\x01 \x01(\tH\x00R\bnameLike\x88\x01\x01\x12\x19\n" +
-	"\x05limit\x18\x02 \x01(\rH\x01R\x05limit\x88\x01\x01\x12\x1b\n" +
-	"\x06offset\x18\x03 \x01(\rH\x02R\x06offset\x88\x01\x01B\f\n" +
+	"\x05limit\x18\x02 \x01(\x05H\x01R\x05limit\x88\x01\x01\x12\x1b\n" +
+	"\x06offset\x18\x03 \x01(\x05H\x02R\x06offset\x88\x01\x01B\f\n" +
 	"\n" +
 	"_name_likeB\b\n" +
 	"\x06_limitB\t\n" +
 	"\a_offset\"-\n" +
 	"\n" +
 	"WorkflowId\x12\x1f\n" +
-	"\vworkflow_id\x18\x01 \x01(\rR\n" +
+	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
 	"workflowId\"\xa4\x01\n" +
 	"\bWorkflow\x12\x1f\n" +
-	"\vworkflow_id\x18\x01 \x01(\rR\n" +
+	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
 	"workflowId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\frun_strategy\x18\x04 \x01(\tR\vrunStrategy\x12,\n" +
-	"\x0fmaximum_workers\x18\x05 \x01(\rH\x00R\x0emaximumWorkers\x88\x01\x01B\x12\n" +
+	"\x0fmaximum_workers\x18\x05 \x01(\x05H\x00R\x0emaximumWorkers\x88\x01\x01B\x12\n" +
 	"\x10_maximum_workers\"\xa0\x01\n" +
 	"\x0fWorkflowRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12&\n" +
 	"\frun_strategy\x18\x02 \x01(\tH\x00R\vrunStrategy\x88\x01\x01\x12,\n" +
-	"\x0fmaximum_workers\x18\x03 \x01(\rH\x01R\x0emaximumWorkers\x88\x01\x01B\x0f\n" +
+	"\x0fmaximum_workers\x18\x03 \x01(\x05H\x01R\x0emaximumWorkers\x88\x01\x01B\x0f\n" +
 	"\r_run_strategyB\x12\n" +
 	"\x10_maximum_workers\"A\n" +
 	"\fWorkflowList\x121\n" +
@@ -6403,23 +6403,23 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"StepFilter\x12\x1e\n" +
 	"\n" +
-	"WorkflowId\x18\x01 \x01(\rR\n" +
+	"WorkflowId\x18\x01 \x01(\x05R\n" +
 	"WorkflowId\x12\x19\n" +
-	"\x05limit\x18\x02 \x01(\rH\x00R\x05limit\x88\x01\x01\x12\x1b\n" +
-	"\x06offset\x18\x03 \x01(\rH\x01R\x06offset\x88\x01\x01B\b\n" +
+	"\x05limit\x18\x02 \x01(\x05H\x00R\x05limit\x88\x01\x01\x12\x1b\n" +
+	"\x06offset\x18\x03 \x01(\x05H\x01R\x06offset\x88\x01\x01B\b\n" +
 	"\x06_limitB\t\n" +
 	"\a_offset\"!\n" +
 	"\x06StepId\x12\x17\n" +
-	"\astep_id\x18\x01 \x01(\rR\x06stepId\"y\n" +
+	"\astep_id\x18\x01 \x01(\x05R\x06stepId\"y\n" +
 	"\x04Step\x12\x17\n" +
-	"\astep_id\x18\x01 \x01(\rR\x06stepId\x12#\n" +
+	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12#\n" +
 	"\rworkflow_name\x18\x02 \x01(\tR\fworkflowName\x12\x1f\n" +
-	"\vworkflow_id\x18\x03 \x01(\rR\n" +
+	"\vworkflow_id\x18\x03 \x01(\x05R\n" +
 	"workflowId\x12\x12\n" +
 	"\x04name\x18\x04 \x01(\tR\x04name\"\x93\x01\n" +
 	"\vStepRequest\x12(\n" +
 	"\rworkflow_name\x18\x01 \x01(\tH\x00R\fworkflowName\x88\x01\x01\x12$\n" +
-	"\vworkflow_id\x18\x02 \x01(\rH\x01R\n" +
+	"\vworkflow_id\x18\x02 \x01(\x05H\x01R\n" +
 	"workflowId\x88\x01\x01\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04nameB\x10\n" +
 	"\x0e_workflow_nameB\x0e\n" +
@@ -6451,11 +6451,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0fsent_bytes_rate\x18\x04 \x01(\x02R\rsentBytesRate\"6\n" +
 	"\x15GetWorkerStatsRequest\x12\x1d\n" +
 	"\n" +
-	"worker_ids\x18\x01 \x03(\rR\tworkerIds\"\xc7\x01\n" +
+	"worker_ids\x18\x01 \x03(\x05R\tworkerIds\"\xc7\x01\n" +
 	"\x16GetWorkerStatsResponse\x12U\n" +
 	"\fworker_stats\x18\x01 \x03(\v22.taskqueue.GetWorkerStatsResponse.WorkerStatsEntryR\vworkerStats\x1aV\n" +
 	"\x10WorkerStatsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\rR\x03key\x12,\n" +
+	"\x03key\x18\x01 \x01(\x05R\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.taskqueue.WorkerStatsR\x05value:\x028\x01\"$\n" +
 	"\x10FetchListRequest\x12\x10\n" +
 	"\x03uri\x18\x01 \x01(\tR\x03uri\")\n" +
@@ -6474,7 +6474,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x16UploadTemplateResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
-	"\x14workflow_template_id\x18\x03 \x01(\rH\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
+	"\x14workflow_template_id\x18\x03 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
 	"\x04name\x18\x04 \x01(\tH\x01R\x04name\x88\x01\x01\x12\x1d\n" +
 	"\aversion\x18\x05 \x01(\tH\x02R\aversion\x88\x01\x01\x12%\n" +
 	"\vdescription\x18\x06 \x01(\tH\x03R\vdescription\x88\x01\x01\x12\"\n" +
@@ -6487,10 +6487,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_descriptionB\r\n" +
 	"\v_param_json\"r\n" +
 	"\x12RunTemplateRequest\x120\n" +
-	"\x14workflow_template_id\x18\x01 \x01(\rR\x12workflowTemplateId\x12*\n" +
+	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12*\n" +
 	"\x11param_values_json\x18\x02 \x01(\tR\x0fparamValuesJson\"\xad\x01\n" +
 	"\x0eTemplateFilter\x125\n" +
-	"\x14workflow_template_id\x18\x01 \x01(\rH\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
+	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
 	"\x04name\x18\x02 \x01(\tH\x01R\x04name\x88\x01\x01\x12\x1d\n" +
 	"\aversion\x18\x03 \x01(\tH\x02R\aversion\x88\x01\x01B\x17\n" +
 	"\x15_workflow_template_idB\a\n" +
@@ -6498,7 +6498,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_version\"\x82\x02\n" +
 	"\bTemplate\x120\n" +
-	"\x14workflow_template_id\x18\x01 \x01(\rR\x12workflowTemplateId\x12\x12\n" +
+	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1d\n" +
@@ -6506,20 +6506,20 @@ const file_taskqueue_proto_rawDesc = "" +
 	"param_json\x18\x05 \x01(\tR\tparamJson\x12\x1f\n" +
 	"\vuploaded_at\x18\x06 \x01(\tR\n" +
 	"uploadedAt\x12$\n" +
-	"\vuploaded_by\x18\a \x01(\rH\x00R\n" +
+	"\vuploaded_by\x18\a \x01(\x05H\x00R\n" +
 	"uploadedBy\x88\x01\x01B\x0e\n" +
 	"\f_uploaded_by\"A\n" +
 	"\fTemplateList\x121\n" +
 	"\ttemplates\x18\x01 \x03(\v2\x13.taskqueue.TemplateR\ttemplates\"\xe1\x04\n" +
 	"\vTemplateRun\x12&\n" +
-	"\x0ftemplate_run_id\x18\x01 \x01(\rR\rtemplateRunId\x120\n" +
-	"\x14workflow_template_id\x18\x02 \x01(\rR\x12workflowTemplateId\x12(\n" +
+	"\x0ftemplate_run_id\x18\x01 \x01(\x05R\rtemplateRunId\x120\n" +
+	"\x14workflow_template_id\x18\x02 \x01(\x05R\x12workflowTemplateId\x12(\n" +
 	"\rtemplate_name\x18\x03 \x01(\tH\x00R\ftemplateName\x88\x01\x01\x12.\n" +
 	"\x10template_version\x18\x04 \x01(\tH\x01R\x0ftemplateVersion\x88\x01\x01\x12(\n" +
 	"\rworkflow_name\x18\x05 \x01(\tH\x02R\fworkflowName\x88\x01\x01\x12\x1a\n" +
-	"\x06run_by\x18\x06 \x01(\rH\x03R\x05runBy\x88\x01\x01\x12\x16\n" +
+	"\x06run_by\x18\x06 \x01(\x05H\x03R\x05runBy\x88\x01\x01\x12\x16\n" +
 	"\x06status\x18\a \x01(\tR\x06status\x12$\n" +
-	"\vworkflow_id\x18\b \x01(\rH\x04R\n" +
+	"\vworkflow_id\x18\b \x01(\x05H\x04R\n" +
 	"workflowId\x88\x01\x01\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\t \x01(\tR\tcreatedAt\x12*\n" +
@@ -6537,11 +6537,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0fTemplateRunList\x12*\n" +
 	"\x04runs\x18\x01 \x03(\v2\x16.taskqueue.TemplateRunR\x04runs\"c\n" +
 	"\x11TemplateRunFilter\x125\n" +
-	"\x14workflow_template_id\x18\x01 \x01(\rH\x00R\x12workflowTemplateId\x88\x01\x01B\x17\n" +
+	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01B\x17\n" +
 	"\x15_workflow_template_id\"\xb4\x01\n" +
 	"\x18UpdateTemplateRunRequest\x12&\n" +
-	"\x0ftemplate_run_id\x18\x01 \x01(\rR\rtemplateRunId\x12$\n" +
-	"\vworkflow_id\x18\x02 \x01(\rH\x00R\n" +
+	"\x0ftemplate_run_id\x18\x01 \x01(\x05R\rtemplateRunId\x12$\n" +
+	"\vworkflow_id\x18\x02 \x01(\x05H\x00R\n" +
 	"workflowId\x88\x01\x01\x12(\n" +
 	"\rerror_message\x18\x03 \x01(\tH\x01R\ferrorMessage\x88\x01\x01B\x0e\n" +
 	"\f_workflow_idB\x10\n" +
@@ -6552,14 +6552,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x15WorkspaceRootResponse\x12\x19\n" +
 	"\broot_uri\x18\x01 \x01(\tR\arootUri\"B\n" +
 	"\x18DeleteTemplateRunRequest\x12&\n" +
-	"\x0ftemplate_run_id\x18\x01 \x01(\rR\rtemplateRunId\"c\n" +
+	"\x0ftemplate_run_id\x18\x01 \x01(\x05R\rtemplateRunId\"c\n" +
 	"\fResourceSpec\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x10\n" +
 	"\x03cpu\x18\x02 \x01(\x05R\x03cpu\x12\x10\n" +
 	"\x03mem\x18\x03 \x01(\x02R\x03mem\x12\x12\n" +
 	"\x04disk\x18\x04 \x01(\x02R\x04disk\"\xd2\x01\n" +
 	"\vWorkerEvent\x12 \n" +
-	"\tworker_id\x18\x01 \x01(\rH\x00R\bworkerId\x88\x01\x01\x12\x1f\n" +
+	"\tworker_id\x18\x01 \x01(\x05H\x00R\bworkerId\x88\x01\x01\x12\x1f\n" +
 	"\vworker_name\x18\x02 \x01(\tR\n" +
 	"workerName\x12\x14\n" +
 	"\x05level\x18\x03 \x01(\tR\x05level\x12\x1f\n" +
@@ -6570,20 +6570,20 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_worker_id\"\xb2\x01\n" +
 	"\x11WorkerEventFilter\x12 \n" +
-	"\tworker_id\x18\x01 \x01(\rH\x00R\bworkerId\x88\x01\x01\x12\x19\n" +
+	"\tworker_id\x18\x01 \x01(\x05H\x00R\bworkerId\x88\x01\x01\x12\x19\n" +
 	"\x05level\x18\x02 \x01(\tH\x01R\x05level\x88\x01\x01\x12\x19\n" +
 	"\x05class\x18\x03 \x01(\tH\x02R\x05class\x88\x01\x01\x12\x19\n" +
-	"\x05limit\x18\x04 \x01(\rH\x03R\x05limit\x88\x01\x01B\f\n" +
+	"\x05limit\x18\x04 \x01(\x05H\x03R\x05limit\x88\x01\x01B\f\n" +
 	"\n" +
 	"_worker_idB\b\n" +
 	"\x06_levelB\b\n" +
 	"\x06_classB\b\n" +
 	"\x06_limit\"\x92\x02\n" +
 	"\x11WorkerEventRecord\x12\x19\n" +
-	"\bevent_id\x18\x01 \x01(\rR\aeventId\x12\x1d\n" +
+	"\bevent_id\x18\x01 \x01(\x05R\aeventId\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\x02 \x01(\tR\tcreatedAt\x12 \n" +
-	"\tworker_id\x18\x03 \x01(\rH\x00R\bworkerId\x88\x01\x01\x12\x1f\n" +
+	"\tworker_id\x18\x03 \x01(\x05H\x00R\bworkerId\x88\x01\x01\x12\x1f\n" +
 	"\vworker_name\x18\x04 \x01(\tR\n" +
 	"workerName\x12\x14\n" +
 	"\x05level\x18\x05 \x01(\tR\x05level\x12\x1f\n" +
@@ -6596,12 +6596,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0fWorkerEventList\x124\n" +
 	"\x06events\x18\x01 \x03(\v2\x1c.taskqueue.WorkerEventRecordR\x06events\"*\n" +
 	"\rWorkerEventId\x12\x19\n" +
-	"\bevent_id\x18\x01 \x01(\rR\aeventId\"\xd3\x01\n" +
+	"\bevent_id\x18\x01 \x01(\x05R\aeventId\"\xd3\x01\n" +
 	"\x16WorkerEventPruneFilter\x12\x1b\n" +
 	"\x06before\x18\x01 \x01(\tH\x00R\x06before\x88\x01\x01\x12\x19\n" +
 	"\x05level\x18\x02 \x01(\tH\x01R\x05level\x88\x01\x01\x12\x19\n" +
 	"\x05class\x18\x03 \x01(\tH\x02R\x05class\x88\x01\x01\x12 \n" +
-	"\tworker_id\x18\x04 \x01(\rH\x03R\bworkerId\x88\x01\x01\x12\x17\n" +
+	"\tworker_id\x18\x04 \x01(\x05H\x03R\bworkerId\x88\x01\x01\x12\x17\n" +
 	"\adry_run\x18\x05 \x01(\bR\x06dryRunB\t\n" +
 	"\a_beforeB\b\n" +
 	"\x06_levelB\b\n" +
@@ -6609,8 +6609,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_worker_id\"L\n" +
 	"\x16WorkerEventPruneResult\x12\x18\n" +
-	"\amatched\x18\x01 \x01(\rR\amatched\x12\x18\n" +
-	"\adeleted\x18\x02 \x01(\rR\adeleted2\x82\x1c\n" +
+	"\amatched\x18\x01 \x01(\x05R\amatched\x12\x18\n" +
+	"\adeleted\x18\x02 \x01(\x05R\adeleted2\x82\x1c\n" +
 	"\tTaskQueue\x12=\n" +
 	"\n" +
 	"SubmitTask\x12\x16.taskqueue.TaskRequest\x1a\x17.taskqueue.TaskResponse\x12<\n" +

@@ -20,14 +20,14 @@ const (
 )
 
 type SyncCounter struct {
-	m sync.Map // map[uint32]int
+	m sync.Map // map[int32]int
 }
 
-func (sc *SyncCounter) Set(taskID uint32, count int) {
+func (sc *SyncCounter) Set(taskID int32, count int) {
 	sc.m.Store(taskID, count)
 }
 
-func (sc *SyncCounter) Decrement(taskID uint32) (int, bool) {
+func (sc *SyncCounter) Decrement(taskID int32) (int, bool) {
 	val, ok := sc.m.Load(taskID)
 	if !ok {
 		return 0, true

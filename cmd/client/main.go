@@ -63,7 +63,7 @@ func sendInstallErrorWithRetry(serverAddr, token, workerName string, installErr 
 	// After exhausting attempts, give up silently (we’ll still exit fatally upstream).
 }
 
-func makeJobReporter(serverAddr, token string, jobID uint32, workerName string) install.Reporter {
+func makeJobReporter(serverAddr, token string, jobID int32, workerName string) install.Reporter {
 	return func(prog int, msg string) {
 		// fire-and-forget with small retries; don’t block install too much
 		go func(p int, m string) {
@@ -92,7 +92,7 @@ func makeJobReporter(serverAddr, token string, jobID uint32, workerName string) 
 					}
 					_, err := qclient.Client.UpdateJob(ctx, &pb.JobUpdate{
 						JobId:       jobID,
-						Progression: uint32Ptr(uint32(p)),
+						Progression: int32Ptr(int32(p)),
 						AppendLog:   &m,
 					})
 					_ = err // best-effort; swallow on failure
@@ -103,7 +103,7 @@ func makeJobReporter(serverAddr, token string, jobID uint32, workerName string) 
 	}
 }
 
-func reportJobStatus(serverAddr, token string, jobID uint32, status, msg string) {
+func reportJobStatus(serverAddr, token string, jobID int32, status, msg string) {
 	// final status setter (F or S), with a last log line
 	qclient, err := lib.CreateClient(serverAddr, token)
 	if err != nil {
@@ -117,9 +117,9 @@ func reportJobStatus(serverAddr, token string, jobID uint32, status, msg string)
 		Status:    &status,
 		AppendLog: &msg,
 		// set 100 on success, leave as-is on fail
-		Progression: func() *uint32 {
+		Progression: func() *int32 {
 			if status == "S" {
-				v := uint32(100)
+				v := int32(100)
 				return &v
 			}
 			return nil
@@ -127,7 +127,7 @@ func reportJobStatus(serverAddr, token string, jobID uint32, status, msg string)
 	})
 }
 
-func uint32Ptr(v uint32) *uint32 { return &v }
+func int32Ptr(v int32) *int32 { return &v }
 
 // main initializes the client.
 func main() {
@@ -163,7 +163,7 @@ func main() {
 		// Build a reporter only if jobID > 0
 		var reporter install.Reporter
 		if *jobID != 0 {
-			reporter = makeJobReporter(*serverAddr, *token, uint32(*jobID), *name)
+			reporter = makeJobReporter(*serverAddr, *token, int32(*jobID), *name)
 			// optional: initial "started" progress
 			reporter(5, "install: started")
 		}
@@ -174,7 +174,7 @@ func main() {
 				// best-effort final failure (include error text)
 				reporter(0, "install: failed: "+err.Error())
 				// also mark job failed
-				reportJobStatus(*serverAddr, *token, uint32(*jobID), "F", "install failed")
+				reportJobStatus(*serverAddr, *token, int32(*jobID), "F", "install failed")
 			}
 			// Best-effort: send one worker_event with retries before exiting.
 			sendInstallErrorWithRetry(*serverAddr, *token, *name, err)
@@ -185,5 +185,5 @@ func main() {
 
 	// Start the client
 	ctx := context.Background()
-	client.Run(ctx, *serverAddr, uint32(*concurrency), *name, *store, *token)
+	client.Run(ctx, *serverAddr, int32(*concurrency), *name, *store, *token)
 }

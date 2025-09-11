@@ -26,16 +26,16 @@ type Watchdog struct {
 	bornIdleTimeout time.Duration
 	offlineTimeout  time.Duration
 
-	updateWorker func(workerID uint32, newStatus string) error
-	deleteWorker func(workerID uint32) error
+	updateWorker func(workerID int32, newStatus string) error
+	deleteWorker func(workerID int32) error
 
 	tickerInterval time.Duration
 }
 
 func NewWatchdog(
 	idleTimeout, bornIdleTimeout, offlineTimeout, tickerInterval time.Duration,
-	updateWorker func(workerID uint32, newStatus string) error,
-	deleteWorker func(workerID uint32) error,
+	updateWorker func(workerID int32, newStatus string) error,
+	deleteWorker func(workerID int32) error,
 ) *Watchdog {
 	return &Watchdog{
 		idleTimeout:     idleTimeout,
@@ -48,7 +48,7 @@ func NewWatchdog(
 }
 
 // Called when a worker is created
-func (w *Watchdog) WorkerRegistered(workerID uint32, isPermanent bool) {
+func (w *Watchdog) WorkerRegistered(workerID int32, isPermanent bool) {
 	now := time.Now()
 	w.lastPing.Store(workerID, now)
 	w.lastNotIdle.Store(workerID, now)
@@ -59,7 +59,7 @@ func (w *Watchdog) WorkerRegistered(workerID uint32, isPermanent bool) {
 }
 
 // Called when a worker sends a ping
-func (w *Watchdog) WorkerPinged(workerID uint32) {
+func (w *Watchdog) WorkerPinged(workerID int32) {
 	now := time.Now()
 	w.lastPing.Store(workerID, now)
 	status, ok := w.lastStatus.Load(workerID)
@@ -87,7 +87,7 @@ func (w *Watchdog) WorkerPinged(workerID uint32) {
 }
 
 // WorkerDeleted should be called when a worker is deleted from the database
-func (w *Watchdog) WorkerDeleted(workerID uint32) {
+func (w *Watchdog) WorkerDeleted(workerID int32) {
 	w.lastPing.Delete(workerID)
 	w.lastNotIdle.Delete(workerID)
 	w.lastStatus.Delete(workerID)
@@ -99,13 +99,13 @@ func (w *Watchdog) WorkerDeleted(workerID uint32) {
 }
 
 // Called when a worker accepts a task (Assigned ➔ Accepted)
-func (w *Watchdog) TaskAccepted(workerID uint32) {
+func (w *Watchdog) TaskAccepted(workerID int32) {
 	w.activeTasksUpdate(workerID, +1)
 	w.idleStatus.Store(workerID, IdleStatusNotIdle)
 }
 
 // Called when a worker finishes a task (Success or Failure)
-func (w *Watchdog) TaskFinished(workerID uint32) {
+func (w *Watchdog) TaskFinished(workerID int32) {
 	now := time.Now()
 	w.lastNotIdle.Store(workerID, now)
 	if w.activeTasksUpdate(workerID, -1) == 0 {
@@ -114,7 +114,7 @@ func (w *Watchdog) TaskFinished(workerID uint32) {
 }
 
 // Internal: updates activeTasks counter
-func (w *Watchdog) activeTasksUpdate(workerID uint32, delta int) int {
+func (w *Watchdog) activeTasksUpdate(workerID int32, delta int) int {
 	val, _ := w.activeTasks.LoadOrStore(workerID, 0)
 	newCount := val.(int) + delta
 	if newCount < 0 {
@@ -145,7 +145,7 @@ func (w *Watchdog) Run(stopChan <-chan struct{}) {
 func (w *Watchdog) checkOffline() {
 	now := time.Now()
 	w.lastPing.Range(func(key, value any) bool {
-		workerID := key.(uint32)
+		workerID := key.(int32)
 		lastPing := value.(time.Time)
 		elapsed := now.Sub(lastPing)
 
@@ -182,7 +182,7 @@ func (w *Watchdog) checkOffline() {
 func (w *Watchdog) checkIdle() {
 	now := time.Now()
 	w.idleStatus.Range(func(key, value any) bool {
-		workerID := key.(uint32)
+		workerID := key.(int32)
 		status := value.(IdleStatus)
 
 		var timeout time.Duration
@@ -230,7 +230,7 @@ func (w *Watchdog) checkIdle() {
 }
 
 type WorkerInfo struct {
-	WorkerID    uint32
+	WorkerID    int32
 	Status      string
 	IsPermanent bool
 	ActiveTasks int

@@ -39,15 +39,15 @@ const fetchTaskErrorThreshold = 5
 
 // WorkerConfig holds worker settings from CLI args.
 type WorkerConfig struct {
-	WorkerId    uint32
+	WorkerId    int32
 	ServerAddr  string
-	Concurrency uint32
+	Concurrency int32
 	Name        string
 	Store       string
 	Token       string
 }
 
-var lostTrackSeen sync.Map // map[uint32]time.Time
+var lostTrackSeen sync.Map // map[int32]time.Time
 
 // auto detect self specs
 func (w *WorkerConfig) registerSpecs(client pb.TaskQueueClient) {
@@ -103,7 +103,7 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)
 	} else {
-		w.WorkerId = uint32(res.WorkerId)
+		w.WorkerId = res.WorkerId
 	}
 	w.registerSpecs(client)
 	log.Printf("✅ Worker %s registered with concurrency %d", w.Name, w.Concurrency)
@@ -261,7 +261,7 @@ func (w *WorkerConfig) fetchTasks(
 	ctx context.Context,
 	client pb.TaskQueueClient,
 	reporter *event.Reporter,
-	id uint32,
+	id int32,
 	sem *utils.ResizableSemaphore,
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
@@ -284,14 +284,14 @@ func (w *WorkerConfig) fetchTasks(
 		return nil, err
 	}
 
-	if res.Concurrency != uint32(w.Concurrency) {
+	if res.Concurrency != w.Concurrency {
 		log.Printf("Resizing concurrency from %d to %d", w.Concurrency, res.Concurrency)
 		sem.Resize(float64(res.Concurrency))
 		w.Concurrency = res.Concurrency
 	}
 
 	// Apply task weights if any
-	updates := make(map[uint32]float64)
+	updates := make(map[int32]float64)
 	for taskID, update := range res.Updates.Updates {
 		taskWeights.Store(taskID, update.Weight)
 		updates[taskID] = update.Weight
@@ -300,7 +300,7 @@ func (w *WorkerConfig) fetchTasks(
 
 	// Check activeTasks map
 	// 1) Build a set of server-active tasks
-	serverActiveTasks := make(map[uint32]struct{})
+	serverActiveTasks := make(map[int32]struct{})
 	for _, tid := range res.ActiveTasks {
 		serverActiveTasks[tid] = struct{}{}
 	}
@@ -334,7 +334,7 @@ func (w *WorkerConfig) fetchTasks(
 	}
 
 	activeTasks.Range(func(key, _ any) bool {
-		taskID := key.(uint32)
+		taskID := key.(int32)
 		if _, known := serverActiveTasks[taskID]; !known {
 			log.Printf("⚠️ Client believes task %d is active but server did not mention it. Will wait.", taskID)
 		}
@@ -506,7 +506,7 @@ func excuterThread(
 }
 
 // / client launcher
-func Run(ctx context.Context, serverAddr string, concurrency uint32, name, store, token string) error {
+func Run(ctx context.Context, serverAddr string, concurrency int32, name, store, token string) error {
 
 	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token}
 	taskWeights := &sync.Map{}

@@ -12,7 +12,7 @@ type ResizableSemaphore struct {
 	cond         *sync.Cond
 	tokens       float64
 	maxSize      float64
-	runningTasks map[uint32]float64 // task_id → weight
+	runningTasks map[int32]float64 // task_id → weight
 }
 
 // NewResizableSemaphore initializes a semaphore with a given size.
@@ -20,13 +20,13 @@ func NewResizableSemaphore(size float64) *ResizableSemaphore {
 	sem := &ResizableSemaphore{
 		tokens:       size,
 		maxSize:      size,
-		runningTasks: make(map[uint32]float64),
+		runningTasks: make(map[int32]float64),
 	}
 	sem.cond = sync.NewCond(&sem.mu)
 	return sem
 }
 
-func (s *ResizableSemaphore) AcquireWithWeight(ctx context.Context, weight float64, taskID uint32) error {
+func (s *ResizableSemaphore) AcquireWithWeight(ctx context.Context, weight float64, taskID int32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -66,7 +66,7 @@ func (s *ResizableSemaphore) resetTokensUnsafe() {
 }
 
 // ReleaseWeight returns the specific weight to the semaphore.
-func (s *ResizableSemaphore) ReleaseTask(taskID uint32) {
+func (s *ResizableSemaphore) ReleaseTask(taskID int32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -99,7 +99,7 @@ func (s *ResizableSemaphore) Size() float64 {
 }
 
 // ResizeTask updates the weight of a task (if the semaphore knows of it) and adjusts the semaphore accordingly.
-func (s *ResizableSemaphore) ResizeTaskIfRunning(taskID uint32, newWeight float64) {
+func (s *ResizableSemaphore) ResizeTaskIfRunning(taskID int32, newWeight float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -116,7 +116,7 @@ func (s *ResizableSemaphore) ResizeTaskIfRunning(taskID uint32, newWeight float6
 
 // ResizeTasks updates the weights of multiple tasks and adjusts the semaphore accordingly.
 // This is useful for bulk updates or when multiple tasks are being resized at once.
-func (s *ResizableSemaphore) ResizeTasks(updates map[uint32]float64) {
+func (s *ResizableSemaphore) ResizeTasks(updates map[int32]float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

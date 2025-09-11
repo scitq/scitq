@@ -169,7 +169,7 @@ func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidenti
 }
 
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
-func (ap *AzureProvider) Create(workerName, flavor, location string, jobId uint32) (string, error) {
+func (ap *AzureProvider) Create(workerName, flavor, location string, jobId int32) (string, error) {
 	var ipAddress string
 	var pubIPID string
 

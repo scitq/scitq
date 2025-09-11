@@ -134,8 +134,8 @@
               <div class="tasks-truncate-command" title={task.command}>{task.command}</div>
             </td>
             <td><a href="#/" class="link" data-testid={`worker-cell-${task.taskId}`}>{getName(task.workerId)}</a></td>
-            <td><a href={`#/workflows?open=${1}`} class="link">{getName(undefined, task.workflowId, undefined)}</a></td>
-            <td><a href={`#/workflows?open=${1}`} class="link">{getName(undefined, 1, task.stepId)}</a></td>
+            <td><a href={`#/workflows?open=${task.workflowId}`} class="link">{getName(undefined, task.workflowId, undefined)}</a></td>
+            <td><a href={`#/workflows?open=${task.workflowId}`} class="link">{getName(undefined, task.workflowId, task.stepId)}</a></td>
             <td>
               <div class="tasks-status-pill {getJobStatusClass(task.status)}" title={getJobStatusText(task.status)}></div>
             </td>

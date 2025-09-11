@@ -12,13 +12,13 @@ import (
 	"github.com/lib/pq"
 )
 
-const DefaultAssignTrigger uint32 = 500 // 5 sec
+const DefaultAssignTrigger int32 = 500 // 5 sec
 
 func (s *taskQueueServer) waitForAssignEvents(context context.Context) {
 	for {
 		s.assignPendingTasks()
 
-		for counter := uint32(0); counter <= s.assignTrigger; counter++ {
+		for counter := int32(0); counter <= s.assignTrigger; counter++ {
 			time.Sleep(10 * time.Millisecond)
 		}
 

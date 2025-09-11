@@ -68,10 +68,10 @@ type taskQueueServer struct {
 	cfg      config.Config
 	jobQueue chan Job
 	//jobWG     sync.WaitGroup
-	providers      map[uint32]providers.Provider
+	providers      map[int32]providers.Provider
 	providerConfig map[string]config.ProviderConfig
 	semaphore      chan struct{} // Semaphore to limit concurrency
-	assignTrigger  uint32
+	assignTrigger  int32
 	qm             recruitment.QuotaManager
 	watchdog       *watchdog.Watchdog
 
@@ -85,15 +85,15 @@ type taskQueueServer struct {
 }
 
 type TaskUpdateBroadcast struct {
-	TaskId   uint32
+	TaskId   int32
 	Status   string
-	WorkerId uint32
+	WorkerId int32
 }
 
 var (
 	batchMutex            sync.Mutex
 	taskUpdateQueue       []TaskUpdateBroadcast
-	lastBroadcastedStatus sync.Map // key: uint32 taskId, value: string status
+	lastBroadcastedStatus sync.Map // key: int32 taskId, value: string status
 )
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx context.Context, cancel context.CancelFunc) *taskQueueServer {
@@ -108,7 +108,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		logRoot:            logRoot,
 		jobQueue:           make(chan Job, defaultJobQueueSize),
 		semaphore:          make(chan struct{}, defaultJobConcurrency),
-		providers:          make(map[uint32]providers.Provider),
+		providers:          make(map[int32]providers.Provider),
 		providerConfig:     make(map[string]config.ProviderConfig),
 		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
 		workerWeightMemory: workerWeightMemory,
@@ -126,11 +126,11 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		time.Duration(cfg.Scitq.NewWorkerIdleTimeout)*time.Second,
 		time.Duration(cfg.Scitq.OfflineTimeout)*time.Second,
 		10*time.Second, // ticker interval
-		func(workerID uint32, newStatus string) error {
+		func(workerID int32, newStatus string) error {
 			_, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: workerID, Status: newStatus})
 			return err
 		}, // callback
-		func(workerID uint32) error {
+		func(workerID int32) error {
 			_, err := s.DeleteWorker(context.Background(), &pb.WorkerId{WorkerId: workerID})
 			return err
 		}, // callback
@@ -161,7 +161,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 				taskUpdateQueue = nil
 				batchMutex.Unlock()
 
-				latest := make(map[uint32]TaskUpdateBroadcast, 64)
+				latest := make(map[int32]TaskUpdateBroadcast, 64)
 				for _, u := range drained {
 					latest[u.TaskId] = u
 				}
@@ -176,16 +176,16 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 					payload := struct {
 						Type    string `json:"type"`
 						Payload struct {
-							TaskId   uint32 `json:"taskId"`
+							TaskId   int32  `json:"taskId"`
 							Status   string `json:"status"`
-							WorkerId uint32 `json:"workerId,omitempty"`
+							WorkerId int32  `json:"workerId,omitempty"`
 						} `json:"payload"`
 					}{
 						Type: "task-updated",
 						Payload: struct {
-							TaskId   uint32 `json:"taskId"`
+							TaskId   int32  `json:"taskId"`
 							Status   string `json:"status"`
-							WorkerId uint32 `json:"workerId,omitempty"`
+							WorkerId int32  `json:"workerId,omitempty"`
 						}{
 							TaskId:   u.TaskId,
 							Status:   u.Status,
@@ -228,7 +228,7 @@ func (s *taskQueueServer) Shutdown() {
 }
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
-	var taskID int
+	var taskID int32
 	// Determine initial status: "W" if dependencies, otherwise "P"
 	initialStatus := "P"
 	if len(req.Dependency) > 0 {
@@ -285,24 +285,24 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	payload := struct {
 		Type    string `json:"type"`
 		Payload struct {
-			TaskId   uint32  `json:"taskId"`
-			Command  string  `json:"command"`
-			StepId   *uint32 `json:"stepId,omitempty"`
-			Output   string  `json:"output,omitempty"`
-			Status   string  `json:"status"`
-			TaskName string  `json:"taskName,omitempty"`
+			TaskId   int32  `json:"taskId"`
+			Command  string `json:"command"`
+			StepId   *int32 `json:"stepId,omitempty"`
+			Output   string `json:"output,omitempty"`
+			Status   string `json:"status"`
+			TaskName string `json:"taskName,omitempty"`
 		} `json:"payload"`
 	}{
 		Type: "task-created",
 		Payload: struct {
-			TaskId   uint32  `json:"taskId"`
-			Command  string  `json:"command"`
-			StepId   *uint32 `json:"stepId,omitempty"`
-			Output   string  `json:"output,omitempty"`
-			Status   string  `json:"status"`
-			TaskName string  `json:"taskName,omitempty"`
+			TaskId   int32  `json:"taskId"`
+			Command  string `json:"command"`
+			StepId   *int32 `json:"stepId,omitempty"`
+			Output   string `json:"output,omitempty"`
+			Status   string `json:"status"`
+			TaskName string `json:"taskName,omitempty"`
 		}{
-			TaskId:  uint32(taskID),
+			TaskId:  taskID,
 			Command: req.Command,
 			Status:  initialStatus,
 		},
@@ -326,7 +326,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		ws.Broadcast(jsonData)
 	}
 
-	return &pb.TaskResponse{TaskId: uint32(taskID)}, nil
+	return &pb.TaskResponse{TaskId: taskID}, nil
 }
 
 func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empty) (*pb.RcloneConfig, error) {
@@ -394,13 +394,13 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		if !workerID.Valid {
 			log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
 		} else {
-			s.watchdog.TaskAccepted(uint32(workerID.Int32))
+			s.watchdog.TaskAccepted(int32(workerID.Int32))
 		}
 	case "S", "F":
 		if !workerID.Valid {
 			log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
 		} else {
-			s.watchdog.TaskFinished(uint32(workerID.Int32))
+			s.watchdog.TaskFinished(int32(workerID.Int32))
 		}
 	}
 
@@ -557,9 +557,9 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 	}
 
-	var workerId uint32
+	var workerId int32
 	if workerID.Valid {
-		workerId = uint32(workerID.Int32)
+		workerId = workerID.Int32
 	}
 
 	update := TaskUpdateBroadcast{
@@ -576,7 +576,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	return &pb.Ack{Success: true}, nil
 }
 
-func getLogPath(taskID uint32, logType string, logRoot string) string {
+func getLogPath(taskID int32, logType string, logRoot string) string {
 	dir := fmt.Sprintf("%s/%d", logRoot, taskID/1000)
 	_ = os.MkdirAll(dir, 0755)
 	return filepath.Join(dir, fmt.Sprintf("%d_%s.log", taskID, logType))
@@ -782,7 +782,7 @@ func (s *taskQueueServer) GetLogsChunk(ctx context.Context, req *pb.GetLogsReque
 }
 
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
-	var workerID uint32
+	var workerID int32
 	var isPermanent bool
 
 	tx, err := s.db.Begin()
@@ -863,7 +863,7 @@ func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.Worker
 	var workers []watchdog.WorkerInfo
 
 	for rows.Next() {
-		var workerID uint32
+		var workerID int32
 		var status string
 		var isPermanent bool
 		var activeTasks int
@@ -907,9 +907,9 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			return nil, fmt.Errorf("failed to start transaction: %w", err)
 		}
 
-		var workerID uint32
+		var workerID int32
 		var workerName string
-		var providerID uint32
+		var providerID int32
 		var regionName string
 		var flavorName string
 		var providerName string
@@ -935,7 +935,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 				req.StepId, req.Concurrency, req.FlavorId, req.RegionId, err)
 		}
 
-		var jobID uint32
+		var jobID int32
 		tx.QueryRow("INSERT INTO job (worker_id, flavor_id, region_id, retry) VALUES ($1, $2, $3, $4) RETURNING job_id",
 			workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
 
@@ -966,18 +966,18 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		}
 
 		type workerPayload struct {
-			WorkerId    uint32 `json:"workerId"`
+			WorkerId    int32  `json:"workerId"`
 			Name        string `json:"name"`
-			Concurrency uint32 `json:"concurrency"`
-			Prefetch    uint32 `json:"prefetch"`
+			Concurrency int32  `json:"concurrency"`
+			Prefetch    int32  `json:"prefetch"`
 			Status      string `json:"status"`
 		}
 
 		type jobPayload struct {
-			JobId      uint32    `json:"jobId"`
+			JobId      int32     `json:"jobId"`
 			Action     string    `json:"action,omitempty"`
 			Status     string    `json:"status,omitempty"`
-			WorkerID   uint32    `json:"workerId,omitempty"`
+			WorkerID   int32     `json:"workerId,omitempty"`
 			ModifiedAt time.Time `json:"modifiedAt,omitempty"`
 		}
 
@@ -1134,7 +1134,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 	}
 
 	if !is_permanent {
-		var jobId uint32
+		var jobId int32
 		err = tx.QueryRow("INSERT INTO job (worker_id,action,region_id,retry) VALUES ($1,'D',$2,$3) RETURNING job_id",
 			req.WorkerId, regionId, defaultJobRetry).Scan(&jobId)
 		if err != nil {
@@ -1144,7 +1144,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 			JobID:      jobId,
 			WorkerID:   req.WorkerId,
 			WorkerName: workerName,
-			ProviderID: uint32(providerId),
+			ProviderID: int32(providerId),
 			Region:     regionName,
 			Action:     'D',
 			Retry:      defaultJobRetry,
@@ -1170,14 +1170,14 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 	}
 
 	type workerPayload struct {
-		WorkerId uint32 `json:"workerId"`
+		WorkerId int32 `json:"workerId"`
 	}
 
 	type jobPayload struct {
-		JobId      uint32    `json:"jobId"`
+		JobId      int32     `json:"jobId"`
 		Action     string    `json:"action,omitempty"`
 		Status     string    `json:"status,omitempty"`
-		WorkerID   uint32    `json:"workerId,omitempty"`
+		WorkerID   int32     `json:"workerId,omitempty"`
 		ModifiedAt time.Time `json:"modifiedAt,omitempty"`
 	}
 
@@ -1298,7 +1298,7 @@ func (s *taskQueueServer) GetJobStatuses(ctx context.Context, req *pb.JobStatusR
 
 	for _, jobID := range req.JobIds {
 		var status string
-		var progression uint32
+		var progression int32
 
 		err := s.db.QueryRow("SELECT status, progression FROM job WHERE job_id = $1", jobID).Scan(&status, &progression)
 		if err != nil {
@@ -1329,12 +1329,12 @@ func (s *taskQueueServer) DeleteJob(ctx context.Context, req *pb.JobId) (*pb.Ack
 	payload := struct {
 		Type    string `json:"type"`
 		Payload struct {
-			JobId uint32 `json:"jobId"`
+			JobId int32 `json:"jobId"`
 		} `json:"payload"`
 	}{
 		Type: "job-deleted",
 		Payload: struct {
-			JobId uint32 `json:"jobId"`
+			JobId int32 `json:"jobId"`
 		}{
 			JobId: req.JobId,
 		},
@@ -1404,145 +1404,134 @@ func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.Worker
 }
 
 func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.TaskList, error) {
-	// Parameter validation and default values
-	params := struct {
-		Status   string
-		WorkerID int
-		StepID   int
-		Command  string
-		Limit    *int
-		Offset   int
-	}{
-		Status:   "",  // Default: no status filter
-		WorkerID: 0,   // Default: no worker filter
-		StepID:   0,   // Default: no step filter
-		Command:  "",  // Default: no command filter
-		Limit:    nil, // Default: no limit
-		Offset:   0,   // Default: start from first record
+	// Collect WHERE clauses and args in order
+	where := []string{}
+	args := []any{}
+
+	// Status filter
+	if req.StatusFilter != nil && *req.StatusFilter != "" {
+		where = append(where, fmt.Sprintf("t.status = $%d", len(args)+1))
+		args = append(args, *req.StatusFilter)
+	}
+	// Worker filter
+	if req.WorkerIdFilter != nil && *req.WorkerIdFilter != 0 {
+		where = append(where, fmt.Sprintf("t.worker_id = $%d", len(args)+1))
+		args = append(args, *req.WorkerIdFilter)
+	}
+	// Step filter
+	if req.StepIdFilter != nil && *req.StepIdFilter != 0 {
+		where = append(where, fmt.Sprintf("t.step_id = $%d", len(args)+1))
+		args = append(args, *req.StepIdFilter)
+	}
+	// Workflow filter (via step join)
+	if req.WorkflowIdFilter != nil && *req.WorkflowIdFilter != 0 {
+		where = append(where, fmt.Sprintf("s.workflow_id = $%d", len(args)+1))
+		args = append(args, *req.WorkflowIdFilter)
+	}
+	// Command filter (substring, case-insensitive)
+	if req.CommandFilter != nil && strings.TrimSpace(*req.CommandFilter) != "" {
+		where = append(where, fmt.Sprintf("t.command ILIKE '%%' || $%d || '%%'", len(args)+1))
+		args = append(args, strings.TrimSpace(*req.CommandFilter))
+	}
+	// Hidden flag: by default hide hidden tasks unless explicitly requested
+	showHidden := req.ShowHidden != nil && *req.ShowHidden
+	if !showHidden {
+		where = append(where, "t.hidden = FALSE")
 	}
 
-	// Apply filters from request if they exist
-	if req.StatusFilter != nil {
-		params.Status = *req.StatusFilter
-	}
-	if req.WorkerIdFilter != nil {
-		params.WorkerID = int(*req.WorkerIdFilter)
-	}
-	if req.StepIdFilter != nil {
-		params.StepID = int(*req.StepIdFilter)
-	}
-	if req.CommandFilter != nil {
-		params.Command = *req.CommandFilter
-	}
-	if req.Limit != nil {
-		limit := int(*req.Limit)
-		params.Limit = &limit
-	}
-	if req.Offset != nil {
-		params.Offset = int(*req.Offset)
-	}
-
-	// Add showHidden param
-	showHidden := false
-	if req.ShowHidden != nil && *req.ShowHidden {
-		showHidden = true
-	}
-
-	// Build SQL query with safe parameterized queries
+	// Base query (join step to expose workflow_id)
 	query := `
-        SELECT t.task_id, t.task_name, t.command, t.container, t.status, 
-               t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden
+        SELECT
+            t.task_id, t.task_name, t.command, t.container, t.container_options, t.status,
+            t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden,
+            s.workflow_id
         FROM task t
-        WHERE ($1 = '' OR t.status = $1)          -- Status filter (if provided)
-        AND ($2 = 0 OR t.worker_id = $2)          -- Worker filter (if provided)
-        AND ($3 = 0 OR t.step_id = $3)            -- Step filter (if provided)
-        AND ($4 = '' OR t.command LIKE '%' || $4 || '%')  -- Command filter (substring match)
-        AND ($5::boolean OR t.hidden = FALSE)
-        ORDER BY t.task_id DESC                   -- Always sort by task_id DESC
+        LEFT JOIN step s ON s.step_id = t.step_id
     `
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY t.task_id DESC"
 
-	// Execute query with pagination
-	var rows *sql.Rows
-	var err error
-
-	if params.Limit != nil {
-		// Query with limit and offset
-		query += " LIMIT $6 OFFSET $7"
-		rows, err = s.db.Query(query,
-			params.Status,
-			params.WorkerID,
-			params.StepID,
-			params.Command,
-			showHidden,
-			*params.Limit,
-			params.Offset,
-		)
+	// Pagination
+	// We support both with/without limit but always allow offset
+	if req.Limit != nil && *req.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+		args = append(args, *req.Limit)
+		// OFFSET always present (defaults to 0)
+		off := int32(0)
+		if req.Offset != nil {
+			off = *req.Offset
+		}
+		query += fmt.Sprintf(" OFFSET $%d", len(args)+1)
+		args = append(args, off)
 	} else {
-		// Query with offset only
-		query += " OFFSET $6"
-		rows, err = s.db.Query(query,
-			params.Status,
-			params.WorkerID,
-			params.StepID,
-			params.Command,
-			showHidden,
-			params.Offset,
-		)
+		// No limit: still allow offset for consistency
+		off := int32(0)
+		if req.Offset != nil {
+			off = *req.Offset
+		}
+		query += fmt.Sprintf(" OFFSET $%d", len(args)+1)
+		args = append(args, off)
 	}
 
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tasks: %w", err)
 	}
 	defer rows.Close()
 
-	// Process query results
 	var tasks []*pb.Task
-
 	for rows.Next() {
-		var task pb.Task
 		var (
-			taskName   sql.NullString
-			stepID     sql.NullInt32
-			prevTaskID sql.NullInt32
+			task         pb.Task
+			taskName     sql.NullString
+			workerIDNull sql.NullInt32
+			stepIDNull   sql.NullInt32
+			prevTaskID   sql.NullInt32
+			wfIDNull     sql.NullInt32
+			retryCount   int32
+			hidden       bool
 		)
-		var retryCount int32
-		var hidden bool
 
-		// Scan row into variables
-		err := rows.Scan(
+		if err := rows.Scan(
 			&task.TaskId,
 			&taskName,
 			&task.Command,
 			&task.Container,
+			&task.ContainerOptions,
 			&task.Status,
-			&task.WorkerId,
-			&stepID,
+			&workerIDNull,
+			&stepIDNull,
 			&prevTaskID,
 			&retryCount,
 			&hidden,
-		)
-
-		if err != nil {
-			continue // Skip rows with errors
+			&wfIDNull,
+		); err != nil {
+			log.Printf("⚠️ failed to scan task row: %v", err)
+			continue
 		}
 
-		// Handle NULL values
 		if taskName.Valid {
 			task.TaskName = &taskName.String
 		}
-		if stepID.Valid {
-			task.StepId = proto.Uint32(uint32(stepID.Int32))
+		if workerIDNull.Valid {
+			task.WorkerId = proto.Int32(int32(workerIDNull.Int32))
+		}
+		if stepIDNull.Valid {
+			task.StepId = proto.Int32(int32(stepIDNull.Int32))
 		}
 		if prevTaskID.Valid {
-			task.PreviousTaskId = proto.Uint32(uint32(prevTaskID.Int32))
+			task.PreviousTaskId = proto.Int32(int32(prevTaskID.Int32))
 		}
-		task.RetryCount = uint32(retryCount)
+		if wfIDNull.Valid {
+			task.WorkflowId = proto.Int32(int32(wfIDNull.Int32))
+		}
+		task.RetryCount = retryCount
 		task.Hidden = hidden
 
 		tasks = append(tasks, &task)
 	}
-
-	// Check for errors during iteration
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error reading tasks: %w", err)
 	}
@@ -1553,12 +1542,12 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingAndGetNewTasksRequest) (*pb.TaskListAndOther, error) {
 	var (
 		tasks          []*pb.Task
-		concurrency    uint32
+		concurrency    int32
 		input          pq.StringArray
 		resource       pq.StringArray
 		shell          sql.NullString
-		taskUpdateList = make(map[uint32]*pb.TaskUpdate)
-		activeTaskIDs  []uint32
+		taskUpdateList = make(map[int32]*pb.TaskUpdate)
+		activeTaskIDs  []int32
 	)
 
 	// 1️⃣ Fetch concurrency
@@ -1631,7 +1620,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 	// Clean up the worker's weight memory
 	if val, ok := s.workerWeightMemory.Load(req.WorkerId); ok {
 		taskMap := val.(*sync.Map)
-		activeSet := make(map[uint32]struct{}, len(activeTaskIDs))
+		activeSet := make(map[int32]struct{}, len(activeTaskIDs))
 		for _, id := range activeTaskIDs {
 			activeSet[id] = struct{}{}
 		}
@@ -1639,9 +1628,9 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 			activeSet[task.TaskId] = struct{}{}
 		}
 
-		var toDelete []uint32
+		var toDelete []int32
 		taskMap.Range(func(taskIDRaw, _ any) bool {
-			taskID := taskIDRaw.(uint32)
+			taskID := taskIDRaw.(int32)
 			if _, stillActive := activeSet[taskID]; !stillActive {
 				toDelete = append(toDelete, taskID)
 			}
@@ -1822,7 +1811,7 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 	return &pb.FlavorsList{Flavors: flavors}, nil
 }
 
-func generateJWT(userID uint32, username, secret string) (string, error) {
+func generateJWT(userID int32, username, secret string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  userID,
 		"username": username,
@@ -1838,7 +1827,7 @@ func CheckPassword(plaintext, hashed string) bool {
 
 func (s *taskQueueServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
 	// Example: Basic username/password validation (replace this with proper DB lookup and hashing)
-	var userId uint32
+	var userId int32
 	var hashedPassword string
 
 	log.Printf("Login attempt for user %s", req.Username)
@@ -2037,7 +2026,7 @@ func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequ
 		return nil, status.Error(codes.Internal, "failed to hash password")
 	}
 
-	var userID uint32
+	var userID int32
 	err = s.db.QueryRow(
 		`INSERT INTO scitq_user (username, password, email, is_admin)
 		 VALUES ($1, $2, $3, $4) RETURNING user_id`,
@@ -2052,7 +2041,7 @@ func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequ
 	}
 
 	type userCreatePayload struct {
-		UserId   uint32  `json:"userId"`
+		UserId   int32   `json:"userId"`
 		Username *string `json:"username,omitempty"`
 		Email    *string `json:"email,omitempty"`
 		IsAdmin  *bool   `json:"isAdmin,omitempty"`
@@ -2178,7 +2167,7 @@ func (s *taskQueueServer) UpdateUser(ctx context.Context, req *pb.User) (*pb.Ack
 	}
 
 	type userUpdatePayload struct {
-		UserId   uint32  `json:"userId"`
+		UserId   int32   `json:"userId"`
 		Username *string `json:"username,omitempty"`
 		Email    *string `json:"email,omitempty"`
 		IsAdmin  *bool   `json:"isAdmin,omitempty"`
@@ -2426,7 +2415,7 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 		req.RunStrategy = &defaultRunStrategy
 	}
 
-	var workflowID uint32
+	var workflowID int32
 	var err error
 	if req.MaximumWorkers == nil {
 		err = s.db.QueryRow(`
@@ -2447,7 +2436,7 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 	}
 
 	type workflowPayload struct {
-		WorkflowId uint32  `json:"workflowId"`
+		WorkflowId int32   `json:"workflowId"`
 		Name       *string `json:"name,omitempty"`
 	}
 
@@ -2479,12 +2468,12 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 	payload := struct {
 		Type    string `json:"type"`
 		Payload struct {
-			WorkflowId uint32 `json:"workflowId"`
+			WorkflowId int32 `json:"workflowId"`
 		} `json:"payload"`
 	}{
 		Type: "workflow-deleted",
 		Payload: struct {
-			WorkflowId uint32 `json:"workflowId"`
+			WorkflowId int32 `json:"workflowId"`
 		}{
 			WorkflowId: req.WorkflowId,
 		},
@@ -2557,13 +2546,13 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 	}
 
 	type stepPayload struct {
-		StepId       uint32  `json:"stepId"`
+		StepId       int32   `json:"stepId"`
 		Name         *string `json:"name,omitempty"`
-		WorkflowId   *uint32 `json:"workflowId,omitempty"`
+		WorkflowId   *int32  `json:"workflowId,omitempty"`
 		WorkflowName *string `json:"workflowName,omitempty"`
 	}
 
-	var stepID uint32
+	var stepID int32
 	var err error
 
 	if req.WorkflowId != nil && *req.WorkflowId != 0 {
@@ -2619,9 +2608,9 @@ func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.A
 	}
 
 	type stepPayload struct {
-		StepId       uint32  `json:"stepId"`
+		StepId       int32   `json:"stepId"`
 		Name         *string `json:"name,omitempty"`
-		WorkflowId   *uint32 `json:"workflowId,omitempty"`
+		WorkflowId   *int32  `json:"workflowId,omitempty"`
 		WorkflowName *string `json:"workflowName,omitempty"`
 	}
 
@@ -2644,7 +2633,7 @@ func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.A
 
 func (s *taskQueueServer) GetWorkerStats(ctx context.Context, req *pb.GetWorkerStatsRequest) (*pb.GetWorkerStatsResponse, error) {
 	resp := &pb.GetWorkerStatsResponse{
-		WorkerStats: make(map[uint32]*pb.WorkerStats),
+		WorkerStats: make(map[int32]*pb.WorkerStats),
 	}
 
 	for _, workerID := range req.WorkerIds {
@@ -2719,7 +2708,7 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 	}
 
 	// Step 2: get the local provider_id
-	var providerId uint32
+	var providerId int32
 	err = tx.QueryRowContext(ctx, `SELECT provider_id FROM provider WHERE provider_name = 'local' AND config_name = 'local'`).Scan(&providerId)
 	if err != nil {
 		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to get local provider: %w", err)
@@ -2727,7 +2716,7 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 
 	// Step 3: if no flavor, create one and attach to worker
 	if !currentFlavorId.Valid {
-		var newFlavorId uint32
+		var newFlavorId int32
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk)
 			VALUES ($1, (SELECT worker_name FROM worker WHERE worker_id=$2), $3, $4, $5)
@@ -2738,7 +2727,7 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 		}
 
 		// Fetch region_id for 'local' region of local provider
-		var localRegionId uint32
+		var localRegionId int32
 		err = tx.QueryRowContext(ctx, `
 			SELECT region_id FROM region WHERE region_name = 'local' AND provider_id = $1
 		`, providerId).Scan(&localRegionId)
@@ -2775,7 +2764,7 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 		log.Printf("✅ Assigned new local flavor %d to worker %s", newFlavorId, req.WorkerId)
 	} else {
 		// Step 4: check if the flavor belongs to local provider
-		var existingProviderId uint32
+		var existingProviderId int32
 		var existingCpu int32
 		var existingMem, existingDisk float32
 
