@@ -162,6 +162,7 @@ message TaskListAndOther {
 message TaskStatusUpdate {
     int32 task_id = 1;
     string new_status = 2;
+    optional int32 duration = 3; // in seconds
 }
 
 message TaskLog {

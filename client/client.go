@@ -141,7 +141,9 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return
 	}
 	task.Status = "R"
-	reporter.UpdateTaskAsync(task.TaskId, "R", "")
+	reporter.UpdateTaskAsync(task.TaskId, "R", "", nil)
+
+	runStart := time.Now()
 
 	//TODO: linking resource
 	for _, r := range task.Resource {
@@ -240,6 +242,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	stream.CloseSend()
 
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
+	sec := int32(time.Since(runStart).Seconds())
 	if err != nil {
 		message := fmt.Sprintf("Task %d failed: %v", task.TaskId, err)
 		log.Printf("❌ %s", message)
@@ -247,12 +250,12 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			"task_id": task.TaskId,
 			"command": task.Command,
 		})
-		task.Status = "F"                              // Mark as failed
-		reporter.UpdateTaskAsync(task.TaskId, "V", "") // Mark as failed
+		task.Status = "F"
+		reporter.UpdateTaskAsync(task.TaskId, "V", "", &sec) // Mark as failed
 	} else {
 		log.Printf("✅ Task %d completed successfully", task.TaskId)
 		task.Status = "S" // Mark as success
-		reporter.UpdateTaskAsync(task.TaskId, "U", "")
+		reporter.UpdateTaskAsync(task.TaskId, "U", "", &sec)
 	}
 }
 
@@ -411,7 +414,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 
 			task.Status = "C" // Accepted
 			activeTasks.Store(task.TaskId, struct{}{})
-			reporter.UpdateTaskAsync(task.TaskId, task.Status, "")
+			reporter.UpdateTaskAsync(task.TaskId, task.Status, "", nil)
 			log.Printf("📝 Task %d accepted", task.TaskId)
 			log.Printf("📌 Marked task %d active locally", task.TaskId)
 

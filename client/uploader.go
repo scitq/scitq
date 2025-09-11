@@ -53,7 +53,8 @@ type UploadManager struct {
 	Store          string
 	Client         pb.TaskQueueClient
 	reporter       *event.Reporter
-	pendingUploads SyncCounter // taskID → remaining files
+	pendingUploads SyncCounter         // taskID → remaining files
+	uploadStart    map[int32]time.Time // chrono: taskID → upload start time
 }
 
 func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.Reporter) *UploadManager {
@@ -64,6 +65,7 @@ func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.R
 		Client:         client,
 		reporter:       reporter,
 		pendingUploads: SyncCounter{},
+		uploadStart:    make(map[int32]time.Time),
 	}
 }
 
@@ -116,6 +118,8 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 		um.Completion <- task
 		return
 	}
+	// chrono: mark start of upload for this task
+	um.uploadStart[task.TaskId] = time.Now()
 	um.pendingUploads.Set(task.TaskId, count)
 }
 
@@ -153,7 +157,12 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 		taskID := task.TaskId
 		if remaining, done := um.pendingUploads.Decrement(taskID); done {
 			log.Printf("📤 Upload completed for task %d, marking as %s", taskID, task.Status)
-			um.reporter.UpdateTaskAsync(taskID, task.Status, "")
+			var secs int32 = 0
+			if start, ok := um.uploadStart[taskID]; ok {
+				secs = int32(time.Since(start).Seconds())
+				delete(um.uploadStart, taskID)
+			}
+			um.reporter.UpdateTaskAsync(taskID, task.Status, "", &secs)
 			activeTasks.Delete(taskID)
 		} else {
 			log.Printf("📤 Remaining uploads for task %d: %d", taskID, remaining)

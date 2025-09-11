@@ -77,6 +77,8 @@ type DownloadManager struct {
 	reporter        *event.Reporter
 	// Tracks tasks currently being scheduled for downloads to ensure idempotency at the boundary.
 	EnqueuedTasks map[int32]bool
+	// Per-task chrono map for download durations
+	DownloadStart map[int32]time.Time
 }
 
 // NewDownloadManager initializes the download manager.
@@ -93,6 +95,7 @@ func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager
 		Store:             store,
 		reporter:          reporter,
 		EnqueuedTasks:     make(map[int32]bool),
+		DownloadStart:     make(map[int32]time.Time),
 	}
 }
 
@@ -254,6 +257,10 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 		return
 	}
 	dm.EnqueuedTasks[task.TaskId] = true
+	// Start chrono for download duration
+	if _, seen := dm.DownloadStart[task.TaskId]; !seen {
+		dm.DownloadStart[task.TaskId] = time.Now()
+	}
 	numFiles := 0
 
 	// Queue input files
@@ -392,9 +399,14 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 			if count, ok := dm.TaskDownloads[fm.TaskId]; ok {
 				dm.TaskDownloads[fm.TaskId] = count - 1
 				if count <= 1 {
-					// no more input/resource files to wait we can queue task for execution
 					delete(dm.TaskDownloads, fm.TaskId)
 					delete(dm.EnqueuedTasks, fm.TaskId)
+					// Send download duration if we have a chrono
+					if start, ok := dm.DownloadStart[fm.TaskId]; ok {
+						secs := int32(time.Since(start).Seconds())
+						dm.reporter.UpdateTaskAsync(fm.TaskId, "O", "", &secs)
+						delete(dm.DownloadStart, fm.TaskId)
+					}
 					if fm.Task.Status != "F" {
 						log.Printf("🚀 Task %d ready for execution", fm.TaskId)
 						dm.ExecQueue <- fm.Task
@@ -413,6 +425,8 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 					log.Printf("⚠️ FailedQueue full; could not enqueue task %d", fm.TaskId)
 				}
 				delete(dm.EnqueuedTasks, fm.TaskId)
+				// Clear chrono to avoid leaks
+				delete(dm.DownloadStart, fm.TaskId)
 			}
 		}
 	case ResourceFile, DockerImage:
@@ -437,6 +451,8 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 								log.Printf("⚠️ FailedQueue full; could not enqueue task %d", task.TaskId)
 							}
 							delete(dm.EnqueuedTasks, task.TaskId)
+							// Clear chrono to avoid leaks
+							delete(dm.DownloadStart, task.TaskId)
 						}
 
 						// Decrement remaining count for this task
@@ -446,6 +462,12 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 						if count <= 1 {
 							delete(dm.TaskDownloads, task.TaskId)
 							delete(dm.EnqueuedTasks, task.TaskId)
+							// Send download duration if we have a chrono
+							if start, ok := dm.DownloadStart[task.TaskId]; ok {
+								secs := int32(time.Since(start).Seconds())
+								dm.reporter.UpdateTaskAsync(task.TaskId, "O", "", &secs)
+								delete(dm.DownloadStart, task.TaskId)
+							}
 							if task.Status != "F" && fm.Success {
 								log.Printf("🚀 Task %d ready for execution", task.TaskId)
 								dm.ExecQueue <- task

@@ -107,9 +107,10 @@ const (
 )
 
 type item struct {
-	kind   itemKind
-	status string // for itStatus
-	msg    string // for itLog or optional accompanying text
+	kind     itemKind
+	status   string // for itStatus
+	msg      string // for itLog or optional accompanying text
+	duration *int32 // optional duration in seconds for status updates
 }
 
 type taskWorker struct {
@@ -159,13 +160,13 @@ func (r *Reporter) getWorker(taskID int32) *taskWorker {
 
 // UpdateTaskAsync enqueues the latest desired status for a task. Newer updates overwrite
 // any queued older one (latest-wins coalescing). Sending is serialized per task by its worker.
-func (r *Reporter) UpdateTaskAsync(taskID int32, status, msg string) {
+func (r *Reporter) UpdateTaskAsync(taskID int32, status, msg string, duration *int32) {
 	if r.Client == nil || taskID == 0 || status == "" {
 		return
 	}
 	w := r.getWorker(taskID)
 	// enqueue the status item (blocks if queue is full)
-	w.ch <- item{kind: itStatus, status: status}
+	w.ch <- item{kind: itStatus, status: status, duration: duration}
 	// optionally enqueue a human/audit message
 	if msg != "" {
 		w.ch <- item{kind: itLog, msg: msg}
@@ -207,10 +208,14 @@ func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 			for attempt := 0; attempt < 3; attempt++ {
 				log.Printf("🔄 Updating task %d status to %s (attempt %d)", taskID, it.status, attempt+1)
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
-				_, err := r.Client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
+				req := &pb.TaskStatusUpdate{
 					TaskId:    taskID,
 					NewStatus: it.status,
-				})
+				}
+				if it.duration != nil {
+					req.Duration = it.duration
+				}
+				_, err := r.Client.UpdateTaskStatus(ctx, req)
 				cancel()
 				if err == nil {
 					break

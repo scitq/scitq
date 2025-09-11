@@ -902,6 +902,7 @@ type TaskStatusUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	NewStatus     string                 `protobuf:"bytes,2,opt,name=new_status,json=newStatus,proto3" json:"new_status,omitempty"`
+	Duration      *int32                 `protobuf:"varint,3,opt,name=duration,proto3,oneof" json:"duration,omitempty"` // in seconds
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -948,6 +949,13 @@ func (x *TaskStatusUpdate) GetNewStatus() string {
 		return x.NewStatus
 	}
 	return ""
+}
+
+func (x *TaskStatusUpdate) GetDuration() int32 {
+	if x != nil && x.Duration != nil {
+		return *x.Duration
+	}
+	return 0
 }
 
 type TaskLog struct {
@@ -6139,11 +6147,13 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\x12 \n" +
 	"\vconcurrency\x18\x02 \x01(\x05R\vconcurrency\x123\n" +
 	"\aupdates\x18\x03 \x01(\v2\x19.taskqueue.TaskUpdateListR\aupdates\x12!\n" +
-	"\factive_tasks\x18\x04 \x03(\x05R\vactiveTasks\"J\n" +
+	"\factive_tasks\x18\x04 \x03(\x05R\vactiveTasks\"x\n" +
 	"\x10TaskStatusUpdate\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\n" +
-	"new_status\x18\x02 \x01(\tR\tnewStatus\"X\n" +
+	"new_status\x18\x02 \x01(\tR\tnewStatus\x12\x1f\n" +
+	"\bduration\x18\x03 \x01(\x05H\x00R\bduration\x88\x01\x01B\v\n" +
+	"\t_duration\"X\n" +
 	"\aTaskLog\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x19\n" +
 	"\blog_type\x18\x02 \x01(\tR\alogType\x12\x19\n" +
@@ -6937,6 +6947,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[1].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[2].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[3].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[11].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[13].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[26].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[27].OneofWrappers = []any{}

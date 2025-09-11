@@ -364,6 +364,13 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	var workerID sql.NullInt32
 	var oldStatus string
 	var curRetry sql.NullInt32
+
+	if req.Duration == nil {
+		log.Printf("🔔 Updating task %d status to %s (duration null)", req.TaskId, req.NewStatus)
+	} else {
+		log.Printf("🔔 Updating task %d status to %s (duration: %d)", req.TaskId, req.NewStatus, *req.Duration)
+	}
+
 	err := s.db.QueryRowContext(ctx, `
         WITH prior AS (
             SELECT status AS old_status, retry
@@ -372,14 +379,18 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
         ), upd AS (
             UPDATE task
                SET status = $1,
-                   modified_at = NOW()
+                   modified_at = NOW(),
+                   run_started_at = CASE WHEN $1 = 'R' THEN NOW() ELSE run_started_at END,
+                   download_duration = CASE WHEN $3::INT IS NOT NULL AND $1 = 'O' THEN $3::INT ELSE download_duration END,
+                   run_duration      = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('U','V') THEN $3::INT ELSE run_duration END,
+                   upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END
              WHERE task_id = $2
                AND status <> $1
              RETURNING worker_id
         )
         SELECT u.worker_id, p.old_status, p.retry
           FROM upd u, prior p;
-    `, req.NewStatus, req.TaskId).Scan(&workerID, &oldStatus, &curRetry)
+    `, req.NewStatus, req.TaskId, req.Duration).Scan(&workerID, &oldStatus, &curRetry)
 	if err == sql.ErrNoRows {
 		// Idempotent/same-status update: nothing changed. Log and return success Ack.
 		log.Printf("⚠️ no-op status update for task %d: already %s", req.TaskId, req.NewStatus)
@@ -643,7 +654,7 @@ func (s *taskQueueServer) StreamTaskLogsErr(req *pb.TaskId, stream pb.TaskQueue_
 				return fmt.Errorf("failed to query task status: %w", err)
 			}
 			if status == "S" || status == "F" {
-				fmt.Println("Task is finished (success or failed).")
+				log.Printf("Task %d is finished (success or failed).", req.TaskId)
 				return nil
 			}
 		}
@@ -692,7 +703,7 @@ func (s *taskQueueServer) StreamTaskLogsOutput(req *pb.TaskId, stream pb.TaskQue
 				return fmt.Errorf("failed to query task status: %w", err)
 			}
 			if status == "S" || status == "F" {
-				fmt.Println("Task is finished (success or failed).")
+				log.Printf("Task %d is finished (success or failed).", req.TaskId)
 				return nil
 			}
 		}
