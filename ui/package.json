@@ -15,7 +15,7 @@
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
-    "gen-proto": "protoc --ts_out ./gen --proto_path=../proto taskqueue.proto"
+    "gen-proto": "protoc --plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts --ts_out ./gen --proto_path=../proto taskqueue.proto"
   },
   "devDependencies": {
     "@protobuf-ts/plugin": "^2.11.1",

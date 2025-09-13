@@ -558,6 +558,7 @@ type Worker struct {
 	Flavor        string                 `protobuf:"bytes,8,opt,name=flavor,proto3" json:"flavor,omitempty"`
 	Provider      string                 `protobuf:"bytes,9,opt,name=provider,proto3" json:"provider,omitempty"`
 	Region        string                 `protobuf:"bytes,10,opt,name=region,proto3" json:"region,omitempty"`
+	StepId        *int32                 `protobuf:"varint,11,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -660,6 +661,13 @@ func (x *Worker) GetRegion() string {
 		return x.Region
 	}
 	return ""
+}
+
+func (x *Worker) GetStepId() int32 {
+	if x != nil && x.StepId != nil {
+		return *x.StepId
+	}
+	return 0
 }
 
 type WorkersList struct {
@@ -6455,7 +6463,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"_task_nameB\x13\n" +
 	"\x11_previous_task_id\"1\n" +
 	"\bTaskList\x12%\n" +
-	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\x83\x02\n" +
+	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\xad\x02\n" +
 	"\x06Worker\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -6467,7 +6475,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x06flavor\x18\b \x01(\tR\x06flavor\x12\x1a\n" +
 	"\bprovider\x18\t \x01(\tR\bprovider\x12\x16\n" +
 	"\x06region\x18\n" +
-	" \x01(\tR\x06region\":\n" +
+	" \x01(\tR\x06region\x12\x1c\n" +
+	"\astep_id\x18\v \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
+	"\n" +
+	"\b_step_id\":\n" +
 	"\vWorkersList\x12+\n" +
 	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"\x14\n" +
 	"\x12ListWorkersRequest\"$\n" +
@@ -7332,6 +7343,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[1].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[2].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[3].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[5].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[11].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[13].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[26].OneofWrappers = []any{}

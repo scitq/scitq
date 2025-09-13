@@ -618,12 +618,45 @@ export async function getSteps(workflowId: number, limit?: number, offset?: numb
  *
  * @param StepId - The ID of the step to delete.
  */
+
 export async function delStep(StepId: number) {
   try {
     await client.deleteStep({ stepId: StepId }, await callOptionsUserToken());
     console.log("Step deleted successfully!");
   } catch (error) {
     console.error("Error deleting step: ", error);
+  }
+}
+
+/**
+ * Retrieves statistics for steps, optionally filtered by workflow, step IDs, and hidden inclusion.
+ * @param params - Optional parameters for filtering stats:
+ *   - workflowId: filter by workflow ID
+ *   - stepIds: filter by specific step IDs
+ *   - includeHidden: whether to include hidden steps
+ * @returns Promise resolving to an array of StepStats
+ */
+export async function getStepStats(params?: {
+  workflowId?: number;
+  stepIds?: number[];
+  includeHidden?: boolean;
+}): Promise<taskqueue.StepStats[]> {
+  try {
+    const request: taskqueue.StepStatsRequest = { stepIds: [] };
+    if (params?.workflowId !== undefined) {
+      request.workflowId = params.workflowId;
+    }
+    if (params?.stepIds !== undefined) {
+      request.stepIds = params.stepIds;
+    }
+    if (params?.includeHidden !== undefined) {
+      request.includeHidden = params.includeHidden;
+    }
+    const response = await client.getStepStats(request, await callOptionsUserToken());
+    return response.response?.stats || [];
+  } catch (error) {
+    console.error("Error while retrieving step stats:", error);
+    return [];
   }
 }
 

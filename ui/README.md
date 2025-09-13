@@ -154,7 +154,8 @@ npm run gen-proto
 ```
 This script runs:
 ```bash
-protoc \                                                     
+cd ui
+protoc \
   --plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts \
   --ts_out=./gen \
   -I ../proto \

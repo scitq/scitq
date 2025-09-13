@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getWorkFlow } from '../lib/api';
+  import { getWorkFlow, getWorkers } from '../lib/api';
+  // Workers and mapping by stepId (passed down to WorkflowList → StepList)
+  let workers: taskqueue.Worker[] = [];
+  let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
   import { wsClient } from '../lib/wsClient';
   import WorkflowList from '../components/WorkflowList.svelte';
   import '../styles/workflow.css';
@@ -28,14 +31,31 @@
   // WebSocket unsubscribe function
   let unsubscribeWS: () => void;
 
+  function mapWorkersToStepIds(workers: taskqueue.Worker[]): Map<number, taskqueue.Worker[]> {
+    const map = new Map<number, taskqueue.Worker[]>();
+    for (const w of workers) {
+      if (w.stepId == null) continue;
+      const list = map.get(w.stepId);
+      if (list) list.push(w);
+      else map.set(w.stepId, [w]);
+    }
+    return map;
+  }
+
   /**
    * Component initialization - loads initial workflows and sets up WebSocket
    * @async
    */
   onMount(async () => {
     workflows = await getWorkFlow(undefined, WORKFLOWS_CHUNK_SIZE, 0);
+    workers = await getWorkers();
+    workersPerStepId = mapWorkersToStepIds(workers);
+    console.log('Loaded workers:', workers);
+    console.log('Workers per stepId map:', workersPerStepId);
     unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
   });
+
+
 
   /**
    * Component cleanup - unsubscribes from WebSocket
@@ -134,7 +154,7 @@
       bind:this={listContainer} 
       on:scroll={handleScroll}
     >
-      <WorkflowList {workflows} />
+      <WorkflowList {workflows} workersPerStepId={workersPerStepId} />
     </div>
 
   </div>

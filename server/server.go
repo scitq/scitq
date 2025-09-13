@@ -1673,6 +1673,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	var workers []*pb.Worker
 	var rows *sql.Rows
 	var err error
+	var stepId sql.NullInt32
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1692,7 +1693,8 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		COALESCE(w.ipv6::text, '') AS ipv6, 
 		COALESCE(r.region_name, ''), 
 		COALESCE(p.provider_name||'.'||p.config_name, ''),
-		COALESCE(f.flavor_name, '')
+		COALESCE(f.flavor_name, ''),
+		w.step_id
 	FROM worker w
 	LEFT JOIN region r ON r.region_id=w.region_id
 	LEFT JOIN provider p ON r.provider_id=p.provider_id
@@ -1708,10 +1710,13 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	for rows.Next() {
 		var worker pb.Worker
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
-			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor)
+			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor, &stepId)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue
+		}
+		if stepId.Valid {
+			worker.StepId = &stepId.Int32
 		}
 		workers = append(workers, &worker)
 	}
@@ -3100,9 +3105,9 @@ func (s *taskQueueServer) GetStepStats(ctx context.Context, req *pb.StepStatsReq
 		  COUNT(*) FILTER (WHERE t.status = 'P') AS pending_tasks,
 		  COUNT(*) FILTER (WHERE t.status = 'C') AS accepted_tasks,
 		  COUNT(*) FILTER (WHERE t.status = 'O') AS onhold_tasks,
-		  COUNT(*) FILTER (WHERE t.status = 'R') AS running_tasks,
+		  COUNT(*) FILTER (WHERE t.status in ('R','U')) AS running_tasks,
 		  COUNT(*) FILTER (WHERE t.status = 'S') AS successful_tasks,
-		  COUNT(*) FILTER (WHERE t.status = 'F') AS failed_tasks,
+		  COUNT(*) FILTER (WHERE t.status in ('F','V')) AS failed_tasks,
 
 		  -- Success run stats (only succeeded tasks)
 		  AVG(t.run_duration::float8)    FILTER (WHERE t.status = 'S') AS success_run_avg,

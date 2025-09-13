@@ -135,6 +135,7 @@ message Worker {
     string flavor = 8;
     string provider = 9;
     string region = 10;
+    optional int32 step_id = 11;
 }
 
 

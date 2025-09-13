@@ -1404,11 +1404,11 @@ func (c *CLI) StepStats() error {
 	}
 	if attr.Totals {
 		fmt.Println(strings.Repeat("-", 222))
-		ellapsedTime := float32(0)
+		elapsedTime := float32(0)
 		if startTime != nil && endTime != nil {
-			ellapsedTime = *endTime - *startTime
+			elapsedTime = *endTime - *startTime
 		}
-		fmt.Printf("Ellapsed time: %-10s %-65sCumulated times: %-22s %-22s %-22s %-22s %-22s\n", formatDuration(ellapsedTime), "",
+		fmt.Printf("Elapsed time: %-10s %-65sCumulated times: %-22s %-22s %-22s %-22s %-22s\n", formatDuration(elapsedTime), "",
 			formatDuration(totalSuccess),
 			formatDuration(totalFailed),
 			formatDuration(totalRunning),

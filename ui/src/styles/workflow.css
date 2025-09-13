@@ -76,6 +76,59 @@
   max-width: 300px;
 }
 
+/* === Workflow progress bar fill support === */
+.wf-progress {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  overflow: hidden; /* make inner segments clip to rounded corners */
+  box-shadow: 0px 0.75px 1.5px rgba(0, 0, 0, 0.2);
+  background-color: transparent; /* container background already set on .wf-progress-bar */
+}
+
+/* A generic segment; position left-to-right, width set inline (e.g., style="width: 42%") */
+.wf-progress__segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;                 /* we use translateX to place it cumulatively */
+  height: 100%;
+  transition: width 0.5s ease, transform 0.5s ease;
+  will-change: width, transform;
+}
+
+/* Success (green) segment */
+.wf-progress__segment--success {
+  background-color: var(--success-color, #2e7d32); /* fall back to green if custom var missing */
+}
+
+/* Fail (red) segment */
+.wf-progress__segment--fail {
+  background-color: var(--danger-color, #c62828); /* fall back to red if custom var missing */
+}
+
+/* Running (blue/primary) segment — optional if you want to show in-progress as well */
+.wf-progress__segment--running {
+  background-color: var(--primary-color);
+}
+
+/* Subtle inner glow in dark mode for segments */
+[data-theme="dark"] .wf-progress__segment {
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.08);
+}
+
+/* If you prefer a single bar using gradients (alternative to segments) */
+.wf-progress--gradient {
+  background: linear-gradient(
+    to right,
+    var(--success-color, #2e7d32) 0 var(--wf-success-stop, 0%),
+    var(--danger-color, #c62828) var(--wf-success-stop, 0%) var(--wf-fail-stop, 0%),
+    transparent var(--wf-fail-stop, 0%) 100%
+  );
+  transition: background-size 0.5s ease;
+}
+
 /* Workflow list container */
 .workflow-list-container {
     height: 100%;

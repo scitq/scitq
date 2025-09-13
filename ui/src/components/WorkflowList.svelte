@@ -9,6 +9,7 @@
    * @type {Array<{workflowId: number, name: string}>}
    */
   export let workflows = [];
+  export let workersPerStepId: Map<number, taskqueue.Worker[]>;
 
   /**
    * Set tracking which workflows are currently expanded
@@ -90,7 +91,7 @@
       <!-- Steps list for expanded workflows -->
       {#if expandedWorkflows.has(wf.workflowId)}
         <div class="wf-steps">
-          <StepList workflowId={wf.workflowId} />
+          <StepList workflowId={wf.workflowId} workersPerStepId={workersPerStepId} />
         </div>
       {/if}
     {/each}

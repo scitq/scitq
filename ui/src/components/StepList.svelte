@@ -1,15 +1,17 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import * as grpcWeb from 'grpc-web';
-  import { getSteps, delStep } from '../lib/api';
+  import { getStepStats, delStep } from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { RefreshCw, PauseCircle, CircleX, Eraser } from 'lucide-svelte';
+  import { formatDuration, showIfNonZero } from '../lib/format';
 
   /**
    * Workflow ID passed as a prop to the component
    * @type {number}
    */
   export let workflowId: number;
+  export let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
 
   /**
    * Array of loaded steps for the workflow
@@ -78,6 +80,13 @@
    */
   let unsubscribeWS: () => void;
 
+  // Safe percent helper for progress segments
+  function pct(part?: number, total?: number): number {
+    if (!total || total <= 0 || !part || part <= 0) return 0;
+    const p = (part / total) * 100;
+    return p < 0 ? 0 : p > 100 ? 100 : p;
+  }
+
   /**
    * Component lifecycle hook that runs on mount
    * Loads initial steps and subscribes to WebSocket messages
@@ -85,7 +94,7 @@
    * @returns {Promise<void>}
    */
   onMount(async () => {
-    steps = await getSteps(workflowId, STEPS_CHUNK_SIZE, 0);
+    steps = await getStepStats({ workflowId });
     unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
   });
 
@@ -181,18 +190,10 @@
    */
   async function loadMoreSteps() {
     if (isLoading || !hasMoreSteps) return;
-
     isLoading = true;
     try {
-      const newSteps = await getSteps(workflowId, STEPS_CHUNK_SIZE, steps.length);
-
-      if (newSteps.length === 0) {
-        hasMoreSteps = false;
-      } else {
-        steps = [...steps, ...newSteps];
-      }
-    } catch (error) {
-      console.error("Failed to load more steps:", error);
+      // Stats endpoint returns the whole set; disable infinite scroll for now.
+      hasMoreSteps = false;
     } finally {
       isLoading = false;
     }
@@ -218,10 +219,11 @@
             <th>Name</th>
             <th>Workers</th>
             <th>Progress</th>
+            <th>Queued</th>
             <th>Starting</th>
-            <th>Progress</th>
-            <th>Successes</th>
-            <th>Fails</th>
+            <th>Running</th>
+            <th>Success</th>
+            <th>Fail</th>
             <th>Total</th>
             <th>Average duration [min-max]</th>
             <th>Actions</th>
@@ -231,15 +233,76 @@
           {#each steps as step (step.stepId)}
             <tr data-testid={`step-${step.stepId}`}>
               <td>{step.stepId}</td>
-              <td><a href="#/tasks?workflowId={workflowId}&stepId={step.stepId}" class="workerCompo-clickable">{step.name}</a></td>
-              <td>Worker</td>
-              <td><div class="wf-progress-bar"></div></td>
-              <td>Starting</td>
-              <td>Progress</td>
-              <td>Successes</td>
-              <td>Fails</td>
-              <td>Total</td>
-              <td>Average duration [min-max]</td>
+              <td><a href="#/tasks?stepId={step.stepId}" class="workerCompo-clickable">{step.stepName}</a></td>
+              <td>
+                {#each workersPerStepId.get(step.stepId) || [] as worker (worker.workerId)}
+                  <div class="worker-badge" title={`Worker ID: ${worker.workerId}`}>
+                    <a href="#/tasks?workerId={worker.workerId}" class="workerCompo-clickable">{worker.name}</a>
+                  </div>
+                {/each}
+              </td>
+              <td><div class="wf-progress-bar">
+                <div class="wf-progress">
+                  <!-- success segment -->
+                  <div class="wf-progress__segment wf-progress__segment--success"
+                       style="width: {pct(step.successfulTasks, step.totalTasks)}%; transform: translateX(0%);"></div>
+
+                  <!-- fail segment: starts after success -->
+                  <div class="wf-progress__segment wf-progress__segment--fail"
+                       style="width: {pct(step.failedTasks, step.totalTasks)}%; transform: translateX({pct(step.successfulTasks, step.totalTasks)}%);"></div>
+
+                  <!-- optional running segment: starts after success+fail -->
+                  <div class="wf-progress__segment wf-progress__segment--running"
+                       style="width: {pct(step.runningTasks, step.totalTasks)}%; transform: translateX({pct(step.successfulTasks, step.totalTasks) + pct(step.failedTasks, step.totalTasks)}%);"></div>
+                </div>
+              </div></td>
+              <td>{showIfNonZero(step.waitingTasks + step.pendingTasks) }</td> 
+              <td>{showIfNonZero(step.acceptedTasks + step.onholdTasks) }</td>
+              <td>{showIfNonZero(step.runningTasks) }</td>
+              <td class="success-cell">{showIfNonZero(step.successfulTasks) }</td>
+              <td class="fail-cell">{showIfNonZero(step.failedTasks) }</td>
+              <td>{showIfNonZero(step.totalTasks) }</td>
+              <td class="duration-cell">
+                {#if step.runningTasks > 0}
+                  <div class="duration-grid duration-running">
+                    <span class="label">Running:</span>
+                    <span class="avg tabnum">{formatDuration(step.currentRunStats?.average)}</span>
+                    {#if step.runningTasks > 1}
+                      <span class="bracket">[</span>
+                      <span class="min tabnum">{formatDuration(step.currentRunStats?.min)}</span>
+                      <span class="dash">–</span>
+                      <span class="max tabnum">{formatDuration(step.currentRunStats?.max)}</span>
+                      <span class="bracket">]</span>
+                    {/if}
+                  </div>
+                {/if}
+                {#if step.successfulTasks > 0}
+                  <div class="duration-grid duration-success">
+                    <span class="label">Success:</span>
+                    <span class="avg tabnum">{formatDuration(step.successRunStats?.average)}</span>
+                    {#if step.successfulTasks > 1}
+                      <span class="bracket">[</span>
+                      <span class="min tabnum">{formatDuration(step.successRunStats?.min)}</span>
+                      <span class="dash">–</span>
+                      <span class="max tabnum">{formatDuration(step.successRunStats?.max)}</span>
+                      <span class="bracket">]</span>
+                    {/if}
+                  </div>
+                {/if}
+                {#if step.failedTasks > 0}
+                  <div class="duration-grid duration-fail">
+                    <span class="label">Fail:</span>
+                    <span class="avg tabnum">{formatDuration(step.failedRunStats?.average)}</span>
+                    {#if step.failedTasks > 1}
+                      <span class="bracket">[</span>
+                      <span class="min tabnum">{formatDuration(step.failedRunStats?.min)}</span>
+                      <span class="dash">–</span>
+                      <span class="max tabnum">{formatDuration(step.failedRunStats?.max)}</span>
+                      <span class="bracket">]</span>
+                    {/if}
+                  </div>
+                {/if}
+              </td>
               <td class="workerCompo-actions">
                 <button class="btn-action" title="Pause"><PauseCircle /></button>
                 <button class="btn-action" title="Reset"><RefreshCw /></button>
@@ -255,3 +318,35 @@
     <p>No steps found for workflow #{workflowId}</p>
   {/if}
 </div>
+<style>
+  .success-cell {
+    color: lightgreen;
+    font-weight: bold;
+  }
+  .fail-cell {
+    color: red;
+    font-weight: bold;
+  }
+  .duration-cell {
+    text-align: left;
+  }
+  .duration-grid {
+    display: grid;
+    grid-template-columns: 70px 70px 4px 60px 10px 60px 4px;
+    column-gap: 4px;
+    align-items: baseline;
+    white-space: nowrap;
+  }
+  .tabnum {
+    font-variant-numeric: tabular-nums;
+  }
+  .duration-success {
+    color: lightgreen;
+  }
+  .duration-fail {
+    color: red;
+  }
+  .duration-running {
+    color: white;
+  }
+</style>
