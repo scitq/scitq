@@ -110,7 +110,7 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 }
 
 // updateTaskStatus marks task as `S` (Success) or `F` (Failed) after execution.
-//func updateTaskStatus(client pb.TaskQueueClient, taskID uint32, status string) {
+//func updateTaskStatus(client pb.TaskQueueClient, taskID int32, status string) {
 //	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 //	defer cancel()
 //

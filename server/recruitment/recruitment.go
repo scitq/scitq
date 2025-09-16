@@ -14,6 +14,7 @@ import (
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/server/memory"
 	"github.com/scitq/scitq/server/protofilter"
+	ws "github.com/scitq/scitq/server/websocket"
 )
 
 type RecruiterKey struct {
@@ -416,24 +417,60 @@ func recycleWorkers(
 
 	idList := fmt.Sprintf("(%s)", strings.Join(ids, ","))
 
+	// Collect updated worker ids and names using RETURNING so we can emit richer WS events
 	q := fmt.Sprintf(`
         UPDATE worker
         SET step_id = $1, concurrency = $2, prefetch = $3
-        WHERE worker_id IN %s`, idList)
+        WHERE worker_id IN %s
+        RETURNING worker_id, worker_name`, idList)
 
-	result, err := tx.Exec(q, stepID, newConcurrency, prefetch)
+	rows2, err := tx.Query(q, stepID, newConcurrency, prefetch)
 	if err != nil {
 		log.Printf("⚠️ Failed to update workers: %v", err)
 		tx.Rollback()
 		return 0
 	}
+	defer rows2.Close()
 
-	affected, err := result.RowsAffected()
-	if err != nil {
-		log.Printf("⚠️ Failed to get rows affected: %v", err)
+	workerNames := make(map[int32]string, len(workerIDs))
+	for rows2.Next() {
+		var rwid int32
+		var rname sql.NullString
+		if err := rows2.Scan(&rwid, &rname); err != nil {
+			log.Printf("⚠️ Failed to scan updated worker row: %v", err)
+			tx.Rollback()
+			return 0
+		}
+		if rname.Valid {
+			workerNames[rwid] = rname.String
+		} else {
+			workerNames[rwid] = ""
+		}
+	}
+	if err := rows2.Err(); err != nil {
+		log.Printf("⚠️ Error iterating updated workers: %v", err)
 		tx.Rollback()
 		return 0
 	}
+
+	// Emit WS updates, including the worker name when available
+	for _, wid := range workerIDs {
+		ws.EmitWS("worker", wid, "updated", struct {
+			WorkerId    int32  `json:"workerId"`
+			Name        string `json:"name,omitempty"`
+			StepId      int32  `json:"stepId"`
+			Concurrency int    `json:"concurrency"`
+			Prefetch    int    `json:"prefetch"`
+		}{
+			WorkerId:    wid,
+			Name:        workerNames[wid],
+			StepId:      stepID,
+			Concurrency: newConcurrency,
+			Prefetch:    prefetch,
+		})
+	}
+
+	affected := len(workerNames)
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Commit failed: %v", err)

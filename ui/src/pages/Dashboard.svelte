@@ -72,7 +72,7 @@
    * Function to unsubscribe from WebSocket messages
    * @type {() => void}
    */
-  let unsubscribeWS: () => void;
+  let unsubscribeWS: (() => void) | null = null;
 
   /**
    * Success message to display
@@ -94,7 +94,7 @@
   onMount(async () => {
     workers = await getWorkers();
     jobs = await getJobs(JOBS_CHUNK_SIZE, 0);
-    unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
+    unsubscribeWS = wsClient.subscribeWithTopics({ worker: [], job: [] }, handleMessage);
   });
 
   /**
@@ -102,7 +102,7 @@
    * Unsubscribes from WebSocket messages
    */
   onDestroy(() => {
-    unsubscribeWS?.();
+    if (unsubscribeWS) { unsubscribeWS(); unsubscribeWS = null; }
   });
 
   /**
@@ -110,58 +110,66 @@
    * @param {Object} message - The WebSocket message
    */
   function handleMessage(message) {
-    // Handle job deletion
-    if (message.type === 'job-deleted') {
-      const payload = message.payload;
-      if (!payload || typeof payload.jobId !== 'number') return;
-
-      const idToRemove = payload.jobId;
-      jobs = jobs.filter(j => j.jobId !== idToRemove);
-      pendingJobs = pendingJobs.filter(j => j.jobId !== idToRemove);
-    }
-
-    // Handle worker creation
-    if (message.type === 'worker-created') {
-      const newWorker = message.payloadWorker;
-      const alreadyExists = workers.some(w => w.workerId === newWorker.workerId);
-      if (!alreadyExists) {
-        workers = [...workers, newWorker];
-      }
-
-      const newJob = message.payloadJob;
-      const existsInDisplayed = jobs.some(j => j.jobId === newJob.jobId);
-      const existsInPending = pendingJobs.some(j => j.jobId === newJob.jobId);
-
-      if (!existsInDisplayed && !existsInPending) {
-        if (isScrolledToTop) {
-          jobs = [newJob, ...jobs];
-        } else {
-          pendingJobs = [newJob, ...pendingJobs];
-          newJobsCount = pendingJobs.length;
-          showNewJobsNotification = true;
+    // === New envelope support ===
+    // { type: 'job', action: 'deleted', payload: { jobId } }
+    if (message?.type === 'job') {
+      if (message.action === 'deleted') {
+        const id = Number(message.payload?.jobId ?? message.jobId);
+        if (!Number.isNaN(id)) {
+          jobs = jobs.filter(j => j.jobId !== id);
+          pendingJobs = pendingJobs.filter(j => j.jobId !== id);
         }
+        return;
       }
     }
 
-    // Handle worker deletion
-    if (message.type === 'worker-deleted') {
-      const workerId = message.payloadWorker.workerId;
-      workers = workers.filter(w => w.workerId !== workerId);
+    // { type: 'worker', action: 'created'|'deleted', payload: { worker: {..}, job?: {..} } }
+    if (message?.type === 'worker') {
+      const p = message.payload || {};
+      const worker = p.worker || message.payloadWorker; // back-compat alias
+      const job = p.job || message.payloadJob;          // optional job side-effect
 
-      const newJob = message.payloadJob;
-      const existsInDisplayed = jobs.some(j => j.jobId === newJob.jobId);
-      const existsInPending = pendingJobs.some(j => j.jobId === newJob.jobId);
-
-      if (!existsInDisplayed && !existsInPending) {
-        if (isScrolledToTop) {
-          jobs = [newJob, ...jobs];
-        } else {
-          pendingJobs = [newJob, ...pendingJobs];
-          newJobsCount = pendingJobs.length;
-          showNewJobsNotification = true;
+      if (message.action === 'created' && worker) {
+        const exists = workers.some(w => w.workerId === worker.workerId);
+        if (!exists) {
+          workers = [...workers, worker];
         }
+        if (job) {
+          const inDisplayed = jobs.some(j => j.jobId === job.jobId);
+          const inPending = pendingJobs.some(j => j.jobId === job.jobId);
+          if (!inDisplayed && !inPending) {
+            if (isScrolledToTop) {
+              jobs = [job, ...jobs];
+            } else {
+              pendingJobs = [job, ...pendingJobs];
+              newJobsCount = pendingJobs.length;
+              showNewJobsNotification = true;
+            }
+          }
+        }
+        return;
+      }
+
+      if (message.action === 'deleted' && worker) {
+        const workerId = worker.workerId;
+        workers = workers.filter(w => w.workerId !== workerId);
+        if (job) {
+          const inDisplayed = jobs.some(j => j.jobId === job.jobId);
+          const inPending = pendingJobs.some(j => j.jobId === job.jobId);
+          if (!inDisplayed && !inPending) {
+            if (isScrolledToTop) {
+              jobs = [job, ...jobs];
+            } else {
+              pendingJobs = [job, ...pendingJobs];
+              newJobsCount = pendingJobs.length;
+              showNewJobsNotification = true;
+            }
+          }
+        }
+        return;
       }
     }
+
   }
 
   /**

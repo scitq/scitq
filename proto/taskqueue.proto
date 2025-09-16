@@ -486,13 +486,14 @@ message StepList {
 message StepStatsRequest {
     optional int32 workflow_id = 1;
     repeated int32 step_ids = 2;
-    optional bool include_hidden = 3;
 }
 
-message DurationStats {
-    float average = 1; // in seconds
-    float min = 2;     // in seconds
-    float max = 3;     // in seconds
+
+message Accum {
+    int32 count = 1;  // number of observations
+    float sum = 2;    // total seconds
+    float min = 3;    // minimum seconds
+    float max = 4;    // maximum seconds
 }
 
 message StepStats {
@@ -506,13 +507,14 @@ message StepStats {
     int32 running_tasks = 8;
     int32 successful_tasks = 9;
     int32 failed_tasks = 10;
-    DurationStats success_run_stats = 11;
-    DurationStats failed_run_stats = 12;
-    DurationStats current_run_stats = 13;
-    DurationStats download_stats = 14;
-    DurationStats upload_stats = 15;
-    optional float start_time = 16; // epoch timestamp of the first task start time
-    optional float end_time = 17;   // epoch timestamp of the last task end time
+    Accum success_run = 11;     // succeeded tasks' run durations
+    Accum failed_run = 12;      // failed tasks' run durations
+    Accum running_run = 13;  // running tasks' elapsed durations (at eval time)
+    Accum download = 14;        // download durations
+    Accum upload = 15;          // upload durations
+    optional int32 start_time = 16; // epoch timestamp of the first task start time
+    optional int32 end_time = 17;   // epoch timestamp of the last task end time
+    int32 stats_eval_time = 18; // epoch seconds when these stats were computed
 }
 
 message StepStatsResponse {

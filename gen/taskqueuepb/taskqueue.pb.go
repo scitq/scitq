@@ -4148,7 +4148,6 @@ type StepStatsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkflowId    *int32                 `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	StepIds       []int32                `protobuf:"varint,2,rep,packed,name=step_ids,json=stepIds,proto3" json:"step_ids,omitempty"`
-	IncludeHidden *bool                  `protobuf:"varint,3,opt,name=include_hidden,json=includeHidden,proto3,oneof" json:"include_hidden,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4197,36 +4196,30 @@ func (x *StepStatsRequest) GetStepIds() []int32 {
 	return nil
 }
 
-func (x *StepStatsRequest) GetIncludeHidden() bool {
-	if x != nil && x.IncludeHidden != nil {
-		return *x.IncludeHidden
-	}
-	return false
-}
-
-type DurationStats struct {
+type Accum struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Average       float32                `protobuf:"fixed32,1,opt,name=average,proto3" json:"average,omitempty"` // in seconds
-	Min           float32                `protobuf:"fixed32,2,opt,name=min,proto3" json:"min,omitempty"`         // in seconds
-	Max           float32                `protobuf:"fixed32,3,opt,name=max,proto3" json:"max,omitempty"`         // in seconds
+	Count         int32                  `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"` // number of observations
+	Sum           float32                `protobuf:"fixed32,2,opt,name=sum,proto3" json:"sum,omitempty"`    // total seconds
+	Min           float32                `protobuf:"fixed32,3,opt,name=min,proto3" json:"min,omitempty"`    // minimum seconds
+	Max           float32                `protobuf:"fixed32,4,opt,name=max,proto3" json:"max,omitempty"`    // maximum seconds
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DurationStats) Reset() {
-	*x = DurationStats{}
+func (x *Accum) Reset() {
+	*x = Accum{}
 	mi := &file_taskqueue_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DurationStats) String() string {
+func (x *Accum) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DurationStats) ProtoMessage() {}
+func (*Accum) ProtoMessage() {}
 
-func (x *DurationStats) ProtoReflect() protoreflect.Message {
+func (x *Accum) ProtoReflect() protoreflect.Message {
 	mi := &file_taskqueue_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4238,26 +4231,33 @@ func (x *DurationStats) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DurationStats.ProtoReflect.Descriptor instead.
-func (*DurationStats) Descriptor() ([]byte, []int) {
+// Deprecated: Use Accum.ProtoReflect.Descriptor instead.
+func (*Accum) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{67}
 }
 
-func (x *DurationStats) GetAverage() float32 {
+func (x *Accum) GetCount() int32 {
 	if x != nil {
-		return x.Average
+		return x.Count
 	}
 	return 0
 }
 
-func (x *DurationStats) GetMin() float32 {
+func (x *Accum) GetSum() float32 {
+	if x != nil {
+		return x.Sum
+	}
+	return 0
+}
+
+func (x *Accum) GetMin() float32 {
 	if x != nil {
 		return x.Min
 	}
 	return 0
 }
 
-func (x *DurationStats) GetMax() float32 {
+func (x *Accum) GetMax() float32 {
 	if x != nil {
 		return x.Max
 	}
@@ -4276,13 +4276,14 @@ type StepStats struct {
 	RunningTasks    int32                  `protobuf:"varint,8,opt,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`
 	SuccessfulTasks int32                  `protobuf:"varint,9,opt,name=successful_tasks,json=successfulTasks,proto3" json:"successful_tasks,omitempty"`
 	FailedTasks     int32                  `protobuf:"varint,10,opt,name=failed_tasks,json=failedTasks,proto3" json:"failed_tasks,omitempty"`
-	SuccessRunStats *DurationStats         `protobuf:"bytes,11,opt,name=success_run_stats,json=successRunStats,proto3" json:"success_run_stats,omitempty"`
-	FailedRunStats  *DurationStats         `protobuf:"bytes,12,opt,name=failed_run_stats,json=failedRunStats,proto3" json:"failed_run_stats,omitempty"`
-	CurrentRunStats *DurationStats         `protobuf:"bytes,13,opt,name=current_run_stats,json=currentRunStats,proto3" json:"current_run_stats,omitempty"`
-	DownloadStats   *DurationStats         `protobuf:"bytes,14,opt,name=download_stats,json=downloadStats,proto3" json:"download_stats,omitempty"`
-	UploadStats     *DurationStats         `protobuf:"bytes,15,opt,name=upload_stats,json=uploadStats,proto3" json:"upload_stats,omitempty"`
-	StartTime       *float32               `protobuf:"fixed32,16,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"` // epoch timestamp of the first task start time
-	EndTime         *float32               `protobuf:"fixed32,17,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`       // epoch timestamp of the last task end time
+	SuccessRun      *Accum                 `protobuf:"bytes,11,opt,name=success_run,json=successRun,proto3" json:"success_run,omitempty"`             // succeeded tasks' run durations
+	FailedRun       *Accum                 `protobuf:"bytes,12,opt,name=failed_run,json=failedRun,proto3" json:"failed_run,omitempty"`                // failed tasks' run durations
+	RunningRun      *Accum                 `protobuf:"bytes,13,opt,name=running_run,json=runningRun,proto3" json:"running_run,omitempty"`             // running tasks' elapsed durations (at eval time)
+	Download        *Accum                 `protobuf:"bytes,14,opt,name=download,proto3" json:"download,omitempty"`                                   // download durations
+	Upload          *Accum                 `protobuf:"bytes,15,opt,name=upload,proto3" json:"upload,omitempty"`                                       // upload durations
+	StartTime       *int32                 `protobuf:"varint,16,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"`         // epoch timestamp of the first task start time
+	EndTime         *int32                 `protobuf:"varint,17,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`               // epoch timestamp of the last task end time
+	StatsEvalTime   int32                  `protobuf:"varint,18,opt,name=stats_eval_time,json=statsEvalTime,proto3" json:"stats_eval_time,omitempty"` // epoch seconds when these stats were computed
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -4387,51 +4388,58 @@ func (x *StepStats) GetFailedTasks() int32 {
 	return 0
 }
 
-func (x *StepStats) GetSuccessRunStats() *DurationStats {
+func (x *StepStats) GetSuccessRun() *Accum {
 	if x != nil {
-		return x.SuccessRunStats
+		return x.SuccessRun
 	}
 	return nil
 }
 
-func (x *StepStats) GetFailedRunStats() *DurationStats {
+func (x *StepStats) GetFailedRun() *Accum {
 	if x != nil {
-		return x.FailedRunStats
+		return x.FailedRun
 	}
 	return nil
 }
 
-func (x *StepStats) GetCurrentRunStats() *DurationStats {
+func (x *StepStats) GetRunningRun() *Accum {
 	if x != nil {
-		return x.CurrentRunStats
+		return x.RunningRun
 	}
 	return nil
 }
 
-func (x *StepStats) GetDownloadStats() *DurationStats {
+func (x *StepStats) GetDownload() *Accum {
 	if x != nil {
-		return x.DownloadStats
+		return x.Download
 	}
 	return nil
 }
 
-func (x *StepStats) GetUploadStats() *DurationStats {
+func (x *StepStats) GetUpload() *Accum {
 	if x != nil {
-		return x.UploadStats
+		return x.Upload
 	}
 	return nil
 }
 
-func (x *StepStats) GetStartTime() float32 {
+func (x *StepStats) GetStartTime() int32 {
 	if x != nil && x.StartTime != nil {
 		return *x.StartTime
 	}
 	return 0
 }
 
-func (x *StepStats) GetEndTime() float32 {
+func (x *StepStats) GetEndTime() int32 {
 	if x != nil && x.EndTime != nil {
 		return *x.EndTime
+	}
+	return 0
+}
+
+func (x *StepStats) GetStatsEvalTime() int32 {
+	if x != nil {
+		return x.StatsEvalTime
 	}
 	return 0
 }
@@ -6782,18 +6790,17 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0e_workflow_nameB\x0e\n" +
 	"\f_workflow_id\"1\n" +
 	"\bStepList\x12%\n" +
-	"\x05steps\x18\x01 \x03(\v2\x0f.taskqueue.StepR\x05steps\"\xa2\x01\n" +
+	"\x05steps\x18\x01 \x03(\v2\x0f.taskqueue.StepR\x05steps\"c\n" +
 	"\x10StepStatsRequest\x12$\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05H\x00R\n" +
 	"workflowId\x88\x01\x01\x12\x19\n" +
-	"\bstep_ids\x18\x02 \x03(\x05R\astepIds\x12*\n" +
-	"\x0einclude_hidden\x18\x03 \x01(\bH\x01R\rincludeHidden\x88\x01\x01B\x0e\n" +
-	"\f_workflow_idB\x11\n" +
-	"\x0f_include_hidden\"M\n" +
-	"\rDurationStats\x12\x18\n" +
-	"\aaverage\x18\x01 \x01(\x02R\aaverage\x12\x10\n" +
-	"\x03min\x18\x02 \x01(\x02R\x03min\x12\x10\n" +
-	"\x03max\x18\x03 \x01(\x02R\x03max\"\x97\x06\n" +
+	"\bstep_ids\x18\x02 \x03(\x05R\astepIdsB\x0e\n" +
+	"\f_workflow_id\"S\n" +
+	"\x05Accum\x12\x14\n" +
+	"\x05count\x18\x01 \x01(\x05R\x05count\x12\x10\n" +
+	"\x03sum\x18\x02 \x01(\x02R\x03sum\x12\x10\n" +
+	"\x03min\x18\x03 \x01(\x02R\x03min\x12\x10\n" +
+	"\x03max\x18\x04 \x01(\x02R\x03max\"\xe0\x05\n" +
 	"\tStepStats\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x1b\n" +
 	"\tstep_name\x18\x02 \x01(\tR\bstepName\x12\x1f\n" +
@@ -6806,15 +6813,19 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\rrunning_tasks\x18\b \x01(\x05R\frunningTasks\x12)\n" +
 	"\x10successful_tasks\x18\t \x01(\x05R\x0fsuccessfulTasks\x12!\n" +
 	"\ffailed_tasks\x18\n" +
-	" \x01(\x05R\vfailedTasks\x12D\n" +
-	"\x11success_run_stats\x18\v \x01(\v2\x18.taskqueue.DurationStatsR\x0fsuccessRunStats\x12B\n" +
-	"\x10failed_run_stats\x18\f \x01(\v2\x18.taskqueue.DurationStatsR\x0efailedRunStats\x12D\n" +
-	"\x11current_run_stats\x18\r \x01(\v2\x18.taskqueue.DurationStatsR\x0fcurrentRunStats\x12?\n" +
-	"\x0edownload_stats\x18\x0e \x01(\v2\x18.taskqueue.DurationStatsR\rdownloadStats\x12;\n" +
-	"\fupload_stats\x18\x0f \x01(\v2\x18.taskqueue.DurationStatsR\vuploadStats\x12\"\n" +
+	" \x01(\x05R\vfailedTasks\x121\n" +
+	"\vsuccess_run\x18\v \x01(\v2\x10.taskqueue.AccumR\n" +
+	"successRun\x12/\n" +
 	"\n" +
-	"start_time\x18\x10 \x01(\x02H\x00R\tstartTime\x88\x01\x01\x12\x1e\n" +
-	"\bend_time\x18\x11 \x01(\x02H\x01R\aendTime\x88\x01\x01B\r\n" +
+	"failed_run\x18\f \x01(\v2\x10.taskqueue.AccumR\tfailedRun\x121\n" +
+	"\vrunning_run\x18\r \x01(\v2\x10.taskqueue.AccumR\n" +
+	"runningRun\x12,\n" +
+	"\bdownload\x18\x0e \x01(\v2\x10.taskqueue.AccumR\bdownload\x12(\n" +
+	"\x06upload\x18\x0f \x01(\v2\x10.taskqueue.AccumR\x06upload\x12\"\n" +
+	"\n" +
+	"start_time\x18\x10 \x01(\x05H\x00R\tstartTime\x88\x01\x01\x12\x1e\n" +
+	"\bend_time\x18\x11 \x01(\x05H\x01R\aendTime\x88\x01\x01\x12&\n" +
+	"\x0fstats_eval_time\x18\x12 \x01(\x05R\rstatsEvalTimeB\r\n" +
 	"\v_start_timeB\v\n" +
 	"\t_end_time\"?\n" +
 	"\x11StepStatsResponse\x12*\n" +
@@ -7148,7 +7159,7 @@ var file_taskqueue_proto_goTypes = []any{
 	(*StepRequest)(nil),               // 64: taskqueue.StepRequest
 	(*StepList)(nil),                  // 65: taskqueue.StepList
 	(*StepStatsRequest)(nil),          // 66: taskqueue.StepStatsRequest
-	(*DurationStats)(nil),             // 67: taskqueue.DurationStats
+	(*Accum)(nil),                     // 67: taskqueue.Accum
 	(*StepStats)(nil),                 // 68: taskqueue.StepStats
 	(*StepStatsResponse)(nil),         // 69: taskqueue.StepStatsResponse
 	(*WorkerStats)(nil),               // 70: taskqueue.WorkerStats
@@ -7203,11 +7214,11 @@ var file_taskqueue_proto_depIdxs = []int32{
 	53,  // 14: taskqueue.RecruiterList.recruiters:type_name -> taskqueue.Recruiter
 	58,  // 15: taskqueue.WorkflowList.workflows:type_name -> taskqueue.Workflow
 	63,  // 16: taskqueue.StepList.steps:type_name -> taskqueue.Step
-	67,  // 17: taskqueue.StepStats.success_run_stats:type_name -> taskqueue.DurationStats
-	67,  // 18: taskqueue.StepStats.failed_run_stats:type_name -> taskqueue.DurationStats
-	67,  // 19: taskqueue.StepStats.current_run_stats:type_name -> taskqueue.DurationStats
-	67,  // 20: taskqueue.StepStats.download_stats:type_name -> taskqueue.DurationStats
-	67,  // 21: taskqueue.StepStats.upload_stats:type_name -> taskqueue.DurationStats
+	67,  // 17: taskqueue.StepStats.success_run:type_name -> taskqueue.Accum
+	67,  // 18: taskqueue.StepStats.failed_run:type_name -> taskqueue.Accum
+	67,  // 19: taskqueue.StepStats.running_run:type_name -> taskqueue.Accum
+	67,  // 20: taskqueue.StepStats.download:type_name -> taskqueue.Accum
+	67,  // 21: taskqueue.StepStats.upload:type_name -> taskqueue.Accum
 	68,  // 22: taskqueue.StepStatsResponse.stats:type_name -> taskqueue.StepStats
 	71,  // 23: taskqueue.WorkerStats.disks:type_name -> taskqueue.DiskUsage
 	72,  // 24: taskqueue.WorkerStats.disk_io:type_name -> taskqueue.DiskIOStats

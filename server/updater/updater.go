@@ -12,7 +12,7 @@ import (
 // In a real implementation, these methods would be implemented
 // using your chosen database/ORM library.
 type Session interface {
-	QueryFlavors(providerID uint32) ([]*Flavor, error)
+	QueryFlavors(providerID int32) ([]*Flavor, error)
 	DeleteFlavor(f *Flavor) error
 	AddFlavor(f *Flavor) error
 	UpdateFlavor(f *Flavor) error
@@ -54,7 +54,7 @@ type FlavorMetrics struct {
 // a live flag, and a buffer for non-live output.
 type GenericProvider struct {
 	Session      Session
-	ProviderID   uint32
+	ProviderID   int32
 	ProviderName string
 }
 
@@ -72,7 +72,7 @@ func NewGenericProvider(cfg config.Config, provider string) (*GenericProvider, e
 	}
 	defer db.Rollback()
 
-	var providerID uint32
+	var providerID int32
 	for i := 0; i < maxRetries; i++ {
 		providerID, err = db.GetProviderID(provider)
 		if err == nil {

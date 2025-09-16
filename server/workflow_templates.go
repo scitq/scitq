@@ -575,35 +575,21 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			return nil, fmt.Errorf("failed to transform params: %w", err)
 		}
 
-		jsonData, err := json.Marshal(struct {
-			Type    string          `json:"type"`
-			Payload json.RawMessage `json:"payload"`
+		ws.EmitWS("template", templateID, "uploaded", struct {
+			WorkflowTemplateId int32  `json:"workflowTemplateId"`
+			Name               string `json:"name"`
+			Version            string `json:"version"`
+			Description        string `json:"description"`
+			ParamJson          string `json:"paramJson"`
+			UploadedAt         string `json:"uploadedAt"`
 		}{
-			Type: "template-uploaded",
-			Payload: func() json.RawMessage {
-				data, _ := json.Marshal(struct {
-					ID          int32  `json:"workflowTemplateId"`
-					Name        string `json:"name"`
-					Version     string `json:"version"`
-					Description string `json:"description"`
-					ParamJson   string `json:"paramJson"`
-					UploadedAt  string `json:"uploadedAt"`
-				}{
-					ID:          templateID,
-					Name:        meta.Name,
-					Version:     meta.Version,
-					Description: meta.Description,
-					ParamJson:   processedParams,
-					UploadedAt:  time.Now().Format(time.RFC3339),
-				})
-				return data
-			}(),
+			WorkflowTemplateId: templateID,
+			Name:               meta.Name,
+			Version:            meta.Version,
+			Description:        meta.Description,
+			ParamJson:          processedParams,
+			UploadedAt:         time.Now().Format(time.RFC3339),
 		})
-		if err == nil {
-			ws.Broadcast(jsonData)
-		} else {
-			log.Printf("❌ Failed to marshal template upload payload: %v", err)
-		}
 
 		return &pb.UploadTemplateResponse{
 			Success:            success,

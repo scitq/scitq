@@ -66,11 +66,11 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 
 	// Build maps
-	dbAssignments := make(map[uint32][]uint32) // worker_id → list of task_id
-	dbTaskPresent := make(map[uint32]uint32)   // task_id → worker_id (reverse lookup)
+	dbAssignments := make(map[int32][]int32) // worker_id → list of task_id
+	dbTaskPresent := make(map[int32]int32)   // task_id → worker_id (reverse lookup)
 
 	for workerTaskRows.Next() {
-		var workerID, taskID uint32
+		var workerID, taskID int32
 		if err := workerTaskRows.Scan(&workerID, &taskID); err == nil {
 			dbAssignments[workerID] = append(dbAssignments[workerID], taskID)
 			dbTaskPresent[taskID] = workerID
@@ -80,11 +80,11 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 	// 3️⃣ Reconcile weight memory
 	s.workerWeightMemory.Range(func(workerIDRaw, taskMapRaw any) bool {
-		workerID := workerIDRaw.(uint32)
+		workerID := workerIDRaw.(int32)
 		taskMap := taskMapRaw.(*sync.Map)
 
 		taskMap.Range(func(taskIDRaw, weightRaw any) bool {
-			taskID := taskIDRaw.(uint32)
+			taskID := taskIDRaw.(int32)
 
 			if _, exists := dbTaskPresent[taskID]; !exists {
 				// Task disappeared from DB -> remove from memory
@@ -137,15 +137,15 @@ func (s *taskQueueServer) assignPendingTasks() {
 	type workerStatus struct {
 		TotalCapacity float64
 		UsedCapacity  float64
-		StepID        *uint32
+		StepID        *int32
 	}
 
-	workerStatusMap := map[uint32]workerStatus{}
+	workerStatusMap := map[int32]workerStatus{}
 
 	for workerCapacityRows.Next() {
-		var workerID uint32
-		var stepID *uint32
-		var concurrency, prefetch uint32
+		var workerID int32
+		var stepID *int32
+		var concurrency, prefetch int32
 		if err := workerCapacityRows.Scan(&workerID, &stepID, &concurrency, &prefetch); err != nil {
 			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
@@ -176,7 +176,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 		return
 	}
 
-	stepSlots := map[uint32]int{} // step_id -> available slots
+	stepSlots := map[int32]int{} // step_id -> available slots
 	for _, status := range workerStatusMap {
 		if status.StepID != nil {
 			stepSlots[*status.StepID] += int(status.TotalCapacity - status.UsedCapacity)
@@ -218,18 +218,17 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 
 	type taskCandidate struct {
-		taskID uint32
-		stepID *uint32
+		taskID int32
+		stepID *int32
 	}
 	var candidates []taskCandidate
 	for taskRows.Next() {
-		var tid uint32
-		var stepID *uint32
+		var tid int32
+		var stepID *int32
 		var stepIDproxy sql.NullInt32
 		if err := taskRows.Scan(&tid, &stepIDproxy); err == nil {
 			if stepIDproxy.Valid {
-				s := uint32(stepIDproxy.Int32)
-				stepID = &s
+				stepID = &stepIDproxy.Int32
 			} else {
 				stepID = nil
 			}
@@ -239,7 +238,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 	taskRows.Close()
 
 	// Assign tasks in memory
-	assignments := make(map[uint32][]uint32) // workerID -> list of taskID
+	assignments := make(map[int32][]int32) // workerID -> list of taskID
 	for _, candidate := range candidates {
 		for workerID, status := range workerStatusMap {
 			// Match step_id

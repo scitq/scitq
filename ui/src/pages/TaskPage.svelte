@@ -109,105 +109,96 @@
   // Whether to show new tasks notification
   let showNewTasksNotification = false;
   // Function to unsubscribe from WebSocket
-  let unsubscribeWS: () => void;
+  let unsubscribeWS: (() => void) | null = null;
 
-/**
- * Handles incoming WebSocket messages for task updates
- * @param {Object} message - The WebSocket message
- * @param {string} message.type - Type of message ('task-created' or 'task-updated')
- * @param {Object} message.payload - The task data
- */
+// Handles incoming WebSocket messages for task updates (topic-aware and legacy)
 async function handleWebSocketMessage(message) {
-  console.log('Received WS message:', message);
-  if (message.type === 'task-created') {
-    console.log('New task created:', message.payload);
-    console.log('isScrolledToTop:', isScrolledToTop);
-    
-    // Create new task object from message
-    const newTask: Task = {
-      taskId: message.payload.taskId,
-      command: message.payload.command || '',
-      status: message.payload.status || 'P',
-      stepId: message.payload.stepId || null,
-      workerId: null,
-      workflowId: null,
-      taskName: message.payload.taskName || null,
-    };
+  // New envelope: task entity events
+  if (message?.type === 'task') {
+    const action = message.action;
+    const p = message.payload || {};
 
-    // Add to pending tasks if not at top, otherwise prepend
-    if (!isScrolledToTop) {
-      pendingTasks = [...pendingTasks, newTask];
-      showNewTasksNotification = true; 
-      console.log('Notification state:', { showNewTasksNotification, pendingTasks });
-    } else {
-      displayedTasks = [newTask, ...displayedTasks];
-      firstTasks = [newTask, ...firstTasks];
-      const finishedTaskIds = displayedTasks
-        .filter(task => !['R', 'U', 'V'].includes(task.status))
-        .map(task => task.taskId);
+    if (action === 'created') {
+      const newTask = {
+        taskId: p.taskId,
+        command: p.command || '',
+        status: p.status || 'P',
+        stepId: p.stepId ?? null,
+        workerId: p.workerId ?? null,
+        workflowId: p.workflowId ?? null,
+        taskName: p.taskName ?? null,
+      };
 
-      if (finishedTaskIds.length > 0) {
-        taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+      if (!isScrolledToTop) {
+        pendingTasks = [...pendingTasks, newTask];
+        showNewTasksNotification = true;
+      } else {
+        displayedTasks = [newTask, ...displayedTasks];
+        firstTasks = [newTask, ...firstTasks];
+
+        const finishedTaskIds = displayedTasks
+          .filter(task => !['R', 'U', 'V'].includes(task.status))
+          .map(task => task.taskId);
+        if (finishedTaskIds.length > 0) {
+          taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
+        }
       }
-    }
-    
-    // Start streaming if task is running
-    if (['R', 'U', 'V'].includes(newTask.status)) {
-      startStreaming(newTask);
-    }
-  }
-  else if (message.type === 'task-updated') {
-    const updatedTaskId = message.payload.taskId;
-    const newStatus = message.payload.status;
-    const workerId = message.payload.workerId;
 
-    console.log('Task updated:', {updatedTaskId, newStatus, workerId});
+      if (['R', 'U', 'V'].includes(newTask.status)) {
+        startStreaming(newTask);
+      }
+      return;
+    }
 
-    /**
-     * Updates task in given array
-     * @param {Task[]} tasks - Array to update
-     * @returns {Task[]} Updated array
-     */
-    const updateTaskInArray = (tasks: Task[]) => {
-      return tasks.map(task => {
-        if (task.taskId === updatedTaskId) {
-          const updatedTask = {
-            ...task,
-            status: newStatus
-          };
-          
-          if (workerId !== undefined) {
-            updatedTask.workerId = workerId;
-            
-            if (workers.length > 0) {
-              const worker = workers.find(w => w.workerId === workerId);
-              if (worker) {
-                updatedTask.workerName = worker.name;
+    if (action === 'updated') {
+      const updatedTaskId = p.taskId;
+      const newStatus = p.status;
+      const workerId = p.workerId;
+
+      const updateTaskInArray = (tasks: Task[]) =>
+        tasks.map(task => {
+          if (task.taskId === updatedTaskId) {
+            const updatedTask = {
+              ...task,
+              status: newStatus ?? task.status,
+            };
+            if (workerId !== undefined) {
+              updatedTask.workerId = workerId;
+              if (workers.length > 0) {
+                const worker = workers.find(w => w.workerId === workerId);
+                if (worker) updatedTask.workerName = worker.name;
               }
             }
+            return updatedTask;
           }
-          
-          return updatedTask;
+          return task;
+        });
+
+      displayedTasks = updateTaskInArray(displayedTasks);
+      firstTasks = updateTaskInArray(firstTasks);
+      pendingTasks = updateTaskInArray(pendingTasks);
+
+      if (['R', 'U', 'V'].includes(newStatus)) {
+        let task = displayedTasks.find(t => t.taskId === updatedTaskId) || pendingTasks.find(t => t.taskId === updatedTaskId);
+        if (task && !streamedTasks.has(task.taskId)) {
+          startStreaming(task);
         }
-        return task;
-      });
-    };
-
-    // Update task in all relevant arrays
-    displayedTasks = updateTaskInArray(displayedTasks);
-    firstTasks = updateTaskInArray(firstTasks);
-    pendingTasks = updateTaskInArray(pendingTasks);
-
-    // Start streaming if task is now running
-    if (['R', 'U', 'V'].includes(newStatus)) {
-      let task = displayedTasks.find(t => t.taskId === updatedTaskId);
-      if (!task) {
-        task = pendingTasks.find(t => t.taskId === updatedTaskId);
       }
-      
-      if (task && !streamedTasks.has(task.taskId)) {
-        startStreaming(task);
+      return;
+    }
+
+    if (action === 'deleted') {
+      const id = p.taskId ?? message.id;
+      if (typeof id === 'number') {
+        displayedTasks = displayedTasks.filter(t => t.taskId !== id);
+        firstTasks = firstTasks.filter(t => t.taskId !== id);
+        pendingTasks = pendingTasks.filter(t => t.taskId !== id);
+        delete taskLogsOut[id];
+        delete taskLogsErr[id];
+        delete logSkipTracker[id];
+        streamedTasks.delete(id);
       }
+      return;
     }
   }
 }
@@ -657,8 +648,8 @@ async function handleWebSocketMessage(message) {
         taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
       }
 
-      // Setup WebSocket subscription
-      unsubscribeWS = wsClient.subscribeToMessages(handleWebSocketMessage);
+      // Subscribe to task events only (topic-aware)
+      unsubscribeWS = wsClient.subscribeWithTopics({ task: [] }, handleWebSocketMessage);
 
       // URL change listener
       window.addEventListener('hashchange', updateTasksFromUrl);
@@ -673,7 +664,10 @@ async function handleWebSocketMessage(message) {
 
     // Cleanup function
     return () => {
-      unsubscribeWS?.();
+      if (unsubscribeWS) {
+        unsubscribeWS();
+        unsubscribeWS = null;
+      }
       window.removeEventListener('hashchange', updateTasksFromUrl);
     };
   });

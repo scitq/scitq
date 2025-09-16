@@ -149,12 +149,11 @@ type Attr struct {
 			StepId int32 `arg:"--id,required" help:"Step ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a step"`
 		Stats *struct {
-			WorkflowId    *int32  `arg:"--workflow-id" help:"Workflow ID to get step stats for"`
-			WorkflowName  string  `arg:"--workflow-name" help:"Workflow name (alternative to ID, used to resolve ID)"`
-			StepIds       []int32 `arg:"--step-id,separate" help:"Step IDs to get stats for (repeatable)"`
-			IncludeHidden bool    `arg:"--include-hidden" help:"Include hidden tasks/steps in stats"`
-			TaskName      string  `arg:"--task-name" help:"Filter relevant step IDs by tasks whose name matches substring (case-insensitive, client-side)"`
-			Totals        bool    `arg:"--totals" help:"Add totals line at the end of the stats"`
+			WorkflowId   *int32  `arg:"--workflow-id" help:"Workflow ID to get step stats for"`
+			WorkflowName string  `arg:"--workflow-name" help:"Workflow name (alternative to ID, used to resolve ID)"`
+			StepIds      []int32 `arg:"--step-id,separate" help:"Step IDs to get stats for (repeatable)"`
+			TaskName     string  `arg:"--task-name" help:"Filter relevant step IDs by tasks whose name matches substring (case-insensitive, client-side)"`
+			Totals       bool    `arg:"--totals" help:"Add totals line at the end of the stats"`
 		} `arg:"subcommand:stats" help:"Show step statistics"`
 	} `arg:"subcommand:step" help:"Manage steps"`
 
@@ -1286,11 +1285,8 @@ func (c *CLI) StepStats() error {
 	var stepIDsFromTaskName map[int32]struct{}
 	if attr.TaskName != "" {
 		// List tasks, filter by TaskName substring and workflowId if set
-		req := &pb.ListTasksRequest{}
-		if attr.IncludeHidden {
-			v := true
-			req.ShowHidden = &v
-		}
+		v := true
+		req := &pb.ListTasksRequest{ShowHidden: &v}
 		res, err := c.QC.Client.ListTasks(ctx, req)
 		if err != nil {
 			return fmt.Errorf("failed to list tasks: %w", err)
@@ -1345,10 +1341,6 @@ func (c *CLI) StepStats() error {
 	if workflowId != nil {
 		req.WorkflowId = workflowId
 	}
-	if attr.IncludeHidden {
-		v := true
-		req.IncludeHidden = &v
-	}
 
 	// Step 4: Call GetStepStats and print human-friendly table
 	res, err := c.QC.Client.GetStepStats(ctx, req)
@@ -1363,7 +1355,7 @@ func (c *CLI) StepStats() error {
 		"StepID", "Name", "Total", "Wait", "Pend", "Acc.", "On H", "Runn", "Succ", "Fail", "SuccRun", "FailRun", "CurrRun", "Download", "Upload")
 	fmt.Println(strings.Repeat("-", 222))
 	var totalSuccess, totalFailed, totalRunning, totalDownload, totalUpload float32
-	var startTime, endTime *float32
+	var startTime, endTime *int32
 
 	for _, stat := range res.Stats {
 		name := stat.StepName
@@ -1381,19 +1373,30 @@ func (c *CLI) StepStats() error {
 			stat.RunningTasks,
 			stat.SuccessfulTasks,
 			stat.FailedTasks,
-			formatDurationStats(stat.SuccessRunStats),
-			formatDurationStats(stat.FailedRunStats),
-			formatDurationStats(stat.CurrentRunStats),
-			formatDurationStats(stat.DownloadStats),
-			formatDurationStats(stat.UploadStats),
+			formatAccum(stat.SuccessRun),
+			formatAccum(stat.FailedRun),
+			formatAccum(stat.RunningRun),
+			formatAccum(stat.Download),
+			formatAccum(stat.Upload),
 		)
 		if attr.Totals {
-			totalSuccess += float32(stat.SuccessfulTasks) * stat.SuccessRunStats.Average
-			totalFailed += float32(stat.FailedTasks) * stat.FailedRunStats.Average
-			totalRunning += float32(stat.RunningTasks) * stat.CurrentRunStats.Average
-			totalDownload += float32(stat.TotalTasks) * stat.DownloadStats.Average
-			totalUpload += float32(stat.TotalTasks) * stat.UploadStats.Average
-
+			// Sum the accumulator sums
+			if stat.SuccessRun != nil {
+				totalSuccess += stat.SuccessRun.GetSum()
+			}
+			if stat.FailedRun != nil {
+				totalFailed += stat.FailedRun.GetSum()
+			}
+			if stat.RunningRun != nil {
+				totalRunning += stat.RunningRun.GetSum()
+			}
+			if stat.Download != nil {
+				totalDownload += stat.Download.GetSum()
+			}
+			if stat.Upload != nil {
+				totalUpload += stat.Upload.GetSum()
+			}
+			// handle start/end time (int32 pointers)
 			if endTime == nil || (stat.EndTime != nil && *stat.EndTime > *endTime) {
 				endTime = stat.EndTime
 			}
@@ -1405,10 +1408,10 @@ func (c *CLI) StepStats() error {
 	if attr.Totals {
 		fmt.Println(strings.Repeat("-", 222))
 		elapsedTime := float32(0)
-		if startTime != nil && endTime != nil {
-			elapsedTime = *endTime - *startTime
+		if startTime != nil && endTime != nil && *endTime >= *startTime {
+			elapsedTime = float32(*endTime - *startTime)
 		}
-		fmt.Printf("Elapsed time: %-10s %-65sCumulated times: %-22s %-22s %-22s %-22s %-22s\n", formatDuration(elapsedTime), "",
+		fmt.Printf("Elapsed time: %-10s %-66sCumulated times: %-22s %-22s %-22s %-22s %-22s\n", formatDuration(elapsedTime), "",
 			formatDuration(totalSuccess),
 			formatDuration(totalFailed),
 			formatDuration(totalRunning),
@@ -1449,11 +1452,17 @@ func formatDuration(durSeconds float32) string {
 	return fmt.Sprintf("%dh%dm", h, m)
 }
 
-func formatDurationStats(dur *pb.DurationStats) string {
-	if dur == nil {
+// formatAccum renders avg [min-max] from an *pb.Accum.
+func formatAccum(a *pb.Accum) string {
+	if a == nil || a.Count == 0 {
 		return "-"
 	}
-	return fmt.Sprintf("%s [%s-%s]", formatDuration(dur.Average), formatDuration(dur.Min), formatDuration(dur.Max))
+	avg := a.Sum / float32(a.Count)
+	return fmt.Sprintf("%s [%s-%s]",
+		formatDuration(avg),
+		formatDuration(a.Min),
+		formatDuration(a.Max),
+	)
 }
 
 func Run(c CLI) error {

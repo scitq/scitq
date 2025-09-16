@@ -5,7 +5,7 @@ package openstack
 // It implements the generic providers.Provider interface used in this project:
 //
 //   type Provider interface {
-//       Create(workerName, flavor, location string, jobId uint32) (string, error)
+//       Create(workerName, flavor, location string, jobId int32) (string, error)
 //       List() (map[string]string, error)
 //       Restart(workerName string) error
 //       Delete(workerName string) error

@@ -82,6 +82,7 @@ type taskQueueServer struct {
 	cancel             context.CancelFunc
 	workerStats        *sync.Map
 	sslCertificatePEM  string
+	stats              *StepStatsAgg // In-memory step/workflow stats aggregator
 }
 
 type TaskUpdateBroadcast struct {
@@ -89,12 +90,6 @@ type TaskUpdateBroadcast struct {
 	Status   string
 	WorkerId int32
 }
-
-var (
-	batchMutex            sync.Mutex
-	taskUpdateQueue       []TaskUpdateBroadcast
-	lastBroadcastedStatus sync.Map // key: int32 taskId, value: string status
-)
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx context.Context, cancel context.CancelFunc) *taskQueueServer {
 	workerWeightMemory, err := memory.LoadWeightMemory(context.Background(), db, "weight_memory")
@@ -118,6 +113,11 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		cancel:             cancel,
 		workerStats:        &sync.Map{},
 	}
+	s.stats, err = NewStepStatsAgg(db)
+	if err != nil {
+		log.Fatalf("⚠️ Failed to initialize step stats aggregator: %v", err)
+	}
+
 	//go s.assignTasksLoop()
 	go s.waitForAssignEvents(s.ctx)
 
@@ -143,62 +143,6 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 	s.watchdog.RebuildFromWorkers(workers)
 
 	go s.watchdog.Run(s.stopWatchdog)
-
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			case <-ticker.C:
-				batchMutex.Lock()
-				if len(taskUpdateQueue) == 0 {
-					batchMutex.Unlock()
-					continue
-				}
-				drained := taskUpdateQueue
-				taskUpdateQueue = nil
-				batchMutex.Unlock()
-
-				latest := make(map[int32]TaskUpdateBroadcast, 64)
-				for _, u := range drained {
-					latest[u.TaskId] = u
-				}
-
-				// 3) Broadcast only if status actually changed vs last sent
-				for _, u := range latest {
-					if prev, ok := lastBroadcastedStatus.Load(u.TaskId); ok && prev.(string) == u.Status {
-						continue
-					}
-					lastBroadcastedStatus.Store(u.TaskId, u.Status)
-
-					payload := struct {
-						Type    string `json:"type"`
-						Payload struct {
-							TaskId   int32  `json:"taskId"`
-							Status   string `json:"status"`
-							WorkerId int32  `json:"workerId,omitempty"`
-						} `json:"payload"`
-					}{
-						Type: "task-updated",
-						Payload: struct {
-							TaskId   int32  `json:"taskId"`
-							Status   string `json:"status"`
-							WorkerId int32  `json:"workerId,omitempty"`
-						}{
-							TaskId:   u.TaskId,
-							Status:   u.Status,
-							WorkerId: u.WorkerId,
-						},
-					}
-					if jsonData, err := json.Marshal(payload); err == nil {
-						ws.Broadcast(jsonData)
-					}
-				}
-			}
-		}
-	}()
 
 	return s
 }
@@ -282,49 +226,32 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	}
 
 	// 🔔 Broadcast WebSocket after task creation
-	payload := struct {
-		Type    string `json:"type"`
-		Payload struct {
-			TaskId   int32  `json:"taskId"`
-			Command  string `json:"command"`
-			StepId   *int32 `json:"stepId,omitempty"`
-			Output   string `json:"output,omitempty"`
-			Status   string `json:"status"`
-			TaskName string `json:"taskName,omitempty"`
-		} `json:"payload"`
+	log.Printf("[WS] task emit ▶ task=%d action=created step=%v status=%s", taskID, req.StepId, initialStatus)
+	ws.EmitWS("task", taskID, "created", struct {
+		TaskId   int32  `json:"taskId"`
+		Command  string `json:"command"`
+		StepId   *int32 `json:"stepId,omitempty"`
+		Output   string `json:"output,omitempty"`
+		Status   string `json:"status"`
+		TaskName string `json:"taskName,omitempty"`
 	}{
-		Type: "task-created",
-		Payload: struct {
-			TaskId   int32  `json:"taskId"`
-			Command  string `json:"command"`
-			StepId   *int32 `json:"stepId,omitempty"`
-			Output   string `json:"output,omitempty"`
-			Status   string `json:"status"`
-			TaskName string `json:"taskName,omitempty"`
-		}{
-			TaskId:  taskID,
-			Command: req.Command,
-			Status:  initialStatus,
-		},
-	}
-
-	// Gérer les champs optionnels
-	if req.StepId != nil {
-		payload.Payload.StepId = req.StepId
-	}
-	if req.Output != nil {
-		payload.Payload.Output = *req.Output
-	}
-	if req.TaskName != nil {
-		payload.Payload.TaskName = *req.TaskName
-	}
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("⚠️ Failed to marshal WebSocket task-created: %v", err)
-	} else {
-		ws.Broadcast(jsonData)
-	}
+		TaskId:  taskID,
+		Command: req.Command,
+		StepId:  req.StepId,
+		Output: func() string {
+			if req.Output != nil {
+				return *req.Output
+			}
+			return ""
+		}(),
+		Status: initialStatus,
+		TaskName: func() string {
+			if req.TaskName != nil {
+				return *req.TaskName
+			}
+			return ""
+		}(),
+	})
 
 	return &pb.TaskResponse{TaskId: taskID}, nil
 }
@@ -364,6 +291,12 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	var workerID sql.NullInt32
 	var oldStatus string
 	var curRetry sql.NullInt32
+	var stepID sql.NullInt32
+	var workflowID sql.NullInt32
+	var prevRunStartedAt sql.NullTime
+	var runStartedEpoch sql.NullInt64
+	var dlDur, runDur, upDur sql.NullInt32
+	var startEpoch, endEpoch sql.NullInt64
 
 	if req.Duration == nil {
 		log.Printf("🔔 Updating task %d status to %s (duration null)", req.TaskId, req.NewStatus)
@@ -371,12 +304,14 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		log.Printf("🔔 Updating task %d status to %s (duration: %d)", req.TaskId, req.NewStatus, *req.Duration)
 	}
 
+	// Use new CTE and scan fields for aggregator
 	err := s.db.QueryRowContext(ctx, `
         WITH prior AS (
-            SELECT status AS old_status, retry
+            SELECT status AS old_status, retry, step_id, run_started_at
             FROM task
             WHERE task_id = $2
-        ), upd AS (
+        ),
+        upd AS (
             UPDATE task
                SET status = $1,
                    modified_at = NOW(),
@@ -386,18 +321,243 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
                    upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END
              WHERE task_id = $2
                AND status <> $1
-             RETURNING worker_id
+             RETURNING task_id, worker_id
+        ),
+        cur AS (
+            SELECT t.task_id,
+                   t.status,
+                   t.step_id,
+                   t.run_started_at,
+                   t.download_duration,
+                   t.run_duration,
+                   t.upload_duration
+              FROM task t
+             WHERE t.task_id = $2
         )
-        SELECT u.worker_id, p.old_status, p.retry
-          FROM upd u, prior p;
-    `, req.NewStatus, req.TaskId, req.Duration).Scan(&workerID, &oldStatus, &curRetry)
+        SELECT 
+            u.worker_id,
+            p.old_status,
+            p.retry,
+            c.step_id,
+            s.workflow_id,
+            p.run_started_at AS prev_run_started_at,
+            EXTRACT(EPOCH FROM c.run_started_at)::bigint AS run_started_epoch,
+            COALESCE(c.download_duration,0) AS dl_dur,
+            COALESCE(c.run_duration,0)      AS run_dur,
+            COALESCE(c.upload_duration,0)   AS up_dur,
+            CASE
+               WHEN c.run_started_at IS NOT NULL THEN
+                   (EXTRACT(EPOCH FROM c.run_started_at)::bigint - COALESCE(c.download_duration,0))
+               ELSE NULL
+            END AS start_epoch,
+            CASE
+               WHEN $1 IN ('S','F') AND c.run_started_at IS NOT NULL THEN
+                   (EXTRACT(EPOCH FROM c.run_started_at)::bigint + COALESCE(c.run_duration,0) + COALESCE(c.upload_duration,0))
+               ELSE NULL
+            END AS end_epoch
+          FROM upd u
+          JOIN prior p ON TRUE
+          JOIN cur c   ON TRUE
+     LEFT JOIN step s ON c.step_id = s.step_id;
+    `,
+		req.NewStatus, req.TaskId, req.Duration,
+	).Scan(
+		&workerID, &oldStatus, &curRetry, &stepID, &workflowID, &prevRunStartedAt,
+		&runStartedEpoch, &dlDur, &runDur, &upDur, &startEpoch, &endEpoch,
+	)
 	if err == sql.ErrNoRows {
-		// Idempotent/same-status update: nothing changed. Log and return success Ack.
 		log.Printf("⚠️ no-op status update for task %d: already %s", req.TaskId, req.NewStatus)
 		return &pb.Ack{Success: true}, nil
 	}
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
+	}
+
+	// --- Step stats aggregator update ---
+	var sid, wid int32
+	if stepID.Valid {
+		sid = stepID.Int32
+	}
+	if workflowID.Valid {
+		wid = workflowID.Int32
+	}
+	if wid > 0 && sid > 0 && s.stats != nil {
+		s.stats.mu.Lock()
+		defer s.stats.mu.Unlock()
+		if s.stats.data == nil {
+			s.stats.data = make(map[int32]map[int32]*StepAgg)
+		}
+		if _, ok := s.stats.data[wid]; !ok {
+			s.stats.data[wid] = make(map[int32]*StepAgg)
+		}
+		if _, ok := s.stats.data[wid][sid]; !ok {
+			s.stats.data[wid][sid] = NewStepAgg()
+		}
+		stepAgg := s.stats.data[wid][sid]
+
+		// Status buckets (typed fields)
+		switch oldStatus {
+		case "W":
+			if stepAgg.Waiting > 0 {
+				stepAgg.Waiting--
+			}
+		case "P":
+			if stepAgg.Pending > 0 {
+				stepAgg.Pending--
+			}
+		case "C":
+			if stepAgg.Accepted > 0 {
+				stepAgg.Accepted--
+			}
+		case "O":
+			if stepAgg.OnHold > 0 {
+				stepAgg.OnHold--
+			}
+		case "R":
+			if stepAgg.Running > 0 {
+				stepAgg.Running--
+			}
+		case "S":
+			if stepAgg.Succeeded > 0 {
+				stepAgg.Succeeded--
+			}
+		case "F", "V":
+			if stepAgg.Failed > 0 {
+				stepAgg.Failed--
+			}
+		}
+		switch req.NewStatus {
+		case "W":
+			stepAgg.Waiting++
+		case "P":
+			stepAgg.Pending++
+		case "C":
+			stepAgg.Accepted++
+		case "O":
+			stepAgg.OnHold++
+		case "R":
+			stepAgg.Running++
+		case "S":
+			stepAgg.Succeeded++
+		case "F", "V":
+			stepAgg.Failed++
+		}
+
+		// RunningTasks map using DB runStartedEpoch
+		if req.NewStatus == "R" && runStartedEpoch.Valid {
+			if stepAgg.RunningTasks == nil {
+				stepAgg.RunningTasks = make(map[int32]time.Time)
+			}
+			t := time.Unix(runStartedEpoch.Int64, 0).UTC()
+			stepAgg.RunningTasks[req.TaskId] = t
+		}
+		if oldStatus == "R" && req.NewStatus != "R" {
+			if stepAgg.RunningTasks != nil {
+				delete(stepAgg.RunningTasks, req.TaskId)
+			}
+		}
+
+		// Accumulators (use req.Duration as before)
+		if req.Duration != nil {
+			dur := float64(*req.Duration)
+			switch req.NewStatus {
+			case "O":
+				acc := &stepAgg.Download
+				acc.Sum += dur
+				if acc.Min == 0 || dur < acc.Min {
+					acc.Min = dur
+				}
+				if dur > acc.Max {
+					acc.Max = dur
+				}
+			case "U":
+				acc := &stepAgg.SuccessRun
+				acc.Sum += dur
+				acc.Count++
+				if acc.Min == 0 || dur < acc.Min {
+					acc.Min = dur
+				}
+				if dur > acc.Max {
+					acc.Max = dur
+				}
+			case "V":
+				acc := &stepAgg.FailRun
+				acc.Sum += dur
+				acc.Count++
+				if acc.Min == 0 || dur < acc.Min {
+					acc.Min = dur
+				}
+				if dur > acc.Max {
+					acc.Max = dur
+				}
+			case "S", "F":
+				acc := &stepAgg.Upload
+				acc.Sum += dur
+				if acc.Min == 0 || dur < acc.Min {
+					acc.Min = dur
+				}
+				if dur > acc.Max {
+					acc.Max = dur
+				}
+			}
+		}
+		// StartTime/EndTime from DB-derived epochs
+		if startEpoch.Valid {
+			start := int32(startEpoch.Int64)
+			if stepAgg.StartTime == nil || start < *stepAgg.StartTime {
+				stepAgg.StartTime = &start
+			}
+		}
+		if endEpoch.Valid {
+			end := int32(endEpoch.Int64)
+			if stepAgg.EndTime == nil || end > *stepAgg.EndTime {
+				stepAgg.EndTime = &end
+			}
+		}
+	}
+
+	// 🔔 WS notify: step-stats delta (for client-side incremental aggregation)
+	if wid > 0 && sid > 0 {
+		var (
+			runEpochPtr *int32
+			startPtr    *int32
+			endPtr      *int32
+		)
+		if runStartedEpoch.Valid {
+			v := int32(runStartedEpoch.Int64)
+			runEpochPtr = &v
+		}
+		if startEpoch.Valid {
+			v := int32(startEpoch.Int64)
+			startPtr = &v
+		}
+		if endEpoch.Valid {
+			v := int32(endEpoch.Int64)
+			endPtr = &v
+		}
+		log.Printf("[WS] step-stats emit ▶ workflow=%d step=%d task=%d %s→%s dur=%v runEpoch=%v start=%v end=%v",
+			wid, sid, req.TaskId, oldStatus, req.NewStatus, req.Duration, runEpochPtr, startPtr, endPtr)
+		ws.EmitWS("step-stats", wid, "delta", struct {
+			WorkflowId      int32  `json:"workflowId"`
+			StepId          int32  `json:"stepId"`
+			TaskId          int32  `json:"taskId"`
+			OldStatus       string `json:"oldStatus,omitempty"`
+			NewStatus       string `json:"newStatus"`
+			Duration        *int32 `json:"duration,omitempty"`
+			RunStartedEpoch *int32 `json:"runStartedEpoch,omitempty"`
+			StartEpoch      *int32 `json:"startEpoch,omitempty"`
+			EndEpoch        *int32 `json:"endEpoch,omitempty"`
+		}{
+			WorkflowId:      wid,
+			StepId:          sid,
+			TaskId:          req.TaskId,
+			OldStatus:       oldStatus,
+			NewStatus:       req.NewStatus,
+			Duration:        req.Duration, // duration delta to apply based on NewStatus (O/U/V/S/F)
+			RunStartedEpoch: runEpochPtr,
+			StartEpoch:      startPtr,
+			EndEpoch:        endPtr,
+		})
 	}
 
 	switch req.NewStatus {
@@ -573,16 +733,17 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		workerId = workerID.Int32
 	}
 
-	update := TaskUpdateBroadcast{
+	// 🔔 WS notify: task status changed
+	log.Printf("[WS] task emit ▶ task=%d status=%s worker=%d", req.TaskId, req.NewStatus, workerId)
+	ws.EmitWS("task", req.TaskId, "status", struct {
+		TaskId   int32  `json:"taskId"`
+		Status   string `json:"status"`
+		WorkerId int32  `json:"workerId,omitempty"`
+	}{
 		TaskId:   req.TaskId,
 		Status:   req.NewStatus,
 		WorkerId: workerId,
-	}
-
-	batchMutex.Lock()
-	defer batchMutex.Unlock()
-
-	taskUpdateQueue = append(taskUpdateQueue, update)
+	})
 
 	return &pb.Ack{Success: true}, nil
 }
@@ -992,20 +1153,18 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			ModifiedAt time.Time `json:"modifiedAt,omitempty"`
 		}
 
-		jsonData, err := json.Marshal(struct {
-			Type          string        `json:"type"`
-			PayloadWorker workerPayload `json:"payloadWorker"`
-			PayloadJob    jobPayload    `json:"payloadJob"`
+		ws.EmitWS("worker", workerID, "created", struct {
+			Worker workerPayload `json:"worker"`
+			Job    jobPayload    `json:"job"`
 		}{
-			Type: "worker-created",
-			PayloadWorker: workerPayload{
+			Worker: workerPayload{
 				WorkerId:    workerID,
 				Name:        workerName,
 				Concurrency: req.Concurrency,
 				Prefetch:    req.Concurrency,
 				Status:      "P",
 			},
-			PayloadJob: jobPayload{
+			Job: jobPayload{
 				JobId:      jobID,
 				Action:     "C",
 				Status:     "P",
@@ -1013,12 +1172,6 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 				ModifiedAt: time.Now(),
 			},
 		})
-		if err != nil {
-			log.Printf("❌ Failed to marshal JSON: %v", err)
-			continue
-		}
-
-		ws.Broadcast(jsonData)
 	}
 
 	for _, job := range jobs {
@@ -1180,40 +1333,17 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 		return nil, fmt.Errorf("failed to commit worker deletion: %w", err)
 	}
 
-	type workerPayload struct {
-		WorkerId int32 `json:"workerId"`
-	}
-
-	type jobPayload struct {
-		JobId      int32     `json:"jobId"`
-		Action     string    `json:"action,omitempty"`
-		Status     string    `json:"status,omitempty"`
-		WorkerID   int32     `json:"workerId,omitempty"`
-		ModifiedAt time.Time `json:"modifiedAt,omitempty"`
-	}
-
-	jsonData, err := json.Marshal(struct {
-		Type          string        `json:"type"`
-		PayloadWorker workerPayload `json:"payloadWorker"`
-		PayloadJob    jobPayload    `json:"payloadJob"`
+	ws.EmitWS("worker", req.WorkerId, "deleted", struct {
+		WorkerId int32  `json:"workerId"`
+		JobId    int32  `json:"jobId,omitempty"`
+		Action   string `json:"action,omitempty"`
+		Status   string `json:"status,omitempty"`
 	}{
-		Type: "worker-deleted",
-		PayloadWorker: workerPayload{
-			WorkerId: req.WorkerId,
-		},
-		PayloadJob: jobPayload{
-			JobId:      job.JobID,
-			Action:     "D",
-			Status:     "P",
-			WorkerID:   req.WorkerId,
-			ModifiedAt: time.Now(),
-		},
+		WorkerId: req.WorkerId,
+		JobId:    job.JobID,
+		Action:   "D",
+		Status:   "P",
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal json: %w", err)
-	}
-
-	ws.Broadcast(jsonData)
 
 	return &pb.JobId{JobId: job.JobID}, nil
 }
@@ -1337,27 +1467,9 @@ func (s *taskQueueServer) DeleteJob(ctx context.Context, req *pb.JobId) (*pb.Ack
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete job: %w", err)
 	}
 
-	payload := struct {
-		Type    string `json:"type"`
-		Payload struct {
-			JobId int32 `json:"jobId"`
-		} `json:"payload"`
-	}{
-		Type: "job-deleted",
-		Payload: struct {
-			JobId int32 `json:"jobId"`
-		}{
-			JobId: req.JobId,
-		},
-	}
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
-	}
-
-	ws.Broadcast(jsonData)
-
+	ws.EmitWS("job", req.JobId, "deleted", struct {
+		JobId int32 `json:"jobId"`
+	}{JobId: req.JobId})
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -2056,33 +2168,17 @@ func (s *taskQueueServer) CreateUser(ctx context.Context, req *pb.CreateUserRequ
 		return nil, status.Error(codes.Internal, "failed to create user")
 	}
 
-	type userCreatePayload struct {
+	ws.EmitWS("user", userID, "created", struct {
 		UserId   int32   `json:"userId"`
 		Username *string `json:"username,omitempty"`
 		Email    *string `json:"email,omitempty"`
 		IsAdmin  *bool   `json:"isAdmin,omitempty"`
-	}
-
-	payload := struct {
-		Type    string            `json:"type"`
-		Payload userCreatePayload `json:"payload"`
 	}{
-		Type: "user-created",
-		Payload: userCreatePayload{
-			UserId:   userID,
-			Username: &req.Username,
-			Email:    &req.Email,
-			IsAdmin:  &req.IsAdmin,
-		},
-	}
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal json: %w", err)
-	}
-
-	ws.Broadcast(jsonData)
-
+		UserId:   userID,
+		Username: &req.Username,
+		Email:    &req.Email,
+		IsAdmin:  &req.IsAdmin,
+	})
 	return &pb.UserId{UserId: userID}, nil
 }
 
@@ -2126,7 +2222,9 @@ func (s *taskQueueServer) DeleteUser(ctx context.Context, req *pb.UserId) (*pb.A
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete user %d: %w", req.UserId, err)
 	}
 
-	ws.Broadcast([]byte(fmt.Sprintf(`{"type":"user-deleted","userId":%d}`, req.UserId)))
+	ws.EmitWS("user", req.UserId, "deleted", struct {
+		UserId int32 `json:"userId"`
+	}{UserId: req.UserId})
 
 	// Return success acknowledgement
 	return &pb.Ack{Success: true}, nil
@@ -2182,30 +2280,17 @@ func (s *taskQueueServer) UpdateUser(ctx context.Context, req *pb.User) (*pb.Ack
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update user %d: %w", req.UserId, err)
 	}
 
-	type userUpdatePayload struct {
+	ws.EmitWS("user", req.UserId, "updated", struct {
 		UserId   int32   `json:"userId"`
 		Username *string `json:"username,omitempty"`
 		Email    *string `json:"email,omitempty"`
 		IsAdmin  *bool   `json:"isAdmin,omitempty"`
-	}
-	payload := struct {
-		Type    string            `json:"type"`
-		Payload userUpdatePayload `json:"payload"`
 	}{
-		Type: "user-updated",
-		Payload: userUpdatePayload{
-			UserId:   req.UserId,
-			Username: req.Username,
-			Email:    req.Email,
-			IsAdmin:  req.IsAdmin,
-		},
-	}
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
-	}
-	ws.Broadcast(jsonData)
-
+		UserId:   req.UserId,
+		Username: req.Username,
+		Email:    req.Email,
+		IsAdmin:  req.IsAdmin,
+	})
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -2371,6 +2456,7 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 		query += " WHERE workflow_name ILIKE $1"
 		args = append(args, req.NameLike)
 	}
+	query += " ORDER BY workflow_id DESC"
 
 	// Handle pagination parameters
 	paramCount := len(args)
@@ -2451,27 +2537,13 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 		return nil, fmt.Errorf("failed to insert workflow: %w", err)
 	}
 
-	type workflowPayload struct {
+	ws.EmitWS("workflow", workflowID, "created", struct {
 		WorkflowId int32   `json:"workflowId"`
 		Name       *string `json:"name,omitempty"`
-	}
-
-	jsonData, err := json.Marshal(struct {
-		Type    string          `json:"type"`
-		Payload workflowPayload `json:"payload"`
 	}{
-		Type: "workflow-created",
-		Payload: workflowPayload{
-			WorkflowId: workflowID,
-			Name:       &req.Name,
-		},
+		WorkflowId: workflowID,
+		Name:       &req.Name,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal json: %w", err)
-	}
-
-	ws.Broadcast(jsonData)
-
 	return &pb.WorkflowId{WorkflowId: workflowID}, nil
 }
 
@@ -2481,26 +2553,16 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
 	}
 
-	payload := struct {
-		Type    string `json:"type"`
-		Payload struct {
-			WorkflowId int32 `json:"workflowId"`
-		} `json:"payload"`
-	}{
-		Type: "workflow-deleted",
-		Payload: struct {
-			WorkflowId int32 `json:"workflowId"`
-		}{
-			WorkflowId: req.WorkflowId,
-		},
-	}
+	s.stats.RemoveWorkflow(req.WorkflowId)
 
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
-	}
+	// Emit deletion events for workflow and associated step-stats (use workflowId as the WS id)
+	//ws.EmitWS("step-stats", req.WorkflowId, "workflow_deleted", struct {
+	//	WorkflowId int32 `json:"workflowId"`
+	//}{WorkflowId: req.WorkflowId})
 
-	ws.Broadcast(jsonData)
+	ws.EmitWS("workflow", req.WorkflowId, "deleted", struct {
+		WorkflowId int32 `json:"workflowId"`
+	}{WorkflowId: req.WorkflowId})
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -2561,31 +2623,27 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 		return nil, fmt.Errorf("step name is required")
 	}
 
-	type stepPayload struct {
-		StepId       int32   `json:"stepId"`
-		Name         *string `json:"name,omitempty"`
-		WorkflowId   *int32  `json:"workflowId,omitempty"`
-		WorkflowName *string `json:"workflowName,omitempty"`
-	}
-
 	var stepID int32
+	var workflowID int32
 	var err error
 
 	if req.WorkflowId != nil && *req.WorkflowId != 0 {
+		// Insert and RETURNING step_id, workflow_id
 		err = s.db.QueryRow(`
 			INSERT INTO step (step_name, workflow_id)
 			VALUES ($1, $2)
-			RETURNING step_id
-		`, req.Name, *req.WorkflowId).Scan(&stepID)
+			RETURNING step_id, workflow_id
+		`, req.Name, *req.WorkflowId).Scan(&stepID, &workflowID)
 	} else if req.WorkflowName != nil {
+		// Insert using workflow_name, return both
 		err = s.db.QueryRow(`
 			WITH wf AS (
 				SELECT w.workflow_id FROM workflow w WHERE w.workflow_name = $1
 			)
 			INSERT INTO step (step_name, workflow_id)
 			SELECT $2, wf.workflow_id FROM wf
-			RETURNING step_id
-		`, *req.WorkflowName, req.Name).Scan(&stepID)
+			RETURNING step_id, workflow_id
+		`, *req.WorkflowName, req.Name).Scan(&stepID, &workflowID)
 	} else {
 		return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
 	}
@@ -2596,23 +2654,32 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 		return nil, fmt.Errorf("failed to insert step: %w", err)
 	}
 
-	jsonData, err := json.Marshal(struct {
-		Type    string      `json:"type"`
-		Payload stepPayload `json:"payload"`
+	ws.EmitWS("step", *req.WorkflowId, "created", struct {
+		StepId       int32   `json:"stepId"`
+		Name         *string `json:"name,omitempty"`
+		WorkflowId   *int32  `json:"workflowId,omitempty"`
+		WorkflowName *string `json:"workflowName,omitempty"`
 	}{
-		Type: "step-created",
-		Payload: stepPayload{
-			StepId:       stepID,
-			Name:         &req.Name,
-			WorkflowId:   req.WorkflowId,
-			WorkflowName: req.WorkflowName,
-		},
+		StepId:       stepID,
+		Name:         &req.Name,
+		WorkflowId:   req.WorkflowId,
+		WorkflowName: req.WorkflowName,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal json: %w", err)
-	}
 
-	ws.Broadcast(jsonData)
+	// Update aggregator & emit initial step-stats snapshot
+	if workflowID > 0 {
+		s.stats.EnsureStep(workflowID, stepID)
+		// Emit a minimal step-stats creation notice; UI initializes zeroes locally
+		//ws.EmitWS("step-stats", workflowID, "created", struct {
+		//	WorkflowId int32  `json:"workflowId"`
+		//	StepId     int32  `json:"stepId"`
+		//	StepName   string `json:"stepName,omitempty"`
+		//}{
+		//	WorkflowId: workflowID,
+		//	StepId:     stepID,
+		//	StepName:   req.Name,
+		//})
+	}
 
 	return &pb.StepId{StepId: stepID}, nil
 }
@@ -2623,27 +2690,11 @@ func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.A
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete step: %w", err)
 	}
 
-	type stepPayload struct {
-		StepId       int32   `json:"stepId"`
-		Name         *string `json:"name,omitempty"`
-		WorkflowId   *int32  `json:"workflowId,omitempty"`
-		WorkflowName *string `json:"workflowName,omitempty"`
-	}
+	workflowId := s.stats.RemoveStep(req.StepId)
 
-	jsonData, err := json.Marshal(struct {
-		Type    string      `json:"type"`
-		Payload stepPayload `json:"payload"`
-	}{
-		Type: "step-deleted",
-		Payload: stepPayload{
-			StepId: req.StepId,
-		},
-	})
-	if err != nil {
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to marshal json: %w", err)
-	}
-
-	ws.Broadcast(jsonData)
+	ws.EmitWS("step", workflowId, "deleted", struct {
+		StepId int32 `json:"stepId"`
+	}{StepId: req.StepId})
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -3061,166 +3112,4 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	}
 
 	return nil
-}
-
-//////////////////////////////////////////////////////////////////
-// region stats
-//////////////////////////////////////////////////////////////////
-
-// GetStepStats implements the gRPC endpoint for step-level statistics aggregation.
-func (s *taskQueueServer) GetStepStats(ctx context.Context, req *pb.StepStatsRequest) (*pb.StepStatsResponse, error) {
-	// Build dynamic SQL with optional filters: workflow_id, step_ids, include_hidden
-	args := []any{}
-	where := []string{"1=1"}
-
-	// Hidden filter (default: exclude hidden)
-	includeHidden := req.IncludeHidden != nil && *req.IncludeHidden
-	if !includeHidden {
-		where = append(where, "t.hidden = FALSE")
-	}
-
-	// Workflow filter
-	if req.WorkflowId != nil && *req.WorkflowId != 0 {
-		where = append(where, fmt.Sprintf("s.workflow_id = $%d", len(args)+1))
-		args = append(args, *req.WorkflowId)
-	}
-
-	// Step IDs filter
-	if len(req.StepIds) > 0 {
-		placeholders := make([]string, len(req.StepIds))
-		for i, id := range req.StepIds {
-			args = append(args, id)
-			placeholders[i] = fmt.Sprintf("$%d", len(args))
-		}
-		where = append(where, fmt.Sprintf("s.step_id IN (%s)", strings.Join(placeholders, ", ")))
-	}
-
-	// Aggregate query
-	query := fmt.Sprintf(`
-		SELECT 
-		  s.step_id,
-		  s.step_name,
-		  COUNT(*) AS total_tasks,
-		  COUNT(*) FILTER (WHERE t.status = 'W') AS waiting_tasks,
-		  COUNT(*) FILTER (WHERE t.status = 'P') AS pending_tasks,
-		  COUNT(*) FILTER (WHERE t.status = 'C') AS accepted_tasks,
-		  COUNT(*) FILTER (WHERE t.status = 'O') AS onhold_tasks,
-		  COUNT(*) FILTER (WHERE t.status in ('R','U')) AS running_tasks,
-		  COUNT(*) FILTER (WHERE t.status = 'S') AS successful_tasks,
-		  COUNT(*) FILTER (WHERE t.status in ('F','V')) AS failed_tasks,
-
-		  -- Success run stats (only succeeded tasks)
-		  AVG(t.run_duration::float8)    FILTER (WHERE t.status = 'S') AS success_run_avg,
-		  MIN(t.run_duration::float8)    FILTER (WHERE t.status = 'S') AS success_run_min,
-		  MAX(t.run_duration::float8)    FILTER (WHERE t.status = 'S') AS success_run_max,
-
-		  -- Failed run stats (only failed tasks)
-		  AVG(t.run_duration::float8)    FILTER (WHERE t.status = 'F') AS failed_run_avg,
-		  MIN(t.run_duration::float8)    FILTER (WHERE t.status = 'F') AS failed_run_min,
-		  MAX(t.run_duration::float8)    FILTER (WHERE t.status = 'F') AS failed_run_max,
-
-		  -- Current running tasks (elapsed since run_started_at)
-		  AVG(EXTRACT(EPOCH FROM (NOW() - t.run_started_at))) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS current_run_avg,
-		  MIN(EXTRACT(EPOCH FROM (NOW() - t.run_started_at))) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS current_run_min,
-		  MAX(EXTRACT(EPOCH FROM (NOW() - t.run_started_at))) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS current_run_max,
-
-		  -- Download stats (ignore zeros)
-		  AVG(t.download_duration::float8) AS download_avg,
-		  MIN(t.download_duration::float8) AS download_min,
-		  MAX(t.download_duration::float8) AS download_max,
-
-		  -- Upload stats (ignore zeros)
-		  AVG(t.upload_duration::float8) AS upload_avg,
-		  MIN(t.upload_duration::float8) AS upload_min,
-		  MAX(t.upload_duration::float8) AS upload_max,
-
-		  -- Overall step activity period
-		  EXTRACT(EPOCH FROM MIN(t.created_at)) AS started_at,
-		  EXTRACT(EPOCH FROM MAX(t.modified_at)) AS last_active_at
-		FROM task t
-		LEFT JOIN step s ON s.step_id = t.step_id
-		WHERE %s
-		GROUP BY s.step_id, s.step_name
-		ORDER BY s.step_id ASC
-	`, strings.Join(where, " AND "))
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query step stats: %w", err)
-	}
-	defer rows.Close()
-
-	var out []*pb.StepStats
-	for rows.Next() {
-		var (
-			stepID                                                         int32
-			stepName                                                       sql.NullString
-			total, waiting, pending, accepted, onhold, running, succ, fail int32
-			successAvg, successMin, successMax                             sql.NullFloat64
-			failedAvg, failedMin, failedMax                                sql.NullFloat64
-			curAvg, curMin, curMax                                         sql.NullFloat64
-			dlAvg, dlMin, dlMax                                            sql.NullFloat64
-			upAvg, upMin, upMax                                            sql.NullFloat64
-			startedAt, lastActiveAt                                        sql.NullFloat64
-		)
-
-		if err := rows.Scan(
-			&stepID, &stepName,
-			&total, &waiting, &pending, &accepted, &onhold, &running, &succ, &fail,
-			&successAvg, &successMin, &successMax,
-			&failedAvg, &failedMin, &failedMax,
-			&curAvg, &curMin, &curMax,
-			&dlAvg, &dlMin, &dlMax,
-			&upAvg, &upMin, &upMax,
-			&startedAt, &lastActiveAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan step stats: %w", err)
-		}
-
-		makeDur := func(avg, min, max sql.NullFloat64) *pb.DurationStats {
-			ds := &pb.DurationStats{}
-			if avg.Valid {
-				ds.Average = float32(avg.Float64)
-			}
-			if min.Valid {
-				ds.Min = float32(min.Float64)
-			}
-			if max.Valid {
-				ds.Max = float32(max.Float64)
-			}
-			return ds
-		}
-
-		stats := &pb.StepStats{
-			StepId: stepID,
-		}
-		if stepName.Valid {
-			stats.StepName = stepName.String
-		}
-		stats.TotalTasks = total
-		stats.SuccessfulTasks = succ
-		stats.FailedTasks = fail
-
-		stats.SuccessRunStats = makeDur(successAvg, successMin, successMax)
-		stats.FailedRunStats = makeDur(failedAvg, failedMin, failedMax)
-		stats.CurrentRunStats = makeDur(curAvg, curMin, curMax)
-		stats.DownloadStats = makeDur(dlAvg, dlMin, dlMax)
-		stats.UploadStats = makeDur(upAvg, upMin, upMax)
-
-		if startedAt.Valid {
-			v := float32(startedAt.Float64)
-			stats.StartTime = &v
-		}
-		if lastActiveAt.Valid {
-			v := float32(lastActiveAt.Float64)
-			stats.EndTime = &v
-		}
-
-		out = append(out, stats)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating step stats: %w", err)
-	}
-
-	return &pb.StepStatsResponse{Stats: out}, nil
 }

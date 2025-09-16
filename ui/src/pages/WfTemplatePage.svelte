@@ -37,7 +37,7 @@
   // Tracks which parameter help texts are visible
   let showHelp: Record<string, boolean> = {};
   // Function to unsubscribe from WebSocket
-  let unsubscribeWS: () => void;
+  let unsubscribeWS: (() => void) | null = null;
 
   /**
    * Handles incoming WebSocket messages for template updates
@@ -46,23 +46,51 @@
    * @param {Object} message.payload - Message payload containing template data
    */
   function handleMessage(message) {
-    if (message.type === 'template-uploaded') {
-      if (!workflowsTemp.some(t => t.workflowTemplateId === message.payload.ID)) {
-        workflowsTemp = [...workflowsTemp, message.payload];
+    // New envelope: { type: 'template', action: 'uploaded'|'created'|'updated'|'deleted', payload: {...} }
+    if (message?.type === 'template') {
+      const action = message.action;
+      const p = message.payload || {};
+
+      if (action === 'uploaded' || action === 'created') {
+        const id = p.workflowTemplateId ?? p.ID ?? p.id;
+        if (id != null && !workflowsTemp.some(t => (t.workflowTemplateId ?? t.ID) === id)) {
+          workflowsTemp = [...workflowsTemp, p];
+        }
+        return;
       }
-      console.log('Template created via WebSocket:', message.payload);
+
+      if (action === 'updated') {
+        const id = p.workflowTemplateId ?? p.ID ?? p.id;
+        if (id != null) {
+          workflowsTemp = workflowsTemp.map(t =>
+            (t.workflowTemplateId ?? t.ID) === id ? { ...t, ...p } : t
+          );
+        }
+        return;
+      }
+
+      if (action === 'deleted') {
+        const id = p.workflowTemplateId ?? p.ID ?? p.id;
+        if (id != null) {
+          workflowsTemp = workflowsTemp.filter(t => (t.workflowTemplateId ?? t.ID) !== id);
+        }
+        return;
+      }
     }
   }
 
   // Initialize component - load templates and subscribe to WebSocket
   onMount(async () => {
     workflowsTemp = await getTemplates();
-    unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
+    unsubscribeWS = wsClient.subscribeWithTopics({ template: [] }, handleMessage);
   });
 
   // Cleanup - unsubscribe from WebSocket when component is destroyed
   onDestroy(() => {
-    unsubscribeWS?.();
+    if (unsubscribeWS) {
+      unsubscribeWS();
+      unsubscribeWS = null;
+    }
   });
 
   /**

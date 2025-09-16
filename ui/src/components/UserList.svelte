@@ -85,38 +85,84 @@
    * @param {Object} message - The WebSocket message
    */
   function handleMessage(message) {
-    // Handle user deletion
-    if (message.type === 'user-deleted') {
-      users = users.filter(u => u.userId !== message.userId);
+    // New envelope: { type: 'user', action: 'created'|'updated'|'deleted', payload:{...} }
+    if (message?.type === 'user') {
+      const action = message.action;
+      const p = message.payload || {};
+
+      if (action === 'deleted') {
+        const id = Number(p.userId ?? message.userId);
+        if (!Number.isNaN(id)) {
+          users = users.filter(u => u.userId !== id);
+        }
+        return;
+      }
+
+      if (action === 'created') {
+        const newUser = {
+          userId: Number(p.userId),
+          username: p.username,
+          email: p.email,
+          isAdmin: !!p.isAdmin,
+        };
+        if (!users.some(u => u.userId === newUser.userId)) {
+          users = [...users, newUser];
+        }
+        return;
+      }
+
+      if (action === 'updated') {
+        const id = Number(p.userId);
+        if (!Number.isNaN(id)) {
+          users = users.map(u =>
+            u.userId === id
+              ? {
+                  ...u,
+                  username: p.username ?? u.username,
+                  email: p.email ?? u.email,
+                  isAdmin: typeof p.isAdmin === 'boolean' ? p.isAdmin : u.isAdmin,
+                }
+              : u
+          );
+        }
+        return;
+      }
     }
 
-    // Handle user creation
-    if (message.type === 'user-created') {
+    // Back-compat with legacy flat events
+    if (message?.type === 'user-deleted') {
+      users = users.filter(u => u.userId !== Number(message.userId));
+      return;
+    }
+    if (message?.type === 'user-created') {
+      const p = message.payload || message;
       const newUser = {
-        userId: Number(message.payload.userId),
-        username: message.payload.username,
-        email: message.payload.email,
-        isAdmin: message.payload.isAdmin
+        userId: Number(p.userId),
+        username: p.username,
+        email: p.email,
+        isAdmin: !!p.isAdmin,
       };
       if (!users.some(u => u.userId === newUser.userId)) {
         users = [...users, newUser];
       }
+      return;
     }
-
-    // Handle user updates
-    if (message.type === 'user-updated') {
-      users = users.map(u => 
-        u.userId === Number(message.payload.userId)
-          ? {
-              ...u,
-              username: message.payload.username || u.username,
-              email: message.payload.email || u.email,
-              isAdmin: message.payload.isAdmin !== undefined 
-                       ? message.payload.isAdmin 
-                       : u.isAdmin
-            }
-          : u
-      );
+    if (message?.type === 'user-updated') {
+      const p = message.payload || message;
+      const id = Number(p.userId);
+      if (!Number.isNaN(id)) {
+        users = users.map(u =>
+          u.userId === id
+            ? {
+                ...u,
+                username: p.username ?? u.username,
+                email: p.email ?? u.email,
+                isAdmin: typeof p.isAdmin === 'boolean' ? p.isAdmin : u.isAdmin,
+              }
+            : u
+        );
+      }
+      return;
     }
   }
 
@@ -124,7 +170,7 @@
    * Function to unsubscribe from WebSocket
    * @type {() => void}
    */
-  let unsubscribeWS: () => void;
+  let unsubscribeWS: (() => void) | null = null;
 
   /**
    * Component mount lifecycle hook
@@ -135,7 +181,7 @@
       users = await getListUser();
 
       // Subscribe to WebSocket messages
-      unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
+      unsubscribeWS = wsClient.subscribeWithTopics({ user: [] }, handleMessage);
     } catch (err) {
       console.error("Error loading user data:", err);
     }
@@ -147,7 +193,10 @@
    */
   onDestroy(() => {
     // Unsubscribe from WebSocket messages
-    unsubscribeWS?.();
+    if (unsubscribeWS) {
+      unsubscribeWS();
+      unsubscribeWS = null;
+    }
   });
 
   /**

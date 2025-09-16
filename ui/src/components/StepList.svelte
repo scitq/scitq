@@ -80,6 +80,53 @@
    */
   let unsubscribeWS: () => void;
 
+  // Track running tasks per step: stepId -> (taskId -> runStartedEpoch)
+  const runningByStep: Map<number, Map<number, number>> = new Map();
+  let runningTimer: any = null;
+
+  // Convert Accum -> {average,min,max} helper
+  function toStats(acc?: { count?: number; sum?: number; min?: number; max?: number }) {
+    if (!acc || !acc.count || acc.count <= 0) return { average: 0, min: 0, max: 0 };
+    const avg = acc.sum! / acc.count!;
+    return { average: avg, min: acc.min ?? 0, max: acc.max ?? 0 };
+  }
+
+  // Recompute live running stats every 1s from runningByStep
+  function recomputeRunningStats() {
+    const now = Math.floor(Date.now() / 1000);
+    for (const step of steps) {
+      const rm = runningByStep.get(step.stepId);
+      if (!rm || rm.size === 0) {
+        // fall back to server-provided runningRun (static) if present
+        if (step.runningRun) {
+          step.currentRunStats = toStats(step.runningRun);
+        } else {
+          step.currentRunStats = { average: 0, min: 0, max: 0 };
+        }
+        continue;
+      }
+      let count = 0;
+      let sum = 0;
+      let min = Number.POSITIVE_INFINITY;
+      let max = 0;
+      rm.forEach((startEpoch) => {
+        const elapsed = Math.max(0, now - startEpoch);
+        sum += elapsed;
+        if (elapsed < min) min = elapsed;
+        if (elapsed > max) max = elapsed;
+        count++;
+      });
+      if (count > 0) {
+        step.currentRunStats = { average: sum / count, min, max };
+      } else {
+        step.currentRunStats = { average: 0, min: 0, max: 0 };
+      }
+    }
+    // 🔁 Svelte reactivity nudge: we mutated nested props inside array items
+    // Reassigning the array reference forces an update
+    steps = steps;
+  }
+
   // Safe percent helper for progress segments
   function pct(part?: number, total?: number): number {
     if (!total || total <= 0 || !part || part <= 0) return 0;
@@ -95,7 +142,22 @@
    */
   onMount(async () => {
     steps = await getStepStats({ workflowId });
-    unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
+    console.info('[StepList] mount: workflow', workflowId, 'initial steps:', (steps||[]).length);
+    // Subscribe to step entity events, step-stats deltas, and worker events for this workflow
+    unsubscribeWS = wsClient.subscribeWithTopics(
+      { step: [workflowId], 'step-stats': [workflowId], worker: [] },
+      handleMessage
+    );
+    console.info('[StepList] subscribed to topics:', { step: [workflowId], 'step-stats': [workflowId], worker: [] });
+    // Prime derived stats from accumulators
+    steps = (steps || []).map((s) => ({
+      ...s,
+      successRunStats: toStats(s.successRun),
+      failedRunStats: toStats(s.failedRun),
+      currentRunStats: toStats(s.runningRun),
+    }));
+    // Start periodic recompute for live running durations (updated via deltas)
+    runningTimer = setInterval(recomputeRunningStats, 1000);
   });
 
   /**
@@ -104,8 +166,47 @@
    * @returns {void}
    */
   onDestroy(() => {
-    unsubscribeWS?.();
+    if (unsubscribeWS) {
+      unsubscribeWS();
+    }
+    if (runningTimer) {
+      clearInterval(runningTimer);
+      runningTimer = null;
+    }
   });
+
+  /**
+   * Marks a step as dirty to trigger Svelte reactivity
+   * @param {number} stepId - The ID of the step to mark as dirty
+   * @returns {void}
+   */
+  function markDirty(stepId: number) {
+    const i = steps.findIndex(s => s.stepId === stepId);
+    if (i !== -1) steps = [...steps.slice(0, i), { ...steps[i] }, ...steps.slice(i+1)];
+  }
+
+
+  // -- Workers map maintenance helpers --------------------------------------
+  function removeWorkerEverywhere(workerId: number) {
+    let changed = false;
+    const next = new Map<number, taskqueue.Worker[]>();
+    for (const [sid, arr] of workersPerStepId.entries()) {
+      const filtered = (arr || []).filter(w => w.workerId !== workerId);
+      next.set(sid, filtered);
+      if (filtered.length !== (arr || []).length) changed = true;
+    }
+    if (changed) workersPerStepId = next; // nudge reactivity by replacing Map
+    return changed;
+  }
+
+  function addWorkerToStep(stepId: number, worker: taskqueue.Worker) {
+    const arr = workersPerStepId.get(stepId) || [];
+    // Avoid duplicates
+    const exists = arr.some(w => w.workerId === worker.workerId);
+    const next = new Map(workersPerStepId);
+    next.set(stepId, exists ? arr : [...arr, worker]);
+    workersPerStepId = next; // reassign to trigger Svelte update
+  }
 
   /**
    * Handles incoming WebSocket messages
@@ -116,43 +217,195 @@
    * @returns {void}
    */
   function handleMessage(message) {
-    if (message.type === 'step-created' && message.payload.workflowId === workflowId) {
-      const newStep = message.payload;
-      const existsInSteps = steps.some(s => s.stepId === newStep.stepId);
-      const existsInPending = pendingSteps.some(s => s.stepId === newStep.stepId);
-
-      if (!existsInSteps && !existsInPending) {
-        if (isScrolledToTop) {
-          steps = [newStep, ...steps];
-        } else {
-          pendingSteps = [newStep, ...pendingSteps];
-          newStepsCount = pendingSteps.length;
-          showNewStepsNotification = true;
+    // STEP entity events
+    if (message.type === 'step') {
+      if (message.action === 'created' && message.payload?.workflowId === workflowId) {
+        const newStep = message.payload;
+        const existsInSteps = steps.some((s) => s.stepId === newStep.stepId);
+        const existsInPending = pendingSteps.some((s) => s.stepId === newStep.stepId);
+        if (!existsInSteps && !existsInPending) {
+          const stepObj = {
+            stepId: newStep.stepId,
+            stepName: newStep.name || newStep.stepName || '',
+            totalTasks: 0,
+            waitingTasks: 0,
+            pendingTasks: 0,
+            acceptedTasks: 0,
+            onholdTasks: 0,
+            runningTasks: 0,
+            successfulTasks: 0,
+            failedTasks: 0,
+            download: { count: 0, sum: 0, min: 0, max: 0 },
+            upload:   { count: 0, sum: 0, min: 0, max: 0 },
+            successRun: { count: 0, sum: 0, min: 0, max: 0 },
+            failedRun:  { count: 0, sum: 0, min: 0, max: 0 },
+            runningRun: { count: 0, sum: 0, min: 0, max: 0 },
+            successRunStats: { average: 0, min: 0, max: 0 },
+            failedRunStats:  { average: 0, min: 0, max: 0 },
+            currentRunStats: { average: 0, min: 0, max: 0 },
+          };
+          if (isScrolledToTop) {
+            steps = [stepObj, ...steps];
+          } else {
+            pendingSteps = [stepObj, ...pendingSteps];
+            newStepsCount = pendingSteps.length;
+            showNewStepsNotification = true;
+          }
         }
+        return;
+      }
+      if (message.action === 'deleted') {
+        const idToRemove = message.payload?.stepId ?? message.id;
+        if (typeof idToRemove === 'number') {
+          steps = steps.filter((s) => s.stepId !== idToRemove);
+          pendingSteps = pendingSteps.filter((s) => s.stepId !== idToRemove);
+          runningByStep.delete(idToRemove);
+          // Remove any workers shown under this step
+          const next = new Map(workersPerStepId);
+          next.delete(idToRemove);
+          workersPerStepId = next;
+        }
+        return;
       }
     }
 
-    if (message.type === 'step-deleted') {
-      const idToRemove = message.payload.stepId;
-      steps = steps.filter(s => s.stepId !== idToRemove);
-      pendingSteps = pendingSteps.filter(s => s.stepId !== idToRemove);
-    }
-  }
+    // STEP-STATS incremental deltas (id == workflowId)
+    if (message.type === 'step-stats' && message.id === workflowId) {
+      const p = message.payload || {};
+      const stepId: number = p.stepId;
+      const step = steps.find((s) => s.stepId === stepId);
+      if (!step) return;
 
-  /**
-   * Loads pending steps into the main steps list
-   * Resets notification and scrolls to top
-   * @returns {void}
-   */
-  function loadNewSteps() {
-    steps = [...pendingSteps, ...steps];
-    pendingSteps = [];
-    newStepsCount = 0;
-    showNewStepsNotification = false;
+      const oldS: string | undefined = p.oldStatus;
+      const newS: string | undefined = p.newStatus;
+      const dur: number | undefined = p.duration;
 
-    if (tableContainer) {
-      tableContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      // Adjust counters: decrement old, increment new
+      if (oldS) {
+        switch (oldS) {
+          case 'W': step.waitingTasks--; break;
+          case 'P': step.pendingTasks--; break;
+          case 'C': step.acceptedTasks--; break;
+          case 'O': step.onholdTasks--; break;
+          case 'R': step.runningTasks--; break;
+          case 'U':
+          case 'S': step.successfulTasks--; break;
+          case 'F': 
+          case 'V': step.failedTasks--; break;
+        }
+      }
+      if (newS) {
+        switch (newS) {
+          case 'W': step.waitingTasks++; break;
+          case 'P': step.pendingTasks++; break;
+          case 'C': step.acceptedTasks++; break;
+          case 'O': step.onholdTasks++; break;
+          case 'R': step.runningTasks++; break;
+          case 'U':
+          case 'S': step.successfulTasks++; break;
+          case 'F':
+          case 'V': step.failedTasks++; break;
+        }
+      }
+
+      // Running set maintenance
+      if (newS === 'R' && typeof p.runStartedEpoch === 'number') {
+        let m = runningByStep.get(stepId);
+        if (!m) { m = new Map(); runningByStep.set(stepId, m); }
+        m.set(p.taskId, p.runStartedEpoch);
+      }
+      if (oldS === 'R' && newS !== 'R') {
+        const m = runningByStep.get(stepId);
+        if (m) { m.delete(p.taskId); }
+      }
+
+      // Accumulators
+      const bumpMinMax = (acc, v) => {
+        if (v == null) return;
+        acc.sum = (acc.sum || 0) + v;
+        if (!acc.min || v < acc.min) acc.min = v;
+        if (!acc.max || v > acc.max) acc.max = v;
+      };
+
+      if (typeof dur === 'number') {
+        if (newS === 'O') {
+          bumpMinMax(step.download, dur);
+        } else if (newS === 'U') {
+          step.successRun.count = (step.successRun.count || 0) + 1;
+          bumpMinMax(step.successRun, dur);
+          step.successRunStats = toStats(step.successRun);
+        } else if (newS === 'V') {
+          step.failedRun.count = (step.failedRun.count || 0) + 1;
+          bumpMinMax(step.failedRun, dur);
+          step.failedRunStats = toStats(step.failedRun);
+        } else if (newS === 'S' || newS === 'F') {
+          bumpMinMax(step.upload, dur);
+        }
+      }
+
+      // Start/end time bounds
+      if (typeof p.startEpoch === 'number') {
+        if (!step.startTime || p.startEpoch < step.startTime) {
+          step.startTime = p.startEpoch;
+        }
+      }
+      if (typeof p.endEpoch === 'number') {
+        if (!step.endTime || p.endEpoch > step.endTime) {
+          step.endTime = p.endEpoch;
+        }
+      }
+
+      // Derived totals
+      step.totalTasks =
+        step.waitingTasks +
+        step.pendingTasks +
+        step.acceptedTasks +
+        step.onholdTasks +
+        step.runningTasks +
+        step.successfulTasks +
+        step.failedTasks;
+
+
+      // Update running derived stats now; periodic timer will keep it fresh
+      recomputeRunningStats();
+      return;
     }
+
+    // WORKER events: track assignment changes per step
+    if (message.type === 'worker') {
+      console.debug('[StepList] worker event:', message);
+      const p = message.payload || {};
+      const wid: number | undefined = p.workerId ?? p.id;
+      const sid: number | undefined = p.stepId;
+
+      if (typeof wid !== 'number') {
+        return;
+      }
+
+      // Normalize a minimal worker object; keep name if provided
+      const workerObj: taskqueue.Worker = {
+        workerId: wid,
+        name: p.name ?? `worker-${wid}`,
+      } as any;
+
+      switch (message.action) {
+        case 'deleted':
+          removeWorkerEverywhere(wid);
+          steps = steps; // nudge reactivity in case only removal happened
+          return;
+        default:
+          // If the event carries a stepId, keep it simple: ensure it’s there
+          if (typeof sid === 'number') {
+            removeWorkerEverywhere(wid);
+            addWorkerToStep(sid, workerObj);
+            steps = steps; // nudge reactivity in case only removal happened
+            return;
+          }
+          return;
+      }
+    }
+
+    console.warn('[StepList] ignoring unknown WS message:', message);
   }
 
   /**

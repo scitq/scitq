@@ -42,10 +42,10 @@ func (ps *PostgresSession) Rollback() error {
 	return nil
 }
 
-func (ps *PostgresSession) GetProviderID(provider string) (uint32, error) {
+func (ps *PostgresSession) GetProviderID(provider string) (int32, error) {
 	query := `
 	SELECT provider_id FROM provider WHERE provider_name||'.'||config_name = $1`
-	var providerID uint32
+	var providerID int32
 	err := ps.tx.QueryRow(query, provider).Scan(&providerID)
 	if err != nil {
 		return 0, fmt.Errorf("query provider %s for ID: %w", provider, err)
@@ -54,7 +54,7 @@ func (ps *PostgresSession) GetProviderID(provider string) (uint32, error) {
 }
 
 // QueryFlavors returns all flavors for a given provider.
-func (ps *PostgresSession) QueryFlavors(providerID uint32) ([]*Flavor, error) {
+func (ps *PostgresSession) QueryFlavors(providerID int32) ([]*Flavor, error) {
 	query := `
 	SELECT f.flavor_name, p.provider_name||'.'||p.config_name, f.cpu, f.mem, f.disk, f.bandwidth, f.gpu, f.gpumem, f.has_gpu, f.has_quick_disks
 	FROM flavor f

@@ -199,7 +199,7 @@ func newOVHClientFromConfig(c config.OpenstackConfig) (*ovh.Client, string, []st
 }
 
 // fetchOVHFlavors gets flavors and builds Flavor + FlavorMetrics slices (empty cost initially)
-func fetchOVHFlavors(client *ovh.Client, providerId uint32, service string, regions []string) ([]*updater.Flavor, []*updater.FlavorMetrics, error) {
+func fetchOVHFlavors(client *ovh.Client, providerId int32, service string, regions []string) ([]*updater.Flavor, []*updater.FlavorMetrics, error) {
 	var raw []ovhFlavor
 	if err := client.Get(fmt.Sprintf("/cloud/project/%s/flavor", service), &raw); err != nil {
 		return nil, nil, fmt.Errorf("list flavors: %w", err)

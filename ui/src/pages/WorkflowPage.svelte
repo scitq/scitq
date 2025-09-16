@@ -29,7 +29,7 @@
   const WORKFLOWS_CHUNK_SIZE = 25;
 
   // WebSocket unsubscribe function
-  let unsubscribeWS: () => void;
+  let unsubscribeWS: (() => void) | null = null;
 
   function mapWorkersToStepIds(workers: taskqueue.Worker[]): Map<number, taskqueue.Worker[]> {
     const map = new Map<number, taskqueue.Worker[]>();
@@ -52,7 +52,8 @@
     workersPerStepId = mapWorkersToStepIds(workers);
     console.log('Loaded workers:', workers);
     console.log('Workers per stepId map:', workersPerStepId);
-    unsubscribeWS = wsClient.subscribeToMessages(handleMessage);
+    // Subscribe to workflow entity events only
+    unsubscribeWS = wsClient.subscribeWithTopics({ workflow: [] }, handleMessage);
   });
 
 
@@ -61,7 +62,10 @@
    * Component cleanup - unsubscribes from WebSocket
    */
   onDestroy(() => {
-    unsubscribeWS?.();
+    if (unsubscribeWS) {
+      unsubscribeWS();
+      unsubscribeWS = null;
+    }
   });
 
   /**
@@ -71,31 +75,36 @@
    * @param {Object} message.payload - Message payload containing workflow data
    */
   function handleMessage(message) {
-    // Handle new workflow creation
-    if (message.type === 'workflow-created') {
-      const newWf = message.payload;
-      const existsInDisplayed = workflows.some(wf => wf.workflowId === newWf.workflowId);
-      const existsInPending = pendingWorkflows.some(wf => wf.workflowId === newWf.workflowId);
+    if (message?.type === 'workflow') {
+      const action = message.action;
+      const p = message.payload || {};
 
-      // Add to appropriate list if not already present
-      if (!existsInDisplayed && !existsInPending) {
-        if (isScrolledToTop) {
-          workflows = [newWf, ...workflows];
-          console.log('workflow created via WebSocket:', message.payload.workflowId);
-        } else {
-          pendingWorkflows = [newWf, ...pendingWorkflows];
-          newWorkflowsCount = pendingWorkflows.length;
-          showNewWorkflowsNotification = true;
+      if (action === 'created') {
+        const newWf = p;
+        const existsInDisplayed = workflows.some(wf => wf.workflowId === newWf.workflowId);
+        const existsInPending = pendingWorkflows.some(wf => wf.workflowId === newWf.workflowId);
+        if (!existsInDisplayed && !existsInPending) {
+          if (isScrolledToTop) {
+            workflows = [newWf, ...workflows];
+            console.log('workflow created via WebSocket:', newWf.workflowId);
+          } else {
+            pendingWorkflows = [newWf, ...pendingWorkflows];
+            newWorkflowsCount = pendingWorkflows.length;
+            showNewWorkflowsNotification = true;
+          }
         }
+        return;
       }
-    }
 
-    // Handle workflow deletion
-    if (message.type === 'workflow-deleted') {
-      const idToRemove = message.payload.workflowId;
-      workflows = workflows.filter(wf => wf.workflowId !== idToRemove);
-      pendingWorkflows = pendingWorkflows.filter(wf => wf.workflowId !== idToRemove);
-      console.log('workflow removed via WebSocket:', idToRemove);
+      if (action === 'deleted') {
+        const idToRemove = typeof p.workflowId === 'number' ? p.workflowId : message.id;
+        if (typeof idToRemove === 'number') {
+          workflows = workflows.filter(wf => wf.workflowId !== idToRemove);
+          pendingWorkflows = pendingWorkflows.filter(wf => wf.workflowId !== idToRemove);
+          console.log('workflow removed via WebSocket:', idToRemove);
+        }
+        return;
+      }
     }
   }
 
