@@ -278,7 +278,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 	)
 
 	if runErr != nil || exitCode != 0 {
-		errMsg := fmt.Sprintf("script failed (exit=%d): %s", exitCode, stderr)
+		errMsg := fmt.Sprintf("script failed (exit=%d): \n %s \n %s", exitCode, stdout, stderr)
 		log.Printf("⚠️ RunTemplate script error: %s", errMsg)
 
 		_, _ = s.db.ExecContext(ctx, `

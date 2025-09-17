@@ -18,9 +18,9 @@
 
 
 [ ] show worker event in UI
-[◒] step view stats in UI (websocket updates missing)
-[ ] fix web sockets
-  [ ] Fix concurrent-write hazard (writer pump per connection)
+[✅] step view stats in UI (websocket updates missing)
+[◒] fix web sockets
+  [✅] Fix concurrent-write hazard (writer pump per connection)
   [ ] Add event envelope with monotonic event_id + server ring buffer (to replay missed events)
   [ ] wsClient.ts small upgrades: lastEventId tracking/since, single dispatcher -> route by msg.type
 

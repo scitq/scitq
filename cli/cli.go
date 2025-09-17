@@ -23,7 +23,7 @@ import (
 // CLI struct encapsulates task & worker commands
 type Attr struct {
 	Server  string `arg:"-s,--server,env:SCITQ_SERVER" default:"localhost:50051" help:"gRPC server address"`
-	TimeOut int    `arg:"-t,--timeout" default:"5" help:"Timeout for server interaction (in seconds)"`
+	TimeOut int    `arg:"-t,--timeout" default:"300" help:"Timeout for server interaction (in seconds)"`
 
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
