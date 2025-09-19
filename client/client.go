@@ -130,9 +130,9 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
-	// 🛑 Only acknowledge if the task is in "C" or "D"
-	if task.Status != "C" && task.Status != "D" {
-		log.Printf("⚠️ Task %d is not accepted (C) or downloading (D) but %s, skipping acknowledgment.", task.TaskId, task.Status)
+	// 🛑 Only proceed if the task is Accepted (C), Downloading (D), or On hold (O)
+	if task.Status != "C" && task.Status != "D" && task.Status != "O" {
+		log.Printf("⚠️ Task %d is not in C/D/O but %s, skipping.", task.TaskId, task.Status)
 		reporter.Event("E", "task", fmt.Sprintf("task %d is not in accepted state", task.TaskId), map[string]any{
 			"task_id": task.TaskId,
 			"status":  task.Status,
@@ -140,6 +140,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		})
 		return
 	}
+	// Promote to Running locally and on the server
 	task.Status = "R"
 	reporter.UpdateTaskAsync(task.TaskId, "R", "", nil)
 
@@ -257,6 +258,21 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		task.Status = "S" // Mark as success
 		reporter.UpdateTaskAsync(task.TaskId, "U", "", &sec)
 	}
+}
+
+// cleanupTaskWorkingDir removes the task working directory regardless of task outcome.
+func cleanupTaskWorkingDir(store string, taskID int32, reporter *event.Reporter) {
+	dir := filepath.Join(store, "tasks", fmt.Sprint(taskID))
+	if err := os.RemoveAll(dir); err != nil {
+		log.Printf("⚠️ Failed to cleanup working dir for task %d: %v", taskID, err)
+		reporter.Event("W", "cleanup", "failed to cleanup task working dir", map[string]any{
+			"task_id": taskID,
+			"dir":     dir,
+			"error":   err.Error(),
+		})
+		return
+	}
+	log.Printf("🧹 Cleaned up working dir for task %d", taskID)
 }
 
 // fetchTasks requests new tasks from the server.
@@ -440,6 +456,9 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			}
 
 			if failed {
+				// Cleanup working directory even though execution never started
+				cleanupTaskWorkingDir(store, task.TaskId, reporter)
+
 				// Clean up bookkeeping
 				activeTasks.Delete(task.TaskId)
 				continue // do not enqueue into TaskQueue
