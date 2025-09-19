@@ -53,8 +53,8 @@ type UploadManager struct {
 	Store          string
 	Client         pb.TaskQueueClient
 	reporter       *event.Reporter
-	pendingUploads SyncCounter         // taskID → remaining files
-	uploadStart    map[int32]time.Time // chrono: taskID → upload start time
+	pendingUploads SyncCounter // taskID → remaining files
+	uploadStart    sync.Map    // taskID -> time.Time
 }
 
 func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.Reporter) *UploadManager {
@@ -65,7 +65,6 @@ func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.R
 		Client:         client,
 		reporter:       reporter,
 		pendingUploads: SyncCounter{},
-		uploadStart:    make(map[int32]time.Time),
 	}
 }
 
@@ -82,27 +81,30 @@ func (um *UploadManager) StartUploadWorkers(activeTasks *sync.Map) {
 }
 
 func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
+	if task.Output == nil {
+		log.Printf("⚠️ Task %d has no output target; skipping upload", task.TaskId)
+		um.Completion <- task
+		return
+	}
+
 	outputDir := filepath.Join(um.Store, "tasks", fmt.Sprint(task.TaskId), "output")
-	count := 0
+	files := make([]string, 0, 64)
 	err := filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			log.Printf("❌ Error walking path %s: %v", path, err)
 			return err
 		}
 		if info.IsDir() {
 			return nil
 		}
-		relPath, err := filepath.Rel(outputDir, path)
-		if err != nil {
-			log.Printf("❌ Failed to get relative path for %s: %v", path, err)
-			return err
-		}
-		target := fetch.Join(*task.Output, relPath)
-		um.UploadQueue <- &UploadFile{Task: task, SourcePath: path, TargetPath: target}
-		count++
+		files = append(files, path)
 		return nil
 	})
 	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("⚠️ Output directory does not exist for task %d", task.TaskId)
+			um.Completion <- task
+			return
+		}
 		message := fmt.Sprintf("Failed walking output directory: %v", err)
 		log.Printf("❌ %s", message)
 		um.reporter.Event("E", "upload", message, map[string]any{
@@ -113,14 +115,31 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 		um.Completion <- task
 		return
 	}
+	count := len(files)
 	if count == 0 {
 		log.Printf("⚠️ No files to upload for task %d", task.TaskId)
 		um.Completion <- task
 		return
 	}
-	// chrono: mark start of upload for this task
-	um.uploadStart[task.TaskId] = time.Now()
+	// Set counters/timers BEFORE enqueuing to avoid races
+	um.uploadStart.Store(task.TaskId, time.Now())
 	um.pendingUploads.Set(task.TaskId, count)
+
+	for _, path := range files {
+		relPath, err := filepath.Rel(outputDir, path)
+		if err != nil {
+			log.Printf("❌ Failed to get relative path for %s: %v", path, err)
+			// degrade gracefully: skip this file and decrement the expected count
+			if remaining, done := um.pendingUploads.Decrement(task.TaskId); done {
+				um.Completion <- task
+			} else {
+				log.Printf("📤 Remaining uploads for task %d after relpath error: %d", task.TaskId, remaining)
+			}
+			continue
+		}
+		target := fetch.Join(*task.Output, relPath)
+		um.UploadQueue <- &UploadFile{Task: task, SourcePath: path, TargetPath: target}
+	}
 }
 
 func (um *UploadManager) uploadFile(file *UploadFile) error {
@@ -158,11 +177,14 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 		if remaining, done := um.pendingUploads.Decrement(taskID); done {
 			log.Printf("📤 Upload completed for task %d, marking as %s", taskID, task.Status)
 			var secs int32 = 0
-			if start, ok := um.uploadStart[taskID]; ok {
-				secs = int32(time.Since(start).Seconds())
-				delete(um.uploadStart, taskID)
+			if v, ok := um.uploadStart.Load(taskID); ok {
+				if start, ok2 := v.(time.Time); ok2 {
+					secs = int32(time.Since(start).Seconds())
+				}
+				um.uploadStart.Delete(taskID)
 			}
 			um.reporter.UpdateTaskAsync(taskID, task.Status, "", &secs)
+			cleanupTaskWorkingDir(um.Store, taskID, um.reporter)
 			activeTasks.Delete(taskID)
 		} else {
 			log.Printf("📤 Remaining uploads for task %d: %d", taskID, remaining)
