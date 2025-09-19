@@ -169,10 +169,7 @@ func (w *Watchdog) checkOffline() {
 			}
 			log.Printf("[watchdog] worker %d is offline for %v", workerID, elapsed)
 			w.lastStatus.Store(workerID, newStatus)
-			err := w.updateWorker(workerID, newStatus)
-			if err != nil {
-				log.Printf("⚠️ [watchdog error] Could not update worker %d status in database: %v", workerID, err)
-			}
+			go w.safeUpdateWorker(workerID, newStatus)
 		}
 		return true
 	})
@@ -219,7 +216,7 @@ func (w *Watchdog) checkIdle() {
 			// Double-check still idle before deletion
 			if activeTasks, ok := w.activeTasks.Load(workerID); ok && activeTasks.(int) == 0 {
 				log.Printf("[watchdog] deleting idle worker %d (idle since %v, timeout %v)", workerID, idleTime, timeout)
-				w.deleteWorker(workerID)
+				go w.safeDeleteWorker(workerID)
 				lastActivity = time.Now() // making dying an activity so that we wait for the worker to delete properly
 				w.lastNotIdle.Store(workerID, lastActivity)
 			}
@@ -263,4 +260,39 @@ func (w *Watchdog) RebuildFromWorkers(workers []WorkerInfo) {
 	}
 
 	log.Printf("[watchdog] rebuild complete: %d workers loaded", len(workers))
+}
+
+// Non-blocking wrappers with timeout logging so slow actions don't stall the watchdog loop
+func (w *Watchdog) safeUpdateWorker(workerID int32, newStatus string) {
+	done := make(chan struct{})
+	go func() {
+		if err := w.updateWorker(workerID, newStatus); err != nil {
+			log.Printf("⚠️ [watchdog error] Could not update worker %d status in database: %v", workerID, err)
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+		return
+	case <-time.After(60 * time.Second):
+		log.Printf("⏱️ [watchdog] updateWorker(%d,%s) still running after 60s; continuing loop", workerID, newStatus)
+		return
+	}
+}
+
+func (w *Watchdog) safeDeleteWorker(workerID int32) {
+	done := make(chan struct{})
+	go func() {
+		if err := w.deleteWorker(workerID); err != nil {
+			log.Printf("⚠️ [watchdog error] Could not delete worker %d: %v", workerID, err)
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+		return
+	case <-time.After(60 * time.Second):
+		log.Printf("⏱️ [watchdog] deleteWorker(%d) still running after 60s; continuing loop", workerID)
+		return
+	}
 }
