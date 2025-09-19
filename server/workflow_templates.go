@@ -158,10 +158,24 @@ func (s *taskQueueServer) scriptRunner(
 			if err != nil {
 				return "", "", -1, fmt.Errorf("invalid GID for user %q: %w", userName, err)
 			}
+
+			// Build supplementary groups (at least 'docker')
+			var supGroups []uint32
+			if grp, err := user.LookupGroup("docker"); err == nil {
+				if dockerGID, err := strconv.Atoi(grp.Gid); err == nil {
+					supGroups = append(supGroups, uint32(dockerGID))
+				} else {
+					log.Printf("⚠️ cannot parse docker group GID: %v", err)
+				}
+			} else {
+				log.Printf("⚠️ cannot find 'docker' group: %v", err)
+			}
+
 			cmd.SysProcAttr = &syscall.SysProcAttr{
 				Credential: &syscall.Credential{
-					Uid: uint32(uid),
-					Gid: uint32(gid),
+					Uid:    uint32(uid),
+					Gid:    uint32(gid),
+					Groups: supGroups,
 				},
 			}
 		}
