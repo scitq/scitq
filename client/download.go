@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -59,12 +60,11 @@ type FileMetadata struct {
 	Size       int64
 	Date       time.Time
 	MD5        string
-	Success    bool // true if download failed
+	Success    bool // true if download succeeded
 }
 
 // DownloadManager manages task downloads.
 type DownloadManager struct {
-	TaskDownloads     map[int32]int           // Task ID → Remaining file count
 	ResourceDownloads map[string][]*pb.Task   // SourcePath → Tasks waiting
 	ResourceMemory    map[string]FileMetadata // SourcePath → Metadata
 
@@ -79,12 +79,13 @@ type DownloadManager struct {
 	EnqueuedTasks map[int32]bool
 	// Per-task chrono map for download durations
 	DownloadStart map[int32]time.Time
+	// Per-task pending set for download items
+	TaskPending map[int32]map[string]bool // Task ID → set of pending item keys (I:input, R:resource, D:docker)
 }
 
 // NewDownloadManager initializes the download manager.
 func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager {
 	return &DownloadManager{
-		TaskDownloads:     make(map[int32]int),
 		ResourceDownloads: make(map[string][]*pb.Task),
 		ResourceMemory:    make(map[string]FileMetadata),
 		FileQueue:         make(chan *FileTransfer, maxDownloads),
@@ -96,7 +97,29 @@ func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager
 		reporter:          reporter,
 		EnqueuedTasks:     make(map[int32]bool),
 		DownloadStart:     make(map[int32]time.Time),
+		TaskPending:       make(map[int32]map[string]bool),
 	}
+}
+
+// addWaitingTask appends task to dm.ResourceDownloads[key] only if not already present.
+// Returns true if the task was added (i.e., this task should increment its pending count by 1).
+func (dm *DownloadManager) addWaitingTask(key string, task *pb.Task) bool {
+	list, exists := dm.ResourceDownloads[key]
+	if !exists {
+		log.Printf("Scheduling new download for resource %s for task %d", key, task.TaskId)
+		dm.ResourceDownloads[key] = []*pb.Task{task}
+		return true
+	}
+	for _, t := range list {
+		if t.TaskId == task.TaskId {
+			log.Printf("Duplicate of resource in %s for task %d", key, task.TaskId)
+			// Already waiting for this resource; don't add a duplicate.
+			return false
+		}
+	}
+	log.Printf("Adding task %d to wait list for resource %s launched by task %d", task.TaskId, key, dm.ResourceDownloads[key][0].TaskId)
+	dm.ResourceDownloads[key] = append(list, task)
+	return true
 }
 
 // loadResourceMemory loads the resource memory from a file.
@@ -213,12 +236,15 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 
 	var size int64
 	var md5Str string
+	var srcModTime time.Time
 	info, err := fetch.Info(fetch.DefaultRcloneConfig, file.SourcePath)
 	if err != nil {
 		log.Printf("Error fetching file info for %s: %v", file.SourcePath, err)
 	} else {
-		size = info.Size() // Correctly call the Size function
+		size = info.Size()
 		md5Str = fetch.GetMD5(info)
+		// Record the SOURCE modtime, not now(), so change detection is stable
+		srcModTime = info.ModTime(context.Background())
 	}
 
 	metadata := FileMetadata{
@@ -228,9 +254,9 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 		FilePath:   file.TargetPath,
 		FileType:   file.FileType,
 		Size:       size,
-		Date:       time.Now(),
+		Date:       srcModTime, // use source's ModTime for proper change detection
 		MD5:        md5Str,
-		Success:    success, // Download succeeded
+		Success:    success,
 	}
 
 	dm.CompletionQueue <- &metadata
@@ -261,23 +287,33 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 	if _, seen := dm.DownloadStart[task.TaskId]; !seen {
 		dm.DownloadStart[task.TaskId] = time.Now()
 	}
-	numFiles := 0
+	// Use TaskPending set for tracking
+	if _, ok := dm.TaskPending[task.TaskId]; !ok {
+		dm.TaskPending[task.TaskId] = make(map[string]bool)
+	}
+	pending := dm.TaskPending[task.TaskId]
 
 	// Queue input files
 	for _, input := range task.Input {
-		ft := &FileTransfer{
-			TaskId:     task.TaskId,
-			Task:       task,
-			FileType:   InputFile,
-			SourcePath: input,
-			TargetPath: fmt.Sprintf("%s/tasks/%d/input/", dm.Store, task.TaskId),
+		key := "I:" + input
+		if pending[key] {
+			log.Printf("🔁 Duplicate input ignored for task %d: %s", task.TaskId, input)
+		} else {
+			pending[key] = true
+			ft := &FileTransfer{
+				TaskId:     task.TaskId,
+				Task:       task,
+				FileType:   InputFile,
+				SourcePath: input,
+				TargetPath: fmt.Sprintf("%s/tasks/%d/input/", dm.Store, task.TaskId),
+			}
+			go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
 		}
-		go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
-		numFiles++
 	}
 
 	// Queue resources (if not already downloaded or outdated)
 	for _, resource := range task.Resource {
+		log.Printf("🔎 Checking ResourceMemory for key=%q", resource)
 		meta, exists := dm.ResourceMemory[resource]
 
 		if exists {
@@ -294,6 +330,10 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 						return true
 					} else {
 						log.Printf("Resource %s seems to have changed (MD5 differs), redownloading", resource)
+						dm.reporter.Event("I", "resource_change", fmt.Sprintf("Resource %s MD5 changed, redownloading", resource), map[string]any{
+							"resource_path": resource,
+							"task_id":       task.TaskId,
+						})
 						delete(dm.ResourceMemory, resource)
 						dm.saveResourceMemory()
 						return false
@@ -302,8 +342,16 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 
 				if !meta.Date.IsZero() {
 					ctx := context.Background()
-					if meta.Date != fileInfo.ModTime(ctx) {
+					srcTime := fileInfo.ModTime(ctx)
+					// Normalize both sides to second precision & UTC to be safe
+					memoryDate := meta.Date.UTC().Truncate(time.Second)
+					srcDate := srcTime.UTC().Truncate(time.Second)
+					if !memoryDate.Equal(srcDate) {
 						log.Printf("Resource %s seems to have changed (date differs), redownloading", resource)
+						dm.reporter.Event("I", "resource_change", fmt.Sprintf("Resource %s date changed, redownloading", resource), map[string]any{
+							"resource_path": resource,
+							"task_id":       task.TaskId,
+						})
 						delete(dm.ResourceMemory, resource)
 						dm.saveResourceMemory()
 						return false
@@ -315,6 +363,10 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 						return true
 					} else {
 						log.Printf("Resource %s seems to have changed (size differs), redownloading", resource)
+						dm.reporter.Event("I", "resource_change", fmt.Sprintf("Resource %s size changed, redownloading", resource), map[string]any{
+							"resource_path": resource,
+							"task_id":       task.TaskId,
+						})
 						delete(dm.ResourceMemory, resource)
 						dm.saveResourceMemory()
 						return false
@@ -326,14 +378,23 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 				continue
 			}
 			// here either MD5 is unchanged or date and size are unchanged or no checking method is available
-
 		}
-		rd, exists := dm.ResourceDownloads[resource]
-		numFiles++
-		if exists {
-			dm.ResourceDownloads[resource] = append(rd, task)
+		added := dm.addWaitingTask(resource, task)
+		rkey := "R:" + resource
+		if added {
+			if pending[rkey] {
+				log.Printf("🔁 Duplicate resource association ignored for task %d: %s", task.TaskId, resource)
+			} else {
+				pending[rkey] = true
+			}
+		}
+		if list, ok := dm.ResourceDownloads[resource]; ok {
+			log.Printf("📥 waitlist key=%q added=%v waiters=%d first=%v", resource, added, len(list), len(list) == 1)
 		} else {
-			dm.ResourceDownloads[resource] = []*pb.Task{task}
+			log.Printf("📥 waitlist key=%q not present right after add (added=%v)", resource, added)
+		}
+		if added && len(dm.ResourceDownloads[resource]) == 1 {
+			log.Printf("📦 ENQ resource download key=%q by task=%d", resource, task.TaskId)
 			ft := &FileTransfer{
 				TaskId:     task.TaskId,
 				Task:       task,
@@ -342,18 +403,29 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 				TargetPath: fmt.Sprintf("%s/resources/%s/", dm.Store, uuid.New()),
 			}
 			go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
+		} else if added {
+			log.Printf("⏳ Not first waiter for key=%q; another task already enqueued the download", resource)
 		}
 	}
 
 	container := "docker:" + task.Container
-	_, exists := dm.ResourceMemory[container]
-	if !exists {
-		rd, exists := dm.ResourceDownloads[container]
-		numFiles++
-		if exists {
-			dm.ResourceDownloads[container] = append(rd, task)
+	if _, present := dm.ResourceMemory[container]; !present {
+		added := dm.addWaitingTask(container, task)
+		dkey := "D:" + container
+		if added {
+			if pending[dkey] {
+				log.Printf("🔁 Duplicate docker association ignored for task %d: %s", task.TaskId, container)
+			} else {
+				pending[dkey] = true
+			}
+		}
+		if list, ok := dm.ResourceDownloads[container]; ok {
+			log.Printf("📥 waitlist key=%q added=%v waiters=%d first=%v", container, added, len(list), len(list) == 1)
 		} else {
-			dm.ResourceDownloads[container] = []*pb.Task{task}
+			log.Printf("📥 waitlist key=%q not present right after add (added=%v)", container, added)
+		}
+		if added && len(dm.ResourceDownloads[container]) == 1 {
+			log.Printf("📦 ENQ docker pull key=%q by task=%d", container, task.TaskId)
 			ft := &FileTransfer{
 				TaskId:     task.TaskId,
 				Task:       task,
@@ -362,17 +434,17 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 				TargetPath: task.Container,
 			}
 			go func(ft *FileTransfer) { dm.FileQueue <- ft }(ft)
+		} else if added {
+			log.Printf("⏳ Not first waiter for docker key=%q; another task already enqueued the pull", container)
 		}
 	}
 
-	// Track total downloads needed
-	dm.TaskDownloads[task.TaskId] = numFiles
-	if numFiles == 0 {
-		log.Printf("🚀 Task %d ready for execution", task.TaskId)
+	if len(pending) == 0 {
+		log.Printf("🚀 Task %d ready for execution (no downloads needed)", task.TaskId)
 		delete(dm.EnqueuedTasks, task.TaskId)
 		dm.ExecQueue <- task
 	} else {
-		log.Printf("📝 Task %d waiting for %d files", task.TaskId, numFiles)
+		log.Printf("📝 Task %d waiting for %d item(s)", task.TaskId, len(pending))
 	}
 }
 
@@ -384,7 +456,6 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 	}
 	fm := *fileMeta
 	log.Printf("✅ Download completed: %s", fm.SourcePath)
-	//dm.ResourceMemory[filePath] = dm.ResourceMemory[filePath]
 
 	if !fm.Success {
 		log.Printf("❌ Download failed for %s", fm.SourcePath)
@@ -396,25 +467,33 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 	switch fm.FileType {
 	case InputFile:
 		{
-			if count, ok := dm.TaskDownloads[fm.TaskId]; ok {
-				dm.TaskDownloads[fm.TaskId] = count - 1
-				if count <= 1 {
-					delete(dm.TaskDownloads, fm.TaskId)
+			key := "I:" + fm.SourcePath
+			if set, ok := dm.TaskPending[fm.TaskId]; ok {
+				if set[key] {
+					delete(set, key)
+				} else {
+					log.Printf("⚠️ Completion for non-pending input key=%q task=%d", key, fm.TaskId)
+					dm.reporter.Event("E", "download_completion", "completion for non-pending key", map[string]any{
+						"key":     key,
+						"task_id": fm.TaskId,
+					})
+				}
+				if len(set) == 0 {
+					delete(dm.TaskPending, fm.TaskId)
 					delete(dm.EnqueuedTasks, fm.TaskId)
-					// Send download duration if we have a chrono
 					if start, ok := dm.DownloadStart[fm.TaskId]; ok {
 						secs := int32(time.Since(start).Seconds())
 						dm.reporter.UpdateTaskAsync(fm.TaskId, "O", "", &secs)
 						delete(dm.DownloadStart, fm.TaskId)
 					}
-					if fm.Task.Status != "F" {
+					if fm.Task.Status != "F" && fm.Success {
 						log.Printf("🚀 Task %d ready for execution", fm.TaskId)
 						dm.ExecQueue <- fm.Task
 					} else {
 						log.Printf("❌ Task %d failed due to previous download errors", fm.TaskId)
 					}
 				} else {
-					log.Printf("📝 Task %d still waiting for %d files", fm.TaskId, count-1)
+					log.Printf("📝 Task %d still waiting for %d item(s)", fm.TaskId, len(set))
 				}
 			}
 			if !fm.Success || fm.Task.Status == "F" {
@@ -425,7 +504,6 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 					log.Printf("⚠️ FailedQueue full; could not enqueue task %d", fm.TaskId)
 				}
 				delete(dm.EnqueuedTasks, fm.TaskId)
-				// Clear chrono to avoid leaks
 				delete(dm.DownloadStart, fm.TaskId)
 			}
 		}
@@ -438,31 +516,43 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 			}
 
 			if tasks, exists := dm.ResourceDownloads[fm.SourcePath]; exists {
+				log.Printf("📣 Notifying %d waiter(s) for key=%q (success=%v)", len(tasks), fm.SourcePath, fm.Success)
 				for _, task := range tasks {
-					if count, ok := dm.TaskDownloads[task.TaskId]; ok {
-						if !fm.Success {
-							log.Printf("❌ Task %d failed due to download error for resource %s", task.TaskId, fm.SourcePath)
-							dm.reporter.UpdateTask(task.TaskId, "F", fmt.Sprintf("Download failed for resource %s", fm.SourcePath))
-							task.Status = "F"
-							// Notify the client loop so it can clear activeTasks and avoid waiting on a never-executing task
-							select {
-							case dm.FailedQueue <- task:
-							default:
-								log.Printf("⚠️ FailedQueue full; could not enqueue task %d", task.TaskId)
-							}
-							delete(dm.EnqueuedTasks, task.TaskId)
-							// Clear chrono to avoid leaks
-							delete(dm.DownloadStart, task.TaskId)
+					var keyPrefix string
+					if fm.FileType == ResourceFile {
+						keyPrefix = "R:"
+					} else {
+						keyPrefix = "D:"
+					}
+					tset := dm.TaskPending[task.TaskId]
+					key := keyPrefix + fm.SourcePath
+					if tset != nil {
+						if tset[key] {
+							delete(tset, key)
+						} else {
+							log.Printf("⚠️ Completion for non-pending %s key=%q task=%d", keyPrefix, key, task.TaskId)
+							dm.reporter.Event("E", "download_completion", "completion for non-pending key", map[string]any{
+								"key":     key,
+								"task_id": task.TaskId,
+							})
 						}
-
-						// Decrement remaining count for this task
-						dm.TaskDownloads[task.TaskId] = count - 1
-
-						// If this was the last pending download for the task, and all succeeded, queue for execution
-						if count <= 1 {
-							delete(dm.TaskDownloads, task.TaskId)
+					}
+					if !fm.Success {
+						log.Printf("❌ Task %d failed due to download error for resource %s", task.TaskId, fm.SourcePath)
+						dm.reporter.UpdateTask(task.TaskId, "F", fmt.Sprintf("Download failed for resource %s", fm.SourcePath))
+						task.Status = "F"
+						select {
+						case dm.FailedQueue <- task:
+						default:
+							log.Printf("⚠️ FailedQueue full; could not enqueue task %d", task.TaskId)
+						}
+						delete(dm.EnqueuedTasks, task.TaskId)
+						delete(dm.DownloadStart, task.TaskId)
+					}
+					if tset != nil {
+						if len(tset) == 0 {
+							delete(dm.TaskPending, task.TaskId)
 							delete(dm.EnqueuedTasks, task.TaskId)
-							// Send download duration if we have a chrono
 							if start, ok := dm.DownloadStart[task.TaskId]; ok {
 								secs := int32(time.Since(start).Seconds())
 								dm.reporter.UpdateTaskAsync(task.TaskId, "O", "", &secs)
@@ -475,7 +565,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 								log.Printf("❌ Task %d not ready for execution (status=%s, resource success=%v)", task.TaskId, task.Status, fm.Success)
 							}
 						} else {
-							log.Printf("📝 Task %d still waiting for %d files", task.TaskId, count-1)
+							log.Printf("📝 Task %d still waiting for %d item(s)", task.TaskId, len(tset))
 						}
 					}
 				}
@@ -485,18 +575,86 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 	default:
 		log.Printf("Unknown file type for %s", fm.SourcePath)
 	}
-
 }
 
 // resourceLink creates hard links for resources in the task's resource folder.
 func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string) error {
-	fileMeta := dm.ResourceMemory[resourcePath]
+	log.Printf("🔗 resourceLink arg=%q", resourcePath)
+	fileMeta, ok := dm.ResourceMemory[resourcePath]
+	log.Printf("🔍 ResourceMemory hit=%v for key=%q", ok, resourcePath)
+
+	waitForResource := func(timeout time.Duration) (FileMetadata, bool) {
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			fm, found := dm.ResourceMemory[resourcePath]
+			if found {
+				return fm, true
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		return FileMetadata{}, false
+	}
+
+	if resourcePath == "" {
+		message := "resourceLink called with empty key"
+		log.Printf("⚠️ %s", message)
+		dm.reporter.Event("E", "resource_link", message, map[string]any{
+			"lookup_key": resourcePath,
+		})
+		return errors.New(message)
+	}
+
+	if !ok {
+		log.Printf("⏱ resourceLink: key %q not in memory — assuming upgrade in progress; waiting...", resourcePath)
+		if fm, ready := waitForResource(10 * time.Minute); ready {
+			fileMeta = fm
+			ok = true
+			log.Printf("✅ resourceLink: key %q appeared after wait -> path=%q", resourcePath, fileMeta.FilePath)
+			dm.reporter.Event("I", "resource_link", fmt.Sprintf("resource key appeared in memory after wait: %q", resourcePath), map[string]any{
+				"lookup_key": resourcePath,
+			})
+		} else {
+			message := fmt.Sprintf("resource key not found in memory after wait: %q", resourcePath)
+			log.Printf("⚠️ %s", message)
+			dm.reporter.Event("E", "resource_link", message, map[string]any{
+				"lookup_key": resourcePath,
+			})
+			return errors.New(message)
+		}
+	}
+
+	if fileMeta.FilePath == "" {
+		message := fmt.Sprintf("resource metadata has empty FilePath for key %q", resourcePath)
+		log.Printf("⚠️ %s", message)
+		dm.reporter.Event("E", "resource_link", message, map[string]any{
+			"lookup_key":    resourcePath,
+			"resource_path": fileMeta.FilePath,
+			"task_id":       fileMeta.TaskId,
+		})
+		return errors.New(message)
+	}
+
+	log.Printf("✅ resourceLink lookup hit for key=%q -> path=%q", resourcePath, fileMeta.FilePath)
+
+	// Sanity check: ensure the resolved resource path exists
+	if _, err := os.Stat(fileMeta.FilePath); err != nil {
+		message := fmt.Sprintf("resource path missing for key %q: %s", resourcePath, err)
+		log.Printf("❌ %s", message)
+		dm.reporter.Event("E", "resource_link", message, map[string]any{
+			"lookup_key":    resourcePath,
+			"resource_path": fileMeta.FilePath,
+			"task_id":       fileMeta.TaskId,
+			"error":         err.Error(),
+		})
+		return errors.New(message)
+	}
 
 	// Ensure destination root exists
 	if err := os.MkdirAll(taskResourceFolder, 0o755); err != nil {
 		message := fmt.Sprintf("Error creating destination directory %s: %v", taskResourceFolder, err)
 		log.Printf("❌ %s", message)
 		dm.reporter.Event("E", "resource_link", message, map[string]any{
+			"lookup_key":    resourcePath,
 			"resource_path": fileMeta.FilePath,
 			"task_id":       fileMeta.TaskId,
 			"error":         err.Error(),
@@ -543,6 +701,7 @@ func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string)
 		message := fmt.Sprintf("Error linking resource tree %s -> %s: %v", fileMeta.FilePath, taskResourceFolder, err)
 		log.Printf("❌ %s", message)
 		dm.reporter.Event("E", "resource_link", message, map[string]any{
+			"lookup_key":    resourcePath,
 			"resource_path": fileMeta.FilePath,
 			"task_id":       fileMeta.TaskId,
 			"error":         err.Error(),
