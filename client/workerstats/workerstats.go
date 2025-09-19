@@ -1,6 +1,8 @@
 package workerstats
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -50,6 +52,30 @@ var (
 	lastTime   time.Time
 )
 
+// findBackingPartition returns the partition whose mountpoint is the deepest prefix of the given path.
+// This handles cases where /var is part of /, or is a bind/overlay onto /scratch, etc.
+func findBackingPartition(parts []disk.PartitionStat, path string) (disk.PartitionStat, bool) {
+	bestLen := -1
+	var best disk.PartitionStat
+	for _, p := range parts {
+		mp := p.Mountpoint
+		if mp == "" {
+			continue
+		}
+		// Ensure we only match whole path segments ("/var" should not match "/varlib")
+		if strings.HasPrefix(path, mp) && (len(path) == len(mp) || strings.HasPrefix(path[len(mp):], "/")) {
+			if l := len(mp); l > bestLen {
+				bestLen = l
+				best = p
+			}
+		}
+	}
+	if bestLen >= 0 {
+		return best, true
+	}
+	return disk.PartitionStat{}, false
+}
+
 func CollectWorkerStats() (*WorkerStats, error) {
 	var stats WorkerStats
 	var err error
@@ -83,15 +109,36 @@ func CollectWorkerStats() (*WorkerStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range partitions {
-		usage, err := disk.Usage(p.Mountpoint)
-		if err != nil {
+
+	// We care only about these paths, in this exact order
+	priority := []string{"/scratch", "/", "/var"}
+	seenDev := make(map[string]bool)
+	for _, path := range priority {
+		// Skip if the path doesn't exist on this system
+		if _, err := os.Stat(path); err != nil {
 			continue
 		}
+		p, ok := findBackingPartition(partitions, path)
+		if !ok {
+			continue // no partition covers this path (unlikely)
+		}
+		// Skip if same backing device already included (bind mounts, overlay, same partition)
+		if seenDev[p.Device] {
+			continue
+		}
+		// Compute usage for the actual path of interest; fall back to mountpoint on error
+		usage, err := disk.Usage(path)
+		if err != nil {
+			usage, err = disk.Usage(p.Mountpoint)
+			if err != nil {
+				continue
+			}
+		}
 		stats.Disks = append(stats.Disks, DiskUsage{
-			DeviceName:   p.Device,
+			DeviceName:   path, // display the path instead of the device
 			UsagePercent: float32(usage.UsedPercent),
 		})
+		seenDev[p.Device] = true
 	}
 
 	now := time.Now()
