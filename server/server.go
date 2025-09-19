@@ -2943,8 +2943,9 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 
 	// Configure database connection pool settings for concurrency
 	db.SetMaxOpenConns(cfg.Scitq.MaxDBConcurrency * 2)
-	db.SetMaxIdleConns(cfg.Scitq.MaxDBConcurrency * 2)
+	db.SetMaxIdleConns(cfg.Scitq.MaxDBConcurrency)
 	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(10 * time.Minute) // prevents very old idle conns
 
 	// 🕵️‍♂️ Periodically log database connection stats every 10 seconds
 	go func() {
