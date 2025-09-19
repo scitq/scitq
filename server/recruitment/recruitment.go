@@ -256,8 +256,13 @@ type RecyclableWorker struct {
 	StepID      *int32
 	Concurrency int
 	Running     int
+	Scope       string
+	WorkflowID  *int32
 }
 
+// Note: This function now returns each worker's recyclability scope ('G' or 'W') and
+// the originating workflow id (via the worker's current step). Workers with scopes
+// 'N' (never) or 'T' (temporary block) are excluded at the SQL level.
 func FindRecyclableWorkers(
 	db *sql.DB,
 	allAllowedFlavorIDs []int32,
@@ -279,16 +284,21 @@ func FindRecyclableWorkers(
 			w.region_id,
 			w.step_id,
 			w.concurrency,
-			COUNT(t.task_id) FILTER (WHERE t.status = 'R') AS running_tasks
+			COUNT(t.task_id) FILTER (WHERE t.status = 'R') AS running_tasks,
+			w.recyclable_scope,
+			s.workflow_id
 		FROM
 			worker w
 		LEFT JOIN
 			task t ON t.worker_id = w.worker_id
+		LEFT JOIN
+			step s ON s.step_id = w.step_id
 		WHERE
 			w.flavor_id = ANY($1::int[])
 			AND w.region_id = ANY($2::int[])
+			AND w.recyclable_scope IN ('G','W')
 		GROUP BY
-			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id
+			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id
 		HAVING
 			COUNT(t.task_id) FILTER (WHERE t.status = 'R') < w.concurrency
 			AND COUNT(t.task_id) FILTER (WHERE t.status IN ('P', 'A')) = 0
@@ -304,6 +314,7 @@ func FindRecyclableWorkers(
 	for rows.Next() {
 		var w RecyclableWorker
 		var stepIDproxy sql.NullInt32
+		var workflowIDProxy sql.NullInt32
 		if err := rows.Scan(
 			&w.WorkerID,
 			&w.FlavorID,
@@ -311,12 +322,18 @@ func FindRecyclableWorkers(
 			&stepIDproxy,
 			&w.Concurrency,
 			&w.Running,
+			&w.Scope,
+			&workflowIDProxy,
 		); err != nil {
 			return nil, err
 		}
 		if stepIDproxy.Valid {
 			s := stepIDproxy.Int32
 			w.StepID = &s
+		}
+		if workflowIDProxy.Valid {
+			wid := workflowIDProxy.Int32
+			w.WorkflowID = &wid
 		}
 		workers = append(workers, w)
 	}
@@ -490,6 +507,7 @@ func selectWorkersForRecruiter(
 	regionIDs map[int32]struct{},
 	needed int,
 	recruiterStepID int32,
+	recruiterWorkflowID int32,
 ) []int32 {
 	selected := make([]int32, 0, needed)
 	for _, w := range recyclable {
@@ -498,6 +516,15 @@ func selectWorkersForRecruiter(
 		}
 		if _, ok := regionIDs[w.RegionID]; !ok {
 			continue
+		}
+		// Honor recyclability scope:
+		// - 'G' (global): no restriction
+		// - 'W' (workflow): only recyclable within the same workflow
+		// - others already filtered out at SQL level
+		if w.Scope == "W" {
+			if w.WorkflowID == nil || *w.WorkflowID != recruiterWorkflowID {
+				continue
+			}
 		}
 		if w.StepID != nil && *w.StepID == recruiterStepID {
 			continue
@@ -670,7 +697,7 @@ func RecruiterCycle(
 
 		if hasRecyclableWorkers {
 			// Try recycling first
-			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, needed, recruiter.StepID)
+			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, needed, recruiter.StepID, recruiter.WorkflowID)
 			if len(selectedWorkerIDs) > 0 {
 				affected := recycleWorkers(
 					db,
@@ -757,17 +784,17 @@ type WorkflowCounter struct {
 }
 
 func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[int32]WorkflowCounter) error {
-	// Step 1: Load live worker counts per workflow
+	// Step 1: Load live worker counts per workflow (includes workflows with zero workers)
 	log.Printf("ℹ️ Adjusting workflow counters")
 	rows, err := db.Query(`
         SELECT
             wf.workflow_id,
             COUNT(w.worker_id) AS worker_count
         FROM
-			workflow wf
-		LEFT JOIN
+            workflow wf
+        LEFT JOIN
             step s ON wf.workflow_id = s.workflow_id
-		LEFT JOIN
+        LEFT JOIN
             worker w ON w.step_id = s.step_id
         GROUP BY
             wf.workflow_id
@@ -777,17 +804,20 @@ func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[int32]Workflow
 	}
 	defer rows.Close()
 
-	// Step 2: Scan and adjust
+	// Step 2: Scan and adjust for **current** workflows
+	current := make(map[int32]int) // workflow_id -> live worker count
+
 	for rows.Next() {
 		var workflowID int32
 		var liveCount int
 		if err := rows.Scan(&workflowID, &liveCount); err != nil {
 			return fmt.Errorf("failed to scan workflow worker count: %w", err)
 		}
+		current[workflowID] = liveCount
 
 		mem, exists := workflowCounterMemory[workflowID]
 		if !exists {
-			// Initialize memory from live state; Maximum will be filled/updated during ListActiveRecruiters
+			// Initialize memory from live state; Maximum is preserved/updated later by ListActiveRecruiters
 			workflowCounterMemory[workflowID] = WorkflowCounter{Counter: liveCount, Maximum: nil}
 			log.Printf("ℹ️ Initialized workflow %d counter from live state: %d", workflowID, liveCount)
 			continue
@@ -797,6 +827,18 @@ func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[int32]Workflow
 			log.Printf("ℹ️ Syncing workflow %d counter from %d to live %d", workflowID, mem.Counter, liveCount)
 			mem.Counter = liveCount
 			workflowCounterMemory[workflowID] = mem
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// Step 3: Remove **stale** workflows from memory (those not present anymore in DB)
+	for wfID := range workflowCounterMemory {
+		if _, ok := current[wfID]; !ok {
+			log.Printf("🧹 Removing stale workflow %d from recruitment memory (no longer present)", wfID)
+			delete(workflowCounterMemory, wfID)
 		}
 	}
 
