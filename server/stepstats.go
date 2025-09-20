@@ -104,6 +104,8 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			COALESCE(SUM(t.upload_duration), 0) AS up_sum,
 			COALESCE(MIN(t.upload_duration), 0) AS up_min,
 			COALESCE(MAX(t.upload_duration), 0) AS up_max,
+			COUNT(*) FILTER (WHERE t.download_duration IS NOT NULL) AS dl_count,
+			COUNT(*) FILTER (WHERE t.upload_duration IS NOT NULL) AS up_count,
 
 			-- run accumulators split by outcome
 			COUNT(*) FILTER (WHERE t.status = 'S') AS run_s_count,
@@ -156,6 +158,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			total, waiting, pending, accepted, onhold, running int32
 			succeeded, failed                                  int32
 			dlSum, dlMin, dlMax, upSum, upMin, upMax           float64
+			dlCount, upCount                                   int32
 			runSCount                                          int32
 			runSSum, runSMin, runSMax                          float64
 			runFCount                                          int32
@@ -168,6 +171,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			&stepID,
 			&total, &waiting, &pending, &accepted, &onhold, &running, &succeeded, &failed,
 			&dlSum, &dlMin, &dlMax, &upSum, &upMin, &upMax,
+			&dlCount, &upCount,
 			&runSCount, &runSSum, &runSMin, &runSMax,
 			&runFCount, &runFSum, &runFMin, &runFMax,
 			&startEpoch, &endEpoch,
@@ -203,8 +207,8 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			Succeeded: succeeded,
 			Failed:    failed,
 			Total:     total,
-			Download:  Accumulator{Count: total, Sum: dlSum, Min: dlMin, Max: dlMax},
-			Upload:    Accumulator{Count: total, Sum: upSum, Min: upMin, Max: upMax},
+			Download:  Accumulator{Count: dlCount, Sum: dlSum, Min: dlMin, Max: dlMax},
+			Upload:    Accumulator{Count: upCount, Sum: upSum, Min: upMin, Max: upMax},
 			SuccessRun: Accumulator{
 				Count: runSCount, Sum: runSSum, Min: runSMin, Max: runSMax,
 			},

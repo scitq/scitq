@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus} from '../lib/api';
+  import { onMount, onDestroy } from 'svelte';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus} from '../lib/api';
+  import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
@@ -47,6 +48,8 @@
    * @type {Map<number, string>}
    */
   let statusMap = new Map<number, string>();
+  // Set of worker IDs currently being acted upon (pause/delete)
+  let acting = new Set<number>();
   
   /**
    * Current display mode ('table' or 'charts')
@@ -143,17 +146,62 @@
     margin: 0.1         // Margin around data
   };
 
+  // --- WS unsubscribe reference for cleanup ---
+  let unsubscribeWS: (() => void) | null = null;
+
   // Make reactive
   $: diskZoom, networkZoom, diskAutoZoom, networkAutoZoom;
 
   /**
    * Component mount lifecycle hook
-   * Initializes data loading and sets up refresh interval
+   * Initializes data loading and sets up refresh interval, plus WS event listeners
    */
   onMount(() => {
     updateWorkerData();
     interval = setInterval(updateWorkerData, 5000);
-    return () => clearInterval(interval);
+
+    const handleMessage = (msg: any) => {
+      const topic = msg?.type ?? msg?.topic; // expected: 'worker'
+      const label = msg?.label;              // expected: workerId (number) or undefined for broadcast
+      const data  = msg?.data ?? msg?.payload ?? msg;
+
+      if (topic !== 'worker') return;
+      const workerId: number | undefined = (data?.workerId ?? label);
+      const status: string | undefined   = data?.status;
+      const event: string | undefined    = data?.event; // e.g., 'status', 'deletionScheduled', 'deleted'
+
+      if (event === 'deletionScheduled' || status === 'D' || data?.action === 'D') {
+        if (typeof workerId === 'number') {
+          statusMap.set(workerId, 'D');
+          statusMap = new Map(statusMap);
+        }
+        return;
+      }
+
+      if (event === 'deleted') {
+        if (typeof workerId === 'number') {
+          statusMap.set(workerId, 'X'); // optional terminal marker; UI pill may ignore unknowns
+          statusMap = new Map(statusMap);
+        }
+        return;
+      }
+
+      if (typeof workerId === 'number' && typeof status === 'string') {
+        statusMap.set(workerId, status);
+        statusMap = new Map(statusMap);
+      }
+    };
+
+    unsubscribeWS = wsClient.subscribeWithTopics(
+      { worker: [] }, // listen to all workers; refine later if needed
+      handleMessage
+    );
+
+    return () => {
+      clearInterval(interval);
+      if (unsubscribeWS) unsubscribeWS();
+      unsubscribeWS = null;
+    };
   });
 
   // Reactive statements
@@ -404,14 +452,81 @@
   }
 
   /**
-   * Deletes a worker and triggers delete event
+   * Helper to compute the next status when pressing pause button.
+   */
+  function computeNextStatusForPause(current?: string): string | null {
+    switch (current) {
+      case 'R':
+        return 'P'; // pause running -> Paused
+      case 'O':
+      case 'I':
+        return 'Q'; // offline/idle -> Queued pause (or quiet)
+      case 'P':
+        return 'R'; // resume
+      case 'Q':
+        return 'O'; // un-quiet back to Offline (or Idle)
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Pause/resume/quiet/unquiet a worker.
+   * @param {Object} worker - Worker object
+   * @async
+   */
+  async function pauseWorker(worker): Promise<void> {
+    const curr = statusMap.get(worker.workerId) ?? worker.status;
+    const next = computeNextStatusForPause(curr);
+    if (!next) return;
+
+    if (acting.has(worker.workerId)) return;
+    acting.add(worker.workerId);
+
+    // optimistic UI update
+    const prev = curr;
+    statusMap.set(worker.workerId, next);
+    statusMap = new Map(statusMap);
+
+    try {
+      await updateWorkerStatus({ workerId: worker.workerId, status: next });
+    } catch (err) {
+      console.error('Failed to update worker status', worker.workerId, next, err);
+      // revert on failure
+      statusMap.set(worker.workerId, prev);
+      statusMap = new Map(statusMap);
+    } finally {
+      acting.delete(worker.workerId);
+    }
+  }
+
+  /**
+   * Deletes a worker and triggers delete event, with optimistic UI and duplicate guard.
    * @param {number} workerId - ID of worker to delete
    * @async
    */
   async function deleteWorker(workerId: number) {
-    await delWorker({ workerId });
-    delete workersStatsMap[workerId];
-    delete tasksCount[workerId];
+    if (acting.has(workerId)) return;
+    acting.add(workerId);
+
+    const prev = statusMap.get(workerId);
+    statusMap.set(workerId, 'D');
+    statusMap = new Map(statusMap);
+
+    try {
+      await delWorker({ workerId });
+      delete workersStatsMap[workerId];
+      delete tasksCount[workerId];
+    } catch (err) {
+      console.error('Failed to delete worker', workerId, err);
+      // revert optimistic status if needed
+      if (prev) {
+        statusMap.set(workerId, prev);
+        statusMap = new Map(statusMap);
+      }
+    } finally {
+      acting.delete(workerId);
+    }
   }
 </script>
 
@@ -475,7 +590,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each workers as worker (worker.workerId)}
+          {#each displayWorkers as worker (worker.workerId)}
             <tr data-testid={`worker-${worker.workerId}`}>
               <td> <a href="#/tasks?workerId={worker.workerId}" data-testid={`worker-name-${worker.workerId}`} class="workerCompo-clickable">{worker.name}</a> </td>
               <td class="workerCompo-actions">
@@ -738,12 +853,16 @@
 
               <td class="workerCompo-actions">
                 <div class="action-row">
-                  <button class="btn-action" title="Pause"><PauseCircle /></button>
+                  <button class="btn-action" title="Pause" on:click={() => pauseWorker(worker)} disabled={acting.has(worker.workerId)} data-testid={`pause-worker-${worker.workerId}`}>
+                    <PauseCircle />
+                  </button>
                   <button class="btn-action" title="Clean"><Eraser /></button>
                 </div>
                 <div class="action-row">
                   <button class="btn-action" title="Restart"><RefreshCw /></button>
-                  <button class="btn-action" title="Delete" on:click={() => { deleteWorker(worker.workerId); }} data-testid={`delete-worker-${worker.workerId}`}><Trash /></button>
+                  <button class="btn-action" title="Delete" on:click={() => { deleteWorker(worker.workerId); }} data-testid={`delete-worker-${worker.workerId}`} disabled={acting.has(worker.workerId)}>
+                    <Trash />
+                  </button>
                 </div>
                 <div class="action-row">
                     {#if displayMode == 'charts'}

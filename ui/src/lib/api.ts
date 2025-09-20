@@ -846,6 +846,23 @@ export async function getStatus(workerIds: number[]): Promise<taskqueue.WorkerSt
 }
 
 /**
+ * Updates a worker's status via gRPC.
+ * @param params - Object containing workerId and the new status code.
+ */
+export async function updateWorkerStatus(params: { workerId: number; status: string }): Promise<void> {
+  try {
+    const request: taskqueue.WorkerStatus = {
+      workerId: params.workerId,
+      status: params.status,
+    };
+    await client.updateWorkerStatus(request, await callOptionsUserToken());
+  } catch (error) {
+    console.error('❌ Error while updating worker status:', error);
+    throw error;
+  }
+}
+
+/**
  * Maps a job status code to a corresponding CSS class name.
  * 
  * @param status - The status code of the job.

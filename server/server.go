@@ -459,20 +459,29 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			}
 		}
 
-		// Accumulators (use req.Duration as before)
-		if req.Duration != nil {
-			dur := float64(*req.Duration)
-			switch req.NewStatus {
-			case "O":
+		// Accumulators (prefer req.Duration, otherwise fall back to DB-derived values)
+		switch req.NewStatus {
+		case "O":
+			var dur float64
+			if req.Duration != nil {
+				dur = float64(*req.Duration)
+			} else if dlDur.Valid {
+				dur = float64(dlDur.Int32)
+			}
+			if dur > 0 {
 				acc := &stepAgg.Download
 				acc.Sum += dur
+				acc.Count++
 				if acc.Min == 0 || dur < acc.Min {
 					acc.Min = dur
 				}
 				if dur > acc.Max {
 					acc.Max = dur
 				}
-			case "U":
+			}
+		case "U":
+			if req.Duration != nil {
+				dur := float64(*req.Duration)
 				acc := &stepAgg.SuccessRun
 				acc.Sum += dur
 				acc.Count++
@@ -482,7 +491,10 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				if dur > acc.Max {
 					acc.Max = dur
 				}
-			case "V":
+			}
+		case "V":
+			if req.Duration != nil {
+				dur := float64(*req.Duration)
 				acc := &stepAgg.FailRun
 				acc.Sum += dur
 				acc.Count++
@@ -492,9 +504,18 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				if dur > acc.Max {
 					acc.Max = dur
 				}
-			case "S", "F":
+			}
+		case "S", "F":
+			var dur float64
+			if req.Duration != nil {
+				dur = float64(*req.Duration)
+			} else if upDur.Valid {
+				dur = float64(upDur.Int32)
+			}
+			if dur > 0 {
 				acc := &stepAgg.Upload
 				acc.Sum += dur
+				acc.Count++
 				if acc.Min == 0 || dur < acc.Min {
 					acc.Min = dur
 				}
@@ -1015,18 +1036,17 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		// Store the list on the context so we can use it after commit
 		ctx = context.WithValue(ctx, struct{ k string }{"reRegFailTaskIDs"}, failedTaskIDs)
 
-		_, err = tx.Exec(`UPDATE worker SET status='R' WHERE status IN ('O','I') AND worker_id=$1`,
-			workerID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to update worker %d status : %w", workerID, err)
-		}
-
 		log.Printf("✅ Worker %s already registered, sending back id %d", req.Name, workerID)
 	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit worker registration: %v", err)
 		return nil, fmt.Errorf("failed to commit worker registration: %w", err)
+	}
+
+	// Ensure status goes through UpdateWorkerStatus (and emits WS)
+	if _, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: workerID, Status: "R"}); err != nil {
+		log.Printf("⚠️ Failed to set worker %d status to 'R' via UpdateWorkerStatus: %v", workerID, err)
 	}
 
 	// After committing, fail previously active tasks via UpdateTaskStatus so that retries/WS/stats are handled uniformly
@@ -1374,10 +1394,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 				Retry:      defaultJobRetry,
 				Timeout:    defaultJobTimeout,
 			}
-			// Mark worker as Deleting ('D') immediately when scheduling delete job
-			if _, err := tx.Exec("UPDATE worker SET status='D' WHERE worker_id=$1", req.WorkerId); err != nil {
-				return nil, fmt.Errorf("failed to set worker %d status to 'D': %w", req.WorkerId, err)
-			}
+			// Defer status change to after commit via UpdateWorkerStatus (which also emits a plain worker.status event)
 			s.addJob(job)
 		} else {
 			// Final DB deletion & quota/watchdog updates (worker already undeployed)
@@ -1420,17 +1437,15 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 	}
 
 	if !is_permanent && !undeployed {
-		ws.EmitWS("worker", req.WorkerId, "deleted", struct {
-			WorkerId int32  `json:"workerId"`
-			JobId    int32  `json:"jobId,omitempty"`
-			Action   string `json:"action,omitempty"`
-			Status   string `json:"status,omitempty"`
-		}{
-			WorkerId: req.WorkerId,
-			JobId:    job.JobID,
-			Action:   "D",
-			Status:   "P",
-		})
+		// 1) Change status via the canonical API (emits a plain worker.status event)
+		if _, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: req.WorkerId, Status: "D"}); err != nil {
+			log.Printf("⚠️ Failed to set worker %d status to 'D' via UpdateWorkerStatus: %v", req.WorkerId, err)
+		}
+		// 2) Emit a dedicated event tying the deletion status to its job id
+		ws.EmitWS("worker", req.WorkerId, "deletionScheduled", struct {
+			WorkerId int32 `json:"workerId"`
+			JobId    int32 `json:"jobId"`
+		}{WorkerId: req.WorkerId, JobId: job.JobID})
 	} else {
 		ws.EmitWS("worker", req.WorkerId, "deleted", struct {
 			WorkerId int32 `json:"workerId"`
@@ -1492,6 +1507,7 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
             progression,
             COALESCE(log, '')
         FROM job
+		ORDER BY job_id DESC
     `
 
 	// Add pagination clauses
@@ -1632,6 +1648,11 @@ func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.Worker
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker status: %w", err)
 	}
+	// 🔔 WS notify: worker status changed
+	ws.EmitWS("worker", req.WorkerId, "status", struct {
+		WorkerId int32  `json:"workerId"`
+		Status   string `json:"status"`
+	}{WorkerId: req.WorkerId, Status: req.Status})
 	return &pb.Ack{Success: true}, nil
 }
 
