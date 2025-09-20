@@ -15,16 +15,18 @@ const (
 )
 
 type Watchdog struct {
-	lastPing    sync.Map // workerID -> time.Time
-	lastNotIdle sync.Map // workerID -> time.Time
-	lastStatus  sync.Map // workerID -> string
-	idleStatus  sync.Map // workerID -> IdleStatus
-	activeTasks sync.Map // workerID -> int
-	isPermanent sync.Map // workerID -> bool
+	lastPing     sync.Map // workerID -> time.Time
+	lastNotIdle  sync.Map // workerID -> time.Time
+	lastStatus   sync.Map // workerID -> string
+	idleStatus   sync.Map // workerID -> IdleStatus
+	activeTasks  sync.Map // workerID -> int
+	isPermanent  sync.Map // workerID -> bool
+	offlineSince sync.Map // workerID -> time.Time (when first marked offline)
 
-	idleTimeout     time.Duration
-	bornIdleTimeout time.Duration
-	offlineTimeout  time.Duration
+	idleTimeout           time.Duration
+	bornIdleTimeout       time.Duration
+	offlineTimeout        time.Duration
+	consideredLostTimeout time.Duration
 
 	updateWorker func(workerID int32, newStatus string) error
 	deleteWorker func(workerID int32) error
@@ -33,17 +35,18 @@ type Watchdog struct {
 }
 
 func NewWatchdog(
-	idleTimeout, bornIdleTimeout, offlineTimeout, tickerInterval time.Duration,
+	idleTimeout, bornIdleTimeout, offlineTimeout, consideredLostTimeout, tickerInterval time.Duration,
 	updateWorker func(workerID int32, newStatus string) error,
 	deleteWorker func(workerID int32) error,
 ) *Watchdog {
 	return &Watchdog{
-		idleTimeout:     idleTimeout,
-		bornIdleTimeout: bornIdleTimeout,
-		offlineTimeout:  offlineTimeout,
-		updateWorker:    updateWorker,
-		deleteWorker:    deleteWorker,
-		tickerInterval:  tickerInterval,
+		idleTimeout:           idleTimeout,
+		bornIdleTimeout:       bornIdleTimeout,
+		offlineTimeout:        offlineTimeout,
+		consideredLostTimeout: consideredLostTimeout,
+		updateWorker:          updateWorker,
+		deleteWorker:          deleteWorker,
+		tickerInterval:        tickerInterval,
 	}
 }
 
@@ -62,6 +65,7 @@ func (w *Watchdog) WorkerRegistered(workerID int32, isPermanent bool) {
 func (w *Watchdog) WorkerPinged(workerID int32) {
 	now := time.Now()
 	w.lastPing.Store(workerID, now)
+	w.offlineSince.Delete(workerID)
 	status, ok := w.lastStatus.Load(workerID)
 	var newStatus string
 	if !ok {
@@ -94,6 +98,7 @@ func (w *Watchdog) WorkerDeleted(workerID int32) {
 	w.idleStatus.Delete(workerID)
 	w.activeTasks.Delete(workerID)
 	w.isPermanent.Delete(workerID)
+	w.offlineSince.Delete(workerID)
 
 	log.Printf("[watchdog] cleaned up memory for deleted worker %d", workerID)
 }
@@ -134,6 +139,7 @@ func (w *Watchdog) Run(stopChan <-chan struct{}) {
 		case <-ticker.C:
 			w.checkOffline()
 			w.checkIdle()
+			w.checkLongOffline()
 		case <-stopChan:
 			log.Println("[watchdog] stopping")
 			return
@@ -148,10 +154,13 @@ func (w *Watchdog) checkOffline() {
 		workerID := key.(int32)
 		lastPing := value.(time.Time)
 		elapsed := now.Sub(lastPing)
-
-		if elapsed > w.offlineTimeout {
-
-			status, ok := w.lastStatus.Load(workerID)
+		// Threshold depends on status: 'I' (installing) uses bornIdleTimeout, others use offlineTimeout
+		threshold := w.offlineTimeout
+		status, ok := w.lastStatus.Load(workerID)
+		if ok && status.(string) == "I" {
+			threshold = w.bornIdleTimeout
+		}
+		if elapsed > threshold {
 			if !ok {
 				log.Printf("⚠️ [watchdog error] Worker %d with no known status just timeout, this should not happend", workerID)
 				return true
@@ -164,11 +173,14 @@ func (w *Watchdog) checkOffline() {
 				newStatus = "Q"
 			case "F":
 				newStatus = "L"
+			case "I":
+				newStatus = "O"
 			default:
 				return true
 			}
 			log.Printf("[watchdog] worker %d is offline for %v", workerID, elapsed)
 			w.lastStatus.Store(workerID, newStatus)
+			w.offlineSince.Store(workerID, now)
 			go w.safeUpdateWorker(workerID, newStatus)
 		}
 		return true
@@ -207,12 +219,6 @@ func (w *Watchdog) checkIdle() {
 				log.Printf("[watchdog] permanent worker %d idle for %v (no deletion)", workerID, now.Sub(lastActivity))
 				return true
 			}
-
-			if s, ok := w.lastStatus.Load(workerID); ok && s.(string) == "P" {
-				log.Printf("[watchdog] worker %d in pause and idle for %v (no deletion)", workerID, now.Sub(lastActivity))
-				return true
-			}
-
 			// Double-check still idle before deletion
 			if activeTasks, ok := w.activeTasks.Load(workerID); ok && activeTasks.(int) == 0 {
 				log.Printf("[watchdog] deleting idle worker %d (idle since %v, timeout %v)", workerID, idleTime, timeout)
@@ -295,4 +301,42 @@ func (w *Watchdog) safeDeleteWorker(workerID int32) {
 		log.Printf("⏱️ [watchdog] deleteWorker(%d) still running after 60s; continuing loop", workerID)
 		return
 	}
+}
+
+func isOfflineStatus(s string) bool {
+	return s == "O" || s == "Q" || s == "L"
+}
+
+// If a worker has been offline for > consideredLostTimeout, delete it (non-permanent only)
+func (w *Watchdog) checkLongOffline() {
+	now := time.Now()
+	w.lastStatus.Range(func(key, value any) bool {
+		workerID := key.(int32)
+		status := value.(string)
+		if !isOfflineStatus(status) {
+			return true
+		}
+		// Determine when we first marked it offline
+		var since time.Time
+		if v, ok := w.offlineSince.Load(workerID); ok {
+			since = v.(time.Time)
+		} else {
+			// seed from lastPing if available; otherwise start the timer now
+			if lp, ok := w.lastPing.Load(workerID); ok {
+				since = lp.(time.Time)
+			} else {
+				since = now
+			}
+			w.offlineSince.Store(workerID, since)
+		}
+
+		if now.Sub(since) > w.consideredLostTimeout {
+			if v, ok := w.isPermanent.Load(workerID); ok && v.(bool) {
+				return true
+			}
+			log.Printf("[watchdog] deleting long-offline worker %d (offline for %v)", workerID, now.Sub(since))
+			go w.safeDeleteWorker(workerID)
+		}
+		return true
+	})
 }

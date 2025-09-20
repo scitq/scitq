@@ -32,20 +32,21 @@ type Config struct {
 		DockerAuthentication string `yaml:"docker_authentication"`
 		// Multiple registry credentials; each entry is a registry→secret pair.
 		// If empty, legacy fields DockerRegistry/DockerAuthentication (single pair) are used if set.
-		DockerCredentials    []DockerCredential `yaml:"docker_credentials"`
-		SwapProportion       float32            `yaml:"swap_proportion" default:"0.1"`
-		WorkerToken          string             `yaml:"worker_token"`
-		JwtSecret            string             `yaml:"jwt_secret"`
-		RecruitmentInterval  int                `yaml:"recruiter_interval" default:"15"`
-		IdleTimeout          int                `yaml:"idle_timeout" default:"300"`
-		NewWorkerIdleTimeout int                `yaml:"new_worker_idle_timeout" default:"900"`
-		OfflineTimeout       int                `yaml:"offline_timeout" default:"30"`
-		AdminUser            string             `yaml:"admin_user" default:"admin"`
-		AdminHashedPassword  string             `yaml:"admin_hashed_password" default:""`
-		AdminEmail           string             `yaml:"admin_email" default:""`
-		DisableHTTPS         bool               `yaml:"disable_https" default:"false"`
-		DisableGRPCWeb       bool               `yaml:"disable_grpcweb" default:"false"`
-		HTTPSPort            int                `yaml:"https_port" default:"443"`
+		DockerCredentials     []DockerCredential `yaml:"docker_credentials"`
+		SwapProportion        float32            `yaml:"swap_proportion" default:"0.1"`
+		WorkerToken           string             `yaml:"worker_token"`
+		JwtSecret             string             `yaml:"jwt_secret"`
+		RecruitmentInterval   int                `yaml:"recruiter_interval" default:"15"`
+		IdleTimeout           int                `yaml:"idle_timeout" default:"300"`
+		NewWorkerIdleTimeout  int                `yaml:"new_worker_idle_timeout" default:"900"`
+		OfflineTimeout        int                `yaml:"offline_timeout" default:"30"`
+		ConsideredLostTimeout int                `yaml:"considered_lost_timeout" default:"300" `
+		AdminUser             string             `yaml:"admin_user" default:"admin"`
+		AdminHashedPassword   string             `yaml:"admin_hashed_password" default:""`
+		AdminEmail            string             `yaml:"admin_email" default:""`
+		DisableHTTPS          bool               `yaml:"disable_https" default:"false"`
+		DisableGRPCWeb        bool               `yaml:"disable_grpcweb" default:"false"`
+		HTTPSPort             int                `yaml:"https_port" default:"443"`
 	} `yaml:"scitq"`
 	Providers struct {
 		Azure     map[string]*AzureConfig     `yaml:"azure"`

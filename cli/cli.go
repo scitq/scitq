@@ -474,7 +474,7 @@ func (c *CLI) WorkerDelete() error {
 	defer cancel()
 
 	// Call the gRPC DeleteWorker RPC.
-	res, err := c.QC.Client.DeleteWorker(ctx, &pb.WorkerId{WorkerId: int32(c.Attr.Worker.Delete.WorkerId)})
+	res, err := c.QC.Client.DeleteWorker(ctx, &pb.WorkerDeletion{WorkerId: int32(c.Attr.Worker.Delete.WorkerId)})
 	if err != nil {
 		return fmt.Errorf("error deleting worker: %w", err)
 	}

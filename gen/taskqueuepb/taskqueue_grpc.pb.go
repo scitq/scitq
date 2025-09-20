@@ -93,7 +93,7 @@ type TaskQueueClient interface {
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
 	UpdateWorkerStatus(ctx context.Context, in *WorkerStatus, opts ...grpc.CallOption) (*Ack, error)
-	DeleteWorker(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*JobId, error)
+	DeleteWorker(ctx context.Context, in *WorkerDeletion, opts ...grpc.CallOption) (*JobId, error)
 	UpdateWorker(ctx context.Context, in *WorkerUpdateRequest, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkerStatuses(ctx context.Context, in *WorkerStatusRequest, opts ...grpc.CallOption) (*WorkerStatusResponse, error)
 	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*JobsList, error)
@@ -289,7 +289,7 @@ func (c *taskQueueClient) UpdateWorkerStatus(ctx context.Context, in *WorkerStat
 	return out, nil
 }
 
-func (c *taskQueueClient) DeleteWorker(ctx context.Context, in *WorkerId, opts ...grpc.CallOption) (*JobId, error) {
+func (c *taskQueueClient) DeleteWorker(ctx context.Context, in *WorkerDeletion, opts ...grpc.CallOption) (*JobId, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(JobId)
 	err := c.cc.Invoke(ctx, TaskQueue_DeleteWorker_FullMethodName, in, out, cOpts...)
@@ -735,7 +735,7 @@ type TaskQueueServer interface {
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
 	UpdateWorkerStatus(context.Context, *WorkerStatus) (*Ack, error)
-	DeleteWorker(context.Context, *WorkerId) (*JobId, error)
+	DeleteWorker(context.Context, *WorkerDeletion) (*JobId, error)
 	UpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error)
 	GetWorkerStatuses(context.Context, *WorkerStatusRequest) (*WorkerStatusResponse, error)
 	ListJobs(context.Context, *ListJobsRequest) (*JobsList, error)
@@ -826,7 +826,7 @@ func (UnimplementedTaskQueueServer) CreateWorker(context.Context, *WorkerRequest
 func (UnimplementedTaskQueueServer) UpdateWorkerStatus(context.Context, *WorkerStatus) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateWorkerStatus not implemented")
 }
-func (UnimplementedTaskQueueServer) DeleteWorker(context.Context, *WorkerId) (*JobId, error) {
+func (UnimplementedTaskQueueServer) DeleteWorker(context.Context, *WorkerDeletion) (*JobId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorker not implemented")
 }
 func (UnimplementedTaskQueueServer) UpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error) {
@@ -1168,7 +1168,7 @@ func _TaskQueue_UpdateWorkerStatus_Handler(srv interface{}, ctx context.Context,
 }
 
 func _TaskQueue_DeleteWorker_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(WorkerId)
+	in := new(WorkerDeletion)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -1180,7 +1180,7 @@ func _TaskQueue_DeleteWorker_Handler(srv interface{}, ctx context.Context, dec f
 		FullMethod: TaskQueue_DeleteWorker_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TaskQueueServer).DeleteWorker(ctx, req.(*WorkerId))
+		return srv.(TaskQueueServer).DeleteWorker(ctx, req.(*WorkerDeletion))
 	}
 	return interceptor(ctx, in, info, handler)
 }

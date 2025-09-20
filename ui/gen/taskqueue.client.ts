@@ -65,6 +65,7 @@ import type { WorkerStatusResponse } from "./taskqueue";
 import type { WorkerStatusRequest } from "./taskqueue";
 import type { WorkerUpdateRequest } from "./taskqueue";
 import type { JobId } from "./taskqueue";
+import type { WorkerDeletion } from "./taskqueue";
 import type { WorkerStatus } from "./taskqueue";
 import type { WorkerIds } from "./taskqueue";
 import type { WorkerRequest } from "./taskqueue";
@@ -144,7 +145,7 @@ export interface ITaskQueueClient {
     /**
      * @generated from protobuf rpc: DeleteWorker
      */
-    deleteWorker(input: WorkerId, options?: RpcOptions): UnaryCall<WorkerId, JobId>;
+    deleteWorker(input: WorkerDeletion, options?: RpcOptions): UnaryCall<WorkerDeletion, JobId>;
     /**
      * @generated from protobuf rpc: UpdateWorker
      */
@@ -414,9 +415,9 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
     /**
      * @generated from protobuf rpc: DeleteWorker
      */
-    deleteWorker(input: WorkerId, options?: RpcOptions): UnaryCall<WorkerId, JobId> {
+    deleteWorker(input: WorkerDeletion, options?: RpcOptions): UnaryCall<WorkerDeletion, JobId> {
         const method = this.methods[12], opt = this._transport.mergeOptions(options);
-        return stackIntercept<WorkerId, JobId>("unary", this._transport, method, opt, input);
+        return stackIntercept<WorkerDeletion, JobId>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: UpdateWorker

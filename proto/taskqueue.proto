@@ -19,7 +19,7 @@ service TaskQueue {
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
-    rpc DeleteWorker(WorkerId) returns (JobId);
+    rpc DeleteWorker(WorkerDeletion) returns (JobId);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
     rpc GetWorkerStatuses (WorkerStatusRequest) returns (WorkerStatusResponse);
     rpc ListJobs (ListJobsRequest) returns (JobsList);
@@ -165,6 +165,7 @@ message TaskStatusUpdate {
     int32 task_id = 1;
     string new_status = 2;
     optional int32 duration = 3; // in seconds
+    optional bool free_retry = 4; // if new_status is F and this is true, then retry is increased by 1 before setting status to F
 }
 
 message TaskLog {
@@ -200,6 +201,11 @@ message TaskId {
 
 message WorkerId {
     int32 worker_id = 1;
+}
+
+message WorkerDeletion {
+    int32 worker_id = 1;
+    optional bool undeployed = 2; // if true, the worker is already undeployed so deletion can proceed
 }
 
 message WorkerStatusRequest {

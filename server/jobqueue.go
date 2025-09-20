@@ -7,6 +7,8 @@ import (
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"google.golang.org/protobuf/proto"
 )
 
 // Job represents a task to be executed.
@@ -112,30 +114,10 @@ func (s *taskQueueServer) processJob(job Job) error {
 		if err != nil {
 			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
 		}
-		// Update the worker state
-		// Update the database
-		var provider string
-		var cpu int32
-		var mem float32
-
-		err = s.db.QueryRow(`
-			DELETE FROM worker
-			USING flavor f, provider p
-			WHERE worker.worker_id = $1
-			  AND worker.flavor_id = f.flavor_id
-			  AND f.provider_id = p.provider_id
-			RETURNING p.provider_name || '.' || p.config_name AS provider,
-					  f.cpu,
-					  f.mem
-		`, job.WorkerID).Scan(&provider, &cpu, &mem)
-
-		if err != nil {
-			return fmt.Errorf("failed to delete worker %d with quota data: %v", job.WorkerID, err)
+		// Provider undeploy succeeded, now finalize deletion in DB via server.DeleteWorker with undeployed=true
+		if _, derr := s.DeleteWorker(context.Background(), &pb.WorkerDeletion{WorkerId: job.WorkerID, Undeployed: proto.Bool(true)}); derr != nil {
+			return fmt.Errorf("provider undeployed worker %d but DB deletion failed: %v", job.WorkerID, derr)
 		}
-		// Update quota manager
-		s.qm.RegisterDelete(job.Region, provider, cpu, mem)
-		// Update watchdog
-		s.watchdog.WorkerDeleted(job.WorkerID)
 	case 'R': // Restart
 		return s.providers[job.ProviderID].Restart(job.WorkerName, job.Region)
 	default:

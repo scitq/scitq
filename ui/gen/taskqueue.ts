@@ -329,6 +329,10 @@ export interface TaskStatusUpdate {
      * @generated from protobuf field: optional int32 duration = 3
      */
     duration?: number; // in seconds
+    /**
+     * @generated from protobuf field: optional bool free_retry = 4
+     */
+    freeRetry?: boolean; // if new_status is F and this is true, then retry is increased by 1 before setting status to F
 }
 /**
  * @generated from protobuf message taskqueue.TaskLog
@@ -420,6 +424,19 @@ export interface WorkerId {
      * @generated from protobuf field: int32 worker_id = 1
      */
     workerId: number;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerDeletion
+ */
+export interface WorkerDeletion {
+    /**
+     * @generated from protobuf field: int32 worker_id = 1
+     */
+    workerId: number;
+    /**
+     * @generated from protobuf field: optional bool undeployed = 2
+     */
+    undeployed?: boolean; // if true, the worker is already undeployed so deletion can proceed
 }
 /**
  * @generated from protobuf message taskqueue.WorkerStatusRequest
@@ -2828,7 +2845,8 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
         super("taskqueue.TaskStatusUpdate", [
             { no: 1, name: "task_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "new_status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 3, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "free_retry", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<TaskStatusUpdate>): TaskStatusUpdate {
@@ -2853,6 +2871,9 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
                 case /* optional int32 duration */ 3:
                     message.duration = reader.int32();
                     break;
+                case /* optional bool free_retry */ 4:
+                    message.freeRetry = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2874,6 +2895,9 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
         /* optional int32 duration = 3; */
         if (message.duration !== undefined)
             writer.tag(3, WireType.Varint).int32(message.duration);
+        /* optional bool free_retry = 4; */
+        if (message.freeRetry !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.freeRetry);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3283,6 +3307,60 @@ class WorkerId$Type extends MessageType<WorkerId> {
  * @generated MessageType for protobuf message taskqueue.WorkerId
  */
 export const WorkerId = new WorkerId$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerDeletion$Type extends MessageType<WorkerDeletion> {
+    constructor() {
+        super("taskqueue.WorkerDeletion", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "undeployed", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerDeletion>): WorkerDeletion {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<WorkerDeletion>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerDeletion): WorkerDeletion {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 worker_id */ 1:
+                    message.workerId = reader.int32();
+                    break;
+                case /* optional bool undeployed */ 2:
+                    message.undeployed = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerDeletion, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 worker_id = 1; */
+        if (message.workerId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.workerId);
+        /* optional bool undeployed = 2; */
+        if (message.undeployed !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.undeployed);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerDeletion
+ */
+export const WorkerDeletion = new WorkerDeletion$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class WorkerStatusRequest$Type extends MessageType<WorkerStatusRequest> {
     constructor() {
@@ -8557,7 +8635,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListWorkers", options: {}, I: ListWorkersRequest, O: WorkersList },
     { name: "CreateWorker", options: {}, I: WorkerRequest, O: WorkerIds },
     { name: "UpdateWorkerStatus", options: {}, I: WorkerStatus, O: Ack },
-    { name: "DeleteWorker", options: {}, I: WorkerId, O: JobId },
+    { name: "DeleteWorker", options: {}, I: WorkerDeletion, O: JobId },
     { name: "UpdateWorker", options: {}, I: WorkerUpdateRequest, O: Ack },
     { name: "GetWorkerStatuses", options: {}, I: WorkerStatusRequest, O: WorkerStatusResponse },
     { name: "ListJobs", options: {}, I: ListJobsRequest, O: JobsList },

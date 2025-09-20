@@ -125,13 +125,14 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		time.Duration(cfg.Scitq.IdleTimeout)*time.Second,
 		time.Duration(cfg.Scitq.NewWorkerIdleTimeout)*time.Second,
 		time.Duration(cfg.Scitq.OfflineTimeout)*time.Second,
+		time.Duration(cfg.Scitq.ConsideredLostTimeout)*time.Second,
 		10*time.Second, // ticker interval
 		func(workerID int32, newStatus string) error {
 			_, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: workerID, Status: newStatus})
 			return err
 		}, // callback
 		func(workerID int32) error {
-			_, err := s.DeleteWorker(context.Background(), &pb.WorkerId{WorkerId: workerID})
+			_, err := s.DeleteWorker(context.Background(), &pb.WorkerDeletion{WorkerId: workerID})
 			return err
 		}, // callback
 	)
@@ -318,7 +319,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
                    run_started_at = CASE WHEN $1 = 'R' THEN NOW() ELSE run_started_at END,
                    download_duration = CASE WHEN $3::INT IS NOT NULL AND $1 = 'O' THEN $3::INT ELSE download_duration END,
                    run_duration      = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('U','V') THEN $3::INT ELSE run_duration END,
-                   upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END
+                   upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END,
+                   retry             = CASE WHEN $1 = 'F' AND $4::BOOL IS TRUE THEN retry + 1 ELSE retry END
              WHERE task_id = $2
                AND status <> $1
              RETURNING task_id, worker_id
@@ -360,7 +362,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
           JOIN cur c   ON TRUE
      LEFT JOIN step s ON c.step_id = s.step_id;
     `,
-		req.NewStatus, req.TaskId, req.Duration,
+		req.NewStatus, req.TaskId, req.Duration, (req.FreeRetry != nil && *req.FreeRetry),
 	).Scan(
 		&workerID, &oldStatus, &curRetry, &stepID, &workflowID, &prevRunStartedAt,
 		&runStartedEpoch, &dlDur, &runDur, &upDur, &startEpoch, &endEpoch,
@@ -638,8 +640,15 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	}
 
 	// Retry (rare path): clone a fresh task and detach the failed parent in a single tx.
-	if req.NewStatus == "F" && curRetry.Valid && curRetry.Int32 > 0 {
-		log.Printf("🔄 retrying task %d (status: %s, retry count: %d)", req.TaskId, req.NewStatus, curRetry.Int32)
+	effectiveRetry := int32(0)
+	if curRetry.Valid {
+		effectiveRetry = curRetry.Int32
+	}
+	if req.FreeRetry != nil && *req.FreeRetry {
+		effectiveRetry++
+	}
+	if req.NewStatus == "F" && effectiveRetry > 0 {
+		log.Printf("🔄 retrying task %d (status: %s, retry count: %d)", req.TaskId, req.NewStatus, effectiveRetry)
 		tx, txErr := s.db.BeginTx(ctx, nil)
 		if txErr == nil {
 			var newID int64
@@ -985,11 +994,27 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		//	log.Printf("⚠️ Failed to update worker %s: %v", req.Name, err)
 		//	return nil, fmt.Errorf("failed to update worker: %w", err)
 		//}
-		_, err = tx.Exec(`UPDATE task SET status='F' WHERE status IN ('C','D','R','U') AND worker_id=$1`,
-			workerID)
+		// Collect active tasks attributed to this worker and mark them for failure after commit using UpdateTaskStatus
+		rows, err := tx.Query(`SELECT task_id FROM task WHERE status IN ('C','D','R','U') AND worker_id=$1`, workerID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fail tasks that were running when client %d crashed: %w", workerID, err)
+			return nil, fmt.Errorf("failed to list tasks that were running when client %d crashed: %w", workerID, err)
 		}
+		defer rows.Close()
+		var failedTaskIDs []int32
+		for rows.Next() {
+			var id int32
+			if err := rows.Scan(&id); err != nil {
+				return nil, fmt.Errorf("failed to scan running task for worker %d: %w", workerID, err)
+			}
+			failedTaskIDs = append(failedTaskIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating running tasks for worker %d: %w", workerID, err)
+		}
+
+		// Store the list on the context so we can use it after commit
+		ctx = context.WithValue(ctx, struct{ k string }{"reRegFailTaskIDs"}, failedTaskIDs)
+
 		_, err = tx.Exec(`UPDATE worker SET status='R' WHERE status IN ('O','I') AND worker_id=$1`,
 			workerID)
 		if err != nil {
@@ -1002,6 +1027,19 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit worker registration: %v", err)
 		return nil, fmt.Errorf("failed to commit worker registration: %w", err)
+	}
+
+	// After committing, fail previously active tasks via UpdateTaskStatus so that retries/WS/stats are handled uniformly
+	if v := ctx.Value(struct{ k string }{"reRegFailTaskIDs"}); v != nil {
+		if ids, ok := v.([]int32); ok {
+			for _, tid := range ids {
+				if _, upErr := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true)}); upErr != nil {
+					log.Printf("❌ failed to set task %d to 'F' on worker re-registration: %v", tid, upErr)
+				} else {
+					log.Printf("🔄 task %d failed due to worker %d re-registration", tid, workerID)
+				}
+			}
+		}
 	}
 
 	s.watchdog.WorkerRegistered(workerID, isPermanent)
@@ -1089,8 +1127,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var memory float32
 
 		err = tx.QueryRow(`WITH insertquery AS (
-			INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent)
-			VALUES (NULLIF($1,0), $5 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE)
+			INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent, status)
+			VALUES (NULLIF($1,0), $5 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE, 'I')
 			RETURNING worker_id, worker_name, region_id, flavor_id
 		)
 		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem
@@ -1273,7 +1311,7 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 	return &pb.Ack{Success: true}, nil
 }
 
-func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*pb.JobId, error) {
+func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeletion) (*pb.JobId, error) {
 	var job Job
 
 	tx, err := s.db.Begin()
@@ -1297,26 +1335,74 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 		return nil, fmt.Errorf("failed to find worker %d: %w", req.WorkerId, err)
 	}
 
+	undeployed := req.Undeployed != nil && *req.Undeployed
+
+	// Collect active tasks for this worker to fail them via UpdateTaskStatus after commit
+	rows, err := tx.Query(`SELECT task_id FROM task WHERE status IN ('C','D','R','U') AND worker_id=$1`, req.WorkerId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tasks to fail for worker %d deletion: %w", req.WorkerId, err)
+	}
+	defer rows.Close()
+	var delFailTaskIDs []int32
+	for rows.Next() {
+		var id int32
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan task to fail for worker %d deletion: %w", req.WorkerId, err)
+		}
+		delFailTaskIDs = append(delFailTaskIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating tasks to fail for worker %d deletion: %w", req.WorkerId, err)
+	}
+	ctx = context.WithValue(ctx, struct{ k string }{"delFailTaskIDs"}, delFailTaskIDs)
+
 	if !is_permanent {
-		var jobId int32
-		err = tx.QueryRow("INSERT INTO job (worker_id,action,region_id,retry) VALUES ($1,'D',$2,$3) RETURNING job_id",
-			req.WorkerId, regionId, defaultJobRetry).Scan(&jobId)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create job for worker %d: %w", req.WorkerId, err)
+		if !undeployed {
+			var jobId int32
+			err = tx.QueryRow("INSERT INTO job (worker_id,action,region_id,retry) VALUES ($1,'D',$2,$3) RETURNING job_id",
+				req.WorkerId, regionId, defaultJobRetry).Scan(&jobId)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create job for worker %d: %w", req.WorkerId, err)
+			}
+			job = Job{
+				JobID:      jobId,
+				WorkerID:   req.WorkerId,
+				WorkerName: workerName,
+				ProviderID: int32(providerId),
+				Region:     regionName,
+				Action:     'D',
+				Retry:      defaultJobRetry,
+				Timeout:    defaultJobTimeout,
+			}
+			// Mark worker as Deleting ('D') immediately when scheduling delete job
+			if _, err := tx.Exec("UPDATE worker SET status='D' WHERE worker_id=$1", req.WorkerId); err != nil {
+				return nil, fmt.Errorf("failed to set worker %d status to 'D': %w", req.WorkerId, err)
+			}
+			s.addJob(job)
+		} else {
+			// Final DB deletion & quota/watchdog updates (worker already undeployed)
+			var provider string
+			var cpu int32
+			var mem float32
+			err = tx.QueryRow(`
+				DELETE FROM worker
+				USING flavor f, provider p
+				WHERE worker.worker_id = $1
+				  AND worker.flavor_id = f.flavor_id
+				  AND f.provider_id = p.provider_id
+				RETURNING p.provider_name || '.' || p.config_name AS provider,
+						  f.cpu,
+						  f.mem
+			`, req.WorkerId).Scan(&provider, &cpu, &mem)
+			if err != nil {
+				return nil, fmt.Errorf("failed to delete worker %d with quota data: %v", req.WorkerId, err)
+			}
+			// Update quota manager and watchdog after commit
+			defer func(region, prov string, c int32, m float32, id int32) {
+				s.qm.RegisterDelete(region, prov, c, m)
+				s.watchdog.WorkerDeleted(id)
+			}(regionName, provider, cpu, mem, req.WorkerId)
 		}
-		job = Job{
-			JobID:      jobId,
-			WorkerID:   req.WorkerId,
-			WorkerName: workerName,
-			ProviderID: int32(providerId),
-			Region:     regionName,
-			Action:     'D',
-			Retry:      defaultJobRetry,
-			Timeout:    defaultJobTimeout,
-		}
-
-		s.addJob(job)
-
 	} else {
 		if status == 'O' || status == 'I' {
 			_, err = tx.Exec("DELETE FROM worker WHERE worker_id=$1", req.WorkerId)
@@ -1333,19 +1419,42 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerId) (*
 		return nil, fmt.Errorf("failed to commit worker deletion: %w", err)
 	}
 
-	ws.EmitWS("worker", req.WorkerId, "deleted", struct {
-		WorkerId int32  `json:"workerId"`
-		JobId    int32  `json:"jobId,omitempty"`
-		Action   string `json:"action,omitempty"`
-		Status   string `json:"status,omitempty"`
-	}{
-		WorkerId: req.WorkerId,
-		JobId:    job.JobID,
-		Action:   "D",
-		Status:   "P",
-	})
+	if !is_permanent && !undeployed {
+		ws.EmitWS("worker", req.WorkerId, "deleted", struct {
+			WorkerId int32  `json:"workerId"`
+			JobId    int32  `json:"jobId,omitempty"`
+			Action   string `json:"action,omitempty"`
+			Status   string `json:"status,omitempty"`
+		}{
+			WorkerId: req.WorkerId,
+			JobId:    job.JobID,
+			Action:   "D",
+			Status:   "P",
+		})
+	} else {
+		ws.EmitWS("worker", req.WorkerId, "deleted", struct {
+			WorkerId int32 `json:"workerId"`
+		}{WorkerId: req.WorkerId})
+	}
 
-	return &pb.JobId{JobId: job.JobID}, nil
+	// After commit, fail previously active tasks attributed to this worker
+	if v := ctx.Value(struct{ k string }{"delFailTaskIDs"}); v != nil {
+		if ids, ok := v.([]int32); ok {
+			for _, tid := range ids {
+				if _, upErr := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true)}); upErr != nil {
+					log.Printf("❌ failed to set task %d to 'F' on worker deletion %d: %v", tid, req.WorkerId, upErr)
+				} else {
+					log.Printf("🔄 task %d failed due to worker %d deletion", tid, req.WorkerId)
+				}
+			}
+		}
+	}
+
+	if !is_permanent && !undeployed {
+		return &pb.JobId{JobId: job.JobID}, nil
+	}
+	// For undeployed or permanent delete, return nil JobId
+	return &pb.JobId{}, nil
 }
 
 func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest) (*pb.JobsList, error) {
