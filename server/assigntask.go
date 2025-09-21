@@ -58,7 +58,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 	workerTaskRows, err := tx.Query(`
 		SELECT worker_id, task_id
 		FROM task
-		WHERE status IN ('A', 'C', 'R')
+		WHERE status IN ('A', 'C', 'D', 'O', 'Z', 'R')
 	`)
 	if err != nil {
 		log.Printf("⚠️ Failed to fetch assigned tasks: %v", err)
@@ -229,8 +229,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 		if err := taskRows.Scan(&tid, &stepIDproxy); err == nil {
 			if stepIDproxy.Valid {
 				stepID = &stepIDproxy.Int32
-			} else {
-				stepID = nil
 			}
 			candidates = append(candidates, taskCandidate{taskID: tid, stepID: stepID})
 		}
