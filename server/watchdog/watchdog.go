@@ -30,6 +30,7 @@ type Watchdog struct {
 
 	updateWorker func(workerID int32, newStatus string) error
 	deleteWorker func(workerID int32) error
+	warmCheck    func(workerID int32) (bool, time.Duration) // (has A/C/O, extra delay)
 
 	tickerInterval time.Duration
 }
@@ -38,6 +39,7 @@ func NewWatchdog(
 	idleTimeout, bornIdleTimeout, offlineTimeout, consideredLostTimeout, tickerInterval time.Duration,
 	updateWorker func(workerID int32, newStatus string) error,
 	deleteWorker func(workerID int32) error,
+	warmCheck func(workerID int32) (bool, time.Duration),
 ) *Watchdog {
 	return &Watchdog{
 		idleTimeout:           idleTimeout,
@@ -46,6 +48,7 @@ func NewWatchdog(
 		consideredLostTimeout: consideredLostTimeout,
 		updateWorker:          updateWorker,
 		deleteWorker:          deleteWorker,
+		warmCheck:             warmCheck,
 		tickerInterval:        tickerInterval,
 	}
 }
@@ -221,9 +224,22 @@ func (w *Watchdog) checkIdle() {
 			}
 			// Double-check still idle before deletion
 			if activeTasks, ok := w.activeTasks.Load(workerID); ok && activeTasks.(int) == 0 {
+				if w.warmCheck != nil {
+					if isWarm, extra := w.warmCheck(workerID); isWarm {
+						effective := w.idleTimeout
+						if extra > 0 && w.idleTimeout+extra > effective {
+							effective = w.idleTimeout + extra
+						}
+						if idleTime <= effective {
+							log.Printf("[watchdog] worker %d warm; idle=%v <= threshold=%v (postponing deletion)", workerID, idleTime, effective)
+							return true
+						}
+						log.Printf("[watchdog] worker %d warm beyond threshold (idle=%v > threshold=%v); deleting", workerID, idleTime, effective)
+					}
+				}
 				log.Printf("[watchdog] deleting idle worker %d (idle since %v, timeout %v)", workerID, idleTime, timeout)
 				go w.safeDeleteWorker(workerID)
-				lastActivity = time.Now() // making dying an activity so that we wait for the worker to delete properly
+				lastActivity = time.Now()
 				w.lastNotIdle.Store(workerID, lastActivity)
 			}
 		}

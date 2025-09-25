@@ -130,11 +130,32 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		func(workerID int32, newStatus string) error {
 			_, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: workerID, Status: newStatus})
 			return err
-		}, // callback
+		},
 		func(workerID int32) error {
 			_, err := s.DeleteWorker(context.Background(), &pb.WorkerDeletion{WorkerId: workerID})
 			return err
-		}, // callback
+		},
+		func(workerID int32) (bool, time.Duration) {
+			var count int
+			var maxDL sql.NullInt32
+			err := s.db.QueryRowContext(context.Background(),
+				`SELECT COUNT(*), COALESCE(MAX(download_timeout), 0)
+					FROM task
+					WHERE worker_id=$1 AND status IN ('A','C','O')`, workerID).Scan(&count, &maxDL)
+			if err != nil {
+				log.Printf("⚠️ [watchdog] warmCheck query failed for worker %d: %v", workerID, err)
+				return false, 0
+			}
+			// extra delay = max(config TaskDownloadTimeout, max(download_timeout) among warm tasks)
+			extraSec := int32(s.cfg.Scitq.TaskDownloadTimeout)
+			if maxDL.Valid && maxDL.Int32 > extraSec {
+				extraSec = maxDL.Int32
+			}
+			if extraSec < 0 {
+				extraSec = 0
+			}
+			return count > 0, time.Duration(extraSec) * time.Second
+		},
 	)
 
 	workers, err := FetchWorkersForWatchdog(context.Background(), s.db)
@@ -588,13 +609,13 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		if !workerID.Valid {
 			log.Printf("⚠️ warning: task %d accepted but worker_id is NULL", req.TaskId)
 		} else {
-			s.watchdog.TaskAccepted(int32(workerID.Int32))
+			s.watchdog.TaskAccepted(workerID.Int32)
 		}
 	case "S", "F":
 		if !workerID.Valid {
 			log.Printf("⚠️ warning: task %d ended in %s but worker_id is NULL", req.TaskId, req.NewStatus)
 		} else {
-			s.watchdog.TaskFinished(int32(workerID.Int32))
+			s.watchdog.TaskFinished(workerID.Int32)
 		}
 	}
 
@@ -1057,6 +1078,18 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 					log.Printf("❌ failed to set task %d to 'F' on worker re-registration: %v", tid, upErr)
 				} else {
 					log.Printf("🔄 task %d failed due to worker %d re-registration", tid, workerID)
+					// Append a synthetic stderr line to the task log explaining the cause
+					func() {
+						logPath := getLogPath(tid, "stderr", s.logRoot)
+						f, ferr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+						if ferr != nil {
+							log.Printf("⚠️ failed to open stderr log for task %d: %v", tid, ferr)
+							return
+						}
+						defer f.Close()
+						ts := time.Now().UTC().Format(time.RFC3339)
+						fmt.Fprintf(f, "%s scitq-server: worker %d re-registered while task was active; marking task as failed and retrying if allowed.\n", ts, workerID)
+					}()
 				}
 			}
 		}
@@ -1166,8 +1199,11 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		}
 
 		var jobID int32
-		tx.QueryRow("INSERT INTO job (worker_id, flavor_id, region_id, retry) VALUES ($1, $2, $3, $4) RETURNING job_id",
-			workerID, req.FlavorId, req.RegionId, defaultJobRetry).Scan(&jobID)
+		jobID, err = s.createJob(ctx, tx, workerID, "C", req.RegionId, defaultJobRetry, &req.FlavorId)
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
 
 		s.qm.RegisterLaunch(regionName, providerName, cpu, memory)
 
@@ -1342,8 +1378,8 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 	defer tx.Rollback()
 
 	var workerName string
-	var providerId int
-	var regionId int
+	var providerId int32
+	var regionId int32
 	var regionName string
 	var is_permanent bool
 	var statusStr string
@@ -1379,10 +1415,9 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 	if !is_permanent {
 		if !undeployed {
 			var jobId int32
-			err = tx.QueryRow("INSERT INTO job (worker_id,action,region_id,retry) VALUES ($1,'D',$2,$3) RETURNING job_id",
-				req.WorkerId, regionId, defaultJobRetry).Scan(&jobId)
+			jobId, err = s.createJob(ctx, tx, req.WorkerId, "D", regionId, defaultJobRetry, nil)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create job for worker %d: %w", req.WorkerId, err)
+				return nil, err
 			}
 			job = Job{
 				JobID:      jobId,
@@ -1460,6 +1495,18 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 					log.Printf("❌ failed to set task %d to 'F' on worker deletion %d: %v", tid, req.WorkerId, upErr)
 				} else {
 					log.Printf("🔄 task %d failed due to worker %d deletion", tid, req.WorkerId)
+					// Append a synthetic stderr line to the task log explaining the cause
+					func() {
+						logPath := getLogPath(tid, "stderr", s.logRoot)
+						f, ferr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+						if ferr != nil {
+							log.Printf("⚠️ failed to open stderr log for task %d: %v", tid, ferr)
+							return
+						}
+						defer f.Close()
+						ts := time.Now().UTC().Format(time.RFC3339)
+						fmt.Fprintf(f, "%s scitq-server: worker %d was deleted while task was active; marking task as failed and retrying if allowed.\n", ts, req.WorkerId)
+					}()
 				}
 			}
 		}
@@ -1598,6 +1645,47 @@ func (s *taskQueueServer) DeleteJob(ctx context.Context, req *pb.JobId) (*pb.Ack
 	return &pb.Ack{Success: true}, nil
 }
 
+// createJob inserts a job row using the provided transaction and returns the job_id.
+// action is a single-letter string (e.g., "C" for create/deploy, "D" for delete/destroy).
+// Emits the corresponding job.created event immediately after the DB change.
+func (s *taskQueueServer) createJob(ctx context.Context, tx *sql.Tx, workerID int32, action string, regionID int32, retry int32, flavorID *int32) (int32, error) {
+	if (flavorID == nil || *flavorID == 0) && action == "C" {
+		return 0, fmt.Errorf("createJob: flavorID must be non-nul and non zero for worker creation %d", workerID)
+	}
+	var jobID int32
+	var err error
+	if flavorID != nil {
+		err = tx.QueryRowContext(ctx,
+			"INSERT INTO job (worker_id, flavor_id, region_id, action, retry) VALUES ($1,$2,$3,$4,$5) RETURNING job_id",
+			workerID, *flavorID, regionID, action, retry,
+		).Scan(&jobID)
+	} else {
+		err = tx.QueryRowContext(ctx,
+			"INSERT INTO job (worker_id, region_id, action, retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
+			workerID, regionID, action, retry,
+		).Scan(&jobID)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert job for worker %d: %w", workerID, err)
+	}
+	// 🔔 Event tied to the DB change (within the same code path)
+	type jobPayload struct {
+		JobId      int32     `json:"jobId"`
+		Action     string    `json:"action,omitempty"`
+		Status     string    `json:"status,omitempty"`
+		WorkerID   int32     `json:"workerId,omitempty"`
+		ModifiedAt time.Time `json:"modifiedAt,omitempty"`
+	}
+	ws.EmitWS("job", jobID, "created", jobPayload{
+		JobId:      jobID,
+		Action:     action,
+		Status:     "P",
+		WorkerID:   workerID,
+		ModifiedAt: time.Now(),
+	})
+	return jobID, nil
+}
+
 func (s *taskQueueServer) UpdateJob(ctx context.Context, req *pb.JobUpdate) (*pb.Ack, error) {
 	if req.JobId == 0 {
 		return nil, fmt.Errorf("a non zero JobId is required")
@@ -1640,6 +1728,18 @@ func (s *taskQueueServer) UpdateJob(ctx context.Context, req *pb.JobUpdate) (*pb
 	if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
 		return nil, err
 	}
+	// Emit a normalized job.updated event, now including modifiedAt
+	ws.EmitWS("job", req.JobId, "updated", struct {
+		JobId       int32     `json:"jobId"`
+		Status      *string   `json:"status,omitempty"`
+		Progression *int32    `json:"progression,omitempty"`
+		ModifiedAt  time.Time `json:"modifiedAt"`
+	}{
+		JobId:       req.JobId,
+		Status:      req.Status,
+		Progression: req.Progression,
+		ModifiedAt:  time.Now(),
+	})
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -1958,7 +2058,10 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			continue
 		}
 		if stepId.Valid {
-			worker.StepId = &stepId.Int32
+			sid := stepId.Int32
+			worker.StepId = &sid
+		} else {
+			worker.StepId = nil
 		}
 		workers = append(workers, &worker)
 	}
