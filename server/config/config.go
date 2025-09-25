@@ -42,7 +42,7 @@ type Config struct {
 		OfflineTimeout        int                `yaml:"offline_timeout" default:"30"`
 		TaskDownloadTimeout   int                `yaml:"task_download_timeout" default:"600"`
 		TaskExecutionTimeout  int                `yaml:"task_execution_timeout" default:"0"`
-		TaskUploadTimeout     int                `yaml:"task_execution_timeout" default:"600"`
+		TaskUploadTimeout     int                `yaml:"task_upload_timeout" default:"600"`
 		ConsideredLostTimeout int                `yaml:"considered_lost_timeout" default:"300" `
 		AdminUser             string             `yaml:"admin_user" default:"admin"`
 		AdminHashedPassword   string             `yaml:"admin_hashed_password" default:""`
