@@ -49,6 +49,10 @@ type WorkerConfig struct {
 
 var lostTrackSeen sync.Map // map[int32]time.Time
 
+// Track how long tasks have been locally active and whether they are executing
+var activeSince sync.Map    // map[int32]time.Time
+var executingTasks sync.Map // map[int32]struct{}
+
 // auto detect self specs
 func (w *WorkerConfig) registerSpecs(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -141,6 +145,9 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return
 	}
 	// Promote to Running locally and on the server
+	reporter.Event("I", "phase", "promoting to R (start exec)", map[string]any{
+		"task_id": task.TaskId,
+	})
 	task.Status = "R"
 	reporter.UpdateTaskAsync(task.TaskId, "R", "", nil)
 
@@ -323,6 +330,7 @@ func (w *WorkerConfig) fetchTasks(
 	for _, tid := range res.ActiveTasks {
 		serverActiveTasks[tid] = struct{}{}
 	}
+	log.Printf("📡 fetchTasks: server reports %d active, %d new tasks", len(serverActiveTasks), len(res.Tasks))
 
 	// 2) For any server-active task we don't know locally, debounce before failing
 	now := time.Now()
@@ -345,6 +353,7 @@ func (w *WorkerConfig) fetchTasks(
 				// first time we see this mismatch: remember it and give the worker loop a chance to store
 				lostTrackSeen.Store(tid, now)
 				log.Printf("⏳ Server says task %d active but client doesn't know it yet; deferring decision.", tid)
+				reporter.Event("I", "trace", "server-active task unknown locally (will recheck)", map[string]any{"task_id": tid})
 			}
 		} else {
 			// if we do know it locally, clear any lingering first-seen marker
@@ -429,10 +438,17 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			}
 
 			task.Status = "C" // Accepted
+			now := time.Now()
 			activeTasks.Store(task.TaskId, struct{}{})
+			activeSince.Store(task.TaskId, now)
 			reporter.UpdateTaskAsync(task.TaskId, task.Status, "", nil)
-			log.Printf("📝 Task %d accepted", task.TaskId)
+			log.Printf("📝 Task %d accepted at %s", task.TaskId, now.Format(time.RFC3339))
 			log.Printf("📌 Marked task %d active locally", task.TaskId)
+			// Trace: queued for download (client side)
+			reporter.Event("I", "phase", "queued for download", map[string]any{
+				"task_id": task.TaskId,
+				"at":      now.Format(time.RFC3339),
+			})
 
 			failed := false
 			for _, folder := range []string{"input", "output", "tmp", "resource"} {
@@ -466,6 +482,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 
 			// Only enqueue if all folders were created successfully
 			dm.TaskQueue <- task
+			log.Printf("📥 Enqueued task %d to download queue", task.TaskId)
 		}
 
 	}
@@ -495,6 +512,13 @@ func excuterThread(
 		}
 
 		go func(t *pb.Task, w float64) {
+			// mark that we are attempting to execute (post-download, i.e. leaving O)
+			reporter.Event("I", "phase", "attempting to acquire slots for execution", map[string]any{
+				"task_id": t.TaskId,
+				"weight":  w,
+			})
+			log.Printf("⏳ Waiting semaphore for task %d (weight=%.3f, current size=%.3f)", t.TaskId, w, sem.Size())
+
 			if err := sem.AcquireWithWeight(context.Background(), w, t.TaskId); err != nil {
 				message := fmt.Sprintf("Failed to acquire semaphore for task %d: %v", t.TaskId, err)
 				log.Printf("❌ %s", message)
@@ -508,17 +532,27 @@ func excuterThread(
 				wg.Done()
 				return
 			}
+			executingTasks.Store(t.TaskId, struct{}{})
+			reporter.Event("I", "phase", "acquired slot; promoting to R soon", map[string]any{
+				"task_id": t.TaskId,
+				"weight":  w,
+			})
+			log.Printf("✅ Acquired semaphore for task %d (weight=%.3f)", t.TaskId, w)
 
 			cpu := max(int32(float64(runtime.NumCPU())/sem.Size()), 1)
+			//memory, err := mem.VirtualMemory()
 			log.Printf("Available CPU threads estimated to %d", cpu)
+			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu})
 			executeTask(client, reporter, t, &wg, store, dm, cpu)
 
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
 
-			// Mark task as no longer active on the client side
+			// execution finished; clear trackers
+			executingTasks.Delete(t.TaskId)
 			activeTasks.Delete(t.TaskId)
-			log.Printf("🧹 Cleared local active flag for task %d", t.TaskId)
+			activeSince.Delete(t.TaskId)
+			log.Printf("🧹 Cleared local flags for task %d (done)", t.TaskId)
 
 			// Clean up memory if task is done
 			taskWeights.Delete(t.TaskId)
@@ -585,6 +619,63 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, taskWeights, activeTasks)
+
+	// 🔎 Periodic diagnostics: detect tasks stuck active but not executing (likely in O)
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// snapshot counts
+				activeCount := 0
+				activeIDs := make([]int32, 0, 64)
+				activeTasks.Range(func(k, _ any) bool {
+					activeCount++
+					if len(activeIDs) < 64 {
+						activeIDs = append(activeIDs, k.(int32))
+					}
+					return true
+				})
+
+				executingCount := 0
+				executingTasks.Range(func(k, _ any) bool {
+					executingCount++
+					return true
+				})
+
+				// find stale candidates (>10min active, not executing)
+				stale := make([]int32, 0, 64)
+				cutoff := time.Now().Add(-10 * time.Minute)
+				activeSince.Range(func(k, v any) bool {
+					tid := k.(int32)
+					if _, ok := executingTasks.Load(tid); ok {
+						return true
+					}
+					if t0, ok := v.(time.Time); ok && t0.Before(cutoff) {
+						if len(stale) < 64 {
+							stale = append(stale, tid)
+						}
+					}
+					return true
+				})
+
+				if len(stale) > 0 {
+					log.Printf("🟥 STALE-O? active=%d executing=%d stale>=10m=%d (examples: %v)", activeCount, executingCount, len(stale), stale)
+					reporter.Event("W", "diagnostics", "tasks active for >10m but not executing (possible O-stall)", map[string]any{
+						"active_count":    activeCount,
+						"executing_count": executingCount,
+						"task_ids":        stale,
+					})
+				} else {
+					log.Printf("📊 heartbeat: active=%d executing=%d (examples: %v)", activeCount, executingCount, activeIDs)
+				}
+			}
+		}
+	}()
+
 	// Block until context is canceled
 	<-ctx.Done()
 	return ctx.Err()
