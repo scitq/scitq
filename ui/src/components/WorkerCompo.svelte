@@ -160,42 +160,39 @@
     updateWorkerData();
     interval = setInterval(updateWorkerData, 5000);
 
-    const handleMessage = (msg: any) => {
-      const topic = msg?.type ?? msg?.topic; // expected: 'worker'
-      const label = msg?.label;              // expected: workerId (number) or undefined for broadcast
-      const data  = msg?.data ?? msg?.payload ?? msg;
-
-      if (topic !== 'worker') return;
-      const workerId: number | undefined = (data?.workerId ?? label);
-      const status: string | undefined   = data?.status;
-      const event: string | undefined    = data?.event; // e.g., 'status', 'deletionScheduled', 'deleted'
-
-      if (event === 'deletionScheduled' || status === 'D' || data?.action === 'D') {
-        if (typeof workerId === 'number') {
-          statusMap.set(workerId, 'D');
-          statusMap = new Map(statusMap);
+    const handleMessage = (message: { type: string; payload: any }) => {
+      const { type, payload } = message;
+      switch (type) {
+        case 'status': {
+          const { workerId, status } = payload;
+          if (typeof workerId === 'number' && typeof status === 'string') {
+            statusMap.set(workerId, status);
+            statusMap = new Map(statusMap);
+          }
+          break;
         }
-        return;
-      }
-
-      if (event === 'deleted') {
-        if (typeof workerId === 'number') {
-          statusMap.set(workerId, 'X'); // optional terminal marker; UI pill may ignore unknowns
-          statusMap = new Map(statusMap);
+        case 'deletionScheduled': {
+          const { workerId } = payload;
+          if (typeof workerId === 'number') {
+            statusMap.set(workerId, 'D');
+            statusMap = new Map(statusMap);
+          }
+          break;
         }
-        return;
-      }
-
-      if (typeof workerId === 'number' && typeof status === 'string') {
-        statusMap.set(workerId, status);
-        statusMap = new Map(statusMap);
+        case 'deleted': {
+          const { workerId } = payload;
+          if (typeof workerId === 'number') {
+            statusMap.set(workerId, 'X');
+            statusMap = new Map(statusMap);
+          }
+          break;
+        }
+        default:
+          break;
       }
     };
 
-    unsubscribeWS = wsClient.subscribeWithTopics(
-      { worker: [] }, // listen to all workers; refine later if needed
-      handleMessage
-    );
+    unsubscribeWS = wsClient.subscribeWithTopics({ worker: [] }, handleMessage);
 
     return () => {
       clearInterval(interval);

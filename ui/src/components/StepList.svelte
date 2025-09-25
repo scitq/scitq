@@ -13,6 +13,13 @@
   export let workflowId: number;
   export let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
 
+  // Local, reactive copy of the parent-provided map to avoid mutating props
+  let workersByStep: Map<number, taskqueue.Worker[]> = new Map();
+  $: if (workersPerStepId) {
+    // Recreate the map to preserve Svelte reactivity and avoid sharing references
+    workersByStep = new Map(workersPerStepId);
+  }
+
   /**
    * Array of loaded steps for the workflow
    * @type {Array<Object>}
@@ -190,22 +197,22 @@
   function removeWorkerEverywhere(workerId: number) {
     let changed = false;
     const next = new Map<number, taskqueue.Worker[]>();
-    for (const [sid, arr] of workersPerStepId.entries()) {
+    for (const [sid, arr] of workersByStep.entries()) {
       const filtered = (arr || []).filter(w => w.workerId !== workerId);
       next.set(sid, filtered);
       if (filtered.length !== (arr || []).length) changed = true;
     }
-    if (changed) workersPerStepId = next; // nudge reactivity by replacing Map
+    if (changed) workersByStep = next; // nudge reactivity by replacing Map
     return changed;
   }
 
   function addWorkerToStep(stepId: number, worker: taskqueue.Worker) {
-    const arr = workersPerStepId.get(stepId) || [];
+    const arr = workersByStep.get(stepId) || [];
     // Avoid duplicates
     const exists = arr.some(w => w.workerId === worker.workerId);
-    const next = new Map(workersPerStepId);
+    const next = new Map(workersByStep);
     next.set(stepId, exists ? arr : [...arr, worker]);
-    workersPerStepId = next; // reassign to trigger Svelte update
+    workersByStep = next; // reassign to trigger Svelte update
   }
 
   /**
@@ -261,9 +268,9 @@
           pendingSteps = pendingSteps.filter((s) => s.stepId !== idToRemove);
           runningByStep.delete(idToRemove);
           // Remove any workers shown under this step
-          const next = new Map(workersPerStepId);
+          const next = new Map(workersByStep);
           next.delete(idToRemove);
-          workersPerStepId = next;
+          workersByStep = next;
         }
         return;
       }
@@ -488,7 +495,7 @@
               <td>{step.stepId}</td>
               <td><a href="#/tasks?stepId={step.stepId}" class="workerCompo-clickable">{step.stepName}</a></td>
               <td>
-                {#each workersPerStepId.get(step.stepId) || [] as worker (worker.workerId)}
+                {#each workersByStep.get(step.stepId) || [] as worker (worker.workerId)}
                   <div class="worker-badge" title={`Worker ID: ${worker.workerId}`}>
                     <a href="#/tasks?workerId={worker.workerId}" class="workerCompo-clickable">{worker.name}</a>
                   </div>

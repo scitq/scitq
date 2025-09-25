@@ -1,4 +1,3 @@
-
 <script lang="ts">
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { Trash, RefreshCw } from 'lucide-svelte';
@@ -8,6 +7,7 @@
   import "../styles/jobsCompo.css";
   import { JobId } from '../../gen/taskqueue';
   import { wsClient } from '../lib/wsClient';
+  import type { WSMessage } from '../lib/wsTypes';
 
   /**
    * List of all jobs passed as a prop to the component
@@ -21,11 +21,6 @@
    */
   let displayJobs: (Job & { status?: string, progression?: number })[] = [];
 
-  /**
-   * Interval reference for auto-refresh functionality
-   * @type {number}
-   */
-  let interval: number;
 
   /**
    * Flag to track initial data load status
@@ -113,16 +108,12 @@
     enqueueDelete(jobId);
   }
 
-  $: sortedJobs = [...jobs].sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
+  // Removed sorting reactive statement to honor server-side job_id DESC ordering
 
-  /**
-   * Component lifecycle hook that runs on mount
-   * Initializes job data and sets up auto-refresh interval
-   * Cleans up interval and event listeners on component destruction
-   */
+  // Live updates are driven by WS `job` events (created/updated/deleted).
+  // We still perform one initial `updateJobData()` to hydrate statuses for preloaded jobs.
   onMount(() => {
-    updateJobData();
-    interval = setInterval(updateJobData, 5000);
+    updateJobData(); // one-time seed
 
     // Setup intersection observer to request more jobs when the list end is visible
     observer = new IntersectionObserver((entries) => {
@@ -135,20 +126,79 @@
 
     if (sentinel) observer.observe(sentinel);
 
-    const handleMessage = (msg: any) => {
-      const topic = msg?.type ?? msg?.topic;
-      if (topic !== 'worker') return;
-      const data = msg?.data ?? msg?.payload ?? msg;
-      // When a deletion job is scheduled, new job appears; request more
-      if (data?.event === 'deletionScheduled' || data?.action === 'D' || data?.status === 'D') {
-        maybeRequestMoreJobs();
-      }
-    };
+    function handleMessage(message: WSMessage) {
+      const { type, action, id, payload } = message;
+      console.log('[WS][job]', { type, action, id, payload });
+      if (type !== 'job') return;
 
-    unsubscribeWS = wsClient.subscribeWithTopics({ worker: [] }, handleMessage);
+      switch (action) {
+        case 'created': {
+          // A new job was created; ask parent to fetch the newest page so it appears immediately
+          maybeRequestMoreJobs();
+
+          // Seed status map so the new job (once loaded) gets a sensible status immediately
+          if (typeof id === 'number' && (payload as any) && typeof (payload as any).status === 'string') {
+            const status = (payload as any).status as string;
+            jobStatusMap.set(id, { status, progression: 0 });
+            jobStatusMap = new Map(jobStatusMap);
+            console.log('[WS][job][created] seed status/prog', id, jobStatusMap.get(id));
+          }
+
+          // If the new job isn't in the current list yet, prepend a minimal placeholder on top
+          if (typeof id === 'number') {
+            const p: any = payload;
+            if (!jobs.some(j => j.jobId === id)) {
+              const placeholder = {
+                jobId: id,
+                workerId: typeof p.workerId === 'number' ? p.workerId : 0,
+                action: typeof p.action === 'string' ? p.action : '',
+                status: typeof p.status === 'string' ? p.status : 'P',
+                modifiedAt: p.modifiedAt || new Date().toISOString(),
+              } as Job;
+              jobs = [placeholder, ...jobs];
+            }
+          }
+          break;
+        }
+        case 'updated': {
+          const jid = id;
+          const p: any = payload;
+          const prev = jobStatusMap.get(jid) || { status: 'unknown', progression: undefined };
+          const nextStatus = typeof p.status === 'string' ? p.status : prev.status;
+          const nextProg = typeof p.progression === 'number' ? p.progression : prev.progression;
+          console.log('[WS][job][updated] before', jid, prev, '->', { status: nextStatus, progression: nextProg });
+          jobStatusMap.set(jid, { status: nextStatus, progression: nextProg });
+          jobStatusMap = new Map(jobStatusMap);
+          console.log('[WS][job][updated] after', jid, jobStatusMap.get(jid));
+
+          // Update the job's modifiedAt so display is accurate
+          if (p && p.modifiedAt) {
+            const idx = jobs.findIndex(j => j.jobId === jid);
+            if (idx !== -1) {
+              const clone = [...jobs];
+              clone[idx] = { ...clone[idx], modifiedAt: p.modifiedAt } as Job;
+              jobs = clone;
+            }
+          }
+          break;
+        }
+        case 'deleted': {
+          const jid = id;
+          // Remove from local lists so it disappears without reload
+          jobs = jobs.filter(j => j.jobId !== jid);
+          jobStatusMap.delete(jid);
+          jobStatusMap = new Map(jobStatusMap);
+          // Optionally request more to replenish the page if it got short
+          maybeRequestMoreJobs();
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    unsubscribeWS = wsClient.subscribeWithTopics({ job: [] }, handleMessage);
 
     return () => {
-      clearInterval(interval);
       if (observer && sentinel) observer.unobserve(sentinel);
       observer = null;
       if (unsubscribeWS) unsubscribeWS();
@@ -158,8 +208,10 @@
 
   /**
    * Reactive statement that updates job data when jobs are initialized
+   * One-shot status hydration after first jobs arrive
    */
   $: if (jobs.length > 0 && !hasLoaded) {
+    // One-shot status hydration after first jobs arrive
     updateJobData();
     hasLoaded = true;
   }
@@ -167,7 +219,7 @@
   /**
    * Reactive statement that creates display jobs with enriched status data
    */
-  $: displayJobs = (sortedJobs ?? jobs).map(job => {
+  $: displayJobs = jobs.map(job => {
     const statusInfo = jobStatusMap.get(job.jobId) || {};
     return {
       ...job,
@@ -191,6 +243,7 @@
         status: s.jobStatus, 
         progression: s.progression 
       }]));
+      console.log('[POLL][job] seeded statuses', jobsStatus);
     } catch (err) {
       console.error('Error loading job data:', err);
     }
@@ -233,6 +286,7 @@
                       data-testid={`progress-bar-${job.jobId}`}
                     ></div>
                   </div>
+                  <small class="jobCompo-progress-text" data-testid={`progress-text-${job.jobId}`}>{job.progression}%</small>
                 {/if}
               {:else if job.action === 'D'}
                 Destroy Worker

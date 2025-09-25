@@ -649,9 +649,6 @@ export async function getStepStats(params?: {
     if (params?.stepIds !== undefined) {
       request.stepIds = params.stepIds;
     }
-    if (params?.includeHidden !== undefined) {
-      request.includeHidden = params.includeHidden;
-    }
     const response = await client.getStepStats(request, await callOptionsUserToken());
     return response.response?.stats || [];
   } catch (error) {
