@@ -136,7 +136,7 @@ _find_pairs() {
 
 func createHelpers(store string) {
 	dir := filepath.Join(store, helperFolder)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o777); err != nil {
 		log.Printf("failed to create %s: %v", dir, err)
 		return
 	}

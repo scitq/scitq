@@ -19,6 +19,13 @@ const (
 	uploadInterval = 10 * time.Second
 )
 
+// UploadFailure carries a unified failure notification from the uploader
+// to a single status update point in the client loop.
+type UploadFailure struct {
+	Task    *pb.Task
+	Message string
+}
+
 type SyncCounter struct {
 	m sync.Map // map[int32]int
 }
@@ -50,6 +57,7 @@ type UploadFile struct {
 type UploadManager struct {
 	UploadQueue    chan *UploadFile
 	Completion     chan *pb.Task
+	FailedQueue    chan *UploadFailure
 	Store          string
 	Client         pb.TaskQueueClient
 	reporter       *event.Reporter
@@ -61,6 +69,7 @@ func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.R
 	return &UploadManager{
 		UploadQueue:    make(chan *UploadFile, maxUploads),
 		Completion:     make(chan *pb.Task, maxQueueSize),
+		FailedQueue:    make(chan *UploadFailure, maxQueueSize),
 		Store:          store,
 		Client:         client,
 		reporter:       reporter,
@@ -165,9 +174,12 @@ func (um *UploadManager) uploadFile(file *UploadFile) error {
 		"attempts": uploadRetry,
 		"error":    err.Error(),
 	})
-	// Log the failure and update the task status
-	file.Task.Status = "F"
-	um.Completion <- file.Task
+	// Centralize failure: do not update status here; enqueue to FailedQueue
+	select {
+	case um.FailedQueue <- &UploadFailure{Task: file.Task, Message: message}:
+	default:
+		log.Printf("⚠️ FailedQueue full; could not enqueue upload failure for task %d", file.Task.TaskId)
+	}
 	return err
 }
 

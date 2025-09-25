@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/rclone/rclone/fs"
 )
@@ -46,9 +47,13 @@ func (ab *AsperaBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsS
 
 	//log.Printf("Aspera downloading %s to %s", src, destPath)
 
-	// Ensure directory exists
-	if err := os.MkdirAll(dst.Path, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %v", err)
+	// Ensure directory exists (use the resolved absolute path we mount into Docker)
+	if err := os.MkdirAll(absPath, 0o777); err != nil {
+		return fmt.Errorf("failed to create destination directory %q: %v", absPath, err)
+	}
+	// On some systems umask prevents 0777; explicitly chmod so the container can write even with root_squash/NFS
+	if err := os.Chmod(absPath, 0o777); err != nil {
+		return fmt.Errorf("failed to chmod destination directory %q: %v", absPath, err)
 	}
 
 	if len(server) == 0 {
@@ -62,10 +67,10 @@ func (ab *AsperaBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsS
 	cmdArgs := []string{
 		"--rm",
 		"-v", absPath + ":/output",
-		"martinlaurent/ascli:4.18.0",
+		"martinlaurent/ascli:4.23.0",
 		"--url=ssh://" + server + ":33001",
 		"--username=" + user,
-		"--ssh-keys=/aspera_sdk/aspera_bypass_dsa.pem",
+		"--ssh-keys=/ibm_aspera/aspera_bypass_dsa.pem",
 		"--ts=@json:{\"target_rate_kbps\":300000}",
 		"server",
 		"download", filePath,
@@ -84,11 +89,10 @@ func (ab *AsperaBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsS
 
 	// Rename file if needed
 	if dst.File != "" && dst.File != src.File {
-		oldPath := dst.Path + dst.Separator + src.File
+		oldPath := filepath.Join(absPath, src.File)
 		newPath := dst.CompletePath()
 		log.Printf("Renaming %s -> %s", oldPath, newPath)
-		err = os.Rename(oldPath, newPath)
-		if err != nil {
+		if err := os.Rename(oldPath, newPath); err != nil {
 			return fmt.Errorf("AsperaBackend failed to rename downloaded file %s -> %s : %v", oldPath, newPath, err)
 		}
 	}
