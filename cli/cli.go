@@ -173,7 +173,9 @@ type Attr struct {
 		} `arg:"subcommand:upload" help:"Upload a new workflow template"`
 
 		Run *struct {
-			TemplateId int32   `arg:"--id,required" help:"ID of the template to run"`
+			TemplateId *int32  `arg:"--id" help:"ID of the template to run (either name or id is required)"`
+			Name       *string `arg:"--name" help:"Name of the template to run (either name or id is required)"`
+			Version    *string `arg:"--version" help:"Optional version (default to latest if omitted)"`
 			ParamPairs *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
@@ -184,7 +186,9 @@ type Attr struct {
 		} `arg:"subcommand:list" help:"List all uploaded workflow templates"`
 
 		Detail *struct {
-			TemplateId int32 `arg:"--id,required" help:"Show detailed information for this template ID"`
+			TemplateId *int32  `arg:"--id" help:"Show detailed information for this template ID (either name or id is required)"`
+			Name       *string `arg:"--name" help:"Name of the template to show (either name or id is required)"`
+			Version    *string `arg:"--version" help:"Optional version (default to latest if omitted)"`
 		} `arg:"subcommand:detail" help:"Show a template's param JSON and metadata"`
 	} `arg:"subcommand:template" help:"Manage workflow templates"`
 
@@ -863,13 +867,35 @@ func (c *CLI) TemplateDetail() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	req := &pb.TemplateFilter{WorkflowTemplateId: &c.Attr.Template.Detail.TemplateId}
+	// If --id is not provided, but --name is, resolve the template ID by name/version.
+	if c.Attr.Template.Detail.TemplateId == nil && c.Attr.Template.Detail.Name != nil {
+		filter := &pb.TemplateFilter{Name: c.Attr.Template.Detail.Name}
+		if c.Attr.Template.Detail.Version != nil {
+			filter.Version = c.Attr.Template.Detail.Version
+		} else {
+			latest := "latest"
+			filter.Version = &latest
+		}
+		res, err := c.QC.Client.ListTemplates(ctx, filter)
+		if err != nil {
+			return fmt.Errorf("failed to resolve template by name/version: %w", err)
+		}
+		if len(res.Templates) == 0 {
+			return fmt.Errorf("no template found with name %q and version %q", *filter.Name, *filter.Version)
+		}
+		c.Attr.Template.Detail.TemplateId = &res.Templates[0].WorkflowTemplateId
+	}
+	if c.Attr.Template.Detail.TemplateId == nil {
+		return fmt.Errorf("template ID or --name is required")
+	}
+
+	req := &pb.TemplateFilter{WorkflowTemplateId: c.Attr.Template.Detail.TemplateId}
 	res, err := c.QC.Client.ListTemplates(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to query template: %w", err)
 	}
 	if len(res.Templates) == 0 {
-		return fmt.Errorf("no template found with ID %d", c.Attr.Template.Detail.TemplateId)
+		return fmt.Errorf("no template found with ID %d", *c.Attr.Template.Detail.TemplateId)
 	}
 	t := res.Templates[0]
 
@@ -952,6 +978,27 @@ func (c *CLI) TemplateRun() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
+	// Resolve TemplateId by Name/Version if --name is provided
+	if c.Attr.Template.Run.Name != nil {
+		filter := &pb.TemplateFilter{Name: c.Attr.Template.Run.Name}
+		if c.Attr.Template.Run.Version != nil {
+			filter.Version = c.Attr.Template.Run.Version
+		} else {
+			latest := "latest"
+			filter.Version = &latest
+		}
+		res, err := c.QC.Client.ListTemplates(ctx, filter)
+		if err != nil {
+			return fmt.Errorf("failed to resolve template by name/version: %w", err)
+		}
+		if len(res.Templates) == 0 {
+			return fmt.Errorf("no template found with name %q and version %q", *filter.Name, *filter.Version)
+		}
+		c.Attr.Template.Run.TemplateId = &res.Templates[0].WorkflowTemplateId
+	}
+	if c.Attr.Template.Run.TemplateId == nil {
+		return fmt.Errorf("template ID or --name is required")
+	}
 	var paramJSON string
 	var err error
 
@@ -963,7 +1010,7 @@ func (c *CLI) TemplateRun() error {
 	}
 
 	req := &pb.RunTemplateRequest{
-		WorkflowTemplateId: c.Attr.Template.Run.TemplateId,
+		WorkflowTemplateId: *c.Attr.Template.Run.TemplateId,
 		ParamValuesJson:    paramJSON,
 	}
 	res, err := c.QC.Client.RunTemplate(ctx, req)
