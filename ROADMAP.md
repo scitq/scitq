@@ -23,6 +23,8 @@
   [✅] Fix concurrent-write hazard (writer pump per connection)
   [ ] Add event envelope with monotonic event_id + server ring buffer (to replay missed events)
   [ ] wsClient.ts small upgrades: lastEventId tracking/since, single dispatcher -> route by msg.type
+[ ] implement download/execution/upload timeout in client (using either config setting or database content for the task)
+[ ] add access to timeout in python DSL
 
 # TODO later
 
