@@ -23,6 +23,8 @@ type Watchdog struct {
 	isPermanent  sync.Map // workerID -> bool
 	offlineSince sync.Map // workerID -> time.Time (when first marked offline)
 
+	recentlyDeleted sync.Map // workerID -> time.Time
+
 	idleTimeout           time.Duration
 	bornIdleTimeout       time.Duration
 	offlineTimeout        time.Duration
@@ -53,15 +55,28 @@ func NewWatchdog(
 	}
 }
 
-// Called when a worker is created
-func (w *Watchdog) WorkerRegistered(workerID int32, isPermanent bool) {
+// Called right after we create the DB row + cloud deploy job, before the worker is ready
+func (w *Watchdog) WorkerSpawned(workerID int32, isPermanent bool) {
 	now := time.Now()
 	w.lastPing.Store(workerID, now)
 	w.lastNotIdle.Store(workerID, now)
-	w.lastStatus.Store(workerID, "R")
+	w.lastStatus.Store(workerID, "I")
 	w.idleStatus.Store(workerID, IdleStatusBornIdle)
 	w.activeTasks.Store(workerID, 0)
 	w.isPermanent.Store(workerID, isPermanent)
+	// make sure long-offline timers start from spawn time if needed
+	w.offlineSince.Store(workerID, now)
+	log.Printf("[watchdog] spawned worker %d tracked as Installing", workerID)
+}
+
+// Called when a worker is registered (comes online and is running)
+func (w *Watchdog) WorkerRegistered(workerID int32, isPermanent bool) {
+	now := time.Now()
+	w.lastPing.Store(workerID, now)
+	w.offlineSince.Delete(workerID)
+	w.lastStatus.Store(workerID, "R")
+	w.isPermanent.Store(workerID, isPermanent)
+	log.Printf("[watchdog] worker %d registered as Running", workerID)
 }
 
 // Called when a worker sends a ping
@@ -69,12 +84,13 @@ func (w *Watchdog) WorkerPinged(workerID int32) {
 	now := time.Now()
 	w.lastPing.Store(workerID, now)
 	w.offlineSince.Delete(workerID)
-	status, ok := w.lastStatus.Load(workerID)
+	statusVal, ok := w.lastStatus.Load(workerID)
 	var newStatus string
 	if !ok {
-		log.Printf("⚠️ [watchdog error] Worker %d with no known status just pinged, this should not happend", workerID)
+		log.Printf("⚠️ [watchdog error] Worker %d with no known status just pinged, this should not happen", workerID)
 	} else {
-		switch status {
+		s := statusVal.(string)
+		switch s {
 		case "O":
 			newStatus = "R"
 		case "Q":
@@ -84,7 +100,7 @@ func (w *Watchdog) WorkerPinged(workerID int32) {
 		default:
 			return
 		}
-		log.Printf("[watchdog] Worker %d transitionned status %s -> %s", workerID, status, newStatus)
+		log.Printf("[watchdog] Worker %d transitionned status %s -> %s", workerID, s, newStatus)
 		w.lastStatus.Store(workerID, newStatus)
 		err := w.updateWorker(workerID, newStatus)
 		if err != nil {
@@ -134,6 +150,8 @@ func (w *Watchdog) activeTasksUpdate(workerID int32, delta int) int {
 
 // Main watchdog loop
 func (w *Watchdog) Run(stopChan <-chan struct{}) {
+	go w.startCleanupLoop(stopChan)
+
 	ticker := time.NewTicker(w.tickerInterval)
 	defer ticker.Stop()
 
@@ -159,17 +177,18 @@ func (w *Watchdog) checkOffline() {
 		elapsed := now.Sub(lastPing)
 		// Threshold depends on status: 'I' (installing) uses bornIdleTimeout, others use offlineTimeout
 		threshold := w.offlineTimeout
-		status, ok := w.lastStatus.Load(workerID)
-		if ok && status.(string) == "I" {
+		statusVal, ok := w.lastStatus.Load(workerID)
+		if ok && statusVal.(string) == "I" {
 			threshold = w.bornIdleTimeout
 		}
 		if elapsed > threshold {
 			if !ok {
-				log.Printf("⚠️ [watchdog error] Worker %d with no known status just timeout, this should not happend", workerID)
+				log.Printf("⚠️ [watchdog error] Worker %d with no known status just timeout, this should not happen", workerID)
 				return true
 			}
+			s := statusVal.(string)
 			var newStatus string
-			switch status {
+			switch s {
 			case "R":
 				newStatus = "O"
 			case "P":
@@ -303,6 +322,12 @@ func (w *Watchdog) safeUpdateWorker(workerID int32, newStatus string) {
 }
 
 func (w *Watchdog) safeDeleteWorker(workerID int32) {
+	if t, ok := w.recentlyDeleted.Load(workerID); ok {
+		log.Printf("[watchdog] skipping duplicate delete for worker %d (already deleted at %v)", workerID, t)
+		return
+	}
+	w.recentlyDeleted.Store(workerID, time.Now())
+
 	done := make(chan struct{})
 	go func() {
 		if err := w.deleteWorker(workerID); err != nil {
@@ -355,4 +380,24 @@ func (w *Watchdog) checkLongOffline() {
 		}
 		return true
 	})
+}
+
+func (w *Watchdog) startCleanupLoop(stopChan <-chan struct{}) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			cutoff := time.Now().Add(-4 * time.Minute)
+			w.recentlyDeleted.Range(func(key, value any) bool {
+				if ts, ok := value.(time.Time); ok && ts.Before(cutoff) {
+					w.recentlyDeleted.Delete(key)
+				}
+				return true
+			})
+		case <-stopChan:
+			return
+		}
+	}
 }

@@ -141,7 +141,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 			err := s.db.QueryRowContext(context.Background(),
 				`SELECT COUNT(*), COALESCE(MAX(download_timeout), 0)
 					FROM task
-					WHERE worker_id=$1 AND status IN ('A','C','O')`, workerID).Scan(&count, &maxDL)
+					WHERE worker_id=$1 AND status IN ('A','C','D','O')`, workerID).Scan(&count, &maxDL)
 			if err != nil {
 				log.Printf("⚠️ [watchdog] warmCheck query failed for worker %d: %v", workerID, err)
 				return false, 0
@@ -319,6 +319,9 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	var runStartedEpoch sql.NullInt64
 	var dlDur, runDur, upDur sql.NullInt32
 	var startEpoch, endEpoch sql.NullInt64
+	var wasHidden bool
+	var sameStatus bool
+	var didUpdate bool
 
 	if req.Duration == nil {
 		log.Printf("🔔 Updating task %d status to %s (duration null)", req.TaskId, req.NewStatus)
@@ -329,7 +332,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	// Use new CTE and scan fields for aggregator
 	err := s.db.QueryRowContext(ctx, `
         WITH prior AS (
-            SELECT status AS old_status, retry, step_id, run_started_at
+            SELECT status AS old_status, retry, step_id, run_started_at, hidden
             FROM task
             WHERE task_id = $2
         ),
@@ -344,6 +347,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
                    retry             = CASE WHEN $1 = 'F' AND $4::BOOL IS TRUE THEN retry + 1 ELSE retry END
              WHERE task_id = $2
                AND status <> $1
+               AND NOT hidden
              RETURNING task_id, worker_id
         ),
         cur AS (
@@ -377,23 +381,41 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
                WHEN $1 IN ('S','F') AND c.run_started_at IS NOT NULL THEN
                    (EXTRACT(EPOCH FROM c.run_started_at)::bigint + COALESCE(c.run_duration,0) + COALESCE(c.upload_duration,0))
                ELSE NULL
-            END AS end_epoch
-          FROM upd u
-          JOIN prior p ON TRUE
+            END AS end_epoch,
+            p.hidden AS prior_hidden,
+            (p.old_status = $1) AS same_status,
+            (u.task_id IS NOT NULL) AS did_update
+          FROM prior p
           JOIN cur c   ON TRUE
-     LEFT JOIN step s ON c.step_id = s.step_id;
+     LEFT JOIN upd u   ON TRUE
+     LEFT JOIN step s  ON c.step_id = s.step_id;
     `,
 		req.NewStatus, req.TaskId, req.Duration, (req.FreeRetry != nil && *req.FreeRetry),
 	).Scan(
 		&workerID, &oldStatus, &curRetry, &stepID, &workflowID, &prevRunStartedAt,
 		&runStartedEpoch, &dlDur, &runDur, &upDur, &startEpoch, &endEpoch,
+		&wasHidden, &sameStatus, &didUpdate,
 	)
+
 	if err == sql.ErrNoRows {
-		log.Printf("⚠️ no-op status update for task %d: already %s", req.TaskId, req.NewStatus)
-		return &pb.Ack{Success: true}, nil
+		return &pb.Ack{Success: false}, fmt.Errorf("task %d not found", req.TaskId)
 	}
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
+	}
+	// If no UPDATE row was produced, decide why
+	if !didUpdate {
+		if wasHidden {
+			log.Printf("🛡️ refusing UpdateTaskStatus on hidden task %d (no-op prevented)", req.TaskId)
+			return &pb.Ack{Success: false}, fmt.Errorf("task %d is hidden and read-only", req.TaskId)
+		}
+		if sameStatus {
+			log.Printf("ℹ️ no-op: task %d already in status %s", req.TaskId, req.NewStatus)
+			return &pb.Ack{Success: true}, nil
+		}
+		// Some other reason prevented the update (e.g., race)
+		log.Printf("⚠️ no update applied for task %d (old=%s new=%s)", req.TaskId, oldStatus, req.NewStatus)
+		return &pb.Ack{Success: false}, fmt.Errorf("no update applied for task %d", req.TaskId)
 	}
 
 	// --- Step stats aggregator update ---
@@ -1230,6 +1252,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			log.Printf("⚠️ Failed to commit worker registration: %v", err)
 			return nil, fmt.Errorf("failed to commit worker registration: %w", err)
 		}
+		// Seed watchdog supervision right away so stuck installs are cleaned up
+		s.watchdog.WorkerSpawned(workerID, false)
 
 		type workerPayload struct {
 			WorkerId    int32  `json:"workerId"`
@@ -1386,6 +1410,10 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 	err = tx.QueryRow(`SELECT w.worker_name, r.provider_id, r.region_id, r.region_name, w.is_permanent, w.status FROM worker w
 	JOIN region r ON w.region_id=r.region_id
 	WHERE w.worker_id=$1`, req.WorkerId).Scan(&workerName, &providerId, &regionId, &regionName, &is_permanent, &statusStr)
+	// Protective check: avoid panic on empty status string
+	if len(statusStr) == 0 {
+		return nil, fmt.Errorf("empty status string for worker %d", req.WorkerId)
+	}
 	status := rune(statusStr[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to find worker %d: %w", req.WorkerId, err)
@@ -1394,7 +1422,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 	undeployed := req.Undeployed != nil && *req.Undeployed
 
 	// Collect active tasks for this worker to fail them via UpdateTaskStatus after commit
-	rows, err := tx.Query(`SELECT task_id FROM task WHERE status IN ('C','D','R','U') AND worker_id=$1`, req.WorkerId)
+	rows, err := tx.Query(`SELECT task_id FROM task WHERE status NOT IN ('F','S') AND worker_id=$1`, req.WorkerId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tasks to fail for worker %d deletion: %w", req.WorkerId, err)
 	}
@@ -1615,7 +1643,7 @@ func (s *taskQueueServer) GetJobStatuses(ctx context.Context, req *pb.JobStatusR
 
 		err := s.db.QueryRow("SELECT status, progression FROM job WHERE job_id = $1", jobID).Scan(&status, &progression)
 		if err != nil {
-			log.Printf("⚠️ Error retrieving status for worker_id %d: %v", jobID, err)
+			log.Printf("⚠️ Error retrieving status for job_id %d: %v", jobID, err)
 			status = "unknown"
 		}
 
