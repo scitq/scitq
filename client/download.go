@@ -50,6 +50,13 @@ type FileTransfer struct {
 	TargetPath string
 }
 
+// DownloadFailure carries a unified failure notification from the downloader
+// to a single status update point in the client loop.
+type DownloadFailure struct {
+	Task    *pb.Task
+	Message string
+}
+
 // ResourceMetadata stores metadata for downloaded resources.
 type FileMetadata struct {
 	TaskId     int32
@@ -68,11 +75,11 @@ type DownloadManager struct {
 	ResourceDownloads map[string][]*pb.Task   // SourcePath → Tasks waiting
 	ResourceMemory    map[string]FileMetadata // SourcePath → Metadata
 
-	FileQueue       chan *FileTransfer // Limited queue (maxDownloads=20)
-	TaskQueue       chan *pb.Task      // Unlimited queue (tasks waiting for download)
-	CompletionQueue chan *FileMetadata // Completed downloads
-	ExecQueue       chan *pb.Task      // Tasks ready for execution
-	FailedQueue     chan *pb.Task      // Tasks that failed during downloads
+	FileQueue       chan *FileTransfer    // Limited queue (maxDownloads=20)
+	TaskQueue       chan *pb.Task         // Unlimited queue (tasks waiting for download)
+	CompletionQueue chan *FileMetadata    // Completed downloads
+	ExecQueue       chan *pb.Task         // Tasks ready for execution
+	FailedQueue     chan *DownloadFailure // Tasks that failed during downloads (centralized reporting)
 	Store           string
 	reporter        *event.Reporter
 	// Tracks tasks currently being scheduled for downloads to ensure idempotency at the boundary.
@@ -92,7 +99,7 @@ func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager
 		TaskQueue:         make(chan *pb.Task, maxQueueSize),
 		CompletionQueue:   make(chan *FileMetadata, maxQueueSize),
 		ExecQueue:         make(chan *pb.Task, maxQueueSize),
-		FailedQueue:       make(chan *pb.Task, maxQueueSize),
+		FailedQueue:       make(chan *DownloadFailure, maxQueueSize),
 		Store:             store,
 		reporter:          reporter,
 		EnqueuedTasks:     make(map[int32]bool),
@@ -457,13 +464,6 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 	fm := *fileMeta
 	log.Printf("✅ Download completed: %s", fm.SourcePath)
 
-	if !fm.Success {
-		log.Printf("❌ Download failed for %s", fm.SourcePath)
-		dm.reporter.UpdateTask(fm.TaskId, "F", fmt.Sprintf("Download failed for %s", fm.SourcePath))
-		fm.Task.Status = "F"
-	}
-
-	// Check if it's a resource, notify all waiting tasks
 	switch fm.FileType {
 	case InputFile:
 		{
@@ -478,30 +478,46 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 						"task_id": fm.TaskId,
 					})
 				}
+				if !fm.Success {
+					log.Printf("❌ Download failed for %s", fm.SourcePath)
+					fm.Task.Status = "F"
+					select {
+					case dm.FailedQueue <- &DownloadFailure{Task: fm.Task, Message: fmt.Sprintf("Download failed for %s", fm.SourcePath)}:
+					default:
+						log.Printf("⚠️ FailedQueue full; could not enqueue failure for task %d", fm.TaskId)
+					}
+				}
 				if len(set) == 0 {
 					delete(dm.TaskPending, fm.TaskId)
 					delete(dm.EnqueuedTasks, fm.TaskId)
-					if start, ok := dm.DownloadStart[fm.TaskId]; ok {
-						secs := int32(time.Since(start).Seconds())
-						dm.reporter.UpdateTaskAsync(fm.TaskId, "O", "", &secs)
+					if fm.Task.Status != "F" {
+						if start, ok := dm.DownloadStart[fm.TaskId]; ok {
+							secs := int32(time.Since(start).Seconds())
+							dm.reporter.UpdateTaskAsync(fm.TaskId, "O", "", &secs)
+							delete(dm.DownloadStart, fm.TaskId)
+						}
+					} else {
+						// if failed, do not send O and ensure chrono is cleared
 						delete(dm.DownloadStart, fm.TaskId)
 					}
 					if fm.Task.Status != "F" && fm.Success {
 						log.Printf("🚀 Task %d ready for execution", fm.TaskId)
 						dm.ExecQueue <- fm.Task
-					} else {
+					} else if fm.Task.Status == "F" {
 						log.Printf("❌ Task %d failed due to previous download errors", fm.TaskId)
+					} else {
+						log.Printf("❌ Task %d not ready for execution (status=%s, success=%v)", fm.TaskId, fm.Task.Status, fm.Success)
 					}
 				} else {
 					log.Printf("📝 Task %d still waiting for %d item(s)", fm.TaskId, len(set))
 				}
 			}
 			if !fm.Success || fm.Task.Status == "F" {
-				// Inform client loop to clear local active flag
+				// Inform client loop to clear local active flag and centralize status update
 				select {
-				case dm.FailedQueue <- fm.Task:
+				case dm.FailedQueue <- &DownloadFailure{Task: fm.Task, Message: fmt.Sprintf("Download failed for %s", fm.SourcePath)}:
 				default:
-					log.Printf("⚠️ FailedQueue full; could not enqueue task %d", fm.TaskId)
+					log.Printf("⚠️ FailedQueue full; could not enqueue failure for task %d", fm.TaskId)
 				}
 				delete(dm.EnqueuedTasks, fm.TaskId)
 				delete(dm.DownloadStart, fm.TaskId)
@@ -539,12 +555,11 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 					}
 					if !fm.Success {
 						log.Printf("❌ Task %d failed due to download error for resource %s", task.TaskId, fm.SourcePath)
-						dm.reporter.UpdateTask(task.TaskId, "F", fmt.Sprintf("Download failed for resource %s", fm.SourcePath))
 						task.Status = "F"
 						select {
-						case dm.FailedQueue <- task:
+						case dm.FailedQueue <- &DownloadFailure{Task: task, Message: fmt.Sprintf("Download failed for resource %s", fm.SourcePath)}:
 						default:
-							log.Printf("⚠️ FailedQueue full; could not enqueue task %d", task.TaskId)
+							log.Printf("⚠️ FailedQueue full; could not enqueue failure for task %d", task.TaskId)
 						}
 						delete(dm.EnqueuedTasks, task.TaskId)
 						delete(dm.DownloadStart, task.TaskId)
@@ -553,14 +568,20 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 						if len(tset) == 0 {
 							delete(dm.TaskPending, task.TaskId)
 							delete(dm.EnqueuedTasks, task.TaskId)
-							if start, ok := dm.DownloadStart[task.TaskId]; ok {
-								secs := int32(time.Since(start).Seconds())
-								dm.reporter.UpdateTaskAsync(task.TaskId, "O", "", &secs)
+							if task.Status != "F" {
+								if start, ok := dm.DownloadStart[task.TaskId]; ok {
+									secs := int32(time.Since(start).Seconds())
+									dm.reporter.UpdateTaskAsync(task.TaskId, "O", "", &secs)
+									delete(dm.DownloadStart, task.TaskId)
+								}
+							} else {
 								delete(dm.DownloadStart, task.TaskId)
 							}
 							if task.Status != "F" && fm.Success {
 								log.Printf("🚀 Task %d ready for execution", task.TaskId)
 								dm.ExecQueue <- task
+							} else if task.Status == "F" {
+								log.Printf("❌ Task %d failed due to previous download errors", task.TaskId)
 							} else {
 								log.Printf("❌ Task %d not ready for execution (status=%s, resource success=%v)", task.TaskId, task.Status, fm.Success)
 							}
@@ -679,7 +700,7 @@ func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string)
 
 			// Directories: create and recurse
 			if entry.IsDir() {
-				if err := os.MkdirAll(dstPath, 0o755); err != nil {
+				if err := os.MkdirAll(dstPath, 0o777); err != nil {
 					return fmt.Errorf("mkdir %s: %w", dstPath, err)
 				}
 				if err := linkTree(srcPath, dstPath); err != nil {

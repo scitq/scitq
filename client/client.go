@@ -373,7 +373,7 @@ func (w *WorkerConfig) fetchTasks(
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
+func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
 	store := dm.Store
 
 	var consecErrors int
@@ -384,15 +384,46 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 		default:
 		}
 
-		// Drain any failed-download notifications so we don't keep thinking those tasks are active
+		// Drain any failed-download notifications; perform centralized failure handling
 		for {
 			select {
-			case failedTask := <-dm.FailedQueue:
-				if failedTask != nil {
-					activeTasks.Delete(failedTask.TaskId)
-					log.Printf("🧹 Cleared local active flag for failed task %d", failedTask.TaskId)
+			case fail := <-dm.FailedQueue:
+				if fail != nil && fail.Task != nil {
+					tid := fail.Task.TaskId
+					msg := fail.Message
+					// Single point: update server status to F once
+					if msg == "" {
+						msg = "Download failed"
+					}
+					reporter.UpdateTask(tid, "F", msg)
+					// Cleanup and clear local bookkeeping
+					cleanupTaskWorkingDir(store, tid, reporter)
+					activeTasks.Delete(tid)
+					log.Printf("🧹 Centralized failure: task %d marked F; cleaned up and cleared active flag", tid)
 				}
-				// keep draining until channel is empty
+				continue
+			default:
+			}
+			break
+		}
+
+		// Drain any failed-upload notifications; perform centralized failure handling
+		for {
+			select {
+			case fail := <-um.FailedQueue:
+				if fail != nil && fail.Task != nil {
+					tid := fail.Task.TaskId
+					msg := fail.Message
+					if msg == "" {
+						msg = "Upload failed"
+					}
+					// Single point: update server status to F once
+					reporter.UpdateTask(tid, "F", msg)
+					// Cleanup and clear local bookkeeping
+					cleanupTaskWorkingDir(store, tid, reporter)
+					activeTasks.Delete(tid)
+					log.Printf("🧹 Centralized failure (upload): task %d marked F; cleaned up and cleared active flag", tid)
+				}
 				continue
 			default:
 			}
@@ -618,7 +649,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks)
 
 	// Start processing tasks
-	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, taskWeights, activeTasks)
+	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, um, taskWeights, activeTasks)
 
 	// 🔎 Periodic diagnostics: detect tasks stuck active but not executing (likely in O)
 	go func() {
