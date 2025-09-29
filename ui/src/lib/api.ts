@@ -182,6 +182,22 @@ export async function getWorkers(): Promise<taskqueue.Worker[]> {
 }
 
 /**
+ * Retrieves the list of workers, optionally filtered by workflowId.
+ * @param workflowId - Optional workflow ID to filter workers.
+ * @returns A promise resolving to an array of workers.
+ */
+export async function listWorkers(workflowId?: number): Promise<taskqueue.Worker[]> {
+  try {
+    const request = workflowId !== undefined ? { workflowId } : {};
+    const workerUnary = await client.listWorkers(request, await callOptionsUserToken());
+    return workerUnary.response?.workers || [];
+  } catch (error) {
+    console.error("Error while retrieving workers with filter:", error);
+    return [];
+  }
+}
+
+/**
  * Retrieves stats for a list of worker IDs.
  * @param workerIds - The IDs of the workers.
  * @returns A record mapping worker IDs to their stats.

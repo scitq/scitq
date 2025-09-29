@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import * as grpcWeb from 'grpc-web';
-  import { getStepStats, delStep } from '../lib/api';
+  import { getStepStats, delStep, listWorkers } from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { RefreshCw, PauseCircle, CircleX, Eraser } from 'lucide-svelte';
   import { formatDuration, showIfNonZero } from '../lib/format';
@@ -149,6 +149,12 @@
    */
   onMount(async () => {
     steps = await getStepStats({ workflowId });
+    const allWorkers = await listWorkers(workflowId);
+    for (const w of allWorkers) {
+      if (typeof w.stepId === 'number') {
+        addWorkerToStep(w.stepId, w); // reuse your helper
+      }
+    }
     console.info('[StepList] mount: workflow', workflowId, 'initial steps:', (steps||[]).length);
     // Subscribe to step entity events, step-stats deltas, and worker events for this workflow
     unsubscribeWS = wsClient.subscribeWithTopics(

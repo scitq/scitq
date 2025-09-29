@@ -271,6 +271,10 @@ export interface WorkersList {
  * @generated from protobuf message taskqueue.ListWorkersRequest
  */
 export interface ListWorkersRequest {
+    /**
+     * @generated from protobuf field: optional int32 workflow_id = 1
+     */
+    workflowId?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskUpdate
@@ -2616,7 +2620,9 @@ export const WorkersList = new WorkersList$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListWorkersRequest$Type extends MessageType<ListWorkersRequest> {
     constructor() {
-        super("taskqueue.ListWorkersRequest", []);
+        super("taskqueue.ListWorkersRequest", [
+            { no: 1, name: "workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
     }
     create(value?: PartialMessage<ListWorkersRequest>): ListWorkersRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
@@ -2629,6 +2635,9 @@ class ListWorkersRequest$Type extends MessageType<ListWorkersRequest> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
+                case /* optional int32 workflow_id */ 1:
+                    message.workflowId = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2641,6 +2650,9 @@ class ListWorkersRequest$Type extends MessageType<ListWorkersRequest> {
         return message;
     }
     internalBinaryWrite(message: ListWorkersRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int32 workflow_id = 1; */
+        if (message.workflowId !== undefined)
+            writer.tag(1, WireType.Varint).int32(message.workflowId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

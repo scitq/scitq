@@ -2145,24 +2145,37 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	}
 	defer tx.Rollback()
 
-	// **Filter by status if provided**
-	rows, err = tx.Query(`SELECT 
-		w.worker_id, 
-		worker_name, 
-		concurrency, 
-		prefetch, 
-		w.status, 
-		COALESCE(w.ipv4::text, '') AS ipv4, 
-		COALESCE(w.ipv6::text, '') AS ipv6, 
-		COALESCE(r.region_name, ''), 
-		COALESCE(p.provider_name||'.'||p.config_name, ''),
-		COALESCE(f.flavor_name, ''),
-		w.step_id
-	FROM worker w
-	LEFT JOIN region r ON r.region_id=w.region_id
-	LEFT JOIN provider p ON r.provider_id=p.provider_id
-	LEFT JOIN flavor f ON f.flavor_id=w.flavor_id
-	ORDER BY worker_id`)
+	query := `
+		SELECT 
+			w.worker_id, 
+			worker_name, 
+			concurrency, 
+			prefetch, 
+			w.status, 
+			COALESCE(w.ipv4::text, '') AS ipv4, 
+			COALESCE(w.ipv6::text, '') AS ipv6, 
+			COALESCE(r.region_name, '') AS region_name, 
+			COALESCE(p.provider_name || '.' || p.config_name, '') AS provider,
+			COALESCE(f.flavor_name, '') AS flavor,
+			w.step_id
+		FROM worker w
+		LEFT JOIN region r ON r.region_id = w.region_id
+		LEFT JOIN provider p ON r.provider_id = p.provider_id
+		LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
+		`
+
+	if req.WorkflowId != nil {
+		query += `
+			WHERE w.step_id IN (
+				SELECT step_id FROM step WHERE workflow_id = $1
+			)
+			ORDER BY worker_id
+			`
+		rows, err = tx.Query(query, *req.WorkflowId)
+	} else {
+		query += `ORDER BY worker_id`
+		rows, err = tx.Query(query)
+	}
 
 	if err != nil {
 		log.Printf("⚠️ Failed to list workers: %v", err)

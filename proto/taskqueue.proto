@@ -144,6 +144,7 @@ message WorkersList {
 }
 
 message ListWorkersRequest {
+  optional int32 workflow_id = 1;
 }
 
 message TaskUpdate {

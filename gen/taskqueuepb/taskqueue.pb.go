@@ -716,6 +716,7 @@ func (x *WorkersList) GetWorkers() []*Worker {
 
 type ListWorkersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkflowId    *int32                 `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -748,6 +749,13 @@ func (x *ListWorkersRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ListWorkersRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkersRequest) Descriptor() ([]byte, []int) {
 	return file_taskqueue_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ListWorkersRequest) GetWorkflowId() int32 {
+	if x != nil && x.WorkflowId != nil {
+		return *x.WorkflowId
+	}
+	return 0
 }
 
 type TaskUpdate struct {
@@ -6556,8 +6564,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_step_id\":\n" +
 	"\vWorkersList\x12+\n" +
-	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"\x14\n" +
-	"\x12ListWorkersRequest\"$\n" +
+	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"J\n" +
+	"\x12ListWorkersRequest\x12$\n" +
+	"\vworkflow_id\x18\x01 \x01(\x05H\x00R\n" +
+	"workflowId\x88\x01\x01B\x0e\n" +
+	"\f_workflow_id\"$\n" +
 	"\n" +
 	"TaskUpdate\x12\x16\n" +
 	"\x06weight\x18\x01 \x01(\x01R\x06weight\"\xa5\x01\n" +
@@ -7434,6 +7445,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[2].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[3].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[5].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[7].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[11].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[13].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[19].OneofWrappers = []any{}
