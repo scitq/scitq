@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	ws "github.com/scitq/scitq/server/websocket"
 )
 
 const DefaultAssignTrigger int32 = 500 // 5 sec
@@ -256,9 +257,13 @@ func (s *taskQueueServer) assignPendingTasks() {
 		if len(taskIDs) == 0 {
 			continue
 		}
-		_, err := tx.Exec(`
-			UPDATE task SET status = 'A', worker_id = $1
+		rows, err := tx.Query(`
+			UPDATE task t
+			SET status = 'A', worker_id = $1
 			WHERE task_id = ANY($2)
+			RETURNING task_id, step_id, (
+			SELECT workflow_id FROM step s WHERE s.step_id = t.step_id
+			)
 		`, workerID, pq.Array(taskIDs))
 		if err != nil {
 			log.Printf("\u26a0\ufe0f Failed to assign tasks to worker %d: %v", workerID, err)
@@ -270,6 +275,26 @@ func (s *taskQueueServer) assignPendingTasks() {
 		for _, tid := range taskIDs {
 			weightMap.Store(tid, 1.0)
 		}
+		for rows.Next() {
+			var tid int32
+			var stepID, workflowID sql.NullInt32
+			if err := rows.Scan(&tid, &stepID, &workflowID); err != nil {
+				continue
+			}
+			if stepID.Valid && workflowID.Valid {
+				agg := s.stats.data[workflowID.Int32][stepID.Int32]
+				agg.Pending--
+				agg.Accepted++
+				ws.EmitWS("step-stats", workflowID.Int32, "delta", map[string]any{
+					"workflowId": workflowID.Int32,
+					"stepId":     stepID.Int32,
+					"taskId":     tid,
+					"oldStatus":  "P",
+					"newStatus":  "A",
+				})
+			}
+		}
+		rows.Close()
 		log.Printf("\u2705 Assigned %d tasks to worker %d", len(taskIDs), workerID)
 	}
 

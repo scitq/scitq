@@ -1300,13 +1300,13 @@ export interface StepStats {
      */
     acceptedTasks: number;
     /**
-     * @generated from protobuf field: int32 onhold_tasks = 7
-     */
-    onholdTasks: number;
-    /**
-     * @generated from protobuf field: int32 running_tasks = 8
+     * @generated from protobuf field: int32 running_tasks = 7
      */
     runningTasks: number;
+    /**
+     * @generated from protobuf field: int32 uploading_tasks = 8
+     */
+    uploadingTasks: number;
     /**
      * @generated from protobuf field: int32 successful_tasks = 9
      */
@@ -1316,35 +1316,39 @@ export interface StepStats {
      */
     failedTasks: number;
     /**
-     * @generated from protobuf field: taskqueue.Accum success_run = 11
+     * @generated from protobuf field: int32 really_failed_tasks = 11
+     */
+    reallyFailedTasks: number; // tasks that have exhausted all retries and are failed
+    /**
+     * @generated from protobuf field: taskqueue.Accum success_run = 12
      */
     successRun?: Accum; // succeeded tasks' run durations
     /**
-     * @generated from protobuf field: taskqueue.Accum failed_run = 12
+     * @generated from protobuf field: taskqueue.Accum failed_run = 13
      */
     failedRun?: Accum; // failed tasks' run durations
     /**
-     * @generated from protobuf field: taskqueue.Accum running_run = 13
+     * @generated from protobuf field: taskqueue.Accum running_run = 14
      */
     runningRun?: Accum; // running tasks' elapsed durations (at eval time)
     /**
-     * @generated from protobuf field: taskqueue.Accum download = 14
+     * @generated from protobuf field: taskqueue.Accum download = 15
      */
     download?: Accum; // download durations
     /**
-     * @generated from protobuf field: taskqueue.Accum upload = 15
+     * @generated from protobuf field: taskqueue.Accum upload = 16
      */
     upload?: Accum; // upload durations
     /**
-     * @generated from protobuf field: optional int32 start_time = 16
+     * @generated from protobuf field: optional int32 start_time = 17
      */
     startTime?: number; // epoch timestamp of the first task start time
     /**
-     * @generated from protobuf field: optional int32 end_time = 17
+     * @generated from protobuf field: optional int32 end_time = 18
      */
     endTime?: number; // epoch timestamp of the last task end time
     /**
-     * @generated from protobuf field: int32 stats_eval_time = 18
+     * @generated from protobuf field: int32 stats_eval_time = 19
      */
     statsEvalTime: number; // epoch seconds when these stats were computed
 }
@@ -6431,18 +6435,19 @@ class StepStats$Type extends MessageType<StepStats> {
             { no: 4, name: "waiting_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "pending_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "accepted_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 7, name: "onhold_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 8, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "uploading_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 9, name: "successful_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 10, name: "failed_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 11, name: "success_run", kind: "message", T: () => Accum },
-            { no: 12, name: "failed_run", kind: "message", T: () => Accum },
-            { no: 13, name: "running_run", kind: "message", T: () => Accum },
-            { no: 14, name: "download", kind: "message", T: () => Accum },
-            { no: 15, name: "upload", kind: "message", T: () => Accum },
-            { no: 16, name: "start_time", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 17, name: "end_time", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 18, name: "stats_eval_time", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 11, name: "really_failed_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 12, name: "success_run", kind: "message", T: () => Accum },
+            { no: 13, name: "failed_run", kind: "message", T: () => Accum },
+            { no: 14, name: "running_run", kind: "message", T: () => Accum },
+            { no: 15, name: "download", kind: "message", T: () => Accum },
+            { no: 16, name: "upload", kind: "message", T: () => Accum },
+            { no: 17, name: "start_time", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 18, name: "end_time", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 19, name: "stats_eval_time", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<StepStats>): StepStats {
@@ -6453,10 +6458,11 @@ class StepStats$Type extends MessageType<StepStats> {
         message.waitingTasks = 0;
         message.pendingTasks = 0;
         message.acceptedTasks = 0;
-        message.onholdTasks = 0;
         message.runningTasks = 0;
+        message.uploadingTasks = 0;
         message.successfulTasks = 0;
         message.failedTasks = 0;
+        message.reallyFailedTasks = 0;
         message.statsEvalTime = 0;
         if (value !== undefined)
             reflectionMergePartial<StepStats>(this, message, value);
@@ -6485,11 +6491,11 @@ class StepStats$Type extends MessageType<StepStats> {
                 case /* int32 accepted_tasks */ 6:
                     message.acceptedTasks = reader.int32();
                     break;
-                case /* int32 onhold_tasks */ 7:
-                    message.onholdTasks = reader.int32();
-                    break;
-                case /* int32 running_tasks */ 8:
+                case /* int32 running_tasks */ 7:
                     message.runningTasks = reader.int32();
+                    break;
+                case /* int32 uploading_tasks */ 8:
+                    message.uploadingTasks = reader.int32();
                     break;
                 case /* int32 successful_tasks */ 9:
                     message.successfulTasks = reader.int32();
@@ -6497,28 +6503,31 @@ class StepStats$Type extends MessageType<StepStats> {
                 case /* int32 failed_tasks */ 10:
                     message.failedTasks = reader.int32();
                     break;
-                case /* taskqueue.Accum success_run */ 11:
+                case /* int32 really_failed_tasks */ 11:
+                    message.reallyFailedTasks = reader.int32();
+                    break;
+                case /* taskqueue.Accum success_run */ 12:
                     message.successRun = Accum.internalBinaryRead(reader, reader.uint32(), options, message.successRun);
                     break;
-                case /* taskqueue.Accum failed_run */ 12:
+                case /* taskqueue.Accum failed_run */ 13:
                     message.failedRun = Accum.internalBinaryRead(reader, reader.uint32(), options, message.failedRun);
                     break;
-                case /* taskqueue.Accum running_run */ 13:
+                case /* taskqueue.Accum running_run */ 14:
                     message.runningRun = Accum.internalBinaryRead(reader, reader.uint32(), options, message.runningRun);
                     break;
-                case /* taskqueue.Accum download */ 14:
+                case /* taskqueue.Accum download */ 15:
                     message.download = Accum.internalBinaryRead(reader, reader.uint32(), options, message.download);
                     break;
-                case /* taskqueue.Accum upload */ 15:
+                case /* taskqueue.Accum upload */ 16:
                     message.upload = Accum.internalBinaryRead(reader, reader.uint32(), options, message.upload);
                     break;
-                case /* optional int32 start_time */ 16:
+                case /* optional int32 start_time */ 17:
                     message.startTime = reader.int32();
                     break;
-                case /* optional int32 end_time */ 17:
+                case /* optional int32 end_time */ 18:
                     message.endTime = reader.int32();
                     break;
-                case /* int32 stats_eval_time */ 18:
+                case /* int32 stats_eval_time */ 19:
                     message.statsEvalTime = reader.int32();
                     break;
                 default:
@@ -6551,42 +6560,45 @@ class StepStats$Type extends MessageType<StepStats> {
         /* int32 accepted_tasks = 6; */
         if (message.acceptedTasks !== 0)
             writer.tag(6, WireType.Varint).int32(message.acceptedTasks);
-        /* int32 onhold_tasks = 7; */
-        if (message.onholdTasks !== 0)
-            writer.tag(7, WireType.Varint).int32(message.onholdTasks);
-        /* int32 running_tasks = 8; */
+        /* int32 running_tasks = 7; */
         if (message.runningTasks !== 0)
-            writer.tag(8, WireType.Varint).int32(message.runningTasks);
+            writer.tag(7, WireType.Varint).int32(message.runningTasks);
+        /* int32 uploading_tasks = 8; */
+        if (message.uploadingTasks !== 0)
+            writer.tag(8, WireType.Varint).int32(message.uploadingTasks);
         /* int32 successful_tasks = 9; */
         if (message.successfulTasks !== 0)
             writer.tag(9, WireType.Varint).int32(message.successfulTasks);
         /* int32 failed_tasks = 10; */
         if (message.failedTasks !== 0)
             writer.tag(10, WireType.Varint).int32(message.failedTasks);
-        /* taskqueue.Accum success_run = 11; */
+        /* int32 really_failed_tasks = 11; */
+        if (message.reallyFailedTasks !== 0)
+            writer.tag(11, WireType.Varint).int32(message.reallyFailedTasks);
+        /* taskqueue.Accum success_run = 12; */
         if (message.successRun)
-            Accum.internalBinaryWrite(message.successRun, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
-        /* taskqueue.Accum failed_run = 12; */
+            Accum.internalBinaryWrite(message.successRun, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
+        /* taskqueue.Accum failed_run = 13; */
         if (message.failedRun)
-            Accum.internalBinaryWrite(message.failedRun, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
-        /* taskqueue.Accum running_run = 13; */
+            Accum.internalBinaryWrite(message.failedRun, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
+        /* taskqueue.Accum running_run = 14; */
         if (message.runningRun)
-            Accum.internalBinaryWrite(message.runningRun, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
-        /* taskqueue.Accum download = 14; */
+            Accum.internalBinaryWrite(message.runningRun, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
+        /* taskqueue.Accum download = 15; */
         if (message.download)
-            Accum.internalBinaryWrite(message.download, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
-        /* taskqueue.Accum upload = 15; */
+            Accum.internalBinaryWrite(message.download, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
+        /* taskqueue.Accum upload = 16; */
         if (message.upload)
-            Accum.internalBinaryWrite(message.upload, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
-        /* optional int32 start_time = 16; */
+            Accum.internalBinaryWrite(message.upload, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* optional int32 start_time = 17; */
         if (message.startTime !== undefined)
-            writer.tag(16, WireType.Varint).int32(message.startTime);
-        /* optional int32 end_time = 17; */
+            writer.tag(17, WireType.Varint).int32(message.startTime);
+        /* optional int32 end_time = 18; */
         if (message.endTime !== undefined)
-            writer.tag(17, WireType.Varint).int32(message.endTime);
-        /* int32 stats_eval_time = 18; */
+            writer.tag(18, WireType.Varint).int32(message.endTime);
+        /* int32 stats_eval_time = 19; */
         if (message.statsEvalTime !== 0)
-            writer.tag(18, WireType.Varint).int32(message.statsEvalTime);
+            writer.tag(19, WireType.Varint).int32(message.statsEvalTime);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

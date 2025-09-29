@@ -4325,27 +4325,28 @@ func (x *Accum) GetMax() float32 {
 }
 
 type StepStats struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	StepId          int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
-	StepName        string                 `protobuf:"bytes,2,opt,name=step_name,json=stepName,proto3" json:"step_name,omitempty"`
-	TotalTasks      int32                  `protobuf:"varint,3,opt,name=total_tasks,json=totalTasks,proto3" json:"total_tasks,omitempty"`
-	WaitingTasks    int32                  `protobuf:"varint,4,opt,name=waiting_tasks,json=waitingTasks,proto3" json:"waiting_tasks,omitempty"`
-	PendingTasks    int32                  `protobuf:"varint,5,opt,name=pending_tasks,json=pendingTasks,proto3" json:"pending_tasks,omitempty"`
-	AcceptedTasks   int32                  `protobuf:"varint,6,opt,name=accepted_tasks,json=acceptedTasks,proto3" json:"accepted_tasks,omitempty"`
-	OnholdTasks     int32                  `protobuf:"varint,7,opt,name=onhold_tasks,json=onholdTasks,proto3" json:"onhold_tasks,omitempty"`
-	RunningTasks    int32                  `protobuf:"varint,8,opt,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`
-	SuccessfulTasks int32                  `protobuf:"varint,9,opt,name=successful_tasks,json=successfulTasks,proto3" json:"successful_tasks,omitempty"`
-	FailedTasks     int32                  `protobuf:"varint,10,opt,name=failed_tasks,json=failedTasks,proto3" json:"failed_tasks,omitempty"`
-	SuccessRun      *Accum                 `protobuf:"bytes,11,opt,name=success_run,json=successRun,proto3" json:"success_run,omitempty"`             // succeeded tasks' run durations
-	FailedRun       *Accum                 `protobuf:"bytes,12,opt,name=failed_run,json=failedRun,proto3" json:"failed_run,omitempty"`                // failed tasks' run durations
-	RunningRun      *Accum                 `protobuf:"bytes,13,opt,name=running_run,json=runningRun,proto3" json:"running_run,omitempty"`             // running tasks' elapsed durations (at eval time)
-	Download        *Accum                 `protobuf:"bytes,14,opt,name=download,proto3" json:"download,omitempty"`                                   // download durations
-	Upload          *Accum                 `protobuf:"bytes,15,opt,name=upload,proto3" json:"upload,omitempty"`                                       // upload durations
-	StartTime       *int32                 `protobuf:"varint,16,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"`         // epoch timestamp of the first task start time
-	EndTime         *int32                 `protobuf:"varint,17,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`               // epoch timestamp of the last task end time
-	StatsEvalTime   int32                  `protobuf:"varint,18,opt,name=stats_eval_time,json=statsEvalTime,proto3" json:"stats_eval_time,omitempty"` // epoch seconds when these stats were computed
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	StepId            int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	StepName          string                 `protobuf:"bytes,2,opt,name=step_name,json=stepName,proto3" json:"step_name,omitempty"`
+	TotalTasks        int32                  `protobuf:"varint,3,opt,name=total_tasks,json=totalTasks,proto3" json:"total_tasks,omitempty"`
+	WaitingTasks      int32                  `protobuf:"varint,4,opt,name=waiting_tasks,json=waitingTasks,proto3" json:"waiting_tasks,omitempty"`
+	PendingTasks      int32                  `protobuf:"varint,5,opt,name=pending_tasks,json=pendingTasks,proto3" json:"pending_tasks,omitempty"`
+	AcceptedTasks     int32                  `protobuf:"varint,6,opt,name=accepted_tasks,json=acceptedTasks,proto3" json:"accepted_tasks,omitempty"`
+	RunningTasks      int32                  `protobuf:"varint,7,opt,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`
+	UploadingTasks    int32                  `protobuf:"varint,8,opt,name=uploading_tasks,json=uploadingTasks,proto3" json:"uploading_tasks,omitempty"`
+	SuccessfulTasks   int32                  `protobuf:"varint,9,opt,name=successful_tasks,json=successfulTasks,proto3" json:"successful_tasks,omitempty"`
+	FailedTasks       int32                  `protobuf:"varint,10,opt,name=failed_tasks,json=failedTasks,proto3" json:"failed_tasks,omitempty"`
+	ReallyFailedTasks int32                  `protobuf:"varint,11,opt,name=really_failed_tasks,json=reallyFailedTasks,proto3" json:"really_failed_tasks,omitempty"` // tasks that have exhausted all retries and are failed
+	SuccessRun        *Accum                 `protobuf:"bytes,12,opt,name=success_run,json=successRun,proto3" json:"success_run,omitempty"`                         // succeeded tasks' run durations
+	FailedRun         *Accum                 `protobuf:"bytes,13,opt,name=failed_run,json=failedRun,proto3" json:"failed_run,omitempty"`                            // failed tasks' run durations
+	RunningRun        *Accum                 `protobuf:"bytes,14,opt,name=running_run,json=runningRun,proto3" json:"running_run,omitempty"`                         // running tasks' elapsed durations (at eval time)
+	Download          *Accum                 `protobuf:"bytes,15,opt,name=download,proto3" json:"download,omitempty"`                                               // download durations
+	Upload            *Accum                 `protobuf:"bytes,16,opt,name=upload,proto3" json:"upload,omitempty"`                                                   // upload durations
+	StartTime         *int32                 `protobuf:"varint,17,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"`                     // epoch timestamp of the first task start time
+	EndTime           *int32                 `protobuf:"varint,18,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`                           // epoch timestamp of the last task end time
+	StatsEvalTime     int32                  `protobuf:"varint,19,opt,name=stats_eval_time,json=statsEvalTime,proto3" json:"stats_eval_time,omitempty"`             // epoch seconds when these stats were computed
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *StepStats) Reset() {
@@ -4420,16 +4421,16 @@ func (x *StepStats) GetAcceptedTasks() int32 {
 	return 0
 }
 
-func (x *StepStats) GetOnholdTasks() int32 {
+func (x *StepStats) GetRunningTasks() int32 {
 	if x != nil {
-		return x.OnholdTasks
+		return x.RunningTasks
 	}
 	return 0
 }
 
-func (x *StepStats) GetRunningTasks() int32 {
+func (x *StepStats) GetUploadingTasks() int32 {
 	if x != nil {
-		return x.RunningTasks
+		return x.UploadingTasks
 	}
 	return 0
 }
@@ -4444,6 +4445,13 @@ func (x *StepStats) GetSuccessfulTasks() int32 {
 func (x *StepStats) GetFailedTasks() int32 {
 	if x != nil {
 		return x.FailedTasks
+	}
+	return 0
+}
+
+func (x *StepStats) GetReallyFailedTasks() int32 {
+	if x != nil {
+		return x.ReallyFailedTasks
 	}
 	return 0
 }
@@ -6869,7 +6877,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05count\x18\x01 \x01(\x05R\x05count\x12\x10\n" +
 	"\x03sum\x18\x02 \x01(\x02R\x03sum\x12\x10\n" +
 	"\x03min\x18\x03 \x01(\x02R\x03min\x12\x10\n" +
-	"\x03max\x18\x04 \x01(\x02R\x03max\"\xe0\x05\n" +
+	"\x03max\x18\x04 \x01(\x02R\x03max\"\x96\x06\n" +
 	"\tStepStats\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x1b\n" +
 	"\tstep_name\x18\x02 \x01(\tR\bstepName\x12\x1f\n" +
@@ -6877,24 +6885,25 @@ const file_taskqueue_proto_rawDesc = "" +
 	"totalTasks\x12#\n" +
 	"\rwaiting_tasks\x18\x04 \x01(\x05R\fwaitingTasks\x12#\n" +
 	"\rpending_tasks\x18\x05 \x01(\x05R\fpendingTasks\x12%\n" +
-	"\x0eaccepted_tasks\x18\x06 \x01(\x05R\racceptedTasks\x12!\n" +
-	"\fonhold_tasks\x18\a \x01(\x05R\vonholdTasks\x12#\n" +
-	"\rrunning_tasks\x18\b \x01(\x05R\frunningTasks\x12)\n" +
+	"\x0eaccepted_tasks\x18\x06 \x01(\x05R\racceptedTasks\x12#\n" +
+	"\rrunning_tasks\x18\a \x01(\x05R\frunningTasks\x12'\n" +
+	"\x0fuploading_tasks\x18\b \x01(\x05R\x0euploadingTasks\x12)\n" +
 	"\x10successful_tasks\x18\t \x01(\x05R\x0fsuccessfulTasks\x12!\n" +
 	"\ffailed_tasks\x18\n" +
-	" \x01(\x05R\vfailedTasks\x121\n" +
-	"\vsuccess_run\x18\v \x01(\v2\x10.taskqueue.AccumR\n" +
+	" \x01(\x05R\vfailedTasks\x12.\n" +
+	"\x13really_failed_tasks\x18\v \x01(\x05R\x11reallyFailedTasks\x121\n" +
+	"\vsuccess_run\x18\f \x01(\v2\x10.taskqueue.AccumR\n" +
 	"successRun\x12/\n" +
 	"\n" +
-	"failed_run\x18\f \x01(\v2\x10.taskqueue.AccumR\tfailedRun\x121\n" +
-	"\vrunning_run\x18\r \x01(\v2\x10.taskqueue.AccumR\n" +
+	"failed_run\x18\r \x01(\v2\x10.taskqueue.AccumR\tfailedRun\x121\n" +
+	"\vrunning_run\x18\x0e \x01(\v2\x10.taskqueue.AccumR\n" +
 	"runningRun\x12,\n" +
-	"\bdownload\x18\x0e \x01(\v2\x10.taskqueue.AccumR\bdownload\x12(\n" +
-	"\x06upload\x18\x0f \x01(\v2\x10.taskqueue.AccumR\x06upload\x12\"\n" +
+	"\bdownload\x18\x0f \x01(\v2\x10.taskqueue.AccumR\bdownload\x12(\n" +
+	"\x06upload\x18\x10 \x01(\v2\x10.taskqueue.AccumR\x06upload\x12\"\n" +
 	"\n" +
-	"start_time\x18\x10 \x01(\x05H\x00R\tstartTime\x88\x01\x01\x12\x1e\n" +
-	"\bend_time\x18\x11 \x01(\x05H\x01R\aendTime\x88\x01\x01\x12&\n" +
-	"\x0fstats_eval_time\x18\x12 \x01(\x05R\rstatsEvalTimeB\r\n" +
+	"start_time\x18\x11 \x01(\x05H\x00R\tstartTime\x88\x01\x01\x12\x1e\n" +
+	"\bend_time\x18\x12 \x01(\x05H\x01R\aendTime\x88\x01\x01\x12&\n" +
+	"\x0fstats_eval_time\x18\x13 \x01(\x05R\rstatsEvalTimeB\r\n" +
 	"\v_start_timeB\v\n" +
 	"\t_end_time\"?\n" +
 	"\x11StepStatsResponse\x12*\n" +

@@ -195,6 +195,7 @@ func (s *taskQueueServer) Shutdown() {
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
 	var taskID int32
+	var workflowID sql.NullInt32
 	// Determine initial status: "W" if dependencies, otherwise "P"
 	initialStatus := "P"
 	if len(req.Dependency) > 0 {
@@ -204,20 +205,29 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	}
 
 	err := s.db.QueryRow(
-		`INSERT INTO task (command, shell, container, container_options, step_id, 
-					input, resource, output, retry, is_final, uses_cache, 
-					download_timeout, running_timeout, upload_timeout,  
-					status, task_name, created_at) 
-		VALUES ($1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11, 
-			$12, $13, $14, 
-			$15, $16, NOW()) 
-		RETURNING task_id`,
+		`WITH inserted AS (
+           INSERT INTO task (
+             command, shell, container, container_options, step_id,
+             input, resource, output, retry, is_final, uses_cache,
+             download_timeout, running_timeout, upload_timeout,
+             status, task_name, created_at
+           )
+           VALUES (
+             $1, $2, $3, $4, $5,
+             $6, $7, $8, $9, $10, $11,
+             $12, $13, $14,
+             $15, $16, NOW()
+           )
+           RETURNING task_id, step_id
+         )
+         SELECT inserted.task_id, step.workflow_id
+         FROM inserted
+         LEFT JOIN step ON inserted.step_id = step.step_id`,
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 		initialStatus, req.TaskName,
-	).Scan(&taskID)
+	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
 	}
@@ -239,6 +249,39 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 			if _, err := stmt.ExecContext(ctx, taskID, depID); err != nil {
 				return nil, fmt.Errorf("failed to insert dependency (%d -> %d): %w", depID, taskID, err)
 			}
+		}
+	}
+
+	// Increment pending count in step stats aggregator
+	if workflowID.Valid && req.StepId != nil {
+		stepAgg := s.stats.data[workflowID.Int32][*req.StepId]
+		switch initialStatus {
+		case "W":
+			stepAgg.Waiting++
+		case "P", "I":
+			stepAgg.Pending++
+		case "C", "D", "O":
+			stepAgg.Accepted++
+		case "R":
+			stepAgg.Running++
+		case "U", "V":
+			stepAgg.Uploading++
+		case "S":
+			stepAgg.Succeeded++
+		case "F":
+			stepAgg.Failed++
+		}
+		stepAgg.Total++
+		// Emit step-stats delta event for new task
+		if workflowID.Valid && req.StepId != nil {
+			ws.EmitWS("step-stats", workflowID.Int32, "delta", map[string]any{
+				"workflowId":     workflowID.Int32,
+				"stepId":         *req.StepId,
+				"taskId":         taskID,
+				"oldStatus":      nil,
+				"newStatus":      "P",
+				"incrementTotal": 1,
+			})
 		}
 	}
 
@@ -332,63 +375,52 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	// Use new CTE and scan fields for aggregator
 	err := s.db.QueryRowContext(ctx, `
         WITH prior AS (
-            SELECT status AS old_status, retry, step_id, run_started_at, hidden
-            FROM task
-            WHERE task_id = $2
-        ),
-        upd AS (
-            UPDATE task
-               SET status = $1,
-                   modified_at = NOW(),
-                   run_started_at = CASE WHEN $1 = 'R' THEN NOW() ELSE run_started_at END,
-                   download_duration = CASE WHEN $3::INT IS NOT NULL AND $1 = 'O' THEN $3::INT ELSE download_duration END,
-                   run_duration      = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('U','V') THEN $3::INT ELSE run_duration END,
-                   upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END,
-                   retry             = CASE WHEN $1 = 'F' AND $4::BOOL IS TRUE THEN retry + 1 ELSE retry END
-             WHERE task_id = $2
-               AND status <> $1
-               AND NOT hidden
-             RETURNING task_id, worker_id
-        ),
-        cur AS (
-            SELECT t.task_id,
-                   t.status,
-                   t.step_id,
-                   t.run_started_at,
-                   t.download_duration,
-                   t.run_duration,
-                   t.upload_duration
-              FROM task t
-             WHERE t.task_id = $2
-        )
-        SELECT 
-            u.worker_id,
-            p.old_status,
-            p.retry,
-            c.step_id,
-            s.workflow_id,
-            p.run_started_at AS prev_run_started_at,
-            EXTRACT(EPOCH FROM c.run_started_at)::bigint AS run_started_epoch,
-            COALESCE(c.download_duration,0) AS dl_dur,
-            COALESCE(c.run_duration,0)      AS run_dur,
-            COALESCE(c.upload_duration,0)   AS up_dur,
-            CASE
-               WHEN c.run_started_at IS NOT NULL THEN
-                   (EXTRACT(EPOCH FROM c.run_started_at)::bigint - COALESCE(c.download_duration,0))
-               ELSE NULL
-            END AS start_epoch,
-            CASE
-               WHEN $1 IN ('S','F') AND c.run_started_at IS NOT NULL THEN
-                   (EXTRACT(EPOCH FROM c.run_started_at)::bigint + COALESCE(c.run_duration,0) + COALESCE(c.upload_duration,0))
-               ELSE NULL
-            END AS end_epoch,
-            p.hidden AS prior_hidden,
-            (p.old_status = $1) AS same_status,
-            (u.task_id IS NOT NULL) AS did_update
-          FROM prior p
-          JOIN cur c   ON TRUE
-     LEFT JOIN upd u   ON TRUE
-     LEFT JOIN step s  ON c.step_id = s.step_id;
+			SELECT status AS old_status, retry, step_id, run_started_at, hidden
+			FROM task
+			WHERE task_id = $2
+		),
+		upd AS (
+			UPDATE task
+			SET status = $1,
+				modified_at = NOW(),
+				run_started_at = CASE WHEN $1 = 'R' THEN NOW() ELSE run_started_at END,
+				download_duration = CASE WHEN $3::INT IS NOT NULL AND $1 = 'O' THEN $3::INT ELSE download_duration END,
+				run_duration      = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('U','V') THEN $3::INT ELSE run_duration END,
+				upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END,
+				retry             = CASE WHEN $1 = 'F' AND $4::BOOL IS TRUE THEN retry + 1 ELSE retry END
+			WHERE task_id = $2
+			AND status <> $1
+			AND NOT hidden
+			RETURNING task_id, worker_id, step_id, status,
+					run_started_at, download_duration, run_duration, upload_duration
+		)
+		SELECT 
+			u.worker_id,
+			p.old_status,
+			p.retry,
+			u.step_id,
+			s.workflow_id,
+			p.run_started_at AS prev_run_started_at,
+			EXTRACT(EPOCH FROM u.run_started_at)::bigint AS run_started_epoch,
+			COALESCE(u.download_duration,0) AS dl_dur,
+			COALESCE(u.run_duration,0)      AS run_dur,
+			COALESCE(u.upload_duration,0)   AS up_dur,
+			CASE
+			WHEN u.run_started_at IS NOT NULL THEN
+				(EXTRACT(EPOCH FROM u.run_started_at)::bigint - COALESCE(u.download_duration,0))
+			ELSE NULL
+			END AS start_epoch,
+			CASE
+			WHEN $1 IN ('S','F') AND u.run_started_at IS NOT NULL THEN
+				(EXTRACT(EPOCH FROM u.run_started_at)::bigint + COALESCE(u.run_duration,0) + COALESCE(u.upload_duration,0))
+			ELSE NULL
+			END AS end_epoch,
+			p.hidden AS prior_hidden,
+			(p.old_status = $1) AS same_status,
+			(u.task_id IS NOT NULL) AS did_update
+		FROM prior p
+		JOIN upd u   ON TRUE
+		LEFT JOIN step s  ON u.step_id = s.step_id
     `,
 		req.NewStatus, req.TaskId, req.Duration, (req.FreeRetry != nil && *req.FreeRetry),
 	).Scan(
@@ -440,61 +472,53 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 		stepAgg := s.stats.data[wid][sid]
 
+		log.Printf("[DEBUG] Step stats update for workflow %d step %d: %s -> %s", wid, sid, oldStatus, req.NewStatus)
 		// Status buckets (typed fields)
 		switch oldStatus {
 		case "W":
-			if stepAgg.Waiting > 0 {
-				stepAgg.Waiting--
-			}
-		case "P":
-			if stepAgg.Pending > 0 {
-				stepAgg.Pending--
-			}
-		case "C":
-			if stepAgg.Accepted > 0 {
-				stepAgg.Accepted--
-			}
-		case "O":
-			if stepAgg.OnHold > 0 {
-				stepAgg.OnHold--
-			}
+			stepAgg.Waiting--
+		case "P", "I":
+			stepAgg.Pending--
+		case "A", "C", "D", "O":
+			stepAgg.Accepted--
 		case "R":
-			if stepAgg.Running > 0 {
-				stepAgg.Running--
-			}
+			stepAgg.Running--
+		case "U", "V":
+			stepAgg.Uploading--
 		case "S":
-			if stepAgg.Succeeded > 0 {
-				stepAgg.Succeeded--
-			}
-		case "F", "V":
-			if stepAgg.Failed > 0 {
-				stepAgg.Failed--
-			}
+			stepAgg.Succeeded--
+		case "F":
+			stepAgg.ReallyFailed--
 		}
 		switch req.NewStatus {
 		case "W":
 			stepAgg.Waiting++
-		case "P":
+		case "P", "I":
 			stepAgg.Pending++
-		case "C":
+		case "A", "C", "D", "O":
 			stepAgg.Accepted++
-		case "O":
-			stepAgg.OnHold++
 		case "R":
 			stepAgg.Running++
+		case "U", "V":
+			stepAgg.Uploading++
 		case "S":
 			stepAgg.Succeeded++
-		case "F", "V":
-			stepAgg.Failed++
+		case "F":
+			stepAgg.ReallyFailed++
 		}
 
 		// RunningTasks map using DB runStartedEpoch
-		if req.NewStatus == "R" && runStartedEpoch.Valid {
+		if req.NewStatus == "R" {
 			if stepAgg.RunningTasks == nil {
 				stepAgg.RunningTasks = make(map[int32]time.Time)
 			}
-			t := time.Unix(runStartedEpoch.Int64, 0).UTC()
-			stepAgg.RunningTasks[req.TaskId] = t
+			if runStartedEpoch.Valid {
+				t := time.Unix(runStartedEpoch.Int64, 0).UTC()
+				stepAgg.RunningTasks[req.TaskId] = t
+			} else {
+				log.Printf("⚠️ warning: task %d entered 'R' state but run_started_at is NULL", req.TaskId)
+				stepAgg.RunningTasks[req.TaskId] = time.Now().UTC()
+			}
 		}
 		if oldStatus == "R" && req.NewStatus != "R" {
 			if stepAgg.RunningTasks != nil {
@@ -607,7 +631,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			WorkflowId      int32  `json:"workflowId"`
 			StepId          int32  `json:"stepId"`
 			TaskId          int32  `json:"taskId"`
-			OldStatus       string `json:"oldStatus,omitempty"`
+			OldStatus       string `json:"oldStatus"`
 			NewStatus       string `json:"newStatus"`
 			Duration        *int32 `json:"duration,omitempty"`
 			RunStartedEpoch *int32 `json:"runStartedEpoch,omitempty"`
@@ -619,7 +643,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			TaskId:          req.TaskId,
 			OldStatus:       oldStatus,
 			NewStatus:       req.NewStatus,
-			Duration:        req.Duration, // duration delta to apply based on NewStatus (O/U/V/S/F)
+			Duration:        req.Duration,
 			RunStartedEpoch: runEpochPtr,
 			StartEpoch:      startPtr,
 			EndEpoch:        endPtr,
@@ -680,18 +704,56 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 
 				if allDone {
 					// Promote to "P"
-					res, err := s.db.ExecContext(ctx, `
-                        UPDATE task
-                        SET status = 'P'
-                        WHERE task_id = $1 AND status = 'W'
-                    `, depTaskID)
-					if err != nil {
+					var stepID, workerID sql.NullInt32
+					var updated bool
+
+					err := s.db.QueryRowContext(ctx, `
+					    WITH updated AS (
+					      UPDATE task
+					      SET status = 'P'
+					      WHERE task_id = $1 AND status = 'W'
+					      RETURNING step_id, worker_id
+					    )
+					    SELECT updated.step_id, updated.worker_id, true AS updated
+					    FROM updated
+					    LEFT JOIN step ON updated.step_id = step.step_id
+					`, depTaskID).Scan(&stepID, &workerID, &updated)
+
+					if err == sql.ErrNoRows {
+						log.Printf("⚠️ no promotion: task %d was not in 'W' state", depTaskID)
+						continue
+					} else if err != nil {
 						log.Printf("⚠️ failed to promote task %d to 'P': %v", depTaskID, err)
 						continue
 					}
-					n, _ := res.RowsAffected()
-					if n > 0 {
+
+					if updated {
 						log.Printf("✅ task %d now pending (dependencies resolved)", depTaskID)
+						// Increment pending count in step stats aggregator
+						if workflowID.Valid && stepID.Valid {
+							stepAgg := s.stats.data[workflowID.Int32][stepID.Int32]
+							stepAgg.Waiting--
+							stepAgg.Pending++
+						}
+
+						// Emit step-stats event for dependency promotion
+						if workflowID.Valid && stepID.Valid {
+							ws.EmitWS("step-stats", workflowID.Int32, "delta", struct {
+								WorkflowId int32  `json:"workflowId"`
+								StepId     int32  `json:"stepId"`
+								TaskId     int32  `json:"taskId"`
+								OldStatus  string `json:"oldStatus"`
+								NewStatus  string `json:"newStatus"`
+							}{
+								WorkflowId: workflowID.Int32,
+								StepId:     stepID.Int32,
+								TaskId:     int32(depTaskID),
+								OldStatus:  "W",
+								NewStatus:  "P",
+							})
+						}
+
+						// 🔔 WS notify: task status change
 						s.triggerAssign()
 					}
 				}
@@ -746,6 +808,15 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 						   modified_at = NOW()
 					 WHERE task_id = $1
 				`, req.TaskId)
+				// Adjust step stats aggregator: decrement ReallyFailed and increment Failed
+				if workflowID.Valid && stepID.Valid {
+					stepAgg := s.stats.data[workflowID.Int32][stepID.Int32]
+					if stepAgg.ReallyFailed > 0 {
+						stepAgg.ReallyFailed--
+						stepAgg.Failed++
+						stepAgg.Pending++
+					}
+				}
 			}
 
 			// 3c) Move dependencies from failed parent to new task
@@ -789,6 +860,29 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 
 			if txErr == nil {
 				_ = tx.Commit()
+				// After commit, increment Pending in StepAgg for new retry task
+				if workflowID.Valid && stepID.Valid {
+					stepAgg := s.stats.data[workflowID.Int32][stepID.Int32]
+					stepAgg.Pending++
+				}
+				// Emit step-stats event for retry (clone)
+				if workflowID.Valid && stepID.Valid {
+					ws.EmitWS("step-stats", workflowID.Int32, "delta", struct {
+						WorkflowId int32  `json:"workflowId"`
+						StepId     int32  `json:"stepId"`
+						TaskId     int32  `json:"taskId"`
+						OldStatus  string `json:"oldStatus"`
+						NewStatus  string `json:"newStatus"`
+						Retried    bool   `json:"retried,omitempty"`
+					}{
+						WorkflowId: workflowID.Int32,
+						StepId:     stepID.Int32,
+						TaskId:     int32(newID),
+						OldStatus:  "F",
+						NewStatus:  "P",
+						Retried:    true,
+					})
+				}
 				// Best-effort: trigger assign for the fresh pending task
 				s.triggerAssign()
 				// (Optional) notify via event/log; we keep it minimal here.
@@ -817,7 +911,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		Status:   req.NewStatus,
 		WorkerId: workerId,
 	})
-
+	// (No deferred step-stats event emission: events are now emitted immediately above.)
 	return &pb.Ack{Success: true}, nil
 }
 

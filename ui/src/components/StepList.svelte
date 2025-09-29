@@ -164,6 +164,7 @@
       currentRunStats: toStats(s.runningRun),
     }));
     // Start periodic recompute for live running durations (updated via deltas)
+    console.log('[StepList] setInterval for recomputeRunningStats activated');
     runningTimer = setInterval(recomputeRunningStats, 1000);
   });
 
@@ -238,10 +239,11 @@
             waitingTasks: 0,
             pendingTasks: 0,
             acceptedTasks: 0,
-            onholdTasks: 0,
             runningTasks: 0,
+            downloadingTasks: 0,
             successfulTasks: 0,
             failedTasks: 0,
+            reallyFailedTasks: 0,
             download: { count: 0, sum: 0, min: 0, max: 0 },
             upload:   { count: 0, sum: 0, min: 0, max: 0 },
             successRun: { count: 0, sum: 0, min: 0, max: 0 },
@@ -291,35 +293,55 @@
       if (oldS) {
         switch (oldS) {
           case 'W': step.waitingTasks--; break;
-          case 'P': step.pendingTasks--; break;
-          case 'C': step.acceptedTasks--; break;
-          case 'O': step.onholdTasks--; break;
+          case 'P':
+          case 'I': step.pendingTasks--; break;
+          case 'A':
+          case 'C':
+          case 'D':
+          case 'O': step.acceptedTasks--; break;
           case 'R': step.runningTasks--; break;
           case 'U':
+          case 'V': step.uploadingTasks--; break;
           case 'S': step.successfulTasks--; break;
-          case 'F': 
-          case 'V': step.failedTasks--; break;
+          case 'F': step.reallyFailedTasks--; if (step?.retried) { step.failedTasks++; } break;
         }
       }
       if (newS) {
         switch (newS) {
           case 'W': step.waitingTasks++; break;
-          case 'P': step.pendingTasks++; break;
-          case 'C': step.acceptedTasks++; break;
-          case 'O': step.onholdTasks++; break;
+          case 'P':
+          case 'I': step.pendingTasks++; break;
+          case 'A':
+          case 'C':
+          case 'D':
+          case 'O': step.acceptedTasks++; break;
           case 'R': step.runningTasks++; break;
           case 'U':
+          case 'V': step.uploadingTasks++; break;
           case 'S': step.successfulTasks++; break;
-          case 'F':
-          case 'V': step.failedTasks++; break;
+          case 'F': step.reallyFailedTasks++; break;
         }
       }
 
+      // Total tasks counter
+      if (message?.payload?.incrementTotal !== undefined) {
+        step.totalTasks = (step.totalTasks || 0) + message.payload.incrementTotal;
+      }
+
       // Running set maintenance
-      if (newS === 'R' && typeof p.runStartedEpoch === 'number') {
-        let m = runningByStep.get(stepId);
-        if (!m) { m = new Map(); runningByStep.set(stepId, m); }
-        m.set(p.taskId, p.runStartedEpoch);
+      if (newS === 'R') {
+        if (typeof p.runStartedEpoch === 'number') {
+          let m = runningByStep.get(stepId);
+          if (!m) { m = new Map(); runningByStep.set(stepId, m); }
+          m.set(p.taskId, p.runStartedEpoch);
+        } else {
+          console.warn('[StepList] Missing or invalid runStartedEpoch for R task:', {
+            taskId: p.taskId,
+            stepId,
+            runStartedEpoch: p.runStartedEpoch,
+            payload: p,
+          });
+        }
       }
       if (oldS === 'R' && newS !== 'R') {
         const m = runningByStep.get(stepId);
@@ -362,15 +384,6 @@
         }
       }
 
-      // Derived totals
-      step.totalTasks =
-        step.waitingTasks +
-        step.pendingTasks +
-        step.acceptedTasks +
-        step.onholdTasks +
-        step.runningTasks +
-        step.successfulTasks +
-        step.failedTasks;
 
 
       // Update running derived stats now; periodic timer will keep it fresh
@@ -501,26 +514,29 @@
                   </div>
                 {/each}
               </td>
-              <td><div class="wf-progress-bar">
+      <td><div class="wf-progress-bar">
                 <div class="wf-progress">
                   <!-- success segment -->
                   <div class="wf-progress__segment wf-progress__segment--success"
                        style="width: {pct(step.successfulTasks, step.totalTasks)}%; transform: translateX(0%);"></div>
 
-                  <!-- fail segment: starts after success -->
-                  <div class="wf-progress__segment wf-progress__segment--fail"
-                       style="width: {pct(step.failedTasks, step.totalTasks)}%; transform: translateX({pct(step.successfulTasks, step.totalTasks)}%);"></div>
-
-                  <!-- optional running segment: starts after success+fail -->
+                  <!-- running segment: starts after success -->
                   <div class="wf-progress__segment wf-progress__segment--running"
-                       style="width: {pct(step.runningTasks, step.totalTasks)}%; transform: translateX({pct(step.successfulTasks, step.totalTasks) + pct(step.failedTasks, step.totalTasks)}%);"></div>
+                       style="left: {pct(step.successfulTasks, step.totalTasks)}%; width: {pct(step.runningTasks, step.totalTasks)}%;"></div>
+
+                  <!-- fail segment: starts after success + running -->
+                  <div class="wf-progress__segment wf-progress__segment--fail"
+                       style="left: {pct(step.successfulTasks + step.runningTasks, step.totalTasks)}%; width: {pct(step.reallyFailedTasks, step.totalTasks)}%;"></div>
                 </div>
               </div></td>
               <td>{showIfNonZero(step.waitingTasks + step.pendingTasks) }</td> 
-              <td>{showIfNonZero(step.acceptedTasks + step.onholdTasks) }</td>
+              <td>{showIfNonZero(step.acceptedTasks) }</td>
               <td>{showIfNonZero(step.runningTasks) }</td>
               <td class="success-cell">{showIfNonZero(step.successfulTasks) }</td>
-              <td class="fail-cell">{showIfNonZero(step.failedTasks) }</td>
+              <td class="fail-cell">
+                <span class="really-failed">{showIfNonZero(step.reallyFailedTasks)}</span>
+                <span class="retried-failed">{showIfNonZero(step.failedTasks)}</span>
+              </td>
               <td>{showIfNonZero(step.totalTasks) }</td>
               <td class="duration-cell">
                 {#if step.runningTasks > 0}
@@ -583,8 +599,13 @@
     color: lightgreen;
     font-weight: bold;
   }
-  .fail-cell {
+  .really-failed {
     color: red;
+    font-weight: bold;
+    margin-right: 4px;
+  }
+  .retried-failed {
+    color: orange;
     font-weight: bold;
   }
   .duration-cell {

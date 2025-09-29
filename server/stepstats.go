@@ -3,14 +3,15 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	pq "github.com/lib/pq"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
@@ -45,14 +46,15 @@ type Accumulator struct {
 // StepAgg aggregates statistics for a step within a workflow.
 type StepAgg struct {
 	// Task status counters
-	Waiting   int32
-	Pending   int32
-	Accepted  int32
-	OnHold    int32
-	Running   int32
-	Succeeded int32
-	Failed    int32
-	Total     int32
+	Waiting      int32
+	Pending      int32
+	Accepted     int32
+	Running      int32
+	Uploading    int32
+	Succeeded    int32
+	Failed       int32
+	ReallyFailed int32 // tasks that have exhausted all retries and are failed
+	Total        int32
 
 	// Accumulators for durations
 	Download   Accumulator
@@ -82,7 +84,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 
 	// Single query: include steps with zero tasks via LEFT JOIN,
 	// compute status counts, totals, duration accumulators,
-	// and gather running tasks (task_id, run_started_at) as JSON per group.
+	// and gather running tasks (task_id, run_started_at) as separate arrays per group.
 	rows, err := db.Query(`
 		SELECT
 			s.workflow_id,
@@ -90,12 +92,13 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			-- totals and status counters (count only non-null task rows)
 			COUNT(t.task_id) AS total,
 			COUNT(*) FILTER (WHERE t.status = 'W') AS waiting,
-			COUNT(*) FILTER (WHERE t.status = 'P') AS pending,
-			COUNT(*) FILTER (WHERE t.status = 'C') AS accepted,
-			COUNT(*) FILTER (WHERE t.status = 'O') AS onhold,
+			COUNT(*) FILTER (WHERE t.status IN ('P','I')) AS pending,
+			COUNT(*) FILTER (WHERE t.status IN ('C','D','O')) AS accepted,
 			COUNT(*) FILTER (WHERE t.status = 'R') AS running,
+			COUNT(*) FILTER (WHERE t.status IN ('U','V')) AS uploading,
 			COUNT(*) FILTER (WHERE t.status = 'S') AS succeeded,
-			COUNT(*) FILTER (WHERE t.status IN ('F','V')) AS failed,
+			COUNT(*) FILTER (WHERE t.status = 'F' AND t.hidden) AS failed,
+			COUNT(*) FILTER (WHERE t.status = 'F' AND NOT t.hidden) AS reallyfailed,
 
 			-- download/upload accumulators
 			COALESCE(SUM(t.download_duration), 0) AS dl_sum,
@@ -114,9 +117,9 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			COALESCE(MAX(t.run_duration) FILTER (WHERE t.status = 'S'), 0) AS run_s_max,
 
 			COUNT(*) FILTER (WHERE t.status IN ('F','V')) AS run_f_count,
-			COALESCE(SUM(t.run_duration) FILTER (WHERE t.status IN ('F','V')), 0) AS run_f_sum,
-			COALESCE(MIN(t.run_duration) FILTER (WHERE t.status IN ('F','V')), 0) AS run_f_min,
-			COALESCE(MAX(t.run_duration) FILTER (WHERE t.status IN ('F','V')), 0) AS run_f_max,
+			COALESCE(SUM(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_sum,
+			COALESCE(MIN(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_min,
+			COALESCE(MAX(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_max,
 
 			-- time bounds (epoch seconds)
 			COALESCE(MIN(EXTRACT(EPOCH FROM t.run_started_at) - t.download_duration)::bigint, 0) AS start_epoch,
@@ -126,16 +129,9 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 				0
 			)::bigint AS end_epoch,
 
-			-- running tasks (as JSON array of objects)
-			COALESCE(
-				json_agg(
-					json_build_object(
-						"task_id", t.task_id,
-						"run_started_at", t.run_started_at
-					)
-				) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL),
-				'[]'::json
-			) AS running_tasks
+			-- running tasks as separate arrays
+			array_agg(t.task_id) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS running_task_ids,
+			array_agg(EXTRACT(EPOCH FROM t.run_started_at)::bigint) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS running_task_times
 		FROM step s
 		LEFT JOIN task t ON t.step_id = s.step_id
 		GROUP BY s.workflow_id, s.step_id
@@ -147,42 +143,35 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 	}
 	defer rows.Close()
 
-	type runItem struct {
-		TaskID       int32     `json:"task_id"`
-		RunStartedAt time.Time `json:"run_started_at"`
-	}
-
 	for rows.Next() {
 		var (
-			workflowID, stepID                                 int32
-			total, waiting, pending, accepted, onhold, running int32
-			succeeded, failed                                  int32
-			dlSum, dlMin, dlMax, upSum, upMin, upMax           float64
-			dlCount, upCount                                   int32
-			runSCount                                          int32
-			runSSum, runSMin, runSMax                          float64
-			runFCount                                          int32
-			runFSum, runFMin, runFMax                          float64
-			startEpoch, endEpoch                               sql.NullInt64
-			runningJSON                                        []byte
+			workflowID, stepID                                    int32
+			total, waiting, pending, accepted, running, uploading int32
+			succeeded, failed, reallyfailed                       int32
+			dlSum, dlMin, dlMax, upSum, upMin, upMax              float64
+			dlCount, upCount                                      int32
+			runSCount                                             int32
+			runSSum, runSMin, runSMax                             float64
+			runFCount                                             int32
+			runFSum, runFMin, runFMax                             float64
+			startEpoch, endEpoch                                  sql.NullInt64
+			runningIDs                                            pq.Int64Array
+			runningTimes                                          pq.Int64Array
 		)
 		if err := rows.Scan(
 			&workflowID,
 			&stepID,
-			&total, &waiting, &pending, &accepted, &onhold, &running, &succeeded, &failed,
+			&total, &waiting, &pending, &accepted, &running, &uploading, &succeeded, &failed, &reallyfailed,
 			&dlSum, &dlMin, &dlMax, &upSum, &upMin, &upMax,
 			&dlCount, &upCount,
 			&runSCount, &runSSum, &runSMin, &runSMax,
 			&runFCount, &runFSum, &runFMin, &runFMax,
 			&startEpoch, &endEpoch,
-			&runningJSON,
+			&runningIDs,
+			&runningTimes,
 		); err != nil {
+			log.Printf("[DEBUG] Could not parse line : %v", err)
 			continue
-		}
-
-		var runItems []runItem
-		if len(runningJSON) > 0 {
-			_ = json.Unmarshal(runningJSON, &runItems)
 		}
 
 		var startPtr, endPtr *int32
@@ -199,16 +188,17 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			agg.data[workflowID] = make(map[int32]*StepAgg)
 		}
 		sagg := &StepAgg{
-			Waiting:   waiting,
-			Pending:   pending,
-			Accepted:  accepted,
-			OnHold:    onhold,
-			Running:   running,
-			Succeeded: succeeded,
-			Failed:    failed,
-			Total:     total,
-			Download:  Accumulator{Count: dlCount, Sum: dlSum, Min: dlMin, Max: dlMax},
-			Upload:    Accumulator{Count: upCount, Sum: upSum, Min: upMin, Max: upMax},
+			Waiting:      waiting,
+			Pending:      pending,
+			Accepted:     accepted,
+			Running:      running,
+			Uploading:    uploading,
+			Succeeded:    succeeded,
+			Failed:       failed,
+			ReallyFailed: reallyfailed,
+			Total:        total,
+			Download:     Accumulator{Count: dlCount, Sum: dlSum, Min: dlMin, Max: dlMax},
+			Upload:       Accumulator{Count: upCount, Sum: upSum, Min: upMin, Max: upMax},
 			SuccessRun: Accumulator{
 				Count: runSCount, Sum: runSSum, Min: runSMin, Max: runSMax,
 			},
@@ -219,8 +209,17 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			StartTime:    startPtr,
 			EndTime:      endPtr,
 		}
-		for _, it := range runItems {
-			sagg.RunningTasks[it.TaskID] = it.RunStartedAt
+		// Populate RunningTasks from returned arrays (task_id[], epoch[])
+		if len(runningIDs) > 0 && len(runningIDs) == len(runningTimes) {
+			for i := range runningIDs {
+				// runningIDs and runningTimes may contain zero values if SQL returned NULLs; skip zeros
+				if runningIDs[i] == 0 || runningTimes[i] == 0 {
+					continue
+				}
+				tid := int32(runningIDs[i])
+				startedAt := time.Unix(int64(runningTimes[i]), 0).UTC()
+				sagg.RunningTasks[tid] = startedAt
+			}
 		}
 		agg.data[workflowID][stepID] = sagg
 	}
@@ -368,19 +367,20 @@ func (s *taskQueueServer) GetStepStats(ctx context.Context, req *pb.StepStatsReq
 		stepAgg := s.stats.data[sk.workflowID][sk.stepID]
 
 		// Compute Running accumulator on-the-fly
+		nowTime := time.Now()
 		var count int32
 		var sum, min, max float64
-		min = 1e99
-		max = -1e99
-		for _, startTime := range stepAgg.RunningTasks {
-			elapsed := now.Sub(startTime).Seconds()
-			count++
-			sum += elapsed
-			if elapsed < min {
-				min = elapsed
-			}
-			if elapsed > max {
-				max = elapsed
+		for tid := range stepAgg.RunningTasks {
+			if startedAt, ok := stepAgg.RunningTasks[tid]; ok {
+				dur := nowTime.Sub(startedAt)
+				count++
+				sum += dur.Seconds()
+				if min == 0 || dur.Seconds() < min {
+					min = dur.Seconds()
+				}
+				if dur.Seconds() > max {
+					max = dur.Seconds()
+				}
 			}
 		}
 		if count == 0 {
@@ -389,16 +389,17 @@ func (s *taskQueueServer) GetStepStats(ctx context.Context, req *pb.StepStatsReq
 		}
 
 		stats := &pb.StepStats{
-			StepId:          sk.stepID,
-			StepName:        stepNames[sk.stepID],
-			TotalTasks:      stepAgg.Total,
-			WaitingTasks:    stepAgg.Waiting,
-			PendingTasks:    stepAgg.Pending,
-			AcceptedTasks:   stepAgg.Accepted,
-			OnholdTasks:     stepAgg.OnHold,
-			RunningTasks:    stepAgg.Running,
-			SuccessfulTasks: stepAgg.Succeeded,
-			FailedTasks:     stepAgg.Failed,
+			StepId:            sk.stepID,
+			StepName:          stepNames[sk.stepID],
+			TotalTasks:        stepAgg.Total,
+			WaitingTasks:      stepAgg.Waiting,
+			PendingTasks:      stepAgg.Pending,
+			AcceptedTasks:     stepAgg.Accepted,
+			RunningTasks:      stepAgg.Running,
+			UploadingTasks:    stepAgg.Uploading,
+			SuccessfulTasks:   stepAgg.Succeeded,
+			FailedTasks:       stepAgg.Failed,
+			ReallyFailedTasks: stepAgg.ReallyFailed,
 			Download: &pb.Accum{
 				Count: stepAgg.Download.Count,
 				Sum:   float32(stepAgg.Download.Sum),

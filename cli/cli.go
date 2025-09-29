@@ -1399,7 +1399,7 @@ func (c *CLI) StepStats() error {
 		return nil
 	}
 	fmt.Printf("%-8s %-24s %-8s %-8s %-8s %-8s %-8s %-8s %-8s %-8s | %-22s %-22s %-22s %-22s %-22s\n",
-		"StepID", "Name", "Total", "Wait", "Pend", "Acc.", "On H", "Runn", "Succ", "Fail", "SuccRun", "FailRun", "CurrRun", "Download", "Upload")
+		"StepID", "Name", "Total", "Wait", "Pend", "Acc.", "Runn", "Upl.", "Succ", "Fail", "SuccRun", "FailRun", "CurrRun", "Download", "Upload")
 	fmt.Println(strings.Repeat("-", 222))
 	var totalSuccess, totalFailed, totalRunning, totalDownload, totalUpload float32
 	var startTime, endTime *int32
@@ -1409,16 +1409,17 @@ func (c *CLI) StepStats() error {
 		if name == "" {
 			name = fmt.Sprintf("Step id=%d", stat.StepId)
 		}
-		fmt.Printf("%-8d %-24s %-8d %-8d %-8d %-8d %-8d %-8d %-8d %-8d | %-22s %-22s %-22s %-22s %-22s\n",
+		fmt.Printf("%-8d %-24s %-8d %-8d %-8d %-8d %-8d %-8d %-8d %-3d(%-3d) | %-22s %-22s %-22s %-22s %-22s\n",
 			stat.StepId,
 			name,
 			stat.TotalTasks,
 			stat.WaitingTasks,
 			stat.PendingTasks,
 			stat.AcceptedTasks,
-			stat.OnholdTasks,
 			stat.RunningTasks,
+			stat.UploadingTasks,
 			stat.SuccessfulTasks,
+			stat.ReallyFailedTasks,
 			stat.FailedTasks,
 			formatAccum(stat.SuccessRun),
 			formatAccum(stat.FailedRun),

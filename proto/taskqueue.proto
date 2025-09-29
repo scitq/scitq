@@ -509,18 +509,19 @@ message StepStats {
     int32 waiting_tasks = 4;
     int32 pending_tasks = 5;
     int32 accepted_tasks = 6;
-    int32 onhold_tasks = 7;
-    int32 running_tasks = 8;
+    int32 running_tasks = 7;
+    int32 uploading_tasks = 8;
     int32 successful_tasks = 9;
     int32 failed_tasks = 10;
-    Accum success_run = 11;     // succeeded tasks' run durations
-    Accum failed_run = 12;      // failed tasks' run durations
-    Accum running_run = 13;  // running tasks' elapsed durations (at eval time)
-    Accum download = 14;        // download durations
-    Accum upload = 15;          // upload durations
-    optional int32 start_time = 16; // epoch timestamp of the first task start time
-    optional int32 end_time = 17;   // epoch timestamp of the last task end time
-    int32 stats_eval_time = 18; // epoch seconds when these stats were computed
+    int32 really_failed_tasks = 11; // tasks that have exhausted all retries and are failed
+    Accum success_run = 12;     // succeeded tasks' run durations
+    Accum failed_run = 13;      // failed tasks' run durations
+    Accum running_run = 14;  // running tasks' elapsed durations (at eval time)
+    Accum download = 15;        // download durations
+    Accum upload = 16;          // upload durations
+    optional int32 start_time = 17; // epoch timestamp of the first task start time
+    optional int32 end_time = 18;   // epoch timestamp of the last task end time
+    int32 stats_eval_time = 19; // epoch seconds when these stats were computed
 }
 
 message StepStatsResponse {
