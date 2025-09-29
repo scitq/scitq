@@ -90,7 +90,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			s.workflow_id,
 			s.step_id,
 			-- totals and status counters (count only non-null task rows)
-			COUNT(t.task_id) AS total,
+			COUNT(*) FILTER (WHERE NOT t.hidden) AS total,
 			COUNT(*) FILTER (WHERE t.status = 'W') AS waiting,
 			COUNT(*) FILTER (WHERE t.status IN ('P','I')) AS pending,
 			COUNT(*) FILTER (WHERE t.status IN ('C','D','O')) AS accepted,

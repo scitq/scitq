@@ -303,7 +303,7 @@
           case 'U':
           case 'V': step.uploadingTasks--; break;
           case 'S': step.successfulTasks--; break;
-          case 'F': step.reallyFailedTasks--; if (step?.retried) { step.failedTasks++; } break;
+          case 'F': step.reallyFailedTasks--; if (p?.retried) { step.failedTasks++; console.log(`Failed count increased to ${step.failedTasks}`)} break;
         }
       }
       if (newS) {

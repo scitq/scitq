@@ -814,7 +814,6 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					if stepAgg.ReallyFailed > 0 {
 						stepAgg.ReallyFailed--
 						stepAgg.Failed++
-						stepAgg.Pending++
 					}
 				}
 			}
