@@ -14,6 +14,8 @@ import (
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
+var lastCPUTimes []cpu.TimesStat
+
 // WorkerStats matches your proto definition
 // adjust the field tags if you use protobuf-generated structs directly
 
@@ -102,7 +104,31 @@ func CollectWorkerStats() (*WorkerStats, error) {
 
 	times, err := cpu.Times(false)
 	if err == nil && len(times) > 0 {
-		stats.IOWaitPercent = float32(times[0].Iowait)
+		if len(lastCPUTimes) == len(times) {
+			// Calculate delta-based iowait percent
+			totalDelta := float64(0)
+			iowaitDelta := float64(0)
+			for i := range times {
+				prev := lastCPUTimes[i]
+				curr := times[i]
+
+				prevTotal := prev.User + prev.System + prev.Idle + prev.Nice + prev.Iowait + prev.Irq + prev.Softirq + prev.Steal + prev.Guest + prev.GuestNice
+				currTotal := curr.User + curr.System + curr.Idle + curr.Nice + curr.Iowait + curr.Irq + curr.Softirq + curr.Steal + curr.Guest + curr.GuestNice
+
+				total := currTotal - prevTotal
+				iowait := curr.Iowait - prev.Iowait
+
+				if total > 0 {
+					iowaitDelta += iowait
+					totalDelta += total
+				}
+			}
+			if totalDelta > 0 {
+				stats.IOWaitPercent = float32((iowaitDelta / totalDelta) * 100.0)
+			}
+		}
+		// Save for next interval
+		lastCPUTimes = times
 	}
 
 	partitions, err := disk.Partitions(true)
