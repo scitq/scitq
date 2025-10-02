@@ -751,6 +751,37 @@ export async function getAllTasks(
 }
 
 /**
+ * Retrieves all tasks grouped by worker ID and task ID with their current status.
+ *
+ * @returns A nested record mapping: workerId -> taskId -> status
+ */
+export async function getWorkerTasks(): Promise<Record<number, Record<number, string>>> {
+  try {
+    const request: taskqueue.ListTasksRequest = { showHidden: true };
+    const taskUnary = await client.listTasks(request, await callOptionsUserToken());
+    const allTasks = taskUnary.response?.tasks || [];
+
+    const mapping: Record<number, Record<number, string>> = {};
+
+    for (const task of allTasks) {
+      const wid = task.workerId;
+      const tid = task.taskId;
+      const status = task.status;
+
+      if (wid !== undefined && tid !== undefined && status) {
+        if (!mapping[wid]) mapping[wid] = {};
+        mapping[wid][tid] = status;
+      }
+    }
+
+    return mapping;
+  } catch (error) {
+    console.error("Error while retrieving worker-task mapping:", error);
+    return {};
+  }
+}
+
+/**
  * Streams the standard output logs (`stdout`) of a task in real time.
  * Continuously listens to logs from the server and calls `onNewLog` for each received log entry.
  *

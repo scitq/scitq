@@ -1,10 +1,14 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getWorkerTasks} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
+  import { WorkerStats } from '../../gen/taskqueue';
+
+  let workerTaskMap: Record<number, Record<number, string>> = {};
+
 
   /**
    * Array of worker objects to display
@@ -19,6 +23,11 @@
   export let onWorkerUpdated: (event: { detail: { workerId: number; updates: Partial<Worker> } }) => void = () => {};
     
   // State management
+  /**
+   * Map of worker statuses by worker ID
+   * @type {Map<number, string>}
+   */
+  let statusMap = new Map<number, string>();
   /**
    * Processed workers data for display
    * @type {Array<Object>}
@@ -43,11 +52,6 @@
    */
   let tasksAllCount;
   
-  /**
-   * Map of worker statuses by worker ID
-   * @type {Map<number, string>}
-   */
-  let statusMap = new Map<number, string>();
   // Set of worker IDs currently being acted upon (pause/delete)
   let acting = new Set<number>();
   
@@ -63,11 +67,6 @@
    */
   let hasLoaded = false;
   
-  /**
-   * Interval reference for auto-refresh
-   * @type {number}
-   */
-  let interval;
   
   /**
    * Flag to show/hide advanced metrics
@@ -154,48 +153,107 @@
 
   /**
    * Component mount lifecycle hook
-   * Initializes data loading and sets up refresh interval, plus WS event listeners
+   * Sets up WS event listeners (no periodic updateWorkerData).
    */
   onMount(() => {
-    updateWorkerData();
-    interval = setInterval(updateWorkerData, 5000);
+    // Validated, type-safe WS message handler
+    const handleMessage = (msg: unknown) => {
+      if (!msg || typeof msg !== 'object') return;
+      const { type, action, id, payload } = msg as WSMessage;
 
-    const handleMessage = (message: { type: string; payload: any }) => {
-      const { type, payload } = message;
       switch (type) {
-        case 'status': {
-          const { workerId, status } = payload;
-          if (typeof workerId === 'number' && typeof status === 'string') {
-            statusMap.set(workerId, status);
-            statusMap = new Map(statusMap);
+        case 'worker':
+          switch (action) {
+            case 'status': {
+              const status = (payload as any).status;
+              if (typeof status === 'string') {
+                statusMap.set(id, status);
+                statusMap = new Map(statusMap);
+              }
+              break;
+            }
+            case 'stats': {
+              const raw = (payload as any).stats;
+              console.log('[WS] stats',raw)
+              if (raw) {
+                workersStatsMap[id] = WorkerStats.fromJson(raw);
+                workersStatsMap = { ...workersStatsMap }; 
+              }
+              break;
+            }
+            case 'deleted': {
+              statusMap.set(id, 'X');
+              statusMap = new Map(statusMap);
+              break;
+            }
+            case 'deletionScheduled': {
+              statusMap.set(id, 'D');
+              statusMap = new Map(statusMap);
+              break;
+            }
+            case 'created':
+            case 'updated': {
+              // Optional: refresh if worker list is live
+              // for now do nothing
+              break;
+            }
           }
           break;
-        }
-        case 'deletionScheduled': {
-          const { workerId } = payload;
-          if (typeof workerId === 'number') {
-            statusMap.set(workerId, 'D');
-            statusMap = new Map(statusMap);
+
+        case 'task':
+          switch (action) {
+            case 'status': {
+              const workerId = payload.workerId;
+              const taskId = id;
+              const prevStatus = workerTaskMap[workerId][taskId];
+              const newStatus = payload.status;
+
+              if (!workerTaskMap[workerId]) {
+                workerTaskMap[workerId] = {};
+              }
+
+              // Remove previous status count
+              if (prevStatus && tasksCount[workerId]) {
+                tasksCount[workerId][prevStatus] = (tasksCount[workerId][prevStatus] || 0) - 1;
+                if (tasksCount[workerId][prevStatus] < 0) {
+                  tasksCount[workerId][prevStatus] = 0;
+                  console.log('Task count underflow:',tasksCount,workerTaskMap);
+                }
+              }
+
+              // Update the status map
+              workerTaskMap[workerId][taskId] = newStatus;
+              if (!tasksCount[workerId]) {
+                tasksCount[workerId] = {};
+              }
+              tasksCount[workerId][newStatus] = (tasksCount[workerId][newStatus] || 0) + 1;
+
+              console.log("[WS] Update task count", tasksCount);
+              // nudge svelte reactivity
+              tasksCount = { ...tasksCount };
+              break;
+            }
+
+
+            case 'created': {
+              if (!tasksAllCount) tasksAllCount = { all: 0 };
+              tasksAllCount.all = (tasksAllCount.all || 0) + 1;
+              tasksAllCount[payload.status] = (tasksAllCount[payload.status] || 0) + 1;
+              break;
+            }
+
+            case 'updated':
+            case 'deleted':
+              // No-op
+              break;
           }
-          break;
-        }
-        case 'deleted': {
-          const { workerId } = payload;
-          if (typeof workerId === 'number') {
-            statusMap.set(workerId, 'X');
-            statusMap = new Map(statusMap);
-          }
-          break;
-        }
-        default:
           break;
       }
     };
 
-    unsubscribeWS = wsClient.subscribeWithTopics({ worker: [] }, handleMessage);
+    unsubscribeWS = wsClient.subscribeWithTopics({ worker: [], task: [] }, handleMessage);
 
     return () => {
-      clearInterval(interval);
       if (unsubscribeWS) unsubscribeWS();
       unsubscribeWS = null;
     };
@@ -209,7 +267,7 @@
 
   $: displayWorkers = workers.map(worker => ({
     ...worker,
-    status: statusMap.get(worker.workerId) ?? 'unknown'
+    status: statusMap.get(worker.workerId) ?? worker.status
   }));
 
   $: diskChartData = prepareChartData(diskHistory, 'disk');
@@ -405,16 +463,16 @@
       });
 
       // Always update history
-      diskHistory = [...diskHistory.slice(-MAX_HISTORY + 1), { 
-        time: now, 
-        read: totalRead, 
-        write: totalWrite 
+      diskHistory = [...diskHistory.slice(-MAX_HISTORY + 1), {
+        time: now,
+        read: totalRead,
+        write: totalWrite
       }];
-      
-      networkHistory = [...networkHistory.slice(-MAX_HISTORY + 1), { 
-        time: now, 
-        sent: totalSent, 
-        received: totalReceived 
+
+      networkHistory = [...networkHistory.slice(-MAX_HISTORY + 1), {
+        time: now,
+        sent: totalSent,
+        received: totalReceived
       }];
 
       // Force chart updates
@@ -423,11 +481,19 @@
 
       // Update status and tasks
       statusMap = new Map((await getStatus(workerIds)).map(s => [s.workerId, s.status]));
-      
-      for (const id of workerIds) {
-        tasksCount[id] = await getTasksCount(id);
+
+      // Replace per-worker tasksCount using getWorkerTasks
+      const workerTasks = await getWorkerTasks();
+      workerTaskMap = workerTasks;
+      tasksCount = {};
+      for (const wid in workerTaskMap) {
+        const count: Record<string, number> = {};
+        for (const tid in workerTaskMap[+wid]) {
+          const status = workerTaskMap[+wid][+tid];
+          count[status] = (count[status] || 0) + 1;
+        }
+        tasksCount[+wid] = count;
       }
-      tasksAllCount = await getTasksCount();
 
     } catch (err) {
       console.error('Error loading data:', err);
@@ -525,6 +591,16 @@
       acting.delete(workerId);
     }
   }
+
+// function to display task counts
+function displayTasksCount(workerId: number, ...statuses: string[]): string {
+  const n = statuses
+    .map((s) => tasksCount[workerId]?.[s] || 0)
+    .reduce((a, b) => a + b, 0);
+
+  return n === 0 ? "" : n.toString();
+}
+
 </script>
 
 {#if workers && workers.length > 0}
@@ -558,7 +634,7 @@
               <th>Concu</th>
               <th>Pref</th>
               <th>Starting</th>
-              <th>Progress</th>
+              <th>Running</th>
               <th>Success</th>
               <th>Fail</th>
               <th>Inactive</th>
@@ -577,7 +653,7 @@
               <th>Concurrency</th>
               <th>Prefetch</th>
               <th>Starting</th>
-              <th>Progress</th>
+              <th>Running</th>
               <th>Success</th>
               <th>Fail</th>
               <th>Inactive</th>
@@ -636,40 +712,34 @@
                 data-testid={`tasks-awaiting-execution-${worker.workerId}`}
                 title={`Pending: ${tasksCount[worker.workerId]?.pending}, Assigned: ${tasksCount[worker.workerId]?.assigned}, Accepted: ${tasksCount[worker.workerId]?.accepted}`}
               >
-                {(tasksCount[worker.workerId]?.pending ?? 0)
-                + (tasksCount[worker.workerId]?.assigned ?? 0)
-                + (tasksCount[worker.workerId]?.accepted ?? 0)}
+                {displayTasksCount(worker.workerId,'C','D','O')}
               </td>
               <td
                 data-testid={`tasks-in-progress-${worker.workerId}`}
                 title={`Downloading: ${tasksCount[worker.workerId]?.downloading}, Running: ${tasksCount[worker.workerId]?.running}`}
               >
-                {(tasksCount[worker.workerId]?.downloading ?? 0)
-                + (tasksCount[worker.workerId]?.running ?? 0)}
+                {displayTasksCount(worker.workerId,'R','U','V')}
               </td>
 
               <td
                 data-testid={`successful-tasks-${worker.workerId}`}
                 title={`UploadingSuccess: ${tasksCount[worker.workerId]?.uploadingSuccess}, Succeeded: ${tasksCount[worker.workerId]?.succeeded}`}
               >
-                {(tasksCount[worker.workerId]?.uploadingSuccess ?? 0) + (tasksCount[worker.workerId]?.succeeded ?? 0)}
+                {displayTasksCount(worker.workerId,'S')}
               </td>
 
               <td
                 data-testid={`failed-tasks-${worker.workerId}`}
                 title={`UploadingFailure: ${tasksCount[worker.workerId]?.uploadingFailure}, Failed: ${tasksCount[worker.workerId]?.failed}`}
               >
-                {(tasksCount[worker.workerId]?.uploadingFailure ?? 0) 
-                + (tasksCount[worker.workerId]?.failed ?? 0)}
+                {displayTasksCount(worker.workerId,'F')}
               </td>
 
               <td
                 data-testid={`inactive-tasks-${worker.workerId}`}
                 title={`Waiting: ${tasksCount[worker.workerId]?.waiting}, Suspended: ${tasksCount[worker.workerId]?.suspended}, Canceled: ${tasksCount[worker.workerId]?.canceled}`}
               >
-                {(tasksCount[worker.workerId]?.waiting ?? 0) 
-                + (tasksCount[worker.workerId]?.suspended ?? 0) 
-                + (tasksCount[worker.workerId]?.canceled ?? 0)}
+                {displayTasksCount(worker.workerId,'I','Z','X')}
               </td>
 
             <!-- Conditional columns based on display mode -->

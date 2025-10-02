@@ -2120,6 +2120,13 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 
 	if req.Stats != nil {
 		s.workerStats.Store(req.WorkerId, req.Stats)
+		ws.EmitWS("worker", req.WorkerId, "stats", struct {
+			WorkerId int32           `json:"workerId"`
+			Stats    *pb.WorkerStats `json:"stats"`
+		}{
+			WorkerId: req.WorkerId,
+			Stats:    req.Stats,
+		})
 	} else {
 		log.Printf("⚠️ Worker %d did not send stats", req.WorkerId)
 	}
