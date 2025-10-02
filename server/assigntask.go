@@ -293,6 +293,11 @@ func (s *taskQueueServer) assignPendingTasks() {
 					"newStatus":  "A",
 				})
 			}
+			ws.EmitWS("task", tid, "status", map[string]any{
+				"oldStatus": "P",
+				"status":    "A",
+				"workerId":  workerID,
+			})
 		}
 		rows.Close()
 		log.Printf("\u2705 Assigned %d tasks to worker %d", len(taskIDs), workerID)

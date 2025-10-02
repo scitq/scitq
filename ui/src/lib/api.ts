@@ -782,6 +782,57 @@ export async function getWorkerTasks(): Promise<Record<number, Record<number, st
 }
 
 /**
+ * Retrieves global and per-worker task status counts.
+ * Performs a single listTasks({ showHidden: true }) request.
+ * @returns An object with globalStatusCounts and perWorkerStatusCounts.
+ */
+export async function getAllTaskStats(): Promise<{
+  globalStatusCounts: Record<string, number>,
+  perWorkerStatusCounts: Record<number, Record<string, number>>,
+  totalCount : number,
+}> {
+  try {
+    const request: taskqueue.ListTasksRequest = { showHidden: true };
+    const taskUnary = await client.listTasks(request, await callOptionsUserToken());
+    const allTasks = taskUnary.response?.tasks || [];
+
+    const globalStatusCounts: Record<string, number> = {};
+    const perWorkerStatusCounts: Record<number, Record<string, number>> = {};
+    var totalCount: number = 0;
+
+    for (const task of allTasks) {
+      const status = task.status;
+      totalCount++;
+      // Increment global status count
+      if (status) {
+        globalStatusCounts[status] = (globalStatusCounts[status] || 0) + 1;
+      }
+      // Increment per-worker status count if workerId exists
+      if (task.workerId !== undefined && status) {
+        if (!perWorkerStatusCounts[task.workerId]) {
+          perWorkerStatusCounts[task.workerId] = {};
+        }
+        perWorkerStatusCounts[task.workerId][status] =
+          (perWorkerStatusCounts[task.workerId][status] || 0) + 1;
+      }
+    }
+
+    return {
+      globalStatusCounts,
+      perWorkerStatusCounts,
+      totalCount
+    };
+  } catch (error) {
+    console.error("Error while retrieving all task stats:", error);
+    return {
+      globalStatusCounts: {},
+      perWorkerStatusCounts: {},
+      totalCount: 0
+    };
+  }
+}
+
+/**
  * Streams the standard output logs (`stdout`) of a task in real time.
  * Continuously listens to logs from the server and calls `onNewLog` for each received log entry.
  *

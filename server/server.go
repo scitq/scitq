@@ -706,7 +706,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					// Promote to "P"
 					var stepID, workerID sql.NullInt32
 					var updated bool
-
+					var oldStatus string = "W"
+					var newStatus string = "P"
 					err := s.db.QueryRowContext(ctx, `
 					    WITH updated AS (
 					      UPDATE task
@@ -748,12 +749,29 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 								WorkflowId: workflowID.Int32,
 								StepId:     stepID.Int32,
 								TaskId:     int32(depTaskID),
-								OldStatus:  "W",
-								NewStatus:  "P",
+								OldStatus:  oldStatus,
+								NewStatus:  newStatus,
 							})
 						}
 
-						// 🔔 WS notify: task status change
+						// 🔔 WS notify: task status change (now emits old/new status)
+						ws.EmitWS("task", int32(depTaskID), "status", struct {
+							TaskId    int32  `json:"taskId"`
+							WorkerId  int32  `json:"workerId"`
+							OldStatus string `json:"oldStatus"`
+							Status    string `json:"status"`
+						}{
+							TaskId: int32(depTaskID),
+							WorkerId: func() int32 {
+								if workerID.Valid {
+									return workerID.Int32
+								} else {
+									return 0
+								}
+							}(),
+							OldStatus: oldStatus,
+							Status:    newStatus,
+						})
 						s.triggerAssign()
 					}
 				}
@@ -882,6 +900,18 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 						Retried:    true,
 					})
 				}
+				// 🔔 WS notify: task status change for retried task (oldStatus="F", newStatus="P")
+				ws.EmitWS("task", int32(newID), "status", struct {
+					TaskId    int32  `json:"taskId"`
+					WorkerId  int32  `json:"workerId"`
+					OldStatus string `json:"oldStatus"`
+					Status    string `json:"status"`
+				}{
+					TaskId:    int32(newID),
+					WorkerId:  0,
+					OldStatus: "F",
+					Status:    "P",
+				})
 				// Best-effort: trigger assign for the fresh pending task
 				s.triggerAssign()
 				// (Optional) notify via event/log; we keep it minimal here.
@@ -899,16 +929,18 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		workerId = workerID.Int32
 	}
 
-	// 🔔 WS notify: task status changed
-	log.Printf("[WS] task emit ▶ task=%d status=%s worker=%d", req.TaskId, req.NewStatus, workerId)
+	// 🔔 WS notify: task status changed (include oldStatus and newStatus)
+	log.Printf("[WS] task emit ▶ task=%d oldStatus=%s newStatus=%s worker=%d", req.TaskId, oldStatus, req.NewStatus, workerId)
 	ws.EmitWS("task", req.TaskId, "status", struct {
-		TaskId   int32  `json:"taskId"`
-		Status   string `json:"status"`
-		WorkerId int32  `json:"workerId,omitempty"`
+		TaskId    int32  `json:"taskId"`
+		WorkerId  int32  `json:"workerId"`
+		OldStatus string `json:"oldStatus"`
+		Status    string `json:"status"`
 	}{
-		TaskId:   req.TaskId,
-		Status:   req.NewStatus,
-		WorkerId: workerId,
+		TaskId:    req.TaskId,
+		WorkerId:  workerId,
+		OldStatus: oldStatus,
+		Status:    req.NewStatus,
 	})
 	// (No deferred step-stats event emission: events are now emitted immediately above.)
 	return &pb.Ack{Success: true}, nil

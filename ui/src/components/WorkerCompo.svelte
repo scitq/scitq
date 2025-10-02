@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getWorkerTasks} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
   import { WorkerStats } from '../../gen/taskqueue';
 
-  let workerTaskMap: Record<number, Record<number, string>> = {};
 
 
   /**
@@ -48,9 +47,14 @@
   
   /**
    * Count of all tasks by status
-   * @type {Object}
+   * @type {Record<string, number>}
    */
-  let tasksAllCount;
+  let allCount: Record<string, number> = {};
+  /**
+   * Total number of tasks
+   * @type {number}
+   */
+  let totalCount = 0;
   
   // Set of worker IDs currently being acted upon (pause/delete)
   let acting = new Set<number>();
@@ -156,6 +160,13 @@
    * Sets up WS event listeners (no periodic updateWorkerData).
    */
   onMount(() => {
+    // On mount, load all task stats
+    getAllTaskStats().then(({ perWorkerStatusCounts, globalStatusCounts, totalCount: t }) => {
+      allCount = globalStatusCounts;
+      tasksCount = perWorkerStatusCounts;
+      totalCount = t;
+    });
+
     // Validated, type-safe WS message handler
     const handleMessage = (msg: unknown) => {
       if (!msg || typeof msg !== 'object') return;
@@ -174,7 +185,6 @@
             }
             case 'stats': {
               const raw = (payload as any).stats;
-              console.log('[WS] stats',raw)
               if (raw) {
                 workersStatsMap[id] = WorkerStats.fromJson(raw);
                 workersStatsMap = { ...workersStatsMap }; 
@@ -204,44 +214,46 @@
           switch (action) {
             case 'status': {
               const workerId = payload.workerId;
-              const taskId = id;
-              const prevStatus = workerTaskMap[workerId][taskId];
+              const oldStatus = payload.oldStatus;
               const newStatus = payload.status;
 
-              if (!workerTaskMap[workerId]) {
-                workerTaskMap[workerId] = {};
-              }
-
-              // Remove previous status count
-              if (prevStatus && tasksCount[workerId]) {
-                tasksCount[workerId][prevStatus] = (tasksCount[workerId][prevStatus] || 0) - 1;
-                if (tasksCount[workerId][prevStatus] < 0) {
-                  tasksCount[workerId][prevStatus] = 0;
-                  console.log('Task count underflow:',tasksCount,workerTaskMap);
+              // Update global allCount
+              if (oldStatus) {
+                allCount[oldStatus] = (allCount[oldStatus] || 0) - 1;
+                if (allCount[oldStatus] < 0) {
+                  allCount[oldStatus] = 0;
+                  console.log(`Task count underflow for status ${oldStatus}: `,payload);
                 }
               }
+              allCount[newStatus] = (allCount[newStatus] || 0) + 1;
+              allCount = { ...allCount };
 
-              // Update the status map
-              workerTaskMap[workerId][taskId] = newStatus;
-              if (!tasksCount[workerId]) {
-                tasksCount[workerId] = {};
+              // Update per-worker tasksCount
+              if (workerId !== undefined) {
+                if (!tasksCount[workerId]) tasksCount[workerId] = {};
+                if (oldStatus) {
+                  tasksCount[workerId][oldStatus] = (tasksCount[workerId][oldStatus] || 0) - 1;
+                  if (tasksCount[workerId][oldStatus] < 0) {
+                    tasksCount[workerId][oldStatus] = 0;
+                    console.log(`Task count underflow for worker ${workerId} [${oldStatus}]: `,payload);
+                  }
+                }
+                if (newStatus) {
+                  tasksCount[workerId][newStatus] = (tasksCount[workerId][newStatus] || 0) + 1;
+                }
+                tasksCount = { ...tasksCount };
               }
-              tasksCount[workerId][newStatus] = (tasksCount[workerId][newStatus] || 0) + 1;
-
-              console.log("[WS] Update task count", tasksCount);
-              // nudge svelte reactivity
-              tasksCount = { ...tasksCount };
               break;
             }
-
-
             case 'created': {
-              if (!tasksAllCount) tasksAllCount = { all: 0 };
-              tasksAllCount.all = (tasksAllCount.all || 0) + 1;
-              tasksAllCount[payload.status] = (tasksAllCount[payload.status] || 0) + 1;
+              // Optionally update allCount for new task
+              if (allCount) {
+                allCount[payload.status] = (allCount[payload.status] || 0) + 1;
+                allCount = { ...allCount };
+              }
+              totalCount++;
               break;
             }
-
             case 'updated':
             case 'deleted':
               // No-op
@@ -479,21 +491,14 @@
       diskChartData = prepareChartData(diskHistory, 'disk');
       networkChartData = prepareChartData(networkHistory, 'network');
 
-      // Update status and tasks
+      // Update status
       statusMap = new Map((await getStatus(workerIds)).map(s => [s.workerId, s.status]));
 
-      // Replace per-worker tasksCount using getWorkerTasks
-      const workerTasks = await getWorkerTasks();
-      workerTaskMap = workerTasks;
-      tasksCount = {};
-      for (const wid in workerTaskMap) {
-        const count: Record<string, number> = {};
-        for (const tid in workerTaskMap[+wid]) {
-          const status = workerTaskMap[+wid][+tid];
-          count[status] = (count[status] || 0) + 1;
-        }
-        tasksCount[+wid] = count;
-      }
+      // Replace per-worker and global task counts using getAllTaskStats
+      const { perWorkerStatusCounts, globalStatusCounts, totalCount: t } = await getAllTaskStats();
+      allCount = globalStatusCounts;
+      tasksCount = perWorkerStatusCounts;
+      totalCount = t;
 
     } catch (err) {
       console.error('Error loading data:', err);
@@ -597,7 +602,6 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
   const n = statuses
     .map((s) => tasksCount[workerId]?.[s] || 0)
     .reduce((a, b) => a + b, 0);
-
   return n === 0 ? "" : n.toString();
 }
 
@@ -606,19 +610,19 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 {#if workers && workers.length > 0}
 
 <div class="status-count-bar status-tabs">
-    <a href="#/tasks"> All: {tasksAllCount?.all ?? 0}</a>
-    <a href="#/tasks?status=P" data-testid="pending-link-dashboard"> Pending: {tasksAllCount?.pending ?? 0}</a>
-    <a href="#/tasks?status=A"> Assigned: {tasksAllCount?.assigned ?? 0}</a>
-    <a href="#/tasks?status=C">Accepted: {tasksAllCount?.accepted ?? 0}</a>
-    <a href="#/tasks?status=D">Downloading: {tasksAllCount?.downloading ?? 0}</a>
-    <a href="#/tasks?status=R">Running: {tasksAllCount?.running ?? 0}</a>
-    <a href="#/tasks?status=U">Uploading (AS): {tasksAllCount?.uploadingSuccess ?? 0}</a>
-    <a href="#/tasks?status=S">Succeeded: {tasksAllCount?.succeeded ?? 0}</a>
-    <a href="#/tasks?status=V">Uploading (AF): {tasksAllCount?.uploadingFailure ?? 0}</a>
-    <a href="#/tasks?status=F">Failed: {tasksAllCount?.failed ?? 0}</a>
-    <a href="#/tasks?status=W">Waiting: {tasksAllCount?.waiting ?? 0}</a>
-    <a href="#/tasks?status=Z">Suspended: {tasksAllCount?.suspended ?? 0}</a>
-    <a href="#/tasks?status=X">Canceled: {tasksAllCount?.canceled ?? 0}</a>
+    <a href="#/tasks"> All: {totalCount}</a>
+    <a href="#/tasks?status=W">Waiting: {(allCount['W'] || 0)}</a>
+    <a href="#/tasks?status=P" data-testid="pending-link-dashboard"> Pending: {(allCount['P'] || 0)}</a>
+    <a href="#/tasks?status=A"> Assigned: {(allCount['A'] || 0)}</a>
+    <a href="#/tasks?status=C">Accepted: {(allCount['C'] || 0)}</a>
+    <a href="#/tasks?status=D">Downloading: {(allCount['D'] || 0)}</a>
+    <a href="#/tasks?status=O">On hold: {(allCount['O'] || 0)}</a>
+    <a href="#/tasks?status=R">Running: {(allCount['R'] || 0)}</a>
+    <a href="#/tasks?status=U">Uploading: {(allCount['U'] || 0)+(allCount['V'] || 0)}</a>
+    <a href="#/tasks?status=S">Succeeded: {(allCount['S'] || 0)}</a>
+    <a href="#/tasks?status=F">Failed: {(allCount['F'] || 0)}</a>
+    <a href="#/tasks?status=Z">Suspended: {(allCount['Z'] || 0)}</a>
+    <a href="#/tasks?status=X">Canceled: {(allCount['X'] || 0)}</a>
   </div>
 
   <div class="workerCompo-table-wrapper">
