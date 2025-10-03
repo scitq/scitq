@@ -255,8 +255,20 @@
               break;
             }
             case 'updated':
+              break;
             case 'deleted':
-              // No-op
+              allCount[payload.status]--;
+              if (allCount[payload.status] < 0) allCount[payload.status] = 0;
+              allCount = { ...allCount };
+
+              if (tasksCount[payload.workerId]) {
+                tasksCount[payload.workerId][payload.status]--;
+                if (tasksCount[payload.workerId][payload.status] < 0)
+                  tasksCount[payload.workerId][payload.status] = 0;
+                tasksCount = { ...tasksCount };
+              }
+
+              totalCount--;
               break;
           }
           break;

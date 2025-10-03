@@ -2953,7 +2953,44 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 	return &pb.WorkflowId{WorkflowId: workflowID}, nil
 }
 
+// emitDeletedTasksForWorkflow emits a WebSocket "task.deleted" event for every task belonging to a workflow.
+func (s *taskQueueServer) emitDeletedTasksForWorkflow(workflowID int32) {
+	rows, err := s.db.Query(
+		`SELECT t.task_id, t.worker_id, t.status FROM step s JOIN task t ON t.step_id=s.step_id WHERE s.workflow_id=$1`, workflowID)
+	if err != nil {
+		log.Printf("⚠️ Failed to fetch tasks for workflow %d for deletion event: %v", workflowID, err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var taskID int32
+		var workerID sql.NullInt32
+		var status string
+		if err := rows.Scan(&taskID, &workerID, &status); err != nil {
+			log.Printf("⚠️ Failed to scan task id for workflow %d: %v", workflowID, err)
+			continue
+		}
+
+		ws.EmitWS("task", taskID, "deleted", struct {
+			TaskId   int32  `json:"taskId"`
+			WorkerId int32  `json:"workerId,omitempty"`
+			Status   string `json:"status"`
+		}{
+			TaskId: taskID,
+			WorkerId: func() int32 {
+				if workerID.Valid {
+					return workerID.Int32
+				}
+				return 0
+			}(),
+			Status: status,
+		})
+	}
+}
+
 func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId) (*pb.Ack, error) {
+	s.emitDeletedTasksForWorkflow(req.WorkflowId)
 	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
