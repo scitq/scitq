@@ -291,7 +291,6 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	}
 
 	// 🔔 Broadcast WebSocket after task creation
-	log.Printf("[WS] task emit ▶ task=%d action=created step=%v status=%s", taskID, req.StepId, initialStatus)
 	ws.EmitWS("task", taskID, "created", struct {
 		TaskId   int32  `json:"taskId"`
 		Command  string `json:"command"`
@@ -472,7 +471,6 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 		stepAgg := s.stats.data[wid][sid]
 
-		log.Printf("[DEBUG] Step stats update for workflow %d step %d: %s -> %s", wid, sid, oldStatus, req.NewStatus)
 		// Status buckets (typed fields)
 		switch oldStatus {
 		case "W":
@@ -625,8 +623,6 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			v := int32(endEpoch.Int64)
 			endPtr = &v
 		}
-		log.Printf("[WS] step-stats emit ▶ workflow=%d step=%d task=%d %s→%s dur=%v runEpoch=%v start=%v end=%v",
-			wid, sid, req.TaskId, oldStatus, req.NewStatus, req.Duration, runEpochPtr, startPtr, endPtr)
 		ws.EmitWS("step-stats", wid, "delta", struct {
 			WorkflowId      int32  `json:"workflowId"`
 			StepId          int32  `json:"stepId"`
@@ -930,7 +926,6 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	}
 
 	// 🔔 WS notify: task status changed (include oldStatus and newStatus)
-	log.Printf("[WS] task emit ▶ task=%d oldStatus=%s newStatus=%s worker=%d", req.TaskId, oldStatus, req.NewStatus, workerId)
 	ws.EmitWS("task", req.TaskId, "status", struct {
 		TaskId    int32  `json:"taskId"`
 		WorkerId  int32  `json:"workerId"`
