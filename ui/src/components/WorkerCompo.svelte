@@ -187,7 +187,8 @@
               const raw = (payload as any).stats;
               if (raw) {
                 workersStatsMap[id] = WorkerStats.fromJson(raw);
-                workersStatsMap = { ...workersStatsMap }; 
+                workersStatsMap = { ...workersStatsMap };
+                updateHistoryFromStats();
               }
               break;
             }
@@ -515,6 +516,41 @@
     } catch (err) {
       console.error('Error loading data:', err);
     }
+  }
+
+  /**
+   * Updates diskHistory and networkHistory from current workersStatsMap.
+   */
+  function updateHistoryFromStats() {
+    const now = new Date();
+    let totalRead = 0, totalWrite = 0, totalSent = 0, totalReceived = 0;
+
+    for (const id in workersStatsMap) {
+      const stats = workersStatsMap[id];
+      if (stats?.diskIo) {
+        totalRead += stats.diskIo.readBytesRate || 0;
+        totalWrite += stats.diskIo.writeBytesRate || 0;
+      }
+      if (stats?.netIo) {
+        totalSent += stats.netIo.sentBytesRate || 0;
+        totalReceived += stats.netIo.recvBytesRate || 0;
+      }
+    }
+
+    diskHistory = [...diskHistory.slice(-MAX_HISTORY + 1), {
+      time: now,
+      read: totalRead,
+      write: totalWrite
+    }];
+
+    networkHistory = [...networkHistory.slice(-MAX_HISTORY + 1), {
+      time: now,
+      sent: totalSent,
+      received: totalReceived
+    }];
+
+    diskChartData = prepareChartData(diskHistory, 'disk');
+    networkChartData = prepareChartData(networkHistory, 'network');
   }
 
   /**

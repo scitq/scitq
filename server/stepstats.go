@@ -170,7 +170,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			&runningIDs,
 			&runningTimes,
 		); err != nil {
-			log.Printf("[DEBUG] Could not parse line : %v", err)
+			log.Printf("Step stats reconstruction error: could not parse line : %v", err)
 			continue
 		}
 
