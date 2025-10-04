@@ -1,0 +1,2 @@
+ALTER TABLE flavor_region
+ADD COLUMN available BOOLEAN NOT NULL DEFAULT true;

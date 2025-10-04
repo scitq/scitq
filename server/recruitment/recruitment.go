@@ -166,7 +166,15 @@ type RecruiterFlavorRegion struct {
 	Memory   float32
 }
 
-func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[RecruiterKey][]RecruiterFlavorRegion, map[int32]RegionInfo, error) {
+func FetchRecruiterFlavorRegions(
+	db *sql.DB,
+	recruiters []Recruiter,
+) (
+	map[RecruiterKey][]RecruiterFlavorRegion, // recruitmentMap: available only
+	map[RecruiterKey][]RecruiterFlavorRegion, // recyclingMap: all flavors
+	map[int32]RegionInfo,
+	error,
+) {
 	type recruiterSQLPart struct {
 		Key       RecruiterKey
 		Condition string
@@ -178,7 +186,7 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 	for _, r := range recruiters {
 		conditions, err := protofilter.ParseProtofilter(r.Protofilter)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed parsing protofilter for step_id %d, rank %d: %w", r.StepID, r.Rank, err)
+			return nil, nil, nil, fmt.Errorf("failed parsing protofilter for step_id %d, rank %d: %w", r.StepID, r.Rank, err)
 		}
 
 		parts = append(parts, recruiterSQLPart{
@@ -199,25 +207,26 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 				p.provider_id,
 				f.cpu,
 				f.mem,
-				fr.cost
+				fr.cost,
+				fr.available
 			FROM flavor f
 			JOIN flavor_region fr ON f.flavor_id = fr.flavor_id
 			JOIN region r ON fr.region_id = r.region_id
 			JOIN provider p ON p.provider_id = f.provider_id
             WHERE %s
         `, p.Key.StepID, p.Key.Rank, p.Condition))
-		//log.Printf("Recruiter SQL part for step_id %d, rank %d: %s", p.Key.StepID, p.Key.Rank, unionQueries[len(unionQueries)-1])
 	}
 
 	finalQuery := strings.Join(unionQueries, " UNION ALL ") + " ORDER BY cost"
 
 	rows, err := db.Query(finalQuery)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rows.Close()
 
-	mapping := make(map[RecruiterKey][]RecruiterFlavorRegion)
+	recruitmentMap := make(map[RecruiterKey][]RecruiterFlavorRegion)
+	recyclingMap := make(map[RecruiterKey][]RecruiterFlavorRegion)
 	regionInfoMap := make(map[int32]RegionInfo)
 
 	for rows.Next() {
@@ -228,14 +237,19 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 		var cost float32
 		var regionName string
 		var provider string
-		if err := rows.Scan(&stepID, &rank, &flavorID, &regionID, &regionName, &provider, &providerID, &cpu, &mem, &cost); err != nil {
-			return nil, nil, err
+		var available bool
+		if err := rows.Scan(&stepID, &rank, &flavorID, &regionID, &regionName, &provider, &providerID, &cpu, &mem, &cost, &available); err != nil {
+			return nil, nil, nil, err
 		}
 		key := RecruiterKey{StepID: stepID, Rank: rank}
-		mapping[key] = append(mapping[key], RecruiterFlavorRegion{
+		region := RecruiterFlavorRegion{
 			FlavorID: flavorID,
 			RegionID: regionID,
-		})
+		}
+		if available {
+			recruitmentMap[key] = append(recruitmentMap[key], region)
+		}
+		recyclingMap[key] = append(recyclingMap[key], region)
 		// Store region info if not already known
 		if _, exists := regionInfoMap[regionID]; !exists {
 			regionInfoMap[regionID] = RegionInfo{
@@ -246,7 +260,7 @@ func FetchRecruiterFlavorRegions(db *sql.DB, recruiters []Recruiter) (map[Recrui
 		}
 	}
 
-	return mapping, regionInfoMap, rows.Err()
+	return recruitmentMap, recyclingMap, regionInfoMap, rows.Err()
 }
 
 type RecyclableWorker struct {
@@ -642,15 +656,16 @@ func RecruiterCycle(
 		return nil
 	}
 
-	recruiterFlavorRegionMap, regionInfoMap, err := FetchRecruiterFlavorRegions(db, recruiters)
+	// Fetch recruiter flavor/region info: recruitmentMap, recyclingMap, regionInfoMap
+	recruitmentMap, recyclingMap, regionInfoMap, err := FetchRecruiterFlavorRegions(db, recruiters)
 	if err != nil {
 		return fmt.Errorf("failed to fetch flavor/region info: %w", err)
 	}
 
-	// Aggregate all allowed flavor_ids and region_ids across all recruiters
+	// Aggregate all allowed flavor_ids and region_ids across all recruiters for recycling
 	allFlavorIDs := make(map[int32]struct{})
 	allRegionIDs := make(map[int32]struct{})
-	for _, frList := range recruiterFlavorRegionMap {
+	for _, frList := range recyclingMap {
 		for _, fr := range frList {
 			allFlavorIDs[fr.FlavorID] = struct{}{}
 			allRegionIDs[fr.RegionID] = struct{}{}
@@ -674,17 +689,20 @@ func RecruiterCycle(
 
 	for _, recruiter := range recruiters {
 		key := RecruiterKey{StepID: recruiter.StepID, Rank: recruiter.Rank}
-		flavorRegionList := recruiterFlavorRegionMap[key]
+		// Use recruitmentMap for cloud deployment
+		flavorRegionList := recruitmentMap[key]
+		// Use recyclingMap for recycling logic
+		recyclingFlavorRegionList := recyclingMap[key]
 
 		if len(flavorRegionList) == 0 {
 			log.Printf("⚠️ No flavor/region candidates for recruiter step=%d rank=%d", recruiter.StepID, recruiter.Rank)
 			continue
 		}
 
-		// Build recruiter-specific allowed flavor/region sets
+		// Build recruiter-specific allowed flavor/region sets for recycling
 		recruiterFlavorIDs := make(map[int32]struct{})
 		recruiterRegionIDs := make(map[int32]struct{})
-		for _, fr := range flavorRegionList {
+		for _, fr := range recyclingFlavorRegionList {
 			recruiterFlavorIDs[fr.FlavorID] = struct{}{}
 			recruiterRegionIDs[fr.RegionID] = struct{}{}
 		}

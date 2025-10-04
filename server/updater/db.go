@@ -238,3 +238,19 @@ func (ps *PostgresSession) Close() error {
 	}
 	return nil
 }
+
+func (ps *PostgresSession) IsFlavorInUse(name string, providerID int32) (bool, error) {
+	query := `
+	SELECT EXISTS (
+		SELECT 1
+		FROM worker w
+		JOIN flavor f ON w.flavor_id = f.flavor_id
+		WHERE f.flavor_name = $1
+		  AND f.provider_id = $2
+	)`
+	var exists bool
+	if err := ps.tx.QueryRow(query, name, providerID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check if flavor in use: %w", err)
+	}
+	return exists, nil
+}

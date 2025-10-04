@@ -317,8 +317,14 @@ func (az *Azure) GetMetrics() error {
 			price := item.UnitPrice
 			key := fmt.Sprintf("%s|%s", flavor, region)
 			if fm, ok := az.FlavorMetricsMap[key]; ok {
-				//retainMetricsKeys = append(retainMetricsKeys, key)
-				fm.Cost = price
+				if price > 0 {
+					fm.Cost = price
+				} else if fm.Cost > 0 {
+					log.Printf("⚠️ Skipping cost update for %s (region: %s): previous cost retained", flavor, region)
+				} else {
+					log.Printf("⚠️ No cost found for new flavor %s in region %s", flavor, region)
+					// Do nothing: keep as-is, don’t delete
+				}
 			}
 		}
 		query = data.NextPageLink

@@ -24,6 +24,7 @@ type Session interface {
 	Begin() error
 	Rollback() error
 	Close() error
+	IsFlavorInUse(name string, providerID int32) (bool, error)
 }
 
 // Flavor represents a compute flavor.
@@ -48,6 +49,7 @@ type FlavorMetrics struct {
 	RegionName string
 	Cost       float64
 	Eviction   int
+	Available  bool
 }
 
 // GenericProvider holds a database session, provider name,
@@ -56,6 +58,7 @@ type GenericProvider struct {
 	Session      Session
 	ProviderID   int32
 	ProviderName string
+	lastSeenMap  map[string]time.Time
 }
 
 const maxRetries = 5
@@ -96,7 +99,32 @@ func NewGenericProvider(cfg config.Config, provider string) (*GenericProvider, e
 		Session:      db,
 		ProviderID:   providerID,
 		ProviderName: provider,
+		lastSeenMap:  make(map[string]time.Time),
 	}, nil
+}
+
+func (gp *GenericProvider) GetFlavorLastSeen(name string, providerID int32) time.Time {
+	key := fmt.Sprintf("%d|%s", providerID, name)
+	inUse, err := gp.Session.IsFlavorInUse(name, providerID)
+	if err != nil {
+		log.Printf("⚠️ Could not check in-use status for flavor %s: %v", key, err)
+		// Defensive fallback: return now
+		return time.Now()
+	}
+	if inUse {
+		// If seen before, clean up memory
+		if _, ok := gp.lastSeenMap[key]; ok {
+			delete(gp.lastSeenMap, key)
+		}
+		return time.Now()
+	}
+	// Not in use now
+	if seen, ok := gp.lastSeenMap[key]; ok {
+		return seen
+	}
+	now := time.Now()
+	gp.lastSeenMap[key] = now
+	return now
 }
 
 // UpdateFlavors compares the list of new flavors with what is stored in the DB
@@ -124,10 +152,23 @@ func (gp *GenericProvider) UpdateFlavors(newFlavors []*Flavor) error {
 	for _, existing := range existingFlavors {
 		key := fmt.Sprintf("%d|%s", existing.ProviderID, existing.Name)
 		if newFlavor, ok := newMap[key]; !ok {
-			log.Printf("Flavor %s is removed\n", key)
+			// Check if flavor is safe to delete
+			inUse, err := gp.Session.IsFlavorInUse(existing.Name, gp.ProviderID)
+			if err != nil {
+				log.Printf("⚠️ Error checking if flavor %s is in use: %v\n", key, err)
+				return err
+			}
+			lastSeen := gp.GetFlavorLastSeen(existing.Name, gp.ProviderID)
+			if inUse || time.Since(lastSeen) < 72*time.Hour {
+				log.Printf("⏳ Flavor %s retained: still in use or seen recently\n", key)
+				continue
+			}
+
+			log.Printf("🗑️ Flavor %s is removed (not in use and not seen in >72h)\n", key)
 			if err := gp.Session.DeleteFlavor(existing); err != nil {
 				return err
 			}
+			delete(gp.lastSeenMap, key)
 		} else {
 			// Remove the entry to mark it as processed.
 			delete(newMap, key)
@@ -199,17 +240,28 @@ func (gp *GenericProvider) UpdateFlavors(newFlavors []*Flavor) error {
 
 // UpdateFlavorMetrics compares and updates flavor metrics (primary keys: Provider, FlavorName, RegionName).
 func (gp *GenericProvider) UpdateFlavorMetrics(newMetrics []*FlavorMetrics) error {
-	// HERE
 	err := gp.Session.Begin()
 	if err != nil {
 		log.Printf("Error beginning transaction: %v\n", err)
 		return err
 	}
 	defer gp.Session.Rollback()
+
+	// Build a map of existing flavors for quick lookup
+	existingFlavors, err := gp.Session.QueryFlavors(gp.ProviderID)
+	if err != nil {
+		return err
+	}
+	flavorExists := make(map[string]bool)
+	for _, f := range existingFlavors {
+		key := fmt.Sprintf("%d|%s", f.ProviderID, f.Name)
+		flavorExists[key] = true
+	}
+
 	newMap := make(map[string]*FlavorMetrics)
 	for _, fm := range newMetrics {
 		if fm.Cost == 0 {
-			// Skip zero-cost metrics (Azure joke: undisclosed price)
+			// Skip zero-cost metrics (might be dangerous to keep them)
 			log.Printf("Remove metrics %v associated with no cost.", fm)
 			continue
 		}
@@ -224,12 +276,27 @@ func (gp *GenericProvider) UpdateFlavorMetrics(newMetrics []*FlavorMetrics) erro
 
 	for _, existing := range existingMetrics {
 		key := fmt.Sprintf("%d|%s|%s", existing.ProviderID, existing.FlavorName, existing.RegionName)
+		flavorKey := fmt.Sprintf("%d|%s", existing.ProviderID, existing.FlavorName)
 		if newMetric, ok := newMap[key]; !ok {
-			log.Printf("FlavorMetrics %s is removed\n", key)
-			if err := gp.Session.DeleteFlavorMetrics(existing); err != nil {
-				return err
+			// Metric missing in new list
+			if flavorExists[flavorKey] {
+				// Flavor still exists, mark metric as Available = false if not already
+				if existing.Available {
+					log.Printf("FlavorMetrics %s marked as unavailable\n", key)
+					existing.Available = false
+					if err := gp.Session.UpdateFlavorMetrics(existing); err != nil {
+						return err
+					}
+				}
+			} else {
+				// Flavor gone, delete metric
+				log.Printf("FlavorMetrics %s is removed (flavor deleted)\n", key)
+				if err := gp.Session.DeleteFlavorMetrics(existing); err != nil {
+					return err
+				}
 			}
 		} else {
+			// Metric found in new list, ensure Available = true and update if needed
 			delete(newMap, key)
 			changed := false
 			if existing.Cost != newMetric.Cost {
@@ -242,14 +309,23 @@ func (gp *GenericProvider) UpdateFlavorMetrics(newMetrics []*FlavorMetrics) erro
 				existing.Eviction = newMetric.Eviction
 				changed = true
 			}
+			if !existing.Available {
+				log.Printf("FlavorMetrics %s marked as available\n", key)
+				existing.Available = true
+				changed = true
+			}
 			if changed {
-				gp.Session.UpdateFlavorMetrics(existing)
+				if err := gp.Session.UpdateFlavorMetrics(existing); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
+	// Any remaining new metrics are added with Available = true
 	for key, fm := range newMap {
 		log.Printf("new FlavorMetrics %s\n", key)
+		fm.Available = true
 		if err := gp.Session.AddFlavorMetrics(fm); err != nil {
 			return err
 		}
