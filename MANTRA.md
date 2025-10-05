@@ -17,3 +17,7 @@ Never test what your own code guarantees. Avoid defensive checks on values that 
 ## 4. Hard Validation
 **Avoid adapting to structure uncertainty — validate the hard way and only if required.**  
 Validate only when uncertainty is expected. If the structure is owned and known, trust it (3rd mantra). When uncertainty is real, verify explicitly and break loudly.
+
+## 5. SQL Mapping Discipline
+**Always match the number and order of SQL SELECT columns with Scan() targets — precisely and explicitly.**  
+Always validate the number of variables, expected types, and their semantics.

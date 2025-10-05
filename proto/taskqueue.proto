@@ -136,6 +136,7 @@ message Worker {
     string provider = 9;
     string region = 10;
     optional int32 step_id = 11;
+    optional string step_name = 12;
 }
 
 

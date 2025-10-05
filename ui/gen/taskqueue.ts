@@ -257,6 +257,10 @@ export interface Worker {
      * @generated from protobuf field: optional int32 step_id = 11
      */
     stepId?: number;
+    /**
+     * @generated from protobuf field: optional string step_name = 12
+     */
+    stepName?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -2458,7 +2462,8 @@ class Worker$Type extends MessageType<Worker> {
             { no: 8, name: "flavor", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "provider", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 10, name: "region", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 11, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 11, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 12, name: "step_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -2515,6 +2520,9 @@ class Worker$Type extends MessageType<Worker> {
                 case /* optional int32 step_id */ 11:
                     message.stepId = reader.int32();
                     break;
+                case /* optional string step_name */ 12:
+                    message.stepName = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2560,6 +2568,9 @@ class Worker$Type extends MessageType<Worker> {
         /* optional int32 step_id = 11; */
         if (message.stepId !== undefined)
             writer.tag(11, WireType.Varint).int32(message.stepId);
+        /* optional string step_name = 12; */
+        if (message.stepName !== undefined)
+            writer.tag(12, WireType.LengthDelimited).string(message.stepName);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

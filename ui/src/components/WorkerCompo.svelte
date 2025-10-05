@@ -8,30 +8,16 @@
   import { WorkerStats } from '../../gen/taskqueue';
 
 
-
   /**
-   * Array of worker objects to display
-   * @type {Array<Object>}
+   * Internal array of workers (stateful, managed here)
    */
-  export let workers = [];
+  let internalWorkers: Array<Worker> = [];
   
   /**
    * Callback function when worker is updated
    * @type {(event: { detail: { workerId: number; updates: Partial<Worker> } }) => void}
    */
   export let onWorkerUpdated: (event: { detail: { workerId: number; updates: Partial<Worker> } }) => void = () => {};
-    
-  // State management
-  /**
-   * Map of worker statuses by worker ID
-   * @type {Map<number, string>}
-   */
-  let statusMap = new Map<number, string>();
-  /**
-   * Processed workers data for display
-   * @type {Array<Object>}
-   */
-  let displayWorkers = [];
   
   /**
    * Map of worker statistics by worker ID
@@ -160,119 +146,138 @@
    * Sets up WS event listeners (no periodic updateWorkerData).
    */
   onMount(() => {
-    // On mount, load all task stats
+    // On mount, load all task stats and fetch workers
     getAllTaskStats().then(({ perWorkerStatusCounts, globalStatusCounts, totalCount: t }) => {
       allCount = globalStatusCounts;
       tasksCount = perWorkerStatusCounts;
       totalCount = t;
     });
+    // Fetch initial workers
+    import('../lib/api').then(api => {
+      api.getWorkers().then(w => {
+        internalWorkers = w;
+      });
+    });
 
-    // Validated, type-safe WS message handler
+    // WebSocket message handler
     const handleMessage = (msg: unknown) => {
       if (!msg || typeof msg !== 'object') return;
-      const { type, action, id, payload } = msg as WSMessage;
+      const { type, action, id, payload } = msg as any;
 
-      switch (type) {
-        case 'worker':
-          switch (action) {
-            case 'status': {
-              const status = (payload as any).status;
-              if (typeof status === 'string') {
-                statusMap.set(id, status);
-                statusMap = new Map(statusMap);
-              }
-              break;
+      if (type === 'worker') {
+        switch (action) {
+          case 'status': {
+            const status = (payload as any).status;
+            if (typeof status === 'string') {
+              internalWorkers = internalWorkers.map(w =>
+                w.workerId === id ? { ...w, status } : w
+              );
             }
-            case 'stats': {
-              const raw = (payload as any).stats;
-              if (raw) {
-                workersStatsMap[id] = WorkerStats.fromJson(raw);
-                workersStatsMap = { ...workersStatsMap };
-                updateHistoryFromStats();
-              }
-              break;
-            }
-            case 'deleted': {
-              statusMap.set(id, 'X');
-              statusMap = new Map(statusMap);
-              break;
-            }
-            case 'deletionScheduled': {
-              statusMap.set(id, 'D');
-              statusMap = new Map(statusMap);
-              break;
-            }
-            case 'created':
-            case 'updated': {
-              // Optional: refresh if worker list is live
-              // for now do nothing
-              break;
-            }
+            break;
           }
-          break;
-
-        case 'task':
-          switch (action) {
-            case 'status': {
-              const workerId = payload.workerId;
-              const oldStatus = payload.oldStatus;
-              const newStatus = payload.status;
-
-              // Update global allCount
+          case 'stats': {
+            const raw = (payload as any).stats;
+            if (raw) {
+              workersStatsMap[id] = WorkerStats.fromJson(raw);
+              workersStatsMap = { ...workersStatsMap };
+              updateHistoryFromStats();
+            }
+            break;
+          }
+          case 'deleted': {
+            internalWorkers = internalWorkers.filter(w => w.workerId !== id);
+            break;
+          }
+          case 'deletionScheduled': {
+            internalWorkers = internalWorkers.map(w =>
+              w.workerId === id ? { ...w, status: 'D' } : w
+            );
+            break;
+          }
+          case 'created': {
+            const worker = (payload as any).worker || (payload as any);
+            if (worker) {
+              const exists = internalWorkers.some(w => w.workerId === worker.workerId);
+              if (!exists) {
+                internalWorkers = [...internalWorkers, worker];
+              }
+            }
+            break;
+          }
+          case 'updated':
+            // Update worker fields reactively, including stepId and stepName for step reassignment
+            {
+              const updates = payload as Partial<Worker>;
+              internalWorkers = internalWorkers.map(w =>
+                w.workerId === id
+                  ? {
+                      ...w,
+                      concurrency: updates.concurrency ?? w.concurrency,
+                      prefetch: updates.prefetch ?? w.prefetch,
+                      stepId: updates.stepId ?? w.stepId,
+                      stepName: updates.stepName ?? w.stepName
+                    }
+                  : w
+              );
+            }
+            break;
+        }
+      } else if (type === 'task') {
+        switch (action) {
+          case 'status': {
+            const workerId = payload.workerId;
+            const oldStatus = payload.oldStatus;
+            const newStatus = payload.status;
+            // Update global allCount
+            if (oldStatus) {
+              allCount[oldStatus] = (allCount[oldStatus] || 0) - 1;
+              if (allCount[oldStatus] < 0) {
+                allCount[oldStatus] = 0;
+                console.log(`Task count underflow for status ${oldStatus}: `,payload);
+              }
+            }
+            allCount[newStatus] = (allCount[newStatus] || 0) + 1;
+            allCount = { ...allCount };
+            // Update per-worker tasksCount
+            if (workerId !== undefined) {
+              if (!tasksCount[workerId]) tasksCount[workerId] = {};
               if (oldStatus) {
-                allCount[oldStatus] = (allCount[oldStatus] || 0) - 1;
-                if (allCount[oldStatus] < 0) {
-                  allCount[oldStatus] = 0;
-                  console.log(`Task count underflow for status ${oldStatus}: `,payload);
+                tasksCount[workerId][oldStatus] = (tasksCount[workerId][oldStatus] || 0) - 1;
+                if (tasksCount[workerId][oldStatus] < 0) {
+                  tasksCount[workerId][oldStatus] = 0;
+                  console.log(`Task count underflow for worker ${workerId} [${oldStatus}]: `,payload);
                 }
               }
-              allCount[newStatus] = (allCount[newStatus] || 0) + 1;
-              allCount = { ...allCount };
-
-              // Update per-worker tasksCount
-              if (workerId !== undefined) {
-                if (!tasksCount[workerId]) tasksCount[workerId] = {};
-                if (oldStatus) {
-                  tasksCount[workerId][oldStatus] = (tasksCount[workerId][oldStatus] || 0) - 1;
-                  if (tasksCount[workerId][oldStatus] < 0) {
-                    tasksCount[workerId][oldStatus] = 0;
-                    console.log(`Task count underflow for worker ${workerId} [${oldStatus}]: `,payload);
-                  }
-                }
-                if (newStatus) {
-                  tasksCount[workerId][newStatus] = (tasksCount[workerId][newStatus] || 0) + 1;
-                }
-                tasksCount = { ...tasksCount };
+              if (newStatus) {
+                tasksCount[workerId][newStatus] = (tasksCount[workerId][newStatus] || 0) + 1;
               }
-              break;
+              tasksCount = { ...tasksCount };
             }
-            case 'created': {
-              // Optionally update allCount for new task
-              if (allCount) {
-                allCount[payload.status] = (allCount[payload.status] || 0) + 1;
-                allCount = { ...allCount };
-              }
-              totalCount++;
-              break;
-            }
-            case 'updated':
-              break;
-            case 'deleted':
-              allCount[payload.status]--;
-              if (allCount[payload.status] < 0) allCount[payload.status] = 0;
-              allCount = { ...allCount };
-
-              if (tasksCount[payload.workerId]) {
-                tasksCount[payload.workerId][payload.status]--;
-                if (tasksCount[payload.workerId][payload.status] < 0)
-                  tasksCount[payload.workerId][payload.status] = 0;
-                tasksCount = { ...tasksCount };
-              }
-
-              totalCount--;
-              break;
+            break;
           }
-          break;
+          case 'created': {
+            if (allCount) {
+              allCount[payload.status] = (allCount[payload.status] || 0) + 1;
+              allCount = { ...allCount };
+            }
+            totalCount++;
+            break;
+          }
+          case 'updated':
+            break;
+          case 'deleted':
+            allCount[payload.status]--;
+            if (allCount[payload.status] < 0) allCount[payload.status] = 0;
+            allCount = { ...allCount };
+            if (tasksCount[payload.workerId]) {
+              tasksCount[payload.workerId][payload.status]--;
+              if (tasksCount[payload.workerId][payload.status] < 0)
+                tasksCount[payload.workerId][payload.status] = 0;
+              tasksCount = { ...tasksCount };
+            }
+            totalCount--;
+            break;
+        }
       }
     };
 
@@ -285,15 +290,10 @@
   });
 
   // Reactive statements
-  $: if (workers.length > 0 && !hasLoaded) {
+  $: if (internalWorkers.length > 0 && !hasLoaded) {
     updateWorkerData();
     hasLoaded = true;
   }
-
-  $: displayWorkers = workers.map(worker => ({
-    ...worker,
-    status: statusMap.get(worker.workerId) ?? worker.status
-  }));
 
   $: diskChartData = prepareChartData(diskHistory, 'disk');
   $: networkChartData = prepareChartData(networkHistory, 'network');
@@ -465,10 +465,10 @@
    * @async
    */
   async function updateWorkerData() {
-    if (workers.length === 0) return;
+    if (internalWorkers.length === 0) return;
 
     try {
-      const workerIds = workers.map(w => w.workerId);
+      const workerIds = internalWorkers.map(w => w.workerId);
       workersStatsMap = await getStats(workerIds);
 
       // Update history data
@@ -503,9 +503,6 @@
       // Force chart updates
       diskChartData = prepareChartData(diskHistory, 'disk');
       networkChartData = prepareChartData(networkHistory, 'network');
-
-      // Update status
-      statusMap = new Map((await getStatus(workerIds)).map(s => [s.workerId, s.status]));
 
       // Replace per-worker and global task counts using getAllTaskStats
       const { perWorkerStatusCounts, globalStatusCounts, totalCount: t } = await getAllTaskStats();
@@ -564,6 +561,10 @@
     if (newValue !== worker[field]) {
       worker[field] = newValue;
       onWorkerUpdated({ detail: { workerId: worker.workerId, updates: { [field]: newValue } } });
+      // Also update internalWorkers to reflect change
+      internalWorkers = internalWorkers.map(w =>
+        w.workerId === worker.workerId ? { ...w, [field]: newValue } : w
+      );
     }
   }
 
@@ -592,7 +593,7 @@
    * @async
    */
   async function pauseWorker(worker): Promise<void> {
-    const curr = statusMap.get(worker.workerId) ?? worker.status;
+    const curr = worker.status;
     const next = computeNextStatusForPause(curr);
     if (!next) return;
 
@@ -601,16 +602,18 @@
 
     // optimistic UI update
     const prev = curr;
-    statusMap.set(worker.workerId, next);
-    statusMap = new Map(statusMap);
+    internalWorkers = internalWorkers.map(w =>
+      w.workerId === worker.workerId ? { ...w, status: next } : w
+    );
 
     try {
       await updateWorkerStatus({ workerId: worker.workerId, status: next });
     } catch (err) {
       console.error('Failed to update worker status', worker.workerId, next, err);
       // revert on failure
-      statusMap.set(worker.workerId, prev);
-      statusMap = new Map(statusMap);
+      internalWorkers = internalWorkers.map(w =>
+        w.workerId === worker.workerId ? { ...w, status: prev } : w
+      );
     } finally {
       acting.delete(worker.workerId);
     }
@@ -625,20 +628,25 @@
     if (acting.has(workerId)) return;
     acting.add(workerId);
 
-    const prev = statusMap.get(workerId);
-    statusMap.set(workerId, 'D');
-    statusMap = new Map(statusMap);
+    // optimistic UI update
+    const prevWorker = internalWorkers.find(w => w.workerId === workerId);
+    internalWorkers = internalWorkers.map(w =>
+      w.workerId === workerId ? { ...w, status: 'D' } : w
+    );
 
     try {
       await delWorker({ workerId });
       delete workersStatsMap[workerId];
       delete tasksCount[workerId];
+      // Actually remove from list after confirmed deletion
+      internalWorkers = internalWorkers.filter(w => w.workerId !== workerId);
     } catch (err) {
       console.error('Failed to delete worker', workerId, err);
       // revert optimistic status if needed
-      if (prev) {
-        statusMap.set(workerId, prev);
-        statusMap = new Map(statusMap);
+      if (prevWorker) {
+        internalWorkers = internalWorkers.map(w =>
+          w.workerId === workerId ? { ...prevWorker } : w
+        );
       }
     } finally {
       acting.delete(workerId);
@@ -655,7 +663,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 
 </script>
 
-{#if workers && workers.length > 0}
+{#if internalWorkers && internalWorkers.length > 0}
 
 <div class="status-count-bar status-tabs">
     <a href="#/tasks"> All: {totalCount}</a>
@@ -715,10 +723,11 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
           </tr>
         </thead>
         <tbody>
-          {#each displayWorkers as worker (worker.workerId)}
+          {#each internalWorkers as worker (worker.workerId)}
             <tr data-testid={`worker-${worker.workerId}`}>
               <td> <a href="#/tasks?workerId={worker.workerId}" data-testid={`worker-name-${worker.workerId}`} class="workerCompo-clickable">{worker.name}</a> </td>
               <td class="workerCompo-actions">
+                {worker.stepName}
                 <button class="btn-action" title="Edit"><Edit /></button>
               </td>
               <td>

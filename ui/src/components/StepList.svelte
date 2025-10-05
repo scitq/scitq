@@ -152,7 +152,7 @@
     const allWorkers = await listWorkers(workflowId);
     for (const w of allWorkers) {
       if (typeof w.stepId === 'number') {
-        addWorkerToStep(w.stepId, w); // reuse your helper
+        addWorkerToStep(w.stepId, w);
       }
     }
     console.info('[StepList] mount: workflow', workflowId, 'initial steps:', (steps||[]).length);

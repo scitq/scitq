@@ -1,17 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getWorkers, getJobs, updateWorkerConfig, delWorker, delJob } from '../lib/api';
+import { getJobs, delWorker, delJob } from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import WorkerCompo from '../components/WorkerCompo.svelte';
   import CreateForm from '../components/CreateForm.svelte';
   import JobCompo from '../components/JobsCompo.svelte';
   import '../styles/dashboard.css';
 
-  /**
-   * Array of worker objects
-   * @type {Array<Object>}
-   */
-  let workers = [];
 
   /**
    * Array of currently displayed jobs
@@ -92,7 +87,6 @@
    * @async
    */
   onMount(async () => {
-    workers = await getWorkers();
     jobs = await getJobs(JOBS_CHUNK_SIZE, 0);
     unsubscribeWS = wsClient.subscribeWithTopics({ worker: [], job: [] }, handleMessage);
   });
@@ -123,52 +117,6 @@
       }
     }
 
-    // { type: 'worker', action: 'created'|'deleted', payload: { worker: {..}, job?: {..} } }
-    if (message?.type === 'worker') {
-      const p = message.payload || {};
-      const worker = p.worker || message.payloadWorker; // back-compat alias
-      const job = p.job || message.payloadJob;          // optional job side-effect
-
-      if (message.action === 'created' && worker) {
-        const exists = workers.some(w => w.workerId === worker.workerId);
-        if (!exists) {
-          workers = [...workers, worker];
-        }
-        if (job) {
-          const inDisplayed = jobs.some(j => j.jobId === job.jobId);
-          const inPending = pendingJobs.some(j => j.jobId === job.jobId);
-          if (!inDisplayed && !inPending) {
-            if (isScrolledToTop) {
-              jobs = [job, ...jobs];
-            } else {
-              pendingJobs = [job, ...pendingJobs];
-              newJobsCount = pendingJobs.length;
-              showNewJobsNotification = true;
-            }
-          }
-        }
-        return;
-      }
-
-      if (message.action === 'deleted' && worker) {
-        const workerId = worker.workerId;
-        workers = workers.filter(w => w.workerId !== workerId);
-        if (job) {
-          const inDisplayed = jobs.some(j => j.jobId === job.jobId);
-          const inPending = pendingJobs.some(j => j.jobId === job.jobId);
-          if (!inDisplayed && !inPending) {
-            if (isScrolledToTop) {
-              jobs = [job, ...jobs];
-            } else {
-              pendingJobs = [job, ...pendingJobs];
-              newJobsCount = pendingJobs.length;
-              showNewJobsNotification = true;
-            }
-          }
-        }
-        return;
-      }
-    }
 
   }
 
@@ -228,29 +176,13 @@
     }
   }
 
-  /**
-   * Handles worker configuration updates
-   * @param {Object} event - The update event
-   * @param {number} event.detail.workerId - ID of the worker to update
-   * @param {Object} event.detail.updates - New configuration values
-   * @async
-   */
-  async function handleWorkerUpdated(event) {
-    const { workerId, updates } = event.detail;
-    try {
-      await updateWorkerConfig(workerId, updates);
-      workers = workers.map(w => w.workerId === workerId ? { ...w, ...updates } : w);
-    } catch (err) {
-      console.error('Worker update failed:', err);
-    }
-  }
 </script>
 
 <!-- Main dashboard container -->
 <div class="dashboard-content" data-testid="dashboard-page">
   <!-- Workers section -->
   <div class="dashboard-worker-section">
-    <WorkerCompo {workers} onWorkerUpdated={handleWorkerUpdated}/>
+    <WorkerCompo />
   </div>
 
   <!-- Success message display -->

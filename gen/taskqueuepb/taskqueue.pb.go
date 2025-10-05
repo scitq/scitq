@@ -559,6 +559,7 @@ type Worker struct {
 	Provider      string                 `protobuf:"bytes,9,opt,name=provider,proto3" json:"provider,omitempty"`
 	Region        string                 `protobuf:"bytes,10,opt,name=region,proto3" json:"region,omitempty"`
 	StepId        *int32                 `protobuf:"varint,11,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	StepName      *string                `protobuf:"bytes,12,opt,name=step_name,json=stepName,proto3,oneof" json:"step_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -668,6 +669,13 @@ func (x *Worker) GetStepId() int32 {
 		return *x.StepId
 	}
 	return 0
+}
+
+func (x *Worker) GetStepName() string {
+	if x != nil && x.StepName != nil {
+		return *x.StepName
+	}
+	return ""
 }
 
 type WorkersList struct {
@@ -6547,7 +6555,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"_task_nameB\x13\n" +
 	"\x11_previous_task_id\"1\n" +
 	"\bTaskList\x12%\n" +
-	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\xad\x02\n" +
+	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\xdd\x02\n" +
 	"\x06Worker\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -6560,9 +6568,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bprovider\x18\t \x01(\tR\bprovider\x12\x16\n" +
 	"\x06region\x18\n" +
 	" \x01(\tR\x06region\x12\x1c\n" +
-	"\astep_id\x18\v \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
+	"\astep_id\x18\v \x01(\x05H\x00R\x06stepId\x88\x01\x01\x12 \n" +
+	"\tstep_name\x18\f \x01(\tH\x01R\bstepName\x88\x01\x01B\n" +
 	"\n" +
-	"\b_step_id\":\n" +
+	"\b_step_idB\f\n" +
+	"\n" +
+	"_step_name\":\n" +
 	"\vWorkersList\x12+\n" +
 	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"J\n" +
 	"\x12ListWorkersRequest\x12$\n" +

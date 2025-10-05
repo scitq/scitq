@@ -1320,19 +1320,21 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var providerName string
 		var cpu int32
 		var memory float32
+		var stepName sql.NullString
 
 		err = tx.QueryRow(`WITH insertquery AS (
 			INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent, status)
 			VALUES (NULLIF($1,0), $5 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE, 'I')
-			RETURNING worker_id, worker_name, region_id, flavor_id
+			RETURNING worker_id, worker_name, region_id, flavor_id, step_id
 		)
-		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem
+		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem, s.step_name
 		FROM insertquery iq
 		JOIN region r ON iq.region_id = r.region_id
 		JOIN flavor f ON iq.flavor_id = f.flavor_id
-		JOIN provider p ON r.provider_id = p.provider_id`,
+		JOIN provider p ON r.provider_id = p.provider_id
+		LEFT JOIN step s ON s.step_id = iq.step_id`,
 			req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
-			&workerID, &workerName, &providerID, &providerName, &regionName, &flavorName, &cpu, &memory)
+			&workerID, &workerName, &providerID, &providerName, &regionName, &flavorName, &cpu, &memory, &stepName)
 		if err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf(
@@ -1378,6 +1380,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		type workerPayload struct {
 			WorkerId    int32  `json:"workerId"`
 			Name        string `json:"name"`
+			StepName    string `json:"stepName"`
+			StepId      *int32 `json:"stepId,omitempty"`
 			Concurrency int32  `json:"concurrency"`
 			Prefetch    int32  `json:"prefetch"`
 			Status      string `json:"status"`
@@ -1391,6 +1395,10 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			ModifiedAt time.Time `json:"modifiedAt,omitempty"`
 		}
 
+		var stepDisplayName string
+		if stepName.Valid {
+			stepDisplayName = stepName.String
+		}
 		ws.EmitWS("worker", workerID, "created", struct {
 			Worker workerPayload `json:"worker"`
 			Job    jobPayload    `json:"job"`
@@ -1398,6 +1406,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			Worker: workerPayload{
 				WorkerId:    workerID,
 				Name:        workerName,
+				StepName:    stepDisplayName,
+				StepId:      req.StepId,
 				Concurrency: req.Concurrency,
 				Prefetch:    req.Concurrency,
 				Status:      "P",
@@ -2170,7 +2180,6 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	var workers []*pb.Worker
 	var rows *sql.Rows
 	var err error
-	var stepId sql.NullInt32
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -2191,11 +2200,13 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			COALESCE(r.region_name, '') AS region_name, 
 			COALESCE(p.provider_name || '.' || p.config_name, '') AS provider,
 			COALESCE(f.flavor_name, '') AS flavor,
-			w.step_id
+			w.step_id,
+			s.step_name
 		FROM worker w
 		LEFT JOIN region r ON r.region_id = w.region_id
 		LEFT JOIN provider p ON r.provider_id = p.provider_id
 		LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
+		LEFT JOIN step s ON s.step_id = w.step_id
 		`
 
 	if req.WorkflowId != nil {
@@ -2219,18 +2230,22 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 
 	for rows.Next() {
 		var worker pb.Worker
+		var stepId sql.NullInt32
+		var stepName sql.NullString
+
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
-			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor, &stepId)
+			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor, &stepId, &stepName)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan task: %v", err)
 			continue
 		}
 		if stepId.Valid {
-			sid := stepId.Int32
-			worker.StepId = &sid
-		} else {
-			worker.StepId = nil
+			worker.StepId = &stepId.Int32
 		}
+		if stepName.Valid {
+			worker.StepName = &stepName.String
+		}
+
 		workers = append(workers, &worker)
 	}
 

@@ -450,10 +450,15 @@ func recycleWorkers(
 
 	// Collect updated worker ids and names using RETURNING so we can emit richer WS events
 	q := fmt.Sprintf(`
-        UPDATE worker
-        SET step_id = $1, concurrency = $2, prefetch = $3
-        WHERE worker_id IN %s
-        RETURNING worker_id, worker_name`, idList)
+        WITH updatequery AS (
+			UPDATE worker
+			SET step_id = $1, concurrency = $2, prefetch = $3
+			WHERE worker_id IN %s
+			RETURNING worker_id, worker_name, step_id
+		)
+		SELECT uq.worker_id,uq.worker_name,s.step_name
+		FROM updatequery uq
+		LEFT JOIN step s ON s.step_id=uq.step_id`, idList)
 
 	rows2, err := tx.Query(q, stepID, newConcurrency, prefetch)
 	if err != nil {
@@ -463,45 +468,47 @@ func recycleWorkers(
 	}
 	defer rows2.Close()
 
-	workerNames := make(map[int32]string, len(workerIDs))
+	var affected int
 	for rows2.Next() {
-		var rwid int32
-		var rname sql.NullString
-		if err := rows2.Scan(&rwid, &rname); err != nil {
+		affected++
+		var workerId int32
+		var workerName, stepName sql.NullString
+		if err := rows2.Scan(&workerId, &workerName, &stepName); err != nil {
 			log.Printf("⚠️ Failed to scan updated worker row: %v", err)
 			tx.Rollback()
 			return 0
 		}
-		if rname.Valid {
-			workerNames[rwid] = rname.String
-		} else {
-			workerNames[rwid] = ""
+
+		var stepDisplayName, workerDisplayName string
+		if stepName.Valid {
+			stepDisplayName = stepName.String
 		}
+		if workerName.Valid {
+			workerDisplayName = workerName.String
+		}
+
+		// Emit WS update, including the worker name when available
+		ws.EmitWS("worker", workerId, "updated", struct {
+			WorkerId    int32  `json:"workerId"`
+			Name        string `json:"name,omitempty"`
+			StepId      int32  `json:"stepId"`
+			StepName    string `json:"stepName,omitempty"`
+			Concurrency int    `json:"concurrency"`
+			Prefetch    int    `json:"prefetch"`
+		}{
+			WorkerId:    workerId,
+			Name:        workerDisplayName,
+			StepId:      stepID,
+			StepName:    stepDisplayName,
+			Concurrency: newConcurrency,
+			Prefetch:    prefetch,
+		})
 	}
 	if err := rows2.Err(); err != nil {
 		log.Printf("⚠️ Error iterating updated workers: %v", err)
 		tx.Rollback()
 		return 0
 	}
-
-	// Emit WS updates, including the worker name when available
-	for _, wid := range workerIDs {
-		ws.EmitWS("worker", wid, "updated", struct {
-			WorkerId    int32  `json:"workerId"`
-			Name        string `json:"name,omitempty"`
-			StepId      int32  `json:"stepId"`
-			Concurrency int    `json:"concurrency"`
-			Prefetch    int    `json:"prefetch"`
-		}{
-			WorkerId:    wid,
-			Name:        workerNames[wid],
-			StepId:      stepID,
-			Concurrency: newConcurrency,
-			Prefetch:    prefetch,
-		})
-	}
-
-	affected := len(workerNames)
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Commit failed: %v", err)
@@ -512,7 +519,7 @@ func recycleWorkers(
 		weightMemory.Store(wid, m)
 	}
 
-	return int(affected)
+	return affected
 }
 
 func selectWorkersForRecruiter(
