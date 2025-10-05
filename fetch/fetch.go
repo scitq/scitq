@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync"
 
 	//"net/url"
 
@@ -64,6 +65,8 @@ import (
 //}
 
 const DefaultRcloneConfig = "/etc/rclone.conf"
+
+var configMu sync.Mutex
 
 func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
 	// Create a context for the operation
@@ -493,9 +496,15 @@ func loadConfigFromFile(configPath string) (string, error) {
 	return tmpName, nil
 }
 
-// Add a new remote in memory without modifying the config file
 func addRemoteInMemory(protocol string, options map[string]string) (string, error) {
+	configMu.Lock()
+	defer configMu.Unlock()
+
 	uniqueName := protocol + "-" + uuid.New().String()
+
+	if options == nil {
+		options = map[string]string{}
+	}
 
 	cfg := configmap.Simple{}
 	for k, v := range options {
@@ -513,7 +522,6 @@ func addRemoteInMemory(protocol string, options map[string]string) (string, erro
 		return "", fmt.Errorf("failed to register remote: %v", err)
 	}
 
-	//fmt.Println("Remote", uniqueName, "added in memory!")
 	return uniqueName, nil
 }
 
