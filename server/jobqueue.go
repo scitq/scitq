@@ -8,6 +8,7 @@ import (
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	ws "github.com/scitq/scitq/server/websocket"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -129,5 +130,17 @@ func (s *taskQueueServer) processJob(job Job) error {
 // updateJobStatus updates the job status in the database.
 func (s *taskQueueServer) updateJobStatus(jobID int32, status string) error {
 	_, err := s.db.Exec("UPDATE job SET status=$1,modified_at=NOW() WHERE job_id=$2", status, jobID)
+
+	// Emit a normalized job.updated event, now including modifiedAt
+	ws.EmitWS("job", jobID, "updated", struct {
+		JobId      int32     `json:"jobId"`
+		Status     *string   `json:"status,omitempty"`
+		ModifiedAt time.Time `json:"modifiedAt"`
+	}{
+		JobId:      jobID,
+		Status:     &status,
+		ModifiedAt: time.Now(),
+	})
+
 	return err
 }
