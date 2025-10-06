@@ -150,9 +150,18 @@ endef
 
 .PHONY: integration-test
 integration-test:
-	cd tests/integration && \
+	@cd tests/integration && \
 	if [ -n "$(TEST)" ]; then \
 		go test -v -run '$(TEST)' ./...; \
 	else \
 		go test -v ./...; \
+	fi
+
+.PHONY: fresh-integration-test
+fresh-integration-test:
+	@cd tests/integration && \
+	if [ -n "$(TEST)" ]; then \
+		go test -count=1 -v -run '$(TEST)' ./...; \
+	else \
+		go test -count=1 -v ./...; \
 	fi

@@ -26,6 +26,7 @@ func TestRetryClonesHiddenParent(t *testing.T) {
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
 	token := strings.TrimSpace(out)
+	//c.Attr.Token = token
 
 	// 3) Create an authenticated gRPC client via lib helper
 	qclient, err := lib.CreateClient(serverAddr, token)

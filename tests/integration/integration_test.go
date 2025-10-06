@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +36,8 @@ import (
 
 	_ "github.com/lib/pq"
 )
+
+var serverStartMu sync.Mutex
 
 func captureOutput(f func()) string {
 	// Create a pipe to capture stdout
@@ -146,13 +149,20 @@ func SendRawGRPCRequest(serverAddr, token string) {
 }
 
 func runCLICommand(c cli.CLI, args []string) (string, error) {
-	server, timeout := c.Attr.Server, c.Attr.TimeOut
-	c.Attr = cli.Attr{Server: server, TimeOut: timeout} // Reset before parsing
+	server, timeout, token := c.Attr.Server, c.Attr.TimeOut, c.Attr.Token
+	c2 := cli.CLI{
+		Attr: cli.Attr{
+			Server:  server,
+			TimeOut: timeout,
+			Token:   token,
+		},
+	}
+	//c.Attr = cli.Attr{Server: server, TimeOut: timeout, Token: token} // Reset before parsing
 	os.Args = append([]string{"scitq-cli"}, args...)
 
 	var err error
 	output := captureOutput(func() {
-		err = cli.Run(c) // Generic CLI entry point if available
+		err = cli.Run(c2) // Generic CLI entry point if available
 	})
 	return output, err
 }
@@ -161,6 +171,8 @@ func runCLICommand(c cli.CLI, args []string) (string, error) {
 // It returns the gRPC address, the worker token, admin credentials, and a cleanup func.
 func startServerForTest(t *testing.T) (serverAddr, workerToken, adminUser, adminPassword string, cleanup func()) {
 	t.Helper()
+	serverStartMu.Lock()
+	defer serverStartMu.Unlock()
 
 	// Define the PostgreSQL test container with proper readiness check
 	req := testcontainers.ContainerRequest{
@@ -265,6 +277,8 @@ func startServerForTest(t *testing.T) (serverAddr, workerToken, adminUser, admin
 		// t.TempDir() handles cleanup of temp subdirs
 	}
 
+	t.Logf("🏁 Starting server with address %s token %s admin %s and pass %s",
+		serverAddr, workerToken, adminUser, adminPassword)
 	return serverAddr, workerToken, adminUser, adminPassword, cleanup
 }
 
@@ -312,8 +326,7 @@ func TestIntegration(t *testing.T) {
 	assert.NoError(t, err)
 	token := strings.TrimSpace(output)
 	assert.NotEmpty(t, token)
-	// Export the token so future CLI calls can use it
-	os.Setenv("SCITQ_TOKEN", token)
+	c.Attr.Token = token
 
 	// creating Task
 	_, err = runCLICommand(c, []string{"task", "create", "--container", "ubuntu", "--command", "ls -la"})

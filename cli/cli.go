@@ -24,6 +24,7 @@ import (
 type Attr struct {
 	Server  string `arg:"-s,--server,env:SCITQ_SERVER" default:"localhost:50051" help:"gRPC server address"`
 	TimeOut int    `arg:"-t,--timeout" default:"300" help:"Timeout for server interaction (in seconds)"`
+	Token   string `arg:"-T,--token" default:"" help:"authentication token (used for tests)"`
 
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
@@ -1530,11 +1531,16 @@ func Run(c CLI) error {
 	}
 	// Establish gRPC connection
 	// Ensure token exists (interactive if needed)
-	token, err := getToken()
+	token := c.Attr.Token
+	if token == "" {
+		var err error
+		token, err = getToken()
 
-	if err != nil {
-		log.Fatalf("Could not create client: %v", err)
+		if err != nil {
+			log.Fatalf("Could not create client: %v", err)
+		}
 	}
+
 	qc, err := lib.CreateClient(c.Attr.Server, token)
 	if err != nil {
 		log.Fatalf("Could not connect to server: %v", err)
