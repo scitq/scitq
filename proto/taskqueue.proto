@@ -29,6 +29,7 @@ service TaskQueue {
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc ListProviders(google.protobuf.Empty) returns (ProviderList);
     rpc ListRegions(google.protobuf.Empty) returns (RegionList);
+    rpc CreateFlavor(FlavorCreateRequest) returns (FlavorId);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
     rpc GetDockerCredentials(google.protobuf.Empty) returns (DockerCredentials);
     rpc Login(LoginRequest) returns (LoginResponse);
@@ -760,4 +761,25 @@ message Region {
 
 message RegionList {
   repeated Region regions = 1;
+}
+
+message FlavorCreateRequest {
+  string provider_name = 1;
+  string config_name = 2;
+  string flavor_name = 3;
+  int32 cpu = 4;
+  float memory = 5;
+  float disk = 6;
+  optional int32 bandwidth = 7;
+  optional string gpu = 8;
+  optional int32 gpumem = 9;
+  optional bool has_gpu = 10;
+  optional bool has_quick_disks = 11; 
+  repeated string region_names = 12;
+  repeated float costs = 13;
+  repeated float evictions = 14;
+}
+
+message FlavorId {
+ int32 flavor_id = 1;
 }

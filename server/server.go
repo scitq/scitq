@@ -2,6 +2,8 @@ package server
 
 import (
 	"bufio"
+	"errors"
+
 	// "container/list"
 	"context"
 	"crypto/tls"
@@ -3472,6 +3474,128 @@ func (s *taskQueueServer) ListRegions(ctx context.Context, _ *emptypb.Empty) (*p
 	}
 
 	return &pb.RegionList{Regions: regions}, nil
+}
+
+func nullInt32(v *int32) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullString(v *string) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullBool(v *bool) interface{} {
+	if v == nil {
+		return false
+	}
+	return *v
+}
+
+func (s *taskQueueServer) CreateFlavor(ctx context.Context, req *pb.FlavorCreateRequest) (*pb.FlavorId, error) {
+	// --- 1️⃣ Check admin privilege ---
+	user := GetUserFromContext(ctx)
+	if user == nil || !user.IsAdmin {
+		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
+	}
+
+	// --- 2️⃣ Basic validation ---
+	if req.ProviderName == "" || req.ConfigName == "" || req.FlavorName == "" {
+		return nil, status.Error(codes.InvalidArgument, "provider_name, config_name, and flavor_name are required")
+	}
+	if len(req.RegionNames) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one region is required")
+	}
+	if len(req.Costs) > 0 && len(req.Costs) != len(req.RegionNames) {
+		return nil, status.Error(codes.InvalidArgument, "costs length must match region_names length")
+	}
+	if len(req.Evictions) > 0 && len(req.Evictions) != len(req.RegionNames) {
+		return nil, status.Error(codes.InvalidArgument, "evictions length must match region_names length")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to start transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// --- 3️⃣ Resolve provider_id ---
+	var providerID int32
+	err = tx.QueryRowContext(ctx, `
+		SELECT provider_id FROM provider
+		WHERE provider_name=$1 AND config_name=$2
+	`, req.ProviderName, req.ConfigName).Scan(&providerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, status.Errorf(codes.NotFound, "provider %s/%s not found", req.ProviderName, req.ConfigName)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to resolve provider: %v", err)
+	}
+
+	// --- 4️⃣ Insert flavor ---
+	var flavorID int32
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, bandwidth, gpu, gpumem, has_gpu, has_quick_disks)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		RETURNING flavor_id
+	`,
+		providerID,
+		req.FlavorName,
+		req.Cpu,
+		req.Memory,
+		req.Disk,
+		nullInt32(req.Bandwidth),
+		nullString(req.Gpu),
+		nullInt32(req.Gpumem),
+		nullBool(req.HasGpu),
+		nullBool(req.HasQuickDisks),
+	).Scan(&flavorID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to insert flavor: %v", err)
+	}
+
+	// --- 5️⃣ Link flavor to regions & create metrics ---
+	for i, regionName := range req.RegionNames {
+		var regionID int32
+		err = tx.QueryRowContext(ctx, `
+			SELECT region_id FROM region
+			WHERE provider_id=$1 AND region_name=$2
+		`, providerID, regionName).Scan(&regionID)
+		if err != nil {
+			return nil, status.Errorf(codes.NotFound, "region %s not found for provider", regionName)
+		}
+
+		var cost, eviction float64
+		if len(req.Costs) > i {
+			cost = float64(req.Costs[i])
+		}
+		if len(req.Evictions) > i {
+			eviction = float64(req.Evictions[i])
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO flavor_region (flavor_id, region_id, eviction, cost)
+			VALUES ($1,$2,$3,$4)
+		`, flavorID, regionID, eviction, cost)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to insert flavor_region for %s: %v", regionName, err)
+		}
+	}
+
+	// --- 6️⃣ Commit transaction ---
+	if err := tx.Commit(); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
+	}
+
+	log.Printf("✅ Created new flavor '%s' for provider %s/%s with %d region(s)",
+		req.FlavorName, req.ProviderName, req.ConfigName, len(req.RegionNames))
+
+	return &pb.FlavorId{FlavorId: flavorID}, nil
 }
 
 func applyMigrations(db *sql.DB) error {

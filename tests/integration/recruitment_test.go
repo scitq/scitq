@@ -6,6 +6,7 @@ import (
 	"time"
 
 	cli "github.com/scitq/scitq/cli"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	lib "github.com/scitq/scitq/lib"
 	"github.com/scitq/scitq/server/config"
 	"github.com/stretchr/testify/require"
@@ -61,7 +62,7 @@ func TestRecruitmentCycle(t *testing.T) {
 		if p.ProviderName == "fake" {
 			found = true
 			providerId = p.ProviderId
-			t.Logf("✅ Found fake provider: %v (config=%v)", p.ProviderName, p.ConfigName)
+			t.Logf("✅ Found fake provider: %v (id=%d, config=%v)", p.ProviderName, providerId, p.ConfigName)
 		}
 	}
 	require.True(t, found, "fake provider not registered")
@@ -71,9 +72,11 @@ func TestRecruitmentCycle(t *testing.T) {
 	require.NoError(t, err)
 
 	names := []string{}
+	regionIds := make(map[string]int32)
 	for _, r := range regions.Regions {
 		if r.ProviderId == providerId {
 			names = append(names, r.RegionName)
+			regionIds[r.RegionName] = r.RegionId
 		}
 	}
 	require.ElementsMatch(t, []string{"r1", "r2", "r3"}, names)
@@ -81,6 +84,86 @@ func TestRecruitmentCycle(t *testing.T) {
 	// --- 7️⃣ Wait for recruiter loop ---
 	time.Sleep(5 * time.Second)
 	t.Log("✅ Fake provider and regions synced correctly — recruiter ready for further tests.")
+
+	// --- 8️⃣ Create flavors on fake provider ---
+	fid, err := qc.CreateFlavor(ctx, &pb.FlavorCreateRequest{
+		ProviderName: "fake",
+		ConfigName:   "test",
+		FlavorName:   "cheap8",
+		RegionNames:  []string{"r1"},
+		Evictions:    []float32{0},
+		Costs:        []float32{1},
+		Cpu:          8,
+		Memory:       30.0,
+		Disk:         50.0,
+	})
+	require.NoError(t, err, "failed to create flavor cheap8")
+	cheap8_id := fid.FlavorId
+	t.Logf("✅ Created flavor cheap8 (id:%d)", cheap8_id)
+
+	fid, err = qc.CreateFlavor(ctx, &pb.FlavorCreateRequest{
+		ProviderName: "fake",
+		ConfigName:   "test",
+		FlavorName:   "exp16",
+		RegionNames:  []string{"r2"},
+		Evictions:    []float32{0},
+		Costs:        []float32{3},
+		Cpu:          16,
+		Memory:       60.0,
+		Disk:         50.0,
+	})
+	require.NoError(t, err, "failed to create flavor cheap8")
+	exp16_id := fid.FlavorId
+	t.Logf("✅ Created flavor exp16 (id:%d)", exp16_id)
+
+	fid, err = qc.CreateFlavor(ctx, &pb.FlavorCreateRequest{
+		ProviderName: "fake",
+		ConfigName:   "test",
+		FlavorName:   "tiny4",
+		RegionNames:  []string{"r3"},
+		Evictions:    []float32{0},
+		Costs:        []float32{0.5},
+		Cpu:          4,
+		Memory:       15.0,
+		Disk:         20.0,
+	})
+	require.NoError(t, err, "failed to create flavor cheap8")
+	tiny4_id := fid.FlavorId
+	t.Logf("✅ Created flavor tiny4 (id:%d)", tiny4_id)
+
+	// --- 9️⃣ Manually create a worker to validate fake provider creation path ---
+	req := &pb.WorkerRequest{
+		ProviderId:  providerId,
+		FlavorId:    tiny4_id,
+		RegionId:    regionIds["r3"],
+		Concurrency: 1,
+		Prefetch:    0,
+		Number:      1,
+	}
+
+	wresp, err := qc.CreateWorker(ctx, req)
+	require.NoError(t, err, "failed to create worker on fake provider")
+	require.NotNil(t, wresp, "CreateWorker returned nil response")
+
+	t.Logf("Answer detail: wresp %v", wresp.WorkersDetails)
+	t.Logf("✅ Worker created successfully: ID=%d, Name=%s, JobID=%d",
+		wresp.WorkersDetails[0].WorkerId, wresp.WorkersDetails[0].WorkerName, wresp.WorkersDetails[0].JobId)
+	workerName := wresp.WorkersDetails[0].WorkerName
+
+	// Give the watchdog loop a moment to pick up the new worker (if relevant)
+	time.Sleep(1 * time.Second)
+
+	// Verify worker presence via DB-level API
+	wlist, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
+	require.NoError(t, err)
+	var foundWorker bool
+	for _, w := range wlist.Workers {
+		if w.Name == workerName {
+			foundWorker = true
+			t.Logf("✅ Verified fake worker found in list (status=%s)", w.Status)
+		}
+	}
+	require.True(t, foundWorker, "fake worker not found in worker list")
 }
 
 // helper

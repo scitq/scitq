@@ -2031,6 +2031,76 @@ export interface RegionList {
      */
     regions: Region[];
 }
+/**
+ * @generated from protobuf message taskqueue.FlavorCreateRequest
+ */
+export interface FlavorCreateRequest {
+    /**
+     * @generated from protobuf field: string provider_name = 1
+     */
+    providerName: string;
+    /**
+     * @generated from protobuf field: string config_name = 2
+     */
+    configName: string;
+    /**
+     * @generated from protobuf field: string flavor_name = 3
+     */
+    flavorName: string;
+    /**
+     * @generated from protobuf field: int32 cpu = 4
+     */
+    cpu: number;
+    /**
+     * @generated from protobuf field: float memory = 5
+     */
+    memory: number;
+    /**
+     * @generated from protobuf field: float disk = 6
+     */
+    disk: number;
+    /**
+     * @generated from protobuf field: optional int32 bandwidth = 7
+     */
+    bandwidth?: number;
+    /**
+     * @generated from protobuf field: optional string gpu = 8
+     */
+    gpu?: string;
+    /**
+     * @generated from protobuf field: optional int32 gpumem = 9
+     */
+    gpumem?: number;
+    /**
+     * @generated from protobuf field: optional bool has_gpu = 10
+     */
+    hasGpu?: boolean;
+    /**
+     * @generated from protobuf field: optional bool has_quick_disks = 11
+     */
+    hasQuickDisks?: boolean;
+    /**
+     * @generated from protobuf field: repeated string region_names = 12
+     */
+    regionNames: string[];
+    /**
+     * @generated from protobuf field: repeated float costs = 13
+     */
+    costs: number[];
+    /**
+     * @generated from protobuf field: repeated float evictions = 14
+     */
+    evictions: number[];
+}
+/**
+ * @generated from protobuf message taskqueue.FlavorId
+ */
+export interface FlavorId {
+    /**
+     * @generated from protobuf field: int32 flavor_id = 1
+     */
+    flavorId: number;
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class TaskResponse$Type extends MessageType<TaskResponse> {
     constructor() {
@@ -9068,6 +9138,215 @@ class RegionList$Type extends MessageType<RegionList> {
  * @generated MessageType for protobuf message taskqueue.RegionList
  */
 export const RegionList = new RegionList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FlavorCreateRequest$Type extends MessageType<FlavorCreateRequest> {
+    constructor() {
+        super("taskqueue.FlavorCreateRequest", [
+            { no: 1, name: "provider_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "config_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "flavor_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "cpu", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "memory", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 6, name: "disk", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 7, name: "bandwidth", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "gpu", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "gpumem", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "has_gpu", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 11, name: "has_quick_disks", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 12, name: "region_names", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 13, name: "costs", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 14, name: "evictions", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FlavorCreateRequest>): FlavorCreateRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.providerName = "";
+        message.configName = "";
+        message.flavorName = "";
+        message.cpu = 0;
+        message.memory = 0;
+        message.disk = 0;
+        message.regionNames = [];
+        message.costs = [];
+        message.evictions = [];
+        if (value !== undefined)
+            reflectionMergePartial<FlavorCreateRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FlavorCreateRequest): FlavorCreateRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string provider_name */ 1:
+                    message.providerName = reader.string();
+                    break;
+                case /* string config_name */ 2:
+                    message.configName = reader.string();
+                    break;
+                case /* string flavor_name */ 3:
+                    message.flavorName = reader.string();
+                    break;
+                case /* int32 cpu */ 4:
+                    message.cpu = reader.int32();
+                    break;
+                case /* float memory */ 5:
+                    message.memory = reader.float();
+                    break;
+                case /* float disk */ 6:
+                    message.disk = reader.float();
+                    break;
+                case /* optional int32 bandwidth */ 7:
+                    message.bandwidth = reader.int32();
+                    break;
+                case /* optional string gpu */ 8:
+                    message.gpu = reader.string();
+                    break;
+                case /* optional int32 gpumem */ 9:
+                    message.gpumem = reader.int32();
+                    break;
+                case /* optional bool has_gpu */ 10:
+                    message.hasGpu = reader.bool();
+                    break;
+                case /* optional bool has_quick_disks */ 11:
+                    message.hasQuickDisks = reader.bool();
+                    break;
+                case /* repeated string region_names */ 12:
+                    message.regionNames.push(reader.string());
+                    break;
+                case /* repeated float costs */ 13:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.costs.push(reader.float());
+                    else
+                        message.costs.push(reader.float());
+                    break;
+                case /* repeated float evictions */ 14:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.evictions.push(reader.float());
+                    else
+                        message.evictions.push(reader.float());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FlavorCreateRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string provider_name = 1; */
+        if (message.providerName !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.providerName);
+        /* string config_name = 2; */
+        if (message.configName !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.configName);
+        /* string flavor_name = 3; */
+        if (message.flavorName !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.flavorName);
+        /* int32 cpu = 4; */
+        if (message.cpu !== 0)
+            writer.tag(4, WireType.Varint).int32(message.cpu);
+        /* float memory = 5; */
+        if (message.memory !== 0)
+            writer.tag(5, WireType.Bit32).float(message.memory);
+        /* float disk = 6; */
+        if (message.disk !== 0)
+            writer.tag(6, WireType.Bit32).float(message.disk);
+        /* optional int32 bandwidth = 7; */
+        if (message.bandwidth !== undefined)
+            writer.tag(7, WireType.Varint).int32(message.bandwidth);
+        /* optional string gpu = 8; */
+        if (message.gpu !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.gpu);
+        /* optional int32 gpumem = 9; */
+        if (message.gpumem !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.gpumem);
+        /* optional bool has_gpu = 10; */
+        if (message.hasGpu !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.hasGpu);
+        /* optional bool has_quick_disks = 11; */
+        if (message.hasQuickDisks !== undefined)
+            writer.tag(11, WireType.Varint).bool(message.hasQuickDisks);
+        /* repeated string region_names = 12; */
+        for (let i = 0; i < message.regionNames.length; i++)
+            writer.tag(12, WireType.LengthDelimited).string(message.regionNames[i]);
+        /* repeated float costs = 13; */
+        if (message.costs.length) {
+            writer.tag(13, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.costs.length; i++)
+                writer.float(message.costs[i]);
+            writer.join();
+        }
+        /* repeated float evictions = 14; */
+        if (message.evictions.length) {
+            writer.tag(14, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.evictions.length; i++)
+                writer.float(message.evictions[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.FlavorCreateRequest
+ */
+export const FlavorCreateRequest = new FlavorCreateRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FlavorId$Type extends MessageType<FlavorId> {
+    constructor() {
+        super("taskqueue.FlavorId", [
+            { no: 1, name: "flavor_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FlavorId>): FlavorId {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.flavorId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<FlavorId>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FlavorId): FlavorId {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 flavor_id */ 1:
+                    message.flavorId = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FlavorId, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 flavor_id = 1; */
+        if (message.flavorId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.flavorId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.FlavorId
+ */
+export const FlavorId = new FlavorId$Type();
 /**
  * @generated ServiceType for protobuf service taskqueue.TaskQueue
  */
@@ -9094,6 +9373,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListFlavors", options: {}, I: ListFlavorsRequest, O: FlavorsList },
     { name: "ListProviders", options: {}, I: Empty, O: ProviderList },
     { name: "ListRegions", options: {}, I: Empty, O: RegionList },
+    { name: "CreateFlavor", options: {}, I: FlavorCreateRequest, O: FlavorId },
     { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneConfig },
     { name: "GetDockerCredentials", options: {}, I: Empty, O: DockerCredentials },
     { name: "Login", options: {}, I: LoginRequest, O: LoginResponse },
