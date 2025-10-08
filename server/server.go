@@ -2733,7 +2733,7 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
 	query := `SELECT step_id, rank, protofilter,
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
-		cpu_per_task, memory_per_task, disk_per_task, prefix_percent, concurrency_min, concurrency_max
+		cpu_per_task, memory_per_task, disk_per_task, prefetch_percent, concurrency_min, concurrency_max
 		FROM recruiter
 		ORDER BY step_id, rank`
 

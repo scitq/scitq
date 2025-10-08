@@ -106,14 +106,20 @@ type Attr struct {
 			StepId int32 `arg:"--step-id" help:"Step ID to filter"`
 		} `arg:"subcommand:list" help:"List all recruiters"`
 		Create *struct {
-			StepId      int32  `arg:"--step-id,required" help:"Step ID"`
-			Rank        int32  `arg:"--rank" default:"1" help:"Recruiter rank"`
-			Protofilter string `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
-			Concurrency int32  `arg:"--concurrency" default:"1" help:"Worker initial concurrency"`
-			Prefetch    int32  `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
-			MaxWorkers  *int32 `arg:"--max-workers" help:"Maximum number of workers"`
-			Rounds      int    `arg:"--rounds" help:"Number of rounds"`
-			Timeout     int    `arg:"--timeout" default:"10" help:"Timeout in seconds"`
+			StepId          int32    `arg:"--step-id,required" help:"Step ID"`
+			Rank            int32    `arg:"--rank" default:"1" help:"Recruiter rank"`
+			Protofilter     string   `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
+			Concurrency     *int32   `arg:"--concurrency" help:"Worker initial concurrency"`
+			Prefetch        *int32   `arg:"--prefetch" help:"Worker initial prefetch"`
+			PrefetchPercent *int32   `arg:"--prefetch-percent" help:"Worker initial prefetc (expressed as a %% of concurrency)"`
+			CpuPerTask      *int32   `arg:"--cpu-per-task" help:"Adaptative concurrency: CPU required for 1 task"`
+			MemoryPerTask   *float32 `arg:"--memory-per-task" help:"Adaptative concurrency: Memory (Gb) required for 1 task"`
+			DiskPerTask     *float32 `arg:"--disk-per-task" help:"Adaptative concurrency: Disk space (Gb) required for 1 task"`
+			ConcurrencyMax  *int32   `arg:"--concurrency" help:"Adaptative concurrency: Maximum concurrency per worker"`
+			ConcurrencyMin  *int32   `arg:"--concurrency" help:"Adaptative concurrency: Minimal concurrency per worker"`
+			MaxWorkers      *int32   `arg:"--max-workers" help:"Maximum number of workers"`
+			Rounds          int      `arg:"--rounds" help:"Number of rounds"`
+			Timeout         int      `arg:"--timeout" default:"10" help:"Timeout in seconds"`
 		} `arg:"subcommand:create" help:"Create a new recruiter"`
 		Delete *struct {
 			StepId int32 `arg:"--step-id,required" help:"Step ID to delete"`
@@ -612,13 +618,51 @@ func (c *CLI) RecruiterList() error {
 
 	fmt.Println("🏗️ Recruiter List:")
 	for _, r := range res.Recruiters {
-		if r.MaxWorkers != nil {
-			fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Max=%d Rounds=%d Timeout=%d Maximum Workers=%d\n",
-				r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.MaxWorkers, r.Rounds, r.Timeout, *r.MaxWorkers)
+		var descLine string
+		if r.Concurrency != nil {
+			descLine = fmt.Sprintf("Step %d | Rank %d | Filter %s | Concurrency=%d",
+				r.StepId, r.Rank, r.Protofilter, *r.Concurrency)
 		} else {
-			fmt.Printf("Step %d | Rank %d | Filter %s | Concurrency=%d Prefetch=%d Rounds=%d Timeout=%d Maximum Workers=unlimited\n",
-				r.StepId, r.Rank, r.Protofilter, r.Concurrency, r.Prefetch, r.Rounds, r.Timeout)
+			descLine = fmt.Sprintf("Step %d | Rank %d | Filter %s | Adaptative concurrency",
+				r.StepId, r.Rank, r.Protofilter)
+			if r.CpuPerTask != nil {
+				descLine += fmt.Sprintf(" CPU:%d/task", *r.CpuPerTask)
+			}
+			if r.MemoryPerTask != nil {
+				descLine += fmt.Sprintf(" Mem:%.1fGb/task", *r.MemoryPerTask)
+			}
+			if r.DiskPerTask != nil {
+				descLine += fmt.Sprintf(" Disk:%.1fGb/task", *r.DiskPerTask)
+			}
+			if r.ConcurrencyMax != nil && r.ConcurrencyMin == nil {
+				descLine += fmt.Sprintf(" (Max:%d)", *r.ConcurrencyMax)
+			}
+			if r.ConcurrencyMax == nil && r.ConcurrencyMin != nil {
+				descLine += fmt.Sprintf(" (Min:%d)", *r.ConcurrencyMin)
+			}
+			if r.ConcurrencyMax != nil && r.ConcurrencyMin != nil {
+				descLine += fmt.Sprintf(" (Min-Max:%d-%d)", *&r.ConcurrencyMin, *r.ConcurrencyMax)
+			}
 		}
+
+		var prefetch string
+		if r.Prefetch != nil {
+			prefetch = fmt.Sprintf("%d", *r.Prefetch)
+		} else {
+			if r.PrefetchPercent != nil {
+				prefetch = fmt.Sprintf("%d%%", *r.PrefetchPercent)
+			}
+		}
+
+		descLine += fmt.Sprintf(" Prefetch=%s Rounds=%d Timeout=%d",
+			prefetch, r.Rounds, r.Timeout)
+
+		if r.MaxWorkers != nil {
+			descLine += fmt.Sprintf(" Maximum Workers=%d\n", *r.MaxWorkers)
+		} else {
+			descLine += fmt.Sprintf(" Maximum Workers unlimited\n")
+		}
+		fmt.Print(descLine)
 	}
 	return nil
 }
@@ -628,14 +672,19 @@ func (c *CLI) RecruiterCreate() error {
 	defer cancel()
 
 	req := &pb.Recruiter{
-		StepId:      c.Attr.Recruiter.Create.StepId,
-		Rank:        c.Attr.Recruiter.Create.Rank,
-		Protofilter: c.Attr.Recruiter.Create.Protofilter,
-		Concurrency: &c.Attr.Recruiter.Create.Concurrency,
-		Prefetch:    &c.Attr.Recruiter.Create.Prefetch,
-		MaxWorkers:  c.Attr.Recruiter.Create.MaxWorkers,
-		Rounds:      int32(c.Attr.Recruiter.Create.Rounds),
-		Timeout:     int32(c.Attr.Recruiter.Create.Timeout),
+		StepId:          c.Attr.Recruiter.Create.StepId,
+		Rank:            c.Attr.Recruiter.Create.Rank,
+		Protofilter:     c.Attr.Recruiter.Create.Protofilter,
+		Concurrency:     c.Attr.Recruiter.Create.Concurrency,
+		Prefetch:        c.Attr.Recruiter.Create.Prefetch,
+		PrefetchPercent: c.Attr.Recruiter.Create.PrefetchPercent,
+		CpuPerTask:      c.Attr.Recruiter.Create.CpuPerTask,
+		MemoryPerTask:   c.Attr.Recruiter.Create.MemoryPerTask,
+		ConcurrencyMin:  c.Attr.Recruiter.Create.ConcurrencyMin,
+		ConcurrencyMax:  c.Attr.Recruiter.Create.ConcurrencyMax,
+		MaxWorkers:      c.Attr.Recruiter.Create.MaxWorkers,
+		Rounds:          int32(c.Attr.Recruiter.Create.Rounds),
+		Timeout:         int32(c.Attr.Recruiter.Create.Timeout),
 	}
 
 	_, err := c.QC.Client.CreateRecruiter(ctx, req)
