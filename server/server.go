@@ -2732,7 +2732,8 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
 	query := `SELECT step_id, rank, protofilter,
-		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
+		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
+		cpu_per_task, memory_per_task, disk_per_task, prefix_percent, concurrency_min, concurrency_max
 		FROM recruiter
 		ORDER BY step_id, rank`
 
@@ -2753,7 +2754,9 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 		var recruiter pb.Recruiter
 		if err := rows.Scan(
 			&recruiter.StepId, &recruiter.Rank, &recruiter.Protofilter,
-			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Rounds, &recruiter.Timeout); err != nil {
+			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Rounds, &recruiter.Timeout,
+			&recruiter.CpuPerTask, &recruiter.MemoryPerTask, &recruiter.DiskPerTask, &recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
+		); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
 		recruiters = append(recruiters, &recruiter)
@@ -2763,33 +2766,50 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 }
 
 func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
+	// --- Validation ---
+	if req.Concurrency == nil && req.CpuPerTask == nil && req.MemoryPerTask == nil && req.DiskPerTask == nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("either worker_concurrency or at least one of cpu_per_task/memory_per_task/disk_per_task must be set")
+	}
+	if req.Prefetch == nil && req.PrefetchPercent == nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("either worker_prefetch or prefetch_percent must be set")
+	}
+	if req.Rounds <= 0 {
+		return &pb.Ack{Success: false}, fmt.Errorf("rounds (number of rounds of execution desired to achieve the current load) must be strictly positive")
+	}
+
 	var err error
 	// Insert with embedded subqueries for provider_id and region_id
 	if req.MaxWorkers == nil {
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO recruiter (
 				step_id, rank, protofilter,
-				worker_concurrency, worker_prefetch, rounds, timeout
+				worker_concurrency, worker_prefetch, rounds, timeout,
+				cpu_per_task, memory_per_task, disk_per_task, prefetch_percent, concurrency_min, concurrency_max
 			) VALUES (
 				$1, $2, $3,
-				$4, $5, $6, $7
+				$4, $5, $6, $7,
+				$8, $9, $10, $11, $12, $13
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
 			req.Concurrency, req.Prefetch, req.Rounds, req.Timeout,
+			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 		)
 	} else {
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO recruiter (
 				step_id, rank, protofilter,
-				worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout
+				worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
+				cpu_per_task, memory_per_task, disk_per_task, prefetch_percent, concurrency_min, concurrency_max
 			) VALUES (
 				$1, $2, $3,
-				$4, $5, $6, $7, $8
+				$4, $5, $6, $7, $8,
+				$9, $10, $11, $12, $13, $14
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
 			req.Concurrency, req.Prefetch, *req.MaxWorkers, req.Rounds, req.Timeout,
+			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 		)
 	}
 
@@ -2814,10 +2834,18 @@ func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.RecruiterUpdate) (*pb.Ack, error) {
-	// Base of the update query
-	q := "UPDATE recruiter SET "
-	args := []any{}
+	// begin transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if req.Rounds != nil && *req.Rounds <= 0 {
+		return &pb.Ack{Success: false}, fmt.Errorf("rounds (number of rounds of execution desired to achieve the current load) must be strictly positive")
+	}
+
 	clauses := []string{}
+	args := []any{}
 
 	if req.Protofilter != nil {
 		clauses = append(clauses, fmt.Sprintf("protofilter = $%d", len(args)+1))
@@ -2843,20 +2871,88 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 		clauses = append(clauses, fmt.Sprintf("timeout = $%d", len(args)+1))
 		args = append(args, *req.Timeout)
 	}
+	if req.CpuPerTask != nil {
+		clauses = append(clauses, fmt.Sprintf("cpu_per_task = $%d", len(args)+1))
+		args = append(args, *req.CpuPerTask)
+	}
+	if req.MemoryPerTask != nil {
+		clauses = append(clauses, fmt.Sprintf("memory_per_task = $%d", len(args)+1))
+		args = append(args, *req.MemoryPerTask)
+	}
+	if req.DiskPerTask != nil {
+		clauses = append(clauses, fmt.Sprintf("disk_per_task = $%d", len(args)+1))
+		args = append(args, *req.DiskPerTask)
+	}
+	if req.PrefetchPercent != nil {
+		clauses = append(clauses, fmt.Sprintf("prefetch_percent = $%d", len(args)+1))
+		args = append(args, *req.PrefetchPercent)
+	}
+	if req.ConcurrencyMin != nil {
+		clauses = append(clauses, fmt.Sprintf("concurrency_min = $%d", len(args)+1))
+		args = append(args, *req.ConcurrencyMin)
+	}
+	if req.ConcurrencyMax != nil {
+		clauses = append(clauses, fmt.Sprintf("concurrency_max = $%d", len(args)+1))
+		args = append(args, *req.ConcurrencyMax)
+	}
 
 	if len(clauses) == 0 {
 		return &pb.Ack{Success: false}, fmt.Errorf("no fields to update")
 	}
 
-	// Finalize query with WHERE clause
-	q += strings.Join(clauses, ", ") + fmt.Sprintf(" WHERE step_id = $%d AND rank = $%d", len(args)+1, len(args)+2)
+	// single statement: update + validate; ensure we always get a row back for status
+	q := fmt.Sprintf(`
+        WITH updated AS (
+            UPDATE recruiter
+            SET %s
+            WHERE step_id = $%d AND rank = $%d
+            RETURNING worker_concurrency, worker_prefetch,
+                      cpu_per_task, memory_per_task, disk_per_task,
+                      prefetch_percent
+        ),
+        verdict AS (
+            SELECT CASE
+                WHEN (worker_concurrency IS NULL
+                      AND cpu_per_task IS NULL
+                      AND memory_per_task IS NULL
+                      AND disk_per_task IS NULL)
+                     THEN 'missing_concurrency'
+                WHEN (worker_prefetch IS NULL
+                      AND prefetch_percent IS NULL)
+                     THEN 'missing_prefetch'
+                ELSE 'ok'
+            END AS status
+            FROM updated
+        )
+        SELECT COALESCE((SELECT status FROM verdict), 'not_found') AS status;
+    `, strings.Join(clauses, ", "), len(args)+1, len(args)+2)
+
 	args = append(args, req.StepId, req.Rank)
 
-	_, err := s.db.ExecContext(ctx, q, args...)
-	if err != nil {
+	var status string
+	if err := tx.QueryRowContext(ctx, q, args...).Scan(&status); err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update recruiter: %w", err)
 	}
-	return &pb.Ack{Success: true}, nil
+
+	switch status {
+	case "ok":
+		if err := tx.Commit(); err != nil {
+			return &pb.Ack{Success: false}, fmt.Errorf("failed to commit recruiter update: %w", err)
+		}
+		return &pb.Ack{Success: true}, nil
+	case "missing_concurrency":
+		// tx will rollback by defer
+		return &pb.Ack{Success: false}, fmt.Errorf("update would leave neither worker_concurrency nor per-task requirements set")
+	case "missing_prefetch":
+		// tx will rollback by defer
+		return &pb.Ack{Success: false}, fmt.Errorf("update would leave neither worker_prefetch nor prefetch_percent set")
+	case "not_found":
+		// tx will rollback by defer
+		return &pb.Ack{Success: false}, fmt.Errorf("recruiter not found for step_id=%d rank=%d", req.StepId, req.Rank)
+	default:
+		// tx will rollback by defer
+		return &pb.Ack{Success: false}, fmt.Errorf("unexpected recruiter update status: %s", status)
+	}
 }
 
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {

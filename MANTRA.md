@@ -6,7 +6,7 @@ This is a special file introducing some important coding style, for developers o
 **More lines of code = more bugs.**  
 Reduce instructions whenever possible, but never at the cost of readability.
 
-## 2. Destructive Refactoring
+## 2. Destructive Code
 **Remove aggressively. Fail early if remnants remain.**  
 Don't preserve scaffolding from previous logic. If you change a model, delete its old paths completely. Break fast, rebuild clean.
 
@@ -21,3 +21,13 @@ Validate only when uncertainty is expected. If the structure is owned and known,
 ## 5. SQL Mapping Discipline
 **Always match the number and order of SQL SELECT columns with Scan() targets — precisely and explicitly.**  
 Always validate the number of variables, expected types, and their semantics.
+
+## 6. SQL Query Refactoring
+**Avoid using several SQL queries when one can suffice.**
+Prefer single, comprehensive statements (WITH, RETURNING, joins) over multiple round-trips. Push logic into the database and keep each operation atomic.
+
+## 7. Resistance
+**Question all redesigns.**
+Previous choices were made for a reason; changing them isn’t progress by default.
+Every modification carries a hidden cost — more code, more complexity, more potential for bugs.
+Before rewriting, measure the true gain against those costs, and change only when the benefit is undeniable.

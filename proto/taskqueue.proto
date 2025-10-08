@@ -419,11 +419,17 @@ message Recruiter {
     int32 step_id = 1;
     int32 rank = 2;
     string protofilter = 3;
-    int32 concurrency = 4;
-    int32 prefetch = 5;
+    optional int32 concurrency = 4;
+    optional int32 prefetch = 5;
     optional int32 max_workers = 6;
     int32 rounds = 7;
     int32 timeout = 8;
+    optional int32 cpu_per_task = 9;
+    optional float memory_per_task = 10;
+    optional float disk_per_task = 11;
+    optional int32 prefetch_percent = 12;
+    optional int32 concurrency_min = 13;
+    optional int32 concurrency_max = 14;
 }
 
 message RecruiterUpdate {
@@ -435,6 +441,12 @@ message RecruiterUpdate {
   optional int32 max_workers = 6;
   optional int32 rounds = 7;
   optional int32 timeout = 8;
+  optional int32 cpu_per_task = 9;
+  optional float memory_per_task = 10;
+  optional float disk_per_task = 11;
+  optional int32 prefetch_percent = 12;
+  optional int32 concurrency_min = 13;
+  optional int32 concurrency_max = 14;
 }
 
 message RecruiterList {

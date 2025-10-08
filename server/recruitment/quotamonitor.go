@@ -29,7 +29,7 @@ func quotaKey(region, provider string) string {
 	return provider + "/" + region
 }
 
-func (qm *QuotaManager) CanLaunch(region, provider string, cpu int32, memGB float32) bool {
+func (qm *QuotaManager) CanLaunch(region, provider string, cpu int32, memGB float64) bool {
 	key := quotaKey(region, provider)
 	quota, ok := qm.Quotas[key]
 	if !ok {
@@ -43,7 +43,7 @@ func (qm *QuotaManager) CanLaunch(region, provider string, cpu int32, memGB floa
 		return false
 	}
 
-	if quota.MaxMemGB > 0 && usage.UsedMemGB+memGB > quota.MaxMemGB {
+	if quota.MaxMemGB > 0 && usage.UsedMemGB+float32(memGB) > quota.MaxMemGB {
 		return false
 	}
 

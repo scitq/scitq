@@ -1033,13 +1033,13 @@ export interface Recruiter {
      */
     protofilter: string;
     /**
-     * @generated from protobuf field: int32 concurrency = 4
+     * @generated from protobuf field: optional int32 concurrency = 4
      */
-    concurrency: number;
+    concurrency?: number;
     /**
-     * @generated from protobuf field: int32 prefetch = 5
+     * @generated from protobuf field: optional int32 prefetch = 5
      */
-    prefetch: number;
+    prefetch?: number;
     /**
      * @generated from protobuf field: optional int32 max_workers = 6
      */
@@ -1052,6 +1052,30 @@ export interface Recruiter {
      * @generated from protobuf field: int32 timeout = 8
      */
     timeout: number;
+    /**
+     * @generated from protobuf field: optional int32 cpu_per_task = 9
+     */
+    cpuPerTask?: number;
+    /**
+     * @generated from protobuf field: optional float memory_per_task = 10
+     */
+    memoryPerTask?: number;
+    /**
+     * @generated from protobuf field: optional float disk_per_task = 11
+     */
+    diskPerTask?: number;
+    /**
+     * @generated from protobuf field: optional int32 prefetch_percent = 12
+     */
+    prefetchPercent?: number;
+    /**
+     * @generated from protobuf field: optional int32 concurrency_min = 13
+     */
+    concurrencyMin?: number;
+    /**
+     * @generated from protobuf field: optional int32 concurrency_max = 14
+     */
+    concurrencyMax?: number;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterUpdate
@@ -1089,6 +1113,30 @@ export interface RecruiterUpdate {
      * @generated from protobuf field: optional int32 timeout = 8
      */
     timeout?: number;
+    /**
+     * @generated from protobuf field: optional int32 cpu_per_task = 9
+     */
+    cpuPerTask?: number;
+    /**
+     * @generated from protobuf field: optional float memory_per_task = 10
+     */
+    memoryPerTask?: number;
+    /**
+     * @generated from protobuf field: optional float disk_per_task = 11
+     */
+    diskPerTask?: number;
+    /**
+     * @generated from protobuf field: optional int32 prefetch_percent = 12
+     */
+    prefetchPercent?: number;
+    /**
+     * @generated from protobuf field: optional int32 concurrency_min = 13
+     */
+    concurrencyMin?: number;
+    /**
+     * @generated from protobuf field: optional int32 concurrency_max = 14
+     */
+    concurrencyMax?: number;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterList
@@ -5504,11 +5552,17 @@ class Recruiter$Type extends MessageType<Recruiter> {
             { no: 1, name: "step_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "rank", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "protofilter", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "concurrency", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 5, name: "prefetch", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "concurrency", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "prefetch", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "max_workers", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 7, name: "rounds", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 8, name: "timeout", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 8, name: "timeout", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 9, name: "cpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "memory_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 11, name: "disk_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 12, name: "prefetch_percent", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 13, name: "concurrency_min", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Recruiter>): Recruiter {
@@ -5516,8 +5570,6 @@ class Recruiter$Type extends MessageType<Recruiter> {
         message.stepId = 0;
         message.rank = 0;
         message.protofilter = "";
-        message.concurrency = 0;
-        message.prefetch = 0;
         message.rounds = 0;
         message.timeout = 0;
         if (value !== undefined)
@@ -5538,10 +5590,10 @@ class Recruiter$Type extends MessageType<Recruiter> {
                 case /* string protofilter */ 3:
                     message.protofilter = reader.string();
                     break;
-                case /* int32 concurrency */ 4:
+                case /* optional int32 concurrency */ 4:
                     message.concurrency = reader.int32();
                     break;
-                case /* int32 prefetch */ 5:
+                case /* optional int32 prefetch */ 5:
                     message.prefetch = reader.int32();
                     break;
                 case /* optional int32 max_workers */ 6:
@@ -5552,6 +5604,24 @@ class Recruiter$Type extends MessageType<Recruiter> {
                     break;
                 case /* int32 timeout */ 8:
                     message.timeout = reader.int32();
+                    break;
+                case /* optional int32 cpu_per_task */ 9:
+                    message.cpuPerTask = reader.int32();
+                    break;
+                case /* optional float memory_per_task */ 10:
+                    message.memoryPerTask = reader.float();
+                    break;
+                case /* optional float disk_per_task */ 11:
+                    message.diskPerTask = reader.float();
+                    break;
+                case /* optional int32 prefetch_percent */ 12:
+                    message.prefetchPercent = reader.int32();
+                    break;
+                case /* optional int32 concurrency_min */ 13:
+                    message.concurrencyMin = reader.int32();
+                    break;
+                case /* optional int32 concurrency_max */ 14:
+                    message.concurrencyMax = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -5574,11 +5644,11 @@ class Recruiter$Type extends MessageType<Recruiter> {
         /* string protofilter = 3; */
         if (message.protofilter !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.protofilter);
-        /* int32 concurrency = 4; */
-        if (message.concurrency !== 0)
+        /* optional int32 concurrency = 4; */
+        if (message.concurrency !== undefined)
             writer.tag(4, WireType.Varint).int32(message.concurrency);
-        /* int32 prefetch = 5; */
-        if (message.prefetch !== 0)
+        /* optional int32 prefetch = 5; */
+        if (message.prefetch !== undefined)
             writer.tag(5, WireType.Varint).int32(message.prefetch);
         /* optional int32 max_workers = 6; */
         if (message.maxWorkers !== undefined)
@@ -5589,6 +5659,24 @@ class Recruiter$Type extends MessageType<Recruiter> {
         /* int32 timeout = 8; */
         if (message.timeout !== 0)
             writer.tag(8, WireType.Varint).int32(message.timeout);
+        /* optional int32 cpu_per_task = 9; */
+        if (message.cpuPerTask !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.cpuPerTask);
+        /* optional float memory_per_task = 10; */
+        if (message.memoryPerTask !== undefined)
+            writer.tag(10, WireType.Bit32).float(message.memoryPerTask);
+        /* optional float disk_per_task = 11; */
+        if (message.diskPerTask !== undefined)
+            writer.tag(11, WireType.Bit32).float(message.diskPerTask);
+        /* optional int32 prefetch_percent = 12; */
+        if (message.prefetchPercent !== undefined)
+            writer.tag(12, WireType.Varint).int32(message.prefetchPercent);
+        /* optional int32 concurrency_min = 13; */
+        if (message.concurrencyMin !== undefined)
+            writer.tag(13, WireType.Varint).int32(message.concurrencyMin);
+        /* optional int32 concurrency_max = 14; */
+        if (message.concurrencyMax !== undefined)
+            writer.tag(14, WireType.Varint).int32(message.concurrencyMax);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5610,7 +5698,13 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
             { no: 5, name: "prefetch", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "max_workers", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 7, name: "rounds", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 8, name: "timeout", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 8, name: "timeout", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 9, name: "cpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "memory_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 11, name: "disk_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 12, name: "prefetch_percent", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 13, name: "concurrency_min", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<RecruiterUpdate>): RecruiterUpdate {
@@ -5650,6 +5744,24 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
                 case /* optional int32 timeout */ 8:
                     message.timeout = reader.int32();
                     break;
+                case /* optional int32 cpu_per_task */ 9:
+                    message.cpuPerTask = reader.int32();
+                    break;
+                case /* optional float memory_per_task */ 10:
+                    message.memoryPerTask = reader.float();
+                    break;
+                case /* optional float disk_per_task */ 11:
+                    message.diskPerTask = reader.float();
+                    break;
+                case /* optional int32 prefetch_percent */ 12:
+                    message.prefetchPercent = reader.int32();
+                    break;
+                case /* optional int32 concurrency_min */ 13:
+                    message.concurrencyMin = reader.int32();
+                    break;
+                case /* optional int32 concurrency_max */ 14:
+                    message.concurrencyMax = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5686,6 +5798,24 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
         /* optional int32 timeout = 8; */
         if (message.timeout !== undefined)
             writer.tag(8, WireType.Varint).int32(message.timeout);
+        /* optional int32 cpu_per_task = 9; */
+        if (message.cpuPerTask !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.cpuPerTask);
+        /* optional float memory_per_task = 10; */
+        if (message.memoryPerTask !== undefined)
+            writer.tag(10, WireType.Bit32).float(message.memoryPerTask);
+        /* optional float disk_per_task = 11; */
+        if (message.diskPerTask !== undefined)
+            writer.tag(11, WireType.Bit32).float(message.diskPerTask);
+        /* optional int32 prefetch_percent = 12; */
+        if (message.prefetchPercent !== undefined)
+            writer.tag(12, WireType.Varint).int32(message.prefetchPercent);
+        /* optional int32 concurrency_min = 13; */
+        if (message.concurrencyMin !== undefined)
+            writer.tag(13, WireType.Varint).int32(message.concurrencyMin);
+        /* optional int32 concurrency_max = 14; */
+        if (message.concurrencyMax !== undefined)
+            writer.tag(14, WireType.Varint).int32(message.concurrencyMax);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
