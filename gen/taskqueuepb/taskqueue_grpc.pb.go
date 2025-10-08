@@ -40,6 +40,8 @@ const (
 	TaskQueue_DeleteJob_FullMethodName              = "/taskqueue.TaskQueue/DeleteJob"
 	TaskQueue_UpdateJob_FullMethodName              = "/taskqueue.TaskQueue/UpdateJob"
 	TaskQueue_ListFlavors_FullMethodName            = "/taskqueue.TaskQueue/ListFlavors"
+	TaskQueue_ListProviders_FullMethodName          = "/taskqueue.TaskQueue/ListProviders"
+	TaskQueue_ListRegions_FullMethodName            = "/taskqueue.TaskQueue/ListRegions"
 	TaskQueue_GetRcloneConfig_FullMethodName        = "/taskqueue.TaskQueue/GetRcloneConfig"
 	TaskQueue_GetDockerCredentials_FullMethodName   = "/taskqueue.TaskQueue/GetDockerCredentials"
 	TaskQueue_Login_FullMethodName                  = "/taskqueue.TaskQueue/Login"
@@ -101,6 +103,8 @@ type TaskQueueClient interface {
 	DeleteJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*Ack, error)
 	UpdateJob(ctx context.Context, in *JobUpdate, opts ...grpc.CallOption) (*Ack, error)
 	ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error)
+	ListProviders(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ProviderList, error)
+	ListRegions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RegionList, error)
 	GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneConfig, error)
 	GetDockerCredentials(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*DockerCredentials, error)
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
@@ -363,6 +367,26 @@ func (c *taskQueueClient) ListFlavors(ctx context.Context, in *ListFlavorsReques
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FlavorsList)
 	err := c.cc.Invoke(ctx, TaskQueue_ListFlavors_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ListProviders(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ProviderList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProviderList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListProviders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ListRegions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RegionList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegionList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListRegions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -743,6 +767,8 @@ type TaskQueueServer interface {
 	DeleteJob(context.Context, *JobId) (*Ack, error)
 	UpdateJob(context.Context, *JobUpdate) (*Ack, error)
 	ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error)
+	ListProviders(context.Context, *emptypb.Empty) (*ProviderList, error)
+	ListRegions(context.Context, *emptypb.Empty) (*RegionList, error)
 	GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error)
 	GetDockerCredentials(context.Context, *emptypb.Empty) (*DockerCredentials, error)
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
@@ -849,6 +875,12 @@ func (UnimplementedTaskQueueServer) UpdateJob(context.Context, *JobUpdate) (*Ack
 }
 func (UnimplementedTaskQueueServer) ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFlavors not implemented")
+}
+func (UnimplementedTaskQueueServer) ListProviders(context.Context, *emptypb.Empty) (*ProviderList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListProviders not implemented")
+}
+func (UnimplementedTaskQueueServer) ListRegions(context.Context, *emptypb.Empty) (*RegionList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRegions not implemented")
 }
 func (UnimplementedTaskQueueServer) GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRcloneConfig not implemented")
@@ -1307,6 +1339,42 @@ func _TaskQueue_ListFlavors_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).ListFlavors(ctx, req.(*ListFlavorsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ListProviders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListProviders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListProviders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListProviders(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ListRegions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListRegions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListRegions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListRegions(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2015,6 +2083,14 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFlavors",
 			Handler:    _TaskQueue_ListFlavors_Handler,
+		},
+		{
+			MethodName: "ListProviders",
+			Handler:    _TaskQueue_ListProviders_Handler,
+		},
+		{
+			MethodName: "ListRegions",
+			Handler:    _TaskQueue_ListRegions_Handler,
 		},
 		{
 			MethodName: "GetRcloneConfig",

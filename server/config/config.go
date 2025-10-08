@@ -52,8 +52,9 @@ type Config struct {
 		HTTPSPort             int                `yaml:"https_port" default:"443"`
 	} `yaml:"scitq"`
 	Providers struct {
-		Azure     map[string]*AzureConfig     `yaml:"azure"`
-		Openstack map[string]*OpenstackConfig `yaml:"openstack"`
+		Azure     map[string]*AzureConfig        `yaml:"azure"`
+		Openstack map[string]*OpenstackConfig    `yaml:"openstack"`
+		Fake      map[string]*FakeProviderConfig `yaml:"fake"`
 	} `yaml:"providers"`
 }
 
@@ -284,6 +285,10 @@ func (cfg *Config) GetProviders() []ProviderConfig {
 	}
 	for n, p := range cfg.Providers.Openstack {
 		p.SetName("openstack." + n)
+		providers = append(providers, p)
+	}
+	for n, p := range cfg.Providers.Fake {
+		p.SetName("fake." + n)
 		providers = append(providers, p)
 	}
 	return providers

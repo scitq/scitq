@@ -17,7 +17,7 @@ func TestTaskDependencyUnlocksNext(t *testing.T) {
 	ctx := context.Background()
 
 	// 1) Boot infra
-	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t)
+	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
 	defer cleanup()
 
 	// 2) Login

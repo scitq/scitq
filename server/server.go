@@ -3412,6 +3412,68 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 	return &taskqueuepb.Ack{Success: true}, nil
 }
 
+func (s *taskQueueServer) ListProviders(ctx context.Context, _ *emptypb.Empty) (*pb.ProviderList, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT provider_id, provider_name, config_name
+		FROM provider
+		ORDER BY provider_id
+	`)
+	if err != nil {
+		log.Printf("⚠️ Failed to list providers: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to list providers: %v", err)
+	}
+	defer rows.Close()
+
+	var providers []*pb.Provider
+
+	for rows.Next() {
+		var p pb.Provider
+		if err := rows.Scan(&p.ProviderId, &p.ProviderName, &p.ConfigName); err != nil {
+			log.Printf("⚠️ Failed to scan provider: %v", err)
+			return nil, status.Errorf(codes.Internal, "failed to scan provider row: %v", err)
+		}
+		providers = append(providers, &p)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("⚠️ Row iteration error: %v", err)
+		return nil, status.Errorf(codes.Internal, "row iteration error: %v", err)
+	}
+
+	return &pb.ProviderList{Providers: providers}, nil
+}
+
+func (s *taskQueueServer) ListRegions(ctx context.Context, _ *emptypb.Empty) (*pb.RegionList, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT region_id, provider_id, region_name, is_default
+		FROM region
+		ORDER BY region_id
+	`)
+	if err != nil {
+		log.Printf("⚠️ Failed to list regions: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to list regions: %v", err)
+	}
+	defer rows.Close()
+
+	var regions []*pb.Region
+
+	for rows.Next() {
+		var r pb.Region
+		if err := rows.Scan(&r.RegionId, &r.ProviderId, &r.RegionName, &r.IsDefault); err != nil {
+			log.Printf("⚠️ Failed to scan region: %v", err)
+			return nil, status.Errorf(codes.Internal, "failed to scan region row: %v", err)
+		}
+		regions = append(regions, &r)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("⚠️ Row iteration error: %v", err)
+		return nil, status.Errorf(codes.Internal, "row iteration error: %v", err)
+	}
+
+	return &pb.RegionList{Regions: regions}, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {

@@ -169,7 +169,7 @@ func runCLICommand(c cli.CLI, args []string) (string, error) {
 
 // startServerForTest boots a Postgres testcontainer and starts the scitq server.
 // It returns the gRPC address, the worker token, admin credentials, and a cleanup func.
-func startServerForTest(t *testing.T) (serverAddr, workerToken, adminUser, adminPassword string, cleanup func()) {
+func startServerForTest(t *testing.T, override *config.Config) (serverAddr, workerToken, adminUser, adminPassword string, cleanup func()) {
 	t.Helper()
 	serverStartMu.Lock()
 	defer serverStartMu.Unlock()
@@ -244,6 +244,11 @@ func startServerForTest(t *testing.T) (serverAddr, workerToken, adminUser, admin
 	// Start server
 	go func() {
 		var cfg config.Config
+
+		if override != nil {
+			cfg = *override
+		}
+
 		cfg.Scitq.DBURL = dbURL
 		cfg.Scitq.Port = serverPort
 		cfg.Scitq.LogLevel = "debug"
@@ -308,7 +313,7 @@ func startClientForTest(t *testing.T, serverAddr, workerName, workerToken string
 
 func TestIntegration(t *testing.T) {
 
-	server_connection_string, workerToken, adminUser, adminPassword, cleanup := startServerForTest(t)
+	server_connection_string, workerToken, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
 	defer cleanup()
 
 	//////////////////////////////////////////////////////////////////////////////

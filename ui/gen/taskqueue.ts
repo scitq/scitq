@@ -1975,6 +1975,62 @@ export interface WorkerEventPruneResult {
      */
     deleted: number;
 }
+/**
+ * @generated from protobuf message taskqueue.Provider
+ */
+export interface Provider {
+    /**
+     * @generated from protobuf field: int32 provider_id = 1
+     */
+    providerId: number;
+    /**
+     * @generated from protobuf field: string provider_name = 2
+     */
+    providerName: string;
+    /**
+     * @generated from protobuf field: string config_name = 3
+     */
+    configName: string;
+}
+/**
+ * @generated from protobuf message taskqueue.ProviderList
+ */
+export interface ProviderList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.Provider providers = 1
+     */
+    providers: Provider[];
+}
+/**
+ * @generated from protobuf message taskqueue.Region
+ */
+export interface Region {
+    /**
+     * @generated from protobuf field: int32 region_id = 1
+     */
+    regionId: number;
+    /**
+     * @generated from protobuf field: int32 provider_id = 2
+     */
+    providerId: number;
+    /**
+     * @generated from protobuf field: string region_name = 3
+     */
+    regionName: string;
+    /**
+     * @generated from protobuf field: bool is_default = 4
+     */
+    isDefault: boolean;
+}
+/**
+ * @generated from protobuf message taskqueue.RegionList
+ */
+export interface RegionList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.Region regions = 1
+     */
+    regions: Region[];
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class TaskResponse$Type extends MessageType<TaskResponse> {
     constructor() {
@@ -8784,6 +8840,234 @@ class WorkerEventPruneResult$Type extends MessageType<WorkerEventPruneResult> {
  * @generated MessageType for protobuf message taskqueue.WorkerEventPruneResult
  */
 export const WorkerEventPruneResult = new WorkerEventPruneResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Provider$Type extends MessageType<Provider> {
+    constructor() {
+        super("taskqueue.Provider", [
+            { no: 1, name: "provider_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "provider_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "config_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Provider>): Provider {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.providerId = 0;
+        message.providerName = "";
+        message.configName = "";
+        if (value !== undefined)
+            reflectionMergePartial<Provider>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Provider): Provider {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 provider_id */ 1:
+                    message.providerId = reader.int32();
+                    break;
+                case /* string provider_name */ 2:
+                    message.providerName = reader.string();
+                    break;
+                case /* string config_name */ 3:
+                    message.configName = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Provider, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 provider_id = 1; */
+        if (message.providerId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.providerId);
+        /* string provider_name = 2; */
+        if (message.providerName !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.providerName);
+        /* string config_name = 3; */
+        if (message.configName !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.configName);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.Provider
+ */
+export const Provider = new Provider$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ProviderList$Type extends MessageType<ProviderList> {
+    constructor() {
+        super("taskqueue.ProviderList", [
+            { no: 1, name: "providers", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Provider }
+        ]);
+    }
+    create(value?: PartialMessage<ProviderList>): ProviderList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.providers = [];
+        if (value !== undefined)
+            reflectionMergePartial<ProviderList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ProviderList): ProviderList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.Provider providers */ 1:
+                    message.providers.push(Provider.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ProviderList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.Provider providers = 1; */
+        for (let i = 0; i < message.providers.length; i++)
+            Provider.internalBinaryWrite(message.providers[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ProviderList
+ */
+export const ProviderList = new ProviderList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Region$Type extends MessageType<Region> {
+    constructor() {
+        super("taskqueue.Region", [
+            { no: 1, name: "region_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "provider_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "region_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "is_default", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Region>): Region {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.regionId = 0;
+        message.providerId = 0;
+        message.regionName = "";
+        message.isDefault = false;
+        if (value !== undefined)
+            reflectionMergePartial<Region>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Region): Region {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 region_id */ 1:
+                    message.regionId = reader.int32();
+                    break;
+                case /* int32 provider_id */ 2:
+                    message.providerId = reader.int32();
+                    break;
+                case /* string region_name */ 3:
+                    message.regionName = reader.string();
+                    break;
+                case /* bool is_default */ 4:
+                    message.isDefault = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Region, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 region_id = 1; */
+        if (message.regionId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.regionId);
+        /* int32 provider_id = 2; */
+        if (message.providerId !== 0)
+            writer.tag(2, WireType.Varint).int32(message.providerId);
+        /* string region_name = 3; */
+        if (message.regionName !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.regionName);
+        /* bool is_default = 4; */
+        if (message.isDefault !== false)
+            writer.tag(4, WireType.Varint).bool(message.isDefault);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.Region
+ */
+export const Region = new Region$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RegionList$Type extends MessageType<RegionList> {
+    constructor() {
+        super("taskqueue.RegionList", [
+            { no: 1, name: "regions", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Region }
+        ]);
+    }
+    create(value?: PartialMessage<RegionList>): RegionList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.regions = [];
+        if (value !== undefined)
+            reflectionMergePartial<RegionList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RegionList): RegionList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.Region regions */ 1:
+                    message.regions.push(Region.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RegionList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.Region regions = 1; */
+        for (let i = 0; i < message.regions.length; i++)
+            Region.internalBinaryWrite(message.regions[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.RegionList
+ */
+export const RegionList = new RegionList$Type();
 /**
  * @generated ServiceType for protobuf service taskqueue.TaskQueue
  */
@@ -8808,6 +9092,8 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "DeleteJob", options: {}, I: JobId, O: Ack },
     { name: "UpdateJob", options: {}, I: JobUpdate, O: Ack },
     { name: "ListFlavors", options: {}, I: ListFlavorsRequest, O: FlavorsList },
+    { name: "ListProviders", options: {}, I: Empty, O: ProviderList },
+    { name: "ListRegions", options: {}, I: Empty, O: RegionList },
     { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneConfig },
     { name: "GetDockerCredentials", options: {}, I: Empty, O: DockerCredentials },
     { name: "Login", options: {}, I: LoginRequest, O: LoginResponse },

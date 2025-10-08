@@ -17,7 +17,7 @@ func TestRetryClonesHiddenParent(t *testing.T) {
 	ctx := context.Background()
 
 	// 1) Boot infra (reuse your helpers from TestIntegration)
-	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t)
+	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
 	defer cleanup()
 
 	// 2) Login via CLI to obtain a token (same approach as main integration test)

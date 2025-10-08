@@ -27,6 +27,8 @@ service TaskQueue {
     rpc DeleteJob (JobId) returns (Ack);
     rpc UpdateJob(JobUpdate) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
+    rpc ListProviders(google.protobuf.Empty) returns (ProviderList);
+    rpc ListRegions(google.protobuf.Empty) returns (RegionList);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
     rpc GetDockerCredentials(google.protobuf.Empty) returns (DockerCredentials);
     rpc Login(LoginRequest) returns (LoginResponse);
@@ -737,4 +739,25 @@ message WorkerEventPruneFilter {
 message WorkerEventPruneResult {
   int32 matched = 1;
   int32 deleted = 2;
+}
+
+message Provider {
+  int32 provider_id = 1;
+  string provider_name = 2;
+  string config_name = 3;
+}
+
+message ProviderList {
+  repeated Provider providers = 1;
+}
+
+message Region {
+  int32 region_id = 1;
+  int32 provider_id = 2;
+  string region_name = 3;
+  bool is_default = 4;
+}
+
+message RegionList {
+  repeated Region regions = 1;
 }

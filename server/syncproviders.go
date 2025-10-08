@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/scitq/scitq/server/providers/azure"
+	"github.com/scitq/scitq/server/providers/fake"
 	"github.com/scitq/scitq/server/providers/openstack"
 )
 
@@ -108,6 +109,23 @@ func (s *taskQueueServer) checkProviders() error {
 				}
 				log.Printf("Openstack provider %s: %v", p.ProviderName, paramConfigName)
 			}
+		case "fake":
+			for paramConfigName, config := range s.cfg.Providers.Fake {
+				if p.ConfigName == paramConfigName {
+					provider := fake.NewFromConfig(s.cfg, config.Regions)
+					s.providers[p.ProviderID] = provider
+					s.providerConfig[fmt.Sprintf("fake.%s", paramConfigName)] = config
+
+					if mappedConfig[p.ProviderName] == nil {
+						mappedConfig[p.ProviderName] = make(map[string]bool)
+					}
+					mappedConfig[p.ProviderName][p.ConfigName] = true
+
+					if err := s.syncRegions(tx, p.ProviderID, config.Regions, config.DefaultRegion); err != nil {
+						log.Printf("⚠️ Failed to sync regions for fake provider %s: %v", config.Name, err)
+					}
+				}
+			}
 		case "local":
 			// Do nothing: local is registered unconditionally
 			log.Printf("✅ Detected local provider in DB: %q", p.ConfigName)
@@ -159,6 +177,28 @@ func (s *taskQueueServer) checkProviders() error {
 			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {
 				return fmt.Errorf("failed to sync regions for new provider %s: %w", configName, err)
 			}
+		}
+	}
+
+	// Add new Fake providers
+	for configName, config := range s.cfg.Providers.Fake {
+		if _, ok := mappedConfig["fake"][configName]; !ok {
+			var providerId int32
+			log.Printf("Adding Fake provider %s", configName)
+			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
+				"fake", configName).Scan(&providerId)
+			if err != nil {
+				log.Printf("⚠️ Failed to add fake provider: %v", err)
+				continue
+			}
+			provider := fake.NewFromConfig(s.cfg, config.Regions)
+			s.providers[providerId] = provider
+			s.providerConfig[fmt.Sprintf("fake.%s", configName)] = config
+			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {
+				log.Printf("⚠️ Failed to sync regions for fake provider %s: %v", configName, err)
+				continue
+			}
+			log.Printf("✅ Successfully created new fake provider %s (ID: %d)", configName, providerId)
 		}
 	}
 
