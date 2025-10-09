@@ -1,10 +1,15 @@
 package fake
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 
+	"github.com/scitq/scitq/client"
 	"github.com/scitq/scitq/server/config"
 	"github.com/scitq/scitq/server/providers"
 )
@@ -18,6 +23,12 @@ type FakeProvider struct {
 	mu sync.Mutex
 	// regions maps region name -> (workerName -> fake IP)
 	regions map[string]map[string]string
+
+	AutoLaunch  bool
+	ServerAddr  string
+	WorkerToken string
+
+	cancels map[string]context.CancelFunc
 }
 
 // New returns a new empty FakeProvider with a single "default" region.
@@ -26,17 +37,22 @@ func New() *FakeProvider {
 		regions: map[string]map[string]string{
 			"default": {},
 		},
+		cancels: make(map[string]context.CancelFunc),
 	}
 }
 
 // NewFromConfig returns a new FakeProvider with regions initialized from config.
-func NewFromConfig(cfg config.Config, regions []string) *FakeProvider {
-	rmap := make(map[string]map[string]string, len(regions))
-	for _, region := range regions {
+func NewFromConfig(cfg config.Config, config config.FakeProviderConfig) *FakeProvider {
+	rmap := make(map[string]map[string]string, len(config.Regions))
+	for _, region := range config.Regions {
 		rmap[region] = make(map[string]string)
 	}
 	return &FakeProvider{
-		regions: rmap,
+		regions:     rmap,
+		cancels:     make(map[string]context.CancelFunc),
+		WorkerToken: cfg.Scitq.WorkerToken,
+		ServerAddr:  fmt.Sprintf("%s:%d", cfg.Scitq.ServerFQDN, cfg.Scitq.Port),
+		AutoLaunch:  config.AutoLaunch,
 	}
 }
 
@@ -60,6 +76,46 @@ func (f *FakeProvider) Create(workerName, flavor, location string, jobId int32) 
 	}
 	ip := fmt.Sprintf("10.0.0.%d", len(f.regions[region])+1)
 	f.regions[region][workerName] = ip
+
+	if f.AutoLaunch {
+		if f.ServerAddr != "" && f.WorkerToken != "" {
+			workerNameCopy := workerName
+			ctx, cancel := context.WithCancel(context.Background())
+			f.cancels[workerNameCopy] = cancel
+			go func() {
+				log.Printf("Auto-launching real worker client for %s", workerNameCopy)
+				tmpDir, err := os.MkdirTemp("", "scitq-worker-"+workerNameCopy+"-*")
+				if err != nil {
+					log.Printf("Failed to create temp dir for worker %s: %v", workerNameCopy, err)
+					return
+				}
+				defer func() {
+					err := os.RemoveAll(tmpDir)
+					if err != nil {
+						log.Printf("Failed to remove temp dir %s: %v", tmpDir, err)
+					}
+				}()
+
+				storePath := filepath.Join(tmpDir, "store")
+				err = os.Mkdir(storePath, 0755)
+				if err != nil {
+					log.Printf("Failed to create store dir for worker %s: %v", workerNameCopy, err)
+					return
+				}
+
+				// Run the worker client with concurrency=1, block until context is canceled.
+				err = client.Run(ctx, f.ServerAddr, 1, workerNameCopy, storePath, f.WorkerToken)
+				if err != nil {
+					log.Printf("Worker client %s exited with error: %v", workerNameCopy, err)
+				} else {
+					log.Printf("Worker client %s exited normally", workerNameCopy)
+				}
+			}()
+		} else {
+			log.Printf("⚠️ AutoLaunch is enabled but ServerAddr or WorkerToken is not set; skipping auto-launch for %s", workerName)
+		}
+	}
+
 	return ip, nil
 }
 
@@ -114,5 +170,12 @@ func (f *FakeProvider) Delete(workerName, location string) error {
 		return fmt.Errorf("worker %s not found", workerName)
 	}
 	delete(workers, workerName)
+
+	if cancel, exists := f.cancels[workerName]; exists {
+		cancel()
+		delete(f.cancels, workerName)
+		log.Printf("🧹 [FakeProvider] terminated auto-launched worker %s", workerName)
+	}
+
 	return nil
 }

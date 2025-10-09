@@ -112,7 +112,7 @@ func (s *taskQueueServer) checkProviders() error {
 		case "fake":
 			for paramConfigName, config := range s.cfg.Providers.Fake {
 				if p.ConfigName == paramConfigName {
-					provider := fake.NewFromConfig(s.cfg, config.Regions)
+					provider := fake.NewFromConfig(s.cfg, *config)
 					s.providers[p.ProviderID] = provider
 					s.providerConfig[fmt.Sprintf("fake.%s", paramConfigName)] = config
 
@@ -191,7 +191,7 @@ func (s *taskQueueServer) checkProviders() error {
 				log.Printf("⚠️ Failed to add fake provider: %v", err)
 				continue
 			}
-			provider := fake.NewFromConfig(s.cfg, config.Regions)
+			provider := fake.NewFromConfig(s.cfg, *config)
 			s.providers[providerId] = provider
 			s.providerConfig[fmt.Sprintf("fake.%s", configName)] = config
 			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {

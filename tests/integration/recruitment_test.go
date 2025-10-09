@@ -31,8 +31,10 @@ func TestRecruitmentCycle(t *testing.T) {
 				"r2": {MaxCPU: 16},
 				"r3": {MaxCPU: 4},
 			},
+			AutoLaunch: true,
 		},
 	}
+	override.Scitq.NewWorkerIdleTimeout = 10 // seconds
 
 	// --- 2️⃣ Boot server with fake provider ---
 	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, override)
@@ -132,16 +134,14 @@ func TestRecruitmentCycle(t *testing.T) {
 	t.Logf("✅ Created flavor tiny4 (id:%d)", tiny4_id)
 
 	// --- 9️⃣ Manually create a worker to validate fake provider creation path ---
-	req := &pb.WorkerRequest{
+	wresp, err := qc.CreateWorker(ctx, &pb.WorkerRequest{
 		ProviderId:  providerId,
 		FlavorId:    tiny4_id,
 		RegionId:    regionIds["r3"],
 		Concurrency: 1,
 		Prefetch:    0,
 		Number:      1,
-	}
-
-	wresp, err := qc.CreateWorker(ctx, req)
+	})
 	require.NoError(t, err, "failed to create worker on fake provider")
 	require.NotNil(t, wresp, "CreateWorker returned nil response")
 
@@ -150,8 +150,8 @@ func TestRecruitmentCycle(t *testing.T) {
 		wresp.WorkersDetails[0].WorkerId, wresp.WorkersDetails[0].WorkerName, wresp.WorkersDetails[0].JobId)
 	workerName := wresp.WorkersDetails[0].WorkerName
 
-	// Give the watchdog loop a moment to pick up the new worker (if relevant)
-	time.Sleep(1 * time.Second)
+	// Give time for the auto-launched worker to register and become Running
+	time.Sleep(5 * time.Second)
 
 	// Verify worker presence via DB-level API
 	wlist, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
@@ -164,6 +164,39 @@ func TestRecruitmentCycle(t *testing.T) {
 		}
 	}
 	require.True(t, foundWorker, "fake worker not found in worker list")
+
+	// --- 🔟 Start a real test worker client ---
+	// clientCleanup, _ := startClientForTest(t, serverAddr, workerName, token, 1)
+	// time.Sleep(2 * time.Second)
+	// t.Log("✅ Test worker client successfully started and connected")
+	// defer clientCleanup()
+
+	time.Sleep(3 * time.Second) // Wait for worker status update
+	wlist2, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
+	require.NoError(t, err)
+	var foundRunning bool
+	for _, w := range wlist2.Workers {
+		if w.Name == workerName {
+			t.Logf("✅ Worker %s status after client start: %s", workerName, w.Status)
+			require.Equal(t, "R", w.Status, "worker should be Running ('R') after client connects")
+			foundRunning = true
+		}
+	}
+	require.True(t, foundRunning, "worker with client not found in worker list after client started")
+	t.Logf("✅ Worker %s is now Running ('R') as expected", workerName)
+
+	time.Sleep(15 * time.Second) // Wait for worker status update
+	wlist3, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
+	require.NoError(t, err)
+	found = false
+	for _, w := range wlist3.Workers {
+		if w.Name == workerName {
+			t.Logf("⚠️ Worker %s status after client start: %s", workerName, w.Status)
+			found = true
+		}
+	}
+	require.True(t, !found, "worker should have been recycled after idle timeout")
+	t.Logf("✅ Worker %s is gone as expected", workerName)
 }
 
 // helper

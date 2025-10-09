@@ -10,6 +10,12 @@ type FakeProviderConfig struct {
 	DefaultRegion string           `yaml:"default_region"`
 	Regions       []string         `yaml:"regions"`
 	Quotas        map[string]Quota `yaml:"quotas"`
+
+	// The following fields are used only in testing contexts to allow
+	// the fake provider to automatically launch worker clients against
+	// a running test server.
+	AutoLaunch bool   `yaml:"auto_launch"`
+	ServerAddr string `yaml:"server_addr"`
 }
 
 func (f *FakeProviderConfig) GetRegions() []string {

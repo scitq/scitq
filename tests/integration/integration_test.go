@@ -251,6 +251,7 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 
 		cfg.Scitq.DBURL = dbURL
 		cfg.Scitq.Port = serverPort
+		cfg.Scitq.ServerFQDN = "localhost"
 		cfg.Scitq.LogLevel = "debug"
 		cfg.Scitq.LogRoot = tempLogRoot
 		cfg.Scitq.WorkerToken = workerToken
