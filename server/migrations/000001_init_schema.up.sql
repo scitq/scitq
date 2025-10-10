@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS workflow (
     workflow_id SERIAL PRIMARY KEY,
     workflow_name TEXT NOT NULL UNIQUE,
     run_strategy CHAR(1) NOT NULL DEFAULT 'B',  -- (B: Batch wise execution, T: Thread wise execution - follow thread logic, D: Debug execution, Z: suspended execution)
-    maximum_workers INT DEFAULT 0
+    maximum_workers INT
 );
 
 -- Step Table

@@ -197,6 +197,99 @@ func TestRecruitmentCycle(t *testing.T) {
 	}
 	require.True(t, !found, "worker should have been recycled after idle timeout")
 	t.Logf("✅ Worker %s is gone as expected", workerName)
+	// --- 🔥 Recruitment full workflow scenario ---
+	t.Run("RecruitmentFullWorkflow", func(t *testing.T) {
+		ctx := context.Background()
+
+		// 1. Create a workflow
+		wfResp, err := qc.CreateWorkflow(ctx, &pb.WorkflowRequest{
+			Name:           "RecruitmentTest",
+			MaximumWorkers: nil,
+		})
+		require.NoError(t, err)
+		wfId := wfResp.WorkflowId
+		t.Logf("✅ Created workflow: id=%d", wfId)
+
+		wfList, err := qc.ListWorkflows(ctx, &pb.WorkflowFilter{}) // for debug
+		require.NoError(t, err)
+		t.Logf("Answer detail: wfList %v", wfList)
+
+		// 2. Add two steps
+		step1Resp, err := qc.CreateStep(ctx, &pb.StepRequest{
+			WorkflowId: &wfId,
+			Name:       "hello",
+		})
+		require.NoError(t, err)
+		step1Id := step1Resp.StepId
+		t.Logf("✅ Created step 1: id=%d", step1Id)
+
+		step2Resp, err := qc.CreateStep(ctx, &pb.StepRequest{
+			WorkflowId: &wfId,
+			Name:       "goodbye",
+		})
+		require.NoError(t, err)
+		step2Id := step2Resp.StepId
+		t.Logf("✅ Created step 2: id=%d", step2Id)
+
+		// 3. For each step, create 10 tasks.
+		step1TaskIds := make([]int32, 10)
+		step2TaskIds := make([]int32, 10)
+		shell := "sh"
+		for i := 0; i < 10; i++ {
+			// Step 1 task
+			taskResp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
+				StepId:    &step1Id,
+				Command:   "echo \"hello with CPU $CPU\"",
+				Shell:     &shell,
+				Container: "alpine:latest", // Use a small image to speed up tests
+			})
+			require.NoError(t, err)
+			step1TaskIds[i] = taskResp.TaskId
+			t.Logf("✅ Created step 1 task %d: id=%d", i, taskResp.TaskId)
+		}
+		for i := 0; i < 10; i++ {
+			// Step 2 task, depends on step 1 task
+			taskResp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
+				StepId:     &step2Id,
+				Command:    "echo \"goodbye with CPU $CPU\"",
+				Shell:      &shell,
+				Dependency: []int32{step1TaskIds[i]},
+				Container:  "alpine:latest", // Use a small image to speed up tests
+			})
+			require.NoError(t, err)
+			step2TaskIds[i] = taskResp.TaskId
+			t.Logf("✅ Created step 2 task %d: id=%d, depends on task %d", i, taskResp.TaskId, step1TaskIds[i])
+		}
+
+		// 4. Create recruiters for each step
+		eight := int32(8)
+		zero := int32(0)
+		rec1Resp, err := qc.CreateRecruiter(ctx, &pb.Recruiter{
+			StepId:          step1Id,
+			Rank:            1,
+			Protofilter:     "cpu>=8",
+			CpuPerTask:      &eight,
+			PrefetchPercent: &zero,
+			Rounds:          2,
+			Timeout:         3,
+		})
+		require.NoError(t, err)
+		t.Logf("✅ Created recruiter for step 1 : %v", rec1Resp.Success)
+		four := int32(4)
+		rec2Resp, err := qc.CreateRecruiter(ctx, &pb.Recruiter{
+			StepId:          step2Id,
+			Rank:            1,
+			Protofilter:     "cpu>=8",
+			CpuPerTask:      &four,
+			PrefetchPercent: &zero,
+			Rounds:          2,
+			Timeout:         3,
+		})
+		require.NoError(t, err)
+		t.Logf("✅ Created recruiter for step 2: %v", rec2Resp.Success)
+
+		time.Sleep(30 * time.Second) // Wait for recruiter to act
+	})
 }
 
 // helper

@@ -102,34 +102,37 @@ func CollectWorkerStats() (*WorkerStats, error) {
 	}
 	stats.Load1Min = float32(loadAvg.Load1)
 
-	times, err := cpu.Times(false)
-	if err == nil && len(times) > 0 {
-		if len(lastCPUTimes) == len(times) {
-			// Calculate delta-based iowait percent
-			totalDelta := float64(0)
-			iowaitDelta := float64(0)
-			for i := range times {
-				prev := lastCPUTimes[i]
-				curr := times[i]
+	/*
+		times, err := cpu.Times(false)
+		if err == nil && len(times) > 0 {
+			if len(lastCPUTimes) == len(times) {
+				// Calculate delta-based iowait percent
+				totalDelta := float64(0)
+				iowaitDelta := float64(0)
+				for i := range times {
+					prev := lastCPUTimes[i]
+					curr := times[i]
 
-				prevTotal := prev.User + prev.System + prev.Idle + prev.Nice + prev.Iowait + prev.Irq + prev.Softirq + prev.Steal + prev.Guest + prev.GuestNice
-				currTotal := curr.User + curr.System + curr.Idle + curr.Nice + curr.Iowait + curr.Irq + curr.Softirq + curr.Steal + curr.Guest + curr.GuestNice
+					prevTotal := prev.User + prev.System + prev.Idle + prev.Nice + prev.Iowait + prev.Irq + prev.Softirq + prev.Steal + prev.Guest + prev.GuestNice
+					currTotal := curr.User + curr.System + curr.Idle + curr.Nice + curr.Iowait + curr.Irq + curr.Softirq + curr.Steal + curr.Guest + curr.GuestNice
 
-				total := currTotal - prevTotal
-				iowait := curr.Iowait - prev.Iowait
+					total := currTotal - prevTotal
+					iowait := curr.Iowait - prev.Iowait
 
-				if total > 0 {
-					iowaitDelta += iowait
-					totalDelta += total
+					if total > 0 {
+						iowaitDelta += iowait
+						totalDelta += total
+					}
+				}
+				if totalDelta > 0 {
+					stats.IOWaitPercent = float32((iowaitDelta / totalDelta) * 100.0)
 				}
 			}
-			if totalDelta > 0 {
-				stats.IOWaitPercent = float32((iowaitDelta / totalDelta) * 100.0)
-			}
+			// Save for next interval
+			lastCPUTimes = times
 		}
-		// Save for next interval
-		lastCPUTimes = times
-	}
+	*/
+	stats.IOWaitPercent = 0
 
 	partitions, err := disk.Partitions(true)
 	if err != nil {
@@ -167,7 +170,59 @@ func CollectWorkerStats() (*WorkerStats, error) {
 		seenDev[p.Device] = true
 	}
 
-	now := time.Now()
+	/*
+		now := time.Now()
+		diskCounters, err := disk.IOCounters()
+		if err != nil {
+			return nil, err
+		}
+		netCounters, err := net.IOCounters(false)
+		if err != nil {
+			return nil, err
+		}
+
+		if !lastTime.IsZero() {
+			dt := now.Sub(lastTime).Seconds()
+			if dt > 0 {
+				// Disk IO aggregation
+				var readTotal, writeTotal uint64
+				var lastReadTotal, lastWriteTotal uint64
+				for _, v := range diskCounters {
+					readTotal += v.ReadBytes
+					writeTotal += v.WriteBytes
+				}
+				for _, v := range lastDiskIO {
+					lastReadTotal += v.ReadBytes
+					lastWriteTotal += v.WriteBytes
+				}
+				stats.DiskIO.ReadBytesTotal = int64(readTotal)
+				stats.DiskIO.WriteBytesTotal = int64(writeTotal)
+				stats.DiskIO.ReadBytesRate = float32(readTotal-lastReadTotal) / float32(dt)
+				stats.DiskIO.WriteBytesRate = float32(writeTotal-lastWriteTotal) / float32(dt)
+
+				// Net IO aggregation
+				if len(netCounters) > 0 {
+					nowNet := netCounters[0]
+					lastNet := lastNetIO["total"]
+					stats.NetIO.RecvBytesTotal = int64(nowNet.BytesRecv)
+					stats.NetIO.SentBytesTotal = int64(nowNet.BytesSent)
+					stats.NetIO.RecvBytesRate = float32(nowNet.BytesRecv-lastNet.BytesRecv) / float32(dt)
+					stats.NetIO.SentBytesRate = float32(nowNet.BytesSent-lastNet.BytesSent) / float32(dt)
+				}
+			}
+		}
+
+		// Save for next time
+		lastDiskIO = diskCounters
+		if len(netCounters) > 0 {
+			if lastNetIO == nil {
+				lastNetIO = make(map[string]net.IOCountersStat)
+			}
+			lastNetIO["total"] = netCounters[0]
+		}
+		lastTime = now
+	*/
+
 	diskCounters, err := disk.IOCounters()
 	if err != nil {
 		return nil, err
@@ -177,46 +232,23 @@ func CollectWorkerStats() (*WorkerStats, error) {
 		return nil, err
 	}
 
-	if !lastTime.IsZero() {
-		dt := now.Sub(lastTime).Seconds()
-		if dt > 0 {
-			// Disk IO aggregation
-			var readTotal, writeTotal uint64
-			var lastReadTotal, lastWriteTotal uint64
-			for _, v := range diskCounters {
-				readTotal += v.ReadBytes
-				writeTotal += v.WriteBytes
-			}
-			for _, v := range lastDiskIO {
-				lastReadTotal += v.ReadBytes
-				lastWriteTotal += v.WriteBytes
-			}
-			stats.DiskIO.ReadBytesTotal = int64(readTotal)
-			stats.DiskIO.WriteBytesTotal = int64(writeTotal)
-			stats.DiskIO.ReadBytesRate = float32(readTotal-lastReadTotal) / float32(dt)
-			stats.DiskIO.WriteBytesRate = float32(writeTotal-lastWriteTotal) / float32(dt)
-
-			// Net IO aggregation
-			if len(netCounters) > 0 {
-				nowNet := netCounters[0]
-				lastNet := lastNetIO["total"]
-				stats.NetIO.RecvBytesTotal = int64(nowNet.BytesRecv)
-				stats.NetIO.SentBytesTotal = int64(nowNet.BytesSent)
-				stats.NetIO.RecvBytesRate = float32(nowNet.BytesRecv-lastNet.BytesRecv) / float32(dt)
-				stats.NetIO.SentBytesRate = float32(nowNet.BytesSent-lastNet.BytesSent) / float32(dt)
-			}
-		}
+	var readTotal, writeTotal uint64
+	for _, v := range diskCounters {
+		readTotal += v.ReadBytes
+		writeTotal += v.WriteBytes
 	}
+	stats.DiskIO.ReadBytesTotal = int64(readTotal)
+	stats.DiskIO.WriteBytesTotal = int64(writeTotal)
+	stats.DiskIO.ReadBytesRate = 0
+	stats.DiskIO.WriteBytesRate = 0
 
-	// Save for next time
-	lastDiskIO = diskCounters
 	if len(netCounters) > 0 {
-		if lastNetIO == nil {
-			lastNetIO = make(map[string]net.IOCountersStat)
-		}
-		lastNetIO["total"] = netCounters[0]
+		nowNet := netCounters[0]
+		stats.NetIO.RecvBytesTotal = int64(nowNet.BytesRecv)
+		stats.NetIO.SentBytesTotal = int64(nowNet.BytesSent)
+		stats.NetIO.RecvBytesRate = 0
+		stats.NetIO.SentBytesRate = 0
 	}
-	lastTime = now
 
 	return &stats, nil
 }
