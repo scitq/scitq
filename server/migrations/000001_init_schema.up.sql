@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS recruiter (
     protofilter TEXT NOT NULL,
     worker_concurrency INT DEFAULT 1,
     worker_prefetch INT DEFAULT 0,
-    maximum_workers INT DEFAULT 0,
+    maximum_workers INT,
     rounds INT DEFAULT 1,
     PRIMARY KEY (step_id, rank)
 );

@@ -16,7 +16,53 @@ import (
 	"github.com/scitq/scitq/server/memory"
 	"github.com/scitq/scitq/server/protofilter"
 	ws "github.com/scitq/scitq/server/websocket"
+	"github.com/scitq/scitq/utils"
 )
+
+type WorkflowCounter struct {
+	Counter int
+	Maximum *int
+}
+
+// getWorkflowCounters loads the current number of active workers and the maximum number of allowed workers per workflow
+func getWorkflowCounters(db *sql.DB, workflowCounterMemory map[int32]WorkflowCounter) error {
+	// Step 1: Load live worker counts per workflow (includes workflows with zero workers)
+	log.Printf("ℹ️ Adjusting workflow counters")
+	rows, err := db.Query(`
+        SELECT
+            wf.workflow_id,
+            COUNT(w.worker_id) AS worker_count,
+			wf.maximum_workers
+        FROM
+            workflow wf
+        LEFT JOIN
+            step s ON wf.workflow_id = s.workflow_id
+        LEFT JOIN
+            worker w ON w.step_id = s.step_id
+        GROUP BY
+            wf.workflow_id
+    `)
+	if err != nil {
+		return fmt.Errorf("failed to query live workers per workflow: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var wfCounter WorkflowCounter
+		var workflowID int32
+		if err := rows.Scan(&workflowID, &wfCounter.Counter, &wfCounter.Maximum); err != nil {
+			return fmt.Errorf("failed to scan workflow worker count: %w", err)
+		}
+		workflowCounterMemory[workflowID] = wfCounter
+		log.Printf("ℹ️ [DEBUG] Workflow %d: current workers = %d, maximum = %v\n", workflowID, wfCounter.Counter, wfCounter.Maximum)
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
 
 type RecruiterKey struct {
 	StepID int32
@@ -41,6 +87,7 @@ type Recruiter struct {
 	ConcurrencyMin        *int
 	PrefetchPercent       *int
 	MaximumWorkers        *int
+	CurrentWorkers        int
 	Rounds                int
 	PendingTasks          int
 	ActiveTaskrate        int
@@ -51,7 +98,7 @@ type Recruiter struct {
 	RemainingUntilTimeout time.Duration
 }
 
-func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[int32]WorkflowCounter) ([]Recruiter, error) {
+func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[int32]WorkflowCounter) ([]Recruiter, error) {
 	const query = `
         SELECT
 			r.step_id,
@@ -60,7 +107,6 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			r.protofilter,
 			r.worker_concurrency,
 			r.worker_prefetch,
-			r.maximum_workers,
 			r.rounds,
 			r.cpu_per_task,
 			r.memory_per_task,
@@ -68,15 +114,18 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			r.prefetch_percent,
 			r.concurrency_min,
 			r.concurrency_max,
-			wf.maximum_workers,
+			r.maximum_workers AS step_maximum,
+			COUNT(DISTINCT w.worker_id) AS current_workers,
 			wf.workflow_id,
-			COUNT(t.task_id) AS pending_tasks,
-			COALESCE(SUM(w.concurrency), 0) AS active_taskrate,
-			CEIL(COUNT(t.task_id) * 1.0 / r.rounds) AS target_taskrate
+			COUNT(DISTINCT pt.task_id) AS pending_tasks,
+			CEIL(COUNT(DISTINCT pt.task_id) * 1.0 / r.rounds) AS target_taskrate,
+			COUNT(DISTINCT at.task_id) AS active_taskrate
 		FROM
 			recruiter r
 		JOIN
-			task t ON t.step_id = r.step_id AND t.status = 'P'
+			task pt ON pt.step_id = r.step_id AND pt.status = 'P'
+		LEFT JOIN
+			task at ON at.step_id = r.step_id AND at.status = 'R'
 		JOIN
 			step s ON s.step_id = r.step_id
 		JOIN
@@ -91,12 +140,12 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			r.prefetch_percent, r.concurrency_min, r.concurrency_max,
 			wf.maximum_workers, wf.workflow_id
 		HAVING
-			COUNT(t.task_id) > 0
-			AND COALESCE(SUM(w.concurrency), 0) < CEIL(COUNT(t.task_id) * 1.0 / r.rounds)
+			COUNT(pt.task_id) > 0
 		ORDER BY
 			r.step_id, r.rank
     `
-
+	//			AND (wf.maximum_workers IS NULL OR COUNT(w.worker_id) < wf.maximum_workers)
+	//			AND (r.maximum_workers  IS NULL OR COUNT(w.worker_id) < r.maximum_workers)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -104,7 +153,6 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 	defer rows.Close()
 
 	var results []Recruiter
-	var workflow_maximum_workers *int
 	for rows.Next() {
 		var r Recruiter
 		err := rows.Scan(
@@ -114,7 +162,6 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.Protofilter,
 			&r.WorkerConcurrency,
 			&r.WorkerPrefetch,
-			&r.MaximumWorkers,
 			&r.Rounds,
 			&r.CpuPerTask,
 			&r.MemoryPerTask,
@@ -122,16 +169,26 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.PrefetchPercent,
 			&r.ConcurrencyMin,
 			&r.ConcurrencyMax,
-			&workflow_maximum_workers,
+			&r.MaximumWorkers,
+			&r.CurrentWorkers,
 			&r.WorkflowID,
 			&r.PendingTasks,
-			&r.ActiveTaskrate,
 			&r.TargetTaskrate,
+			&r.ActiveTaskrate,
 		)
 		if err != nil {
 			return nil, err
 		}
 
+		// DEBUG
+		var stepMaxStr string
+		if r.MaximumWorkers != nil {
+			stepMaxStr = fmt.Sprintf("%d", *r.MaximumWorkers)
+		} else {
+			stepMaxStr = "unlimited"
+		}
+		log.Printf("ℹ️ [DEBUG] Found active recruiter: step_id=%d rank=%d pending_tasks=%d active_taskrate=%d current_workers=%d step_maximum=%s workflow_maximum=%v\n",
+			r.StepID, r.Rank, r.PendingTasks, r.ActiveTaskrate, r.CurrentWorkers, stepMaxStr, wfcMem[r.WorkflowID].Maximum)
 		key := RecruiterKey{StepID: r.StepID, Rank: r.Rank}
 		state, seen := recruiterTimers[key]
 		if !seen {
@@ -153,27 +210,13 @@ func ListActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			}
 		}
 
-		// Update the workflow counter memory
-		wfc, ok := wfcMem[r.WorkflowID]
-		if !ok {
-			wfcMem[r.WorkflowID] = WorkflowCounter{
-				Counter: 0,
-				Maximum: workflow_maximum_workers,
-			}
-		} else {
-			wfcMem[r.WorkflowID] = WorkflowCounter{
-				Counter: wfc.Counter,
-				Maximum: workflow_maximum_workers,
-			}
-		}
-
 		results = append(results, r)
 	}
 
 	return results, rows.Err()
 }
 
-type RecruiterFlavorRegion struct {
+type FlavorDetail struct {
 	FlavorID int32
 	RegionID int32
 	Cpu      int32
@@ -181,12 +224,14 @@ type RecruiterFlavorRegion struct {
 	Disk     float64
 }
 
-func FetchRecruiterFlavorRegions(
+// fetchRecruiterFlavors fetches available flavors (for recruitment) and all flavors (for recycling)
+// for each recruiter.
+func fetchRecruiterFlavors(
 	db *sql.DB,
 	recruiters []Recruiter,
 ) (
-	map[RecruiterKey][]RecruiterFlavorRegion, // recruitmentMap: available only
-	map[RecruiterKey][]RecruiterFlavorRegion, // recyclingMap: all flavors
+	map[RecruiterKey][]FlavorDetail, // recruitmentMap: available only
+	map[RecruiterKey][]FlavorDetail, // recyclingMap: all flavors
 	map[int32]RegionInfo,
 	error,
 ) {
@@ -241,8 +286,8 @@ func FetchRecruiterFlavorRegions(
 	}
 	defer rows.Close()
 
-	recruitmentMap := make(map[RecruiterKey][]RecruiterFlavorRegion)
-	recyclingMap := make(map[RecruiterKey][]RecruiterFlavorRegion)
+	recruitmentMap := make(map[RecruiterKey][]FlavorDetail)
+	recyclingMap := make(map[RecruiterKey][]FlavorDetail)
 	regionInfoMap := make(map[int32]RegionInfo)
 
 	for rows.Next() {
@@ -257,7 +302,7 @@ func FetchRecruiterFlavorRegions(
 			return nil, nil, nil, err
 		}
 		key := RecruiterKey{StepID: stepID, Rank: rank}
-		region := RecruiterFlavorRegion{
+		flavorDetail := FlavorDetail{
 			FlavorID: flavorID,
 			RegionID: regionID,
 			Cpu:      cpu,
@@ -265,9 +310,9 @@ func FetchRecruiterFlavorRegions(
 			Disk:     disk,
 		}
 		if available {
-			recruitmentMap[key] = append(recruitmentMap[key], region)
+			recruitmentMap[key] = append(recruitmentMap[key], flavorDetail)
 		}
-		recyclingMap[key] = append(recyclingMap[key], region)
+		recyclingMap[key] = append(recyclingMap[key], flavorDetail)
 		// Store region info if not already known
 		if _, exists := regionInfoMap[regionID]; !exists {
 			regionInfoMap[regionID] = RegionInfo{
@@ -287,21 +332,47 @@ type RecyclableWorker struct {
 	RegionID    int32
 	StepID      *int32
 	Concurrency int
-	Running     int
 	Scope       string
 	WorkflowID  *int32
 	Cpu         *int32
 	Memory      *float64
 	Disk        *float64
+	Occupation  float64
+}
+
+// computeWorkerOccupation computes the occupation (as a fraction between 0 and 1) of a worker based on its running tasks and their weights.
+func computeWorkerOccupation(workerID int32, concurrency int, weightMemory *sync.Map, runningTaskIds pq.Int32Array) float64 {
+	val, ok := weightMemory.Load(workerID)
+	if !ok {
+		// fallback: no weight memory yet → estimate
+		return float64(len(runningTaskIds)) / float64(concurrency)
+	}
+
+	m := val.(*sync.Map)
+	totalWeight := 0.0
+	for _, taskID := range runningTaskIds {
+		if v, ok := m.Load(taskID); ok {
+			totalWeight += v.(float64)
+		} else {
+			totalWeight += 1.0
+		}
+	}
+
+	occ := totalWeight / float64(concurrency)
+	if occ > 1.0 {
+		occ = 1.0
+	}
+	return occ
 }
 
 // Note: This function now returns each worker's recyclability scope ('G' or 'W') and
 // the originating workflow id (via the worker's current step). Workers with scopes
 // 'N' (never) or 'T' (temporary block) are excluded at the SQL level.
-func FindRecyclableWorkers(
+func findRecyclableWorkers(
 	db *sql.DB,
 	allAllowedFlavorIDs []int32,
 	allAllowedRegionIDs []int32,
+	weightMemory *sync.Map,
 ) ([]RecyclableWorker, error) {
 	if len(allAllowedFlavorIDs) == 0 {
 		log.Printf("No compatible flavors available to recycle")
@@ -319,7 +390,7 @@ func FindRecyclableWorkers(
 			w.region_id,
 			w.step_id,
 			w.concurrency,
-			COUNT(t.task_id) FILTER (WHERE t.status = 'R') AS running_tasks,
+			ARRAY_AGG(t.task_id ORDER BY t.task_id) FILTER (WHERE t.status='R') AS running_task_ids,
 			w.recyclable_scope,
 			s.workflow_id,
 			f.cpu,
@@ -341,8 +412,7 @@ func FindRecyclableWorkers(
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id,
     		f.cpu, f.mem, f.disk
 		HAVING
-			COUNT(t.task_id) FILTER (WHERE t.status = 'R') < w.concurrency
-			AND COUNT(t.task_id) FILTER (WHERE t.status IN ('P', 'A')) = 0
+			(SELECT COUNT(t2.task_id) FROM task t2 WHERE t2.step_id=w.step_id AND status='P') = 0
     `
 	log.Printf("Trying to find with Flavors %v| Regions %v", allAllowedFlavorIDs, allAllowedRegionIDs)
 	rows, err := db.Query(query, pq.Array(allAllowedFlavorIDs), pq.Array(allAllowedRegionIDs))
@@ -356,13 +426,14 @@ func FindRecyclableWorkers(
 		var w RecyclableWorker
 		var stepIDproxy, workflowIDProxy, cpu sql.NullInt32
 		var memory, disk sql.NullFloat64
+		var runningTaskIds pq.Int32Array
 		if err := rows.Scan(
 			&w.WorkerID,
 			&w.FlavorID,
 			&w.RegionID,
 			&stepIDproxy,
 			&w.Concurrency,
-			&w.Running,
+			&runningTaskIds,
 			&w.Scope,
 			&workflowIDProxy,
 			&cpu,
@@ -371,21 +442,20 @@ func FindRecyclableWorkers(
 		); err != nil {
 			return nil, err
 		}
-		if stepIDproxy.Valid {
-			w.StepID = &stepIDproxy.Int32
+		w.StepID = utils.NullInt32ToPtr(stepIDproxy)
+		w.WorkflowID = utils.NullInt32ToPtr(workflowIDProxy)
+		w.Cpu = utils.NullInt32ToPtr(cpu)
+		w.Memory = utils.NullFloat64ToPtr(memory)
+		w.Disk = utils.NullFloat64ToPtr(disk)
+
+		// Compute occupation
+		w.Occupation = computeWorkerOccupation(w.WorkerID, w.Concurrency, weightMemory, runningTaskIds)
+		log.Printf("[DEBUG] Worker %d: occupation %.2f (running tasks: %v)", w.WorkerID, w.Occupation, runningTaskIds)
+		if w.Occupation >= 0.99 {
+			log.Printf("[DEBUG] Skipping worker %d: fully occupied", w.WorkerID)
+			continue
 		}
-		if workflowIDProxy.Valid {
-			w.WorkflowID = &workflowIDProxy.Int32
-		}
-		if cpu.Valid {
-			w.Cpu = &cpu.Int32
-		}
-		if memory.Valid {
-			w.Memory = &memory.Float64
-		}
-		if disk.Valid {
-			w.Disk = &disk.Float64
-		}
+
 		workers = append(workers, w)
 	}
 
@@ -411,11 +481,12 @@ func recycleWorkers(
 	newConcurrencyByWorkerID map[int32]int,
 	newPrefetchByWorkerID map[int32]int,
 	weightMemory *sync.Map,
-) int {
+	remainingTaskRate int,
+) (int, int) {
 	tx, err := db.Begin()
 	if err != nil {
 		log.Printf("⚠️ Failed to begin transaction: %v", err)
-		return 0
+		return 0, 0
 	}
 
 	newConcurrencies := make([]int, 0, len(workerIDs))
@@ -427,6 +498,7 @@ func recycleWorkers(
 		recyclableMap[w.WorkerID] = w
 	}
 
+	var potentialTaskrate, potentialWorkerNumber int
 	for _, id := range workerIDs {
 		w, ok := recyclableMap[id]
 		if !ok {
@@ -440,6 +512,13 @@ func recycleWorkers(
 		}
 
 		newConcurrency := newConcurrencyByWorkerID[id]
+		if 1.0-w.Occupation < 1.0/float64(newConcurrency) {
+			// The worker is too occupied to handle any new task at this concurrency
+			log.Printf("⚠️ Worker %d is too occupied (%.2f) to handle new concurrency %d", id, w.Occupation, newConcurrency)
+			continue
+		}
+		potentialTaskrate += int(float64(newConcurrency) * (1.0 - w.Occupation))
+		potentialWorkerNumber++
 		newConcurrencies = append(newConcurrencies, newConcurrency)
 		newPrefetches = append(newPrefetches, newPrefetchByWorkerID[id])
 		if w.Concurrency != newConcurrency {
@@ -477,12 +556,22 @@ func recycleWorkers(
 				tempWeightUpdates[id] = newMap
 			}
 		}
+		if potentialTaskrate >= remainingTaskRate {
+			// Stop here: we have enough potential taskrate to cover the recruiter's needs
+			log.Printf("⚠️ Stopping recycling at worker %d to avoid overshooting the recruiter's needs", id)
+			break
+		}
+		if recruiter.MaximumWorkers != nil && potentialWorkerNumber+recruiter.CurrentWorkers >= *recruiter.MaximumWorkers {
+			// Stop here: we have enough potential workers to cover the recruiter's max workers limit
+			log.Printf("⚠️ Stopping recycling at worker %d to avoid exceeding the recruiter's maximum_workers limit", id)
+			break
+		}
 	}
 
 	if len(workerIDs) == 0 {
 		log.Printf("⚠️ No compatible recyclable workers were found.")
 		tx.Rollback()
-		return 0
+		return 0, 0
 	}
 
 	// Collect updated worker ids and names using RETURNING so we can emit richer WS events
@@ -514,11 +603,11 @@ func recycleWorkers(
 	if err != nil {
 		log.Printf("⚠️ Failed to update workers: %v", err)
 		tx.Rollback()
-		return 0
+		return 0, 0
 	}
 	defer rows2.Close()
 
-	var affected int
+	var affected, recycledTaskrate int
 	for rows2.Next() {
 		affected++
 		var workerId int32
@@ -526,16 +615,11 @@ func recycleWorkers(
 		if err := rows2.Scan(&workerId, &workerName, &stepName); err != nil {
 			log.Printf("⚠️ Failed to scan updated worker row: %v", err)
 			tx.Rollback()
-			return 0
+			return 0, 0
 		}
-
-		var stepDisplayName, workerDisplayName string
-		if stepName.Valid {
-			stepDisplayName = stepName.String
-		}
-		if workerName.Valid {
-			workerDisplayName = workerName.String
-		}
+		stepDisplayName := utils.NullStringToString(stepName)
+		workerDisplayName := utils.NullStringToString(workerName)
+		recycledTaskrate += int(float64(newConcurrencyByWorkerID[workerId]) * (1.0 - recyclableMap[workerId].Occupation))
 
 		// Emit WS update, including the worker name when available
 		ws.EmitWS("worker", workerId, "updated", struct {
@@ -557,19 +641,21 @@ func recycleWorkers(
 	if err := rows2.Err(); err != nil {
 		log.Printf("⚠️ Error iterating updated workers: %v", err)
 		tx.Rollback()
-		return 0
+		return 0, 0
 	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Commit failed: %v", err)
-		return 0
+		return 0, 0
 	}
 
 	for wid, m := range tempWeightUpdates {
 		weightMemory.Store(wid, m)
 	}
 
-	return affected
+	recruiter.CurrentWorkers += affected
+	recruiter.ActiveTaskrate += recycledTaskrate
+	return affected, recycledTaskrate
 }
 
 // computeConcurrencyForRecruiterWorker returns the concurrency this worker would have
@@ -676,7 +762,7 @@ func deployWorkers(
 	qm *QuotaManager,
 	creator WorkerCreator,
 	recruiter Recruiter,
-	flavorRegionList []RecruiterFlavorRegion,
+	flavorList []FlavorDetail,
 	regionInfoMap map[int32]RegionInfo,
 	remainingTaskrate int,
 	workflowCounterMemory *WorkflowCounter,
@@ -689,10 +775,10 @@ func deployWorkers(
 
 	for remainingTaskrate > 0 {
 		found := false
-		var selected RecruiterFlavorRegion
+		var selected FlavorDetail
 		var regionInfo RegionInfo
 
-		for _, fr := range flavorRegionList {
+		for _, fr := range flavorList {
 			ri, ok := regionInfoMap[fr.RegionID]
 			if !ok {
 				log.Printf("⚠️ Unknown region_id %d", fr.RegionID)
@@ -751,6 +837,14 @@ func deployWorkers(
 
 		deployed++
 		remainingTaskrate -= newConcurrency
+		if workflowCounterMemory.Maximum != nil && workflowCounterMemory.Counter >= *workflowCounterMemory.Maximum {
+			log.Printf("⚠️ Workflow has reached maximum workers for step %d, stopping deployment", recruiter.StepID)
+			break
+		}
+		if recruiter.MaximumWorkers != nil && recruiter.CurrentWorkers+deployed >= *recruiter.MaximumWorkers {
+			log.Printf("⚠️ Recruiter has reached maximum_workers for step %d, stopping deployment", recruiter.StepID)
+			break
+		}
 	}
 
 	return deployed, nil
@@ -766,7 +860,13 @@ func RecruiterCycle(
 	workflowCounterMemory map[int32]WorkflowCounter,
 	now time.Time,
 ) error {
-	recruiters, err := ListActiveRecruiters(db, now, recruiterTimers, workflowCounterMemory)
+
+	err := getWorkflowCounters(db, workflowCounterMemory)
+	if err != nil {
+		log.Printf("⚠️ Could not adjust workflow counters: %v", err)
+	}
+
+	recruiters, err := listActiveRecruiters(db, now, recruiterTimers, workflowCounterMemory)
 	if err != nil {
 		return fmt.Errorf("failed to list active recruiters: %w", err)
 	}
@@ -777,12 +877,13 @@ func RecruiterCycle(
 	}
 
 	// Fetch recruiter flavor/region info: recruitmentMap, recyclingMap, regionInfoMap
-	recruitmentMap, recyclingMap, regionInfoMap, err := FetchRecruiterFlavorRegions(db, recruiters)
+	recruitmentMap, recyclingMap, regionInfoMap, err := fetchRecruiterFlavors(db, recruiters)
 	if err != nil {
 		return fmt.Errorf("failed to fetch flavor/region info: %w", err)
 	}
 
-	// Aggregate all allowed flavor_ids and region_ids across all recruiters for recycling
+	// Aggregate all allowed flavor_ids and region_ids across all recruiters for recycling.
+	// Using map[int32]struct{} as a lightweight set to collect unique IDs.
 	allFlavorIDs := make(map[int32]struct{})
 	allRegionIDs := make(map[int32]struct{})
 	for _, frList := range recyclingMap {
@@ -792,7 +893,7 @@ func RecruiterCycle(
 		}
 	}
 
-	recyclableWorkers, err := FindRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs))
+	recyclableWorkers, err := findRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs), weightMemory)
 	if err != nil {
 		return fmt.Errorf("failed to find recyclable workers: %w", err)
 	}
@@ -827,26 +928,23 @@ func RecruiterCycle(
 			recruiterRegionIDs[fr.RegionID] = struct{}{}
 		}
 
-		neededTaskrate := recruiter.TargetTaskrate - recruiter.ActiveTaskrate
-		if neededTaskrate <= 0 {
-			log.Printf("Recruiter step=%d rank=%d already meets target throughput.", recruiter.StepID, recruiter.Rank)
+		remainingTaskrate := recruiter.TargetTaskrate - recruiter.ActiveTaskrate
+		if remainingTaskrate <= 0 {
+			log.Printf("Recruiter step=%d rank=%d already meets target throughput (taskrate %d >= target %d).",
+				recruiter.StepID, recruiter.Rank, recruiter.ActiveTaskrate, recruiter.TargetTaskrate)
 			continue
 		}
-
-		remainingTaskrate := neededTaskrate
 
 		if hasRecyclableWorkers {
 			// Try recycling first (select workers to fill the throughput gap)
 			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, remainingTaskrate, recruiter.StepID, recruiter.WorkflowID, recruiter)
 			if len(selectedWorkerIDs) > 0 {
 				// Calculate total taskrate being recycled
-				recycledTaskrate := 0
 				newConcurrencyByWorkerID := make(map[int32]int)
 				newPrefetchByWorkerID := make(map[int32]int)
 				for _, wid := range selectedWorkerIDs {
 					if w, ok := recyclableMap[wid]; ok {
 						newConcurrency := computeConcurrencyForRecruiterWorker(recruiter, w)
-						recycledTaskrate += newConcurrency
 						newConcurrencyByWorkerID[wid] = newConcurrency
 						if recruiter.WorkerPrefetch != nil {
 							newPrefetchByWorkerID[wid] = *recruiter.WorkerPrefetch
@@ -861,7 +959,7 @@ func RecruiterCycle(
 						}
 					}
 				}
-				affected := recycleWorkers(
+				affected, recycledTaskrate := recycleWorkers(
 					db,
 					recyclableWorkers,
 					selectedWorkerIDs,
@@ -870,6 +968,7 @@ func RecruiterCycle(
 					newConcurrencyByWorkerID,
 					newPrefetchByWorkerID,
 					weightMemory,
+					remainingTaskrate,
 				)
 				remainingTaskrate -= recycledTaskrate
 				if remainingTaskrate < 0 {
@@ -944,73 +1043,6 @@ func keys(m map[int32]struct{}) []int32 {
 	return out
 }
 
-type WorkflowCounter struct {
-	Counter int
-	Maximum *int
-}
-
-func AdjustWorkflowCounters(db *sql.DB, workflowCounterMemory map[int32]WorkflowCounter) error {
-	// Step 1: Load live worker counts per workflow (includes workflows with zero workers)
-	log.Printf("ℹ️ Adjusting workflow counters")
-	rows, err := db.Query(`
-        SELECT
-            wf.workflow_id,
-            COUNT(w.worker_id) AS worker_count
-        FROM
-            workflow wf
-        LEFT JOIN
-            step s ON wf.workflow_id = s.workflow_id
-        LEFT JOIN
-            worker w ON w.step_id = s.step_id
-        GROUP BY
-            wf.workflow_id
-    `)
-	if err != nil {
-		return fmt.Errorf("failed to query live workers per workflow: %w", err)
-	}
-	defer rows.Close()
-
-	// Step 2: Scan and adjust for **current** workflows
-	current := make(map[int32]int) // workflow_id -> live worker count
-
-	for rows.Next() {
-		var workflowID int32
-		var liveCount int
-		if err := rows.Scan(&workflowID, &liveCount); err != nil {
-			return fmt.Errorf("failed to scan workflow worker count: %w", err)
-		}
-		current[workflowID] = liveCount
-
-		mem, exists := workflowCounterMemory[workflowID]
-		if !exists {
-			// Initialize memory from live state; Maximum is preserved/updated later by ListActiveRecruiters
-			workflowCounterMemory[workflowID] = WorkflowCounter{Counter: liveCount, Maximum: nil}
-			log.Printf("ℹ️ Initialized workflow %d counter from live state: %d", workflowID, liveCount)
-			continue
-		}
-
-		if liveCount != mem.Counter {
-			log.Printf("ℹ️ Syncing workflow %d counter from %d to live %d", workflowID, mem.Counter, liveCount)
-			mem.Counter = liveCount
-			workflowCounterMemory[workflowID] = mem
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	// Step 3: Remove **stale** workflows from memory (those not present anymore in DB)
-	for wfID := range workflowCounterMemory {
-		if _, ok := current[wfID]; !ok {
-			log.Printf("🧹 Removing stale workflow %d from recruitment memory (no longer present)", wfID)
-			delete(workflowCounterMemory, wfID)
-		}
-	}
-
-	return nil
-}
-
 // StartRecruitmentLoop runs the recruitment loop every interval duration
 func StartRecruiterLoop(
 	ctx context.Context,
@@ -1027,13 +1059,7 @@ func StartRecruiterLoop(
 			log.Println("✅ Recruiter loop fully stopped")
 		}()
 
-		var workflowCounterMemory map[int32]WorkflowCounter
-		err := memory.LoadMemory(ctx, db, "workflow_counters", &workflowCounterMemory)
-		if err != nil {
-			log.Printf("ℹ️ No existing workflow_counters memory found, starting fresh")
-			workflowCounterMemory = make(map[int32]WorkflowCounter)
-		}
-
+		workflowCounterMemory := make(map[int32]WorkflowCounter)
 		recruiterTimers := make(map[RecruiterKey]RecruiterState)
 
 		for {
@@ -1043,18 +1069,9 @@ func StartRecruiterLoop(
 				return
 
 			case now := <-ticker.C:
-				err := AdjustWorkflowCounters(db, workflowCounterMemory)
-				if err != nil {
-					log.Printf("⚠️ Could not adjust workflow counters: %v", err)
-				}
-
-				err = RecruiterCycle(ctx, db, qm, creator, recruiterTimers, weightMemory, workflowCounterMemory, now)
+				err := RecruiterCycle(ctx, db, qm, creator, recruiterTimers, weightMemory, workflowCounterMemory, now)
 				if err != nil {
 					log.Printf("⚠️ Recruiter cycle failed: %v", err)
-				}
-				err = memory.SaveMemory(ctx, db, "workflow_counters", workflowCounterMemory)
-				if err != nil {
-					log.Printf("⚠️ Could not save workflow recruitment memory: %v", err)
 				}
 				err = memory.SaveWeightMemory(ctx, db, "weight_memory", weightMemory)
 				if err != nil {
