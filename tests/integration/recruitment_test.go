@@ -262,33 +262,35 @@ func TestRecruitmentCycle(t *testing.T) {
 		}
 
 		// 4. Create recruiters for each step
-		eight := int32(8)
+		//eight := int32(8)
+		four := int32(4)
+		three := int32(3)
 		zero := int32(0)
 		rec1Resp, err := qc.CreateRecruiter(ctx, &pb.Recruiter{
 			StepId:          step1Id,
 			Rank:            1,
 			Protofilter:     "cpu>=8",
-			CpuPerTask:      &eight,
+			CpuPerTask:      &three,
 			PrefetchPercent: &zero,
 			Rounds:          2,
 			Timeout:         3,
 		})
 		require.NoError(t, err)
 		t.Logf("✅ Created recruiter for step 1 : %v", rec1Resp.Success)
-		four := int32(4)
+
 		rec2Resp, err := qc.CreateRecruiter(ctx, &pb.Recruiter{
 			StepId:          step2Id,
 			Rank:            1,
 			Protofilter:     "cpu>=8",
 			CpuPerTask:      &four,
 			PrefetchPercent: &zero,
-			Rounds:          2,
+			Rounds:          1,
 			Timeout:         3,
 		})
 		require.NoError(t, err)
 		t.Logf("✅ Created recruiter for step 2: %v", rec2Resp.Success)
 
-		time.Sleep(30 * time.Second) // Wait for recruiter to act
+		time.Sleep(45 * time.Second) // Wait for recruiter to act
 	})
 }
 

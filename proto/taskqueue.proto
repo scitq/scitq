@@ -121,6 +121,7 @@ message Task {
     int32 retry_count = 20;
     bool hidden = 21;
     optional int32 previous_task_id = 22;
+    optional double weight = 23; // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
 }
 
 message TaskList {

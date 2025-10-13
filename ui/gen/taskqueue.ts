@@ -199,6 +199,10 @@ export interface Task {
      * @generated from protobuf field: optional int32 previous_task_id = 22
      */
     previousTaskId?: number;
+    /**
+     * @generated from protobuf field: optional double weight = 23
+     */
+    weight?: number; // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -2399,7 +2403,8 @@ class Task$Type extends MessageType<Task> {
             { no: 19, name: "task_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 20, name: "retry_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 21, name: "hidden", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 22, name: "previous_task_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 22, name: "previous_task_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 23, name: "weight", kind: "scalar", opt: true, T: 1 /*ScalarType.DOUBLE*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -2487,6 +2492,9 @@ class Task$Type extends MessageType<Task> {
                 case /* optional int32 previous_task_id */ 22:
                     message.previousTaskId = reader.int32();
                     break;
+                case /* optional double weight */ 23:
+                    message.weight = reader.double();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2565,6 +2573,9 @@ class Task$Type extends MessageType<Task> {
         /* optional int32 previous_task_id = 22; */
         if (message.previousTaskId !== undefined)
             writer.tag(22, WireType.Varint).int32(message.previousTaskId);
+        /* optional double weight = 23; */
+        if (message.weight !== undefined)
+            writer.tag(23, WireType.Bit64).double(message.weight);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

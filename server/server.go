@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/scitq/scitq/server/config"
-	"github.com/scitq/scitq/server/memory"
 	"github.com/scitq/scitq/server/protofilter"
 	"github.com/scitq/scitq/server/providers"
 	"github.com/scitq/scitq/server/watchdog"
@@ -77,14 +76,13 @@ type taskQueueServer struct {
 	qm             recruitment.QuotaManager
 	watchdog       *watchdog.Watchdog
 
-	stopWatchdog       chan struct{}
-	done               chan struct{}
-	workerWeightMemory *sync.Map // worker_id -> map[task_id]float64
-	ctx                context.Context
-	cancel             context.CancelFunc
-	workerStats        *sync.Map
-	sslCertificatePEM  string
-	stats              *StepStatsAgg // In-memory step/workflow stats aggregator
+	stopWatchdog      chan struct{}
+	done              chan struct{}
+	ctx               context.Context
+	cancel            context.CancelFunc
+	workerStats       *sync.Map
+	sslCertificatePEM string
+	stats             *StepStatsAgg // In-memory step/workflow stats aggregator
 }
 
 type TaskUpdateBroadcast struct {
@@ -94,27 +92,22 @@ type TaskUpdateBroadcast struct {
 }
 
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx context.Context, cancel context.CancelFunc) *taskQueueServer {
-	workerWeightMemory, err := memory.LoadWeightMemory(context.Background(), db, "weight_memory")
-	if err != nil {
-		log.Printf("⚠️ Creating a new weight memory: %v", err)
-		workerWeightMemory = &sync.Map{}
-	}
 	s := &taskQueueServer{
-		db:                 db,
-		cfg:                cfg,
-		logRoot:            logRoot,
-		jobQueue:           make(chan Job, defaultJobQueueSize),
-		semaphore:          make(chan struct{}, defaultJobConcurrency),
-		providers:          make(map[int32]providers.Provider),
-		providerConfig:     make(map[string]config.ProviderConfig),
-		assignTrigger:      DefaultAssignTrigger, // buffered, avoids blocking
-		workerWeightMemory: workerWeightMemory,
-		stopWatchdog:       make(chan struct{}),
-		done:               make(chan struct{}),
-		ctx:                ctx,
-		cancel:             cancel,
-		workerStats:        &sync.Map{},
+		db:             db,
+		cfg:            cfg,
+		logRoot:        logRoot,
+		jobQueue:       make(chan Job, defaultJobQueueSize),
+		semaphore:      make(chan struct{}, defaultJobConcurrency),
+		providers:      make(map[int32]providers.Provider),
+		providerConfig: make(map[string]config.ProviderConfig),
+		assignTrigger:  DefaultAssignTrigger, // buffered, avoids blocking
+		stopWatchdog:   make(chan struct{}),
+		done:           make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
+		workerStats:    &sync.Map{},
 	}
+	var err error
 	s.stats, err = NewStepStatsAgg(db)
 	if err != nil {
 		log.Fatalf("⚠️ Failed to initialize step stats aggregator: %v", err)
@@ -2074,15 +2067,14 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		return nil, fmt.Errorf("failed to fetch worker concurrency for worker %d: %w", req.WorkerId, err)
 	}
 
-	// 2️⃣ Fetch tasks (assigned and running)
+	// 2️⃣ Fetch tasks (assigned and running), now include weight column
 	rows, err := s.db.Query(`
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
 			download_timeout, running_timeout, upload_timeout,
-			status
+			status, weight
 		FROM task
 		WHERE worker_id = $1
-		  AND COALESCE(step_id, 0) = COALESCE((SELECT step_id FROM worker WHERE worker_id = $1), 0)
 		  AND status IN ('A', 'C', 'D', 'R', 'U', 'V')
 	`, req.WorkerId)
 	if err != nil {
@@ -2093,10 +2085,11 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 	for rows.Next() {
 		var task pb.Task
 		var status string
+		var weight sql.NullFloat64
 
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
@@ -2104,6 +2097,10 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		task.Resource = []string(resource)
 		if shell.Valid {
 			task.Shell = proto.String(shell.String)
+		}
+		if weight.Valid {
+			task.Weight = &weight.Float64
+			taskUpdateList[task.TaskId] = &pb.TaskUpdate{Weight: weight.Float64}
 		}
 
 		if status == "A" {
@@ -2113,47 +2110,13 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 			// Just track active running task IDs
 			activeTaskIDs = append(activeTaskIDs, task.TaskId)
 		}
-
-		// Add weight if available (for both assigned and active tasks)
-		if val, ok := s.workerWeightMemory.Load(req.WorkerId); ok {
-			taskMap := val.(*sync.Map)
-			if weightVal, ok := taskMap.Load(task.TaskId); ok {
-				weight, ok := weightVal.(float64)
-				if ok {
-					taskUpdateList[task.TaskId] = &pb.TaskUpdate{Weight: weight}
-				}
-			}
-		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating through tasks: %w", err)
 	}
 
-	// Clean up the worker's weight memory
-	if val, ok := s.workerWeightMemory.Load(req.WorkerId); ok {
-		taskMap := val.(*sync.Map)
-		activeSet := make(map[int32]struct{}, len(activeTaskIDs))
-		for _, id := range activeTaskIDs {
-			activeSet[id] = struct{}{}
-		}
-		for _, task := range tasks {
-			activeSet[task.TaskId] = struct{}{}
-		}
-
-		var toDelete []int32
-		taskMap.Range(func(taskIDRaw, _ any) bool {
-			taskID := taskIDRaw.(int32)
-			if _, stillActive := activeSet[taskID]; !stillActive {
-				toDelete = append(toDelete, taskID)
-			}
-			return true
-		})
-		for _, taskID := range toDelete {
-			taskMap.Delete(taskID)
-			log.Printf("⚠️ Worker %d: cleaned task %d from weight memory (no longer active)", req.WorkerId, taskID)
-		}
-	}
+	// No longer need to clean up in-memory weightMemory here
 
 	s.watchdog.WorkerPinged(req.WorkerId)
 
@@ -3743,7 +3706,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		defer s.Shutdown()
 
 		s.qm = *recruitment.NewQuotaManager(&cfg)
-		recruitment.StartRecruiterLoop(s.ctx, s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, s.workerWeightMemory)
+		recruitment.StartRecruiterLoop(s.ctx, s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval)
 
 		if err := s.checkProviders(); err != nil {
 			log.Fatalf("failed to check providers: %v", err)

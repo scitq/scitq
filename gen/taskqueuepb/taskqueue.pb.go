@@ -314,6 +314,7 @@ type Task struct {
 	RetryCount       int32                  `protobuf:"varint,20,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
 	Hidden           bool                   `protobuf:"varint,21,opt,name=hidden,proto3" json:"hidden,omitempty"`
 	PreviousTaskId   *int32                 `protobuf:"varint,22,opt,name=previous_task_id,json=previousTaskId,proto3,oneof" json:"previous_task_id,omitempty"`
+	Weight           *float64               `protobuf:"fixed64,23,opt,name=weight,proto3,oneof" json:"weight,omitempty"` // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -498,6 +499,13 @@ func (x *Task) GetHidden() bool {
 func (x *Task) GetPreviousTaskId() int32 {
 	if x != nil && x.PreviousTaskId != nil {
 		return *x.PreviousTaskId
+	}
+	return 0
+}
+
+func (x *Task) GetWeight() float64 {
+	if x != nil && x.Weight != nil {
+		return *x.Weight
 	}
 	return 0
 }
@@ -7012,7 +7020,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10_running_timeoutB\x11\n" +
 	"\x0f_upload_timeoutB\f\n" +
 	"\n" +
-	"_task_name\"\xbe\a\n" +
+	"_task_name\"\xe6\a\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -7040,7 +7048,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\vretry_count\x18\x14 \x01(\x05R\n" +
 	"retryCount\x12\x16\n" +
 	"\x06hidden\x18\x15 \x01(\bR\x06hidden\x12-\n" +
-	"\x10previous_task_id\x18\x16 \x01(\x05H\rR\x0epreviousTaskId\x88\x01\x01B\b\n" +
+	"\x10previous_task_id\x18\x16 \x01(\x05H\rR\x0epreviousTaskId\x88\x01\x01\x12\x1b\n" +
+	"\x06weight\x18\x17 \x01(\x01H\x0eR\x06weight\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -7057,7 +7066,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_workflow_idB\f\n" +
 	"\n" +
 	"_task_nameB\x13\n" +
-	"\x11_previous_task_id\"1\n" +
+	"\x11_previous_task_idB\t\n" +
+	"\a_weight\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"\xdd\x02\n" +
 	"\x06Worker\x12\x1b\n" +

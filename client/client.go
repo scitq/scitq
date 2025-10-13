@@ -310,19 +310,19 @@ func (w *WorkerConfig) fetchTasks(
 		return nil, err
 	}
 
-	if res.Concurrency != w.Concurrency {
-		log.Printf("Resizing concurrency from %d to %d", w.Concurrency, res.Concurrency)
-		sem.Resize(float64(res.Concurrency))
-		w.Concurrency = res.Concurrency
-	}
-
 	// Apply task weights if any
 	updates := make(map[int32]float64)
 	for taskID, update := range res.Updates.Updates {
 		taskWeights.Store(taskID, update.Weight)
 		updates[taskID] = update.Weight
 	}
-	sem.ResizeTasks(updates)
+	if res.Concurrency != w.Concurrency {
+		log.Printf("Resizing concurrency from %d to %d", w.Concurrency, res.Concurrency)
+		sem.ResizeAll(float64(res.Concurrency), updates)
+		w.Concurrency = res.Concurrency
+	} else {
+		sem.ResizeTasks(updates)
+	}
 
 	// Check activeTasks map
 	// 1) Build a set of server-active tasks

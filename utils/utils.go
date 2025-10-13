@@ -98,22 +98,6 @@ func (s *ResizableSemaphore) Size() float64 {
 	return s.maxSize
 }
 
-// ResizeTask updates the weight of a task (if the semaphore knows of it) and adjusts the semaphore accordingly.
-func (s *ResizableSemaphore) ResizeTaskIfRunning(taskID int32, newWeight float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if oldWeight, ok := s.runningTasks[taskID]; ok {
-		delta := newWeight - oldWeight
-		s.tokens -= delta
-		s.runningTasks[taskID] = newWeight
-		if delta < 0 {
-			// if we shrunk capacity, we may want to wake someone
-			s.cond.Signal()
-		}
-	}
-}
-
 // ResizeTasks updates the weights of multiple tasks and adjusts the semaphore accordingly.
 // This is useful for bulk updates or when multiple tasks are being resized at once.
 func (s *ResizableSemaphore) ResizeTasks(updates map[int32]float64) {
@@ -122,6 +106,33 @@ func (s *ResizableSemaphore) ResizeTasks(updates map[int32]float64) {
 
 	for taskID, newWeight := range updates {
 		if _, ok := s.runningTasks[taskID]; ok {
+			log.Printf("[SEM] Resizing task %d from %.3f to %.3f", taskID, s.runningTasks[taskID], newWeight)
+			s.runningTasks[taskID] = newWeight
+		}
+	}
+	s.resetTokensUnsafe()
+	s.cond.Broadcast()
+}
+
+// ResizeTasks updates the weights of multiple tasks and adjusts the semaphore accordingly.
+// This is useful for bulk updates or when multiple tasks are being resized at once.
+func (s *ResizableSemaphore) ResizeAll(newSize float64, updates map[int32]float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	log.Printf("🔄 Resizing semaphore from %.2f to %.2f\n", s.maxSize, newSize)
+	diff := newSize - s.maxSize
+
+	s.tokens += diff
+	s.maxSize = newSize
+
+	if diff > 0 {
+		s.cond.Broadcast()
+	}
+
+	for taskID, newWeight := range updates {
+		if _, ok := s.runningTasks[taskID]; ok {
+			log.Printf("🔄 Resizing task %d weight from %.2f to %.2f\n", taskID, s.runningTasks[taskID], newWeight)
 			s.runningTasks[taskID] = newWeight
 		}
 	}

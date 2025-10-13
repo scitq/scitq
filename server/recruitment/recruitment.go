@@ -7,13 +7,11 @@ import (
 	"log"
 	"math"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lib/pq"
 
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
-	"github.com/scitq/scitq/server/memory"
 	"github.com/scitq/scitq/server/protofilter"
 	ws "github.com/scitq/scitq/server/websocket"
 	"github.com/scitq/scitq/utils"
@@ -54,7 +52,6 @@ func getWorkflowCounters(db *sql.DB, workflowCounterMemory map[int32]WorkflowCou
 			return fmt.Errorf("failed to scan workflow worker count: %w", err)
 		}
 		workflowCounterMemory[workflowID] = wfCounter
-		log.Printf("ℹ️ [DEBUG] Workflow %d: current workers = %d, maximum = %v\n", workflowID, wfCounter.Counter, wfCounter.Maximum)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -340,31 +337,6 @@ type RecyclableWorker struct {
 	Occupation  float64
 }
 
-// computeWorkerOccupation computes the occupation (as a fraction between 0 and 1) of a worker based on its running tasks and their weights.
-func computeWorkerOccupation(workerID int32, concurrency int, weightMemory *sync.Map, runningTaskIds pq.Int32Array) float64 {
-	val, ok := weightMemory.Load(workerID)
-	if !ok {
-		// fallback: no weight memory yet → estimate
-		return float64(len(runningTaskIds)) / float64(concurrency)
-	}
-
-	m := val.(*sync.Map)
-	totalWeight := 0.0
-	for _, taskID := range runningTaskIds {
-		if v, ok := m.Load(taskID); ok {
-			totalWeight += v.(float64)
-		} else {
-			totalWeight += 1.0
-		}
-	}
-
-	occ := totalWeight / float64(concurrency)
-	if occ > 1.0 {
-		occ = 1.0
-	}
-	return occ
-}
-
 // Note: This function now returns each worker's recyclability scope ('G' or 'W') and
 // the originating workflow id (via the worker's current step). Workers with scopes
 // 'N' (never) or 'T' (temporary block) are excluded at the SQL level.
@@ -372,7 +344,6 @@ func findRecyclableWorkers(
 	db *sql.DB,
 	allAllowedFlavorIDs []int32,
 	allAllowedRegionIDs []int32,
-	weightMemory *sync.Map,
 ) ([]RecyclableWorker, error) {
 	if len(allAllowedFlavorIDs) == 0 {
 		log.Printf("No compatible flavors available to recycle")
@@ -390,7 +361,7 @@ func findRecyclableWorkers(
 			w.region_id,
 			w.step_id,
 			w.concurrency,
-			ARRAY_AGG(t.task_id ORDER BY t.task_id) FILTER (WHERE t.status='R') AS running_task_ids,
+			coalesce(sum(t.weight),0)/w.concurrency AS current_load,
 			w.recyclable_scope,
 			s.workflow_id,
 			f.cpu,
@@ -399,7 +370,7 @@ func findRecyclableWorkers(
 		FROM
 			worker w
 		LEFT JOIN
-			task t ON t.worker_id = w.worker_id
+			task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
 		LEFT JOIN
 			step s ON s.step_id = w.step_id
 		LEFT JOIN
@@ -411,46 +382,49 @@ func findRecyclableWorkers(
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id,
     		f.cpu, f.mem, f.disk
-		HAVING
-			(SELECT COUNT(t2.task_id) FROM task t2 WHERE t2.step_id=w.step_id AND status='P') = 0
+		HAVING 
+			COALESCE(sum(t.weight),0) < w.concurrency
     `
 	log.Printf("Trying to find with Flavors %v| Regions %v", allAllowedFlavorIDs, allAllowedRegionIDs)
 	rows, err := db.Query(query, pq.Array(allAllowedFlavorIDs), pq.Array(allAllowedRegionIDs))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var workers []RecyclableWorker
+	var stepFreeSlots = make(map[int32]int) // step_id -> free slots
 	for rows.Next() {
 		var w RecyclableWorker
 		var stepIDproxy, workflowIDProxy, cpu sql.NullInt32
 		var memory, disk sql.NullFloat64
-		var runningTaskIds pq.Int32Array
 		if err := rows.Scan(
 			&w.WorkerID,
 			&w.FlavorID,
 			&w.RegionID,
 			&stepIDproxy,
 			&w.Concurrency,
-			&runningTaskIds,
+			&w.Occupation, // current_load
 			&w.Scope,
 			&workflowIDProxy,
 			&cpu,
 			&memory,
 			&disk,
 		); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		w.StepID = utils.NullInt32ToPtr(stepIDproxy)
+		if w.StepID != nil {
+			// Count free slots per step for informational/debugging purposes
+			stepFreeSlots[*w.StepID] += max(w.Concurrency-int(math.Ceil(w.Occupation*float64(w.Concurrency))), 0)
+		}
 		w.WorkflowID = utils.NullInt32ToPtr(workflowIDProxy)
 		w.Cpu = utils.NullInt32ToPtr(cpu)
 		w.Memory = utils.NullFloat64ToPtr(memory)
 		w.Disk = utils.NullFloat64ToPtr(disk)
 
 		// Compute occupation
-		w.Occupation = computeWorkerOccupation(w.WorkerID, w.Concurrency, weightMemory, runningTaskIds)
-		log.Printf("[DEBUG] Worker %d: occupation %.2f (running tasks: %v)", w.WorkerID, w.Occupation, runningTaskIds)
+		log.Printf("[DEBUG] Worker %d: occupation %.2f", w.WorkerID, w.Occupation)
 		if w.Occupation >= 0.99 {
 			log.Printf("[DEBUG] Skipping worker %d: fully occupied", w.WorkerID)
 			continue
@@ -458,8 +432,61 @@ func findRecyclableWorkers(
 
 		workers = append(workers, w)
 	}
+	rows.Close()
 
-	return workers, rows.Err()
+	log.Printf("[DEBUG] Found %d recyclable workers, with free slots per step: %v", len(workers), stepFreeSlots)
+	// Filter out workers whose step has pending tasks exceeding the free slots on recyclable workers
+	const stepQuery = `
+		SELECT
+			step_id,
+			COUNT(task_id) AS pending_tasks
+		FROM
+			task
+		WHERE
+			status = 'P'
+			AND step_id = ANY($1::int[])
+		GROUP BY
+			step_id
+    `
+	var stepIDs []int32
+	for stepID := range stepFreeSlots {
+		stepIDs = append(stepIDs, stepID)
+	}
+	log.Printf("[DEBUG] Querying pending tasks for steps %v", stepIDs)
+	stepRows, err := db.Query(stepQuery, pq.Array(stepIDs))
+	if err != nil {
+		log.Printf("⚠️ Failed to query pending tasks per step: %v", err)
+		return nil, err
+	}
+	defer stepRows.Close()
+
+	var stepPendingTasks = make(map[int32]int) // step_id -> pending tasks
+	for stepRows.Next() {
+		var stepID int32
+		var pending int
+		if err := stepRows.Scan(&stepID, &pending); err != nil {
+			log.Printf("⚠️ Failed to scan pending tasks per step: %v", err)
+			return nil, err
+		}
+		log.Printf("[DEBUG] ℹ️ Step %d has %d pending tasks and %d free slots on recyclable workers", stepID, pending, stepFreeSlots[stepID])
+		if pending > stepFreeSlots[stepID] {
+			stepPendingTasks[stepID] = pending
+		}
+	}
+
+	freeWorkers := []RecyclableWorker{}
+	for _, w := range workers {
+		if w.StepID != nil {
+			if stepPendingTasks[*w.StepID] > 0 {
+				log.Printf("[DEBUG] ℹ️ Skipping worker %d (step %d) for recycling as its step has %d pending tasks exceeding free slots %d", w.WorkerID, *w.StepID, stepPendingTasks[*w.StepID], stepFreeSlots[*w.StepID])
+				stepPendingTasks[*w.StepID] -= max(w.Concurrency-int(math.Ceil(w.Occupation*float64(w.Concurrency))), 0)
+				continue
+			}
+			freeWorkers = append(freeWorkers, w)
+		}
+	}
+
+	return freeWorkers, stepRows.Err()
 }
 
 func containsInt(slice []int32, val int32) bool {
@@ -471,7 +498,7 @@ func containsInt(slice []int32, val int32) bool {
 	return false
 }
 
-// recycle workers and update weight memory if needed
+// recycle workers and update task weights in DB if needed
 func recycleWorkers(
 	db *sql.DB,
 	recyclableWorkers []RecyclableWorker, // <- directly what FindRecyclableWorkers returns
@@ -480,7 +507,6 @@ func recycleWorkers(
 	allowedFlavorIDs []int32,
 	newConcurrencyByWorkerID map[int32]int,
 	newPrefetchByWorkerID map[int32]int,
-	weightMemory *sync.Map,
 	remainingTaskRate int,
 ) (int, int) {
 	tx, err := db.Begin()
@@ -491,7 +517,6 @@ func recycleWorkers(
 
 	newConcurrencies := make([]int, 0, len(workerIDs))
 	newPrefetches := make([]int, 0, len(workerIDs))
-	tempWeightUpdates := make(map[int32]*sync.Map) // worker_id → *sync.Map[task_id]float64
 
 	recyclableMap := make(map[int32]RecyclableWorker)
 	for _, w := range recyclableWorkers {
@@ -523,37 +548,15 @@ func recycleWorkers(
 		newPrefetches = append(newPrefetches, newPrefetchByWorkerID[id])
 		if w.Concurrency != newConcurrency {
 			scale := float64(newConcurrency) / float64(w.Concurrency)
-
-			var currentMap *sync.Map
-			if val, ok := weightMemory.Load(id); ok {
-				currentMap = val.(*sync.Map)
-				newMap := &sync.Map{}
-				currentMap.Range(func(key, value any) bool {
-					tid := key.(int32)
-					weight := value.(float64)
-					newMap.Store(tid, weight*scale)
-					return true
-				})
-				tempWeightUpdates[id] = newMap
-			} else {
-				newMap := &sync.Map{}
-				rows, err := tx.Query(`
-                    SELECT task_id
-                    FROM task
-                    WHERE worker_id = $1
-                    AND status IN ('A','C','R','D','U')`, id)
-				if err != nil {
-					log.Printf("⚠️ Failed to list tasks for worker %d: %v", id, err)
-					continue
-				}
-				for rows.Next() {
-					var tid int
-					if err := rows.Scan(&tid); err == nil {
-						newMap.Store(tid, scale)
-					}
-				}
-				rows.Close()
-				tempWeightUpdates[id] = newMap
+			_, err := tx.Exec(`
+                UPDATE task
+                SET weight = weight * $1
+                WHERE worker_id = $2
+                  AND status IN ('A','C','R','D','U')
+            `, scale, id)
+			if err != nil {
+				log.Printf("⚠️ Failed to update task weights for worker %d: %v", id, err)
+				// continue; do not abort the rest
 			}
 		}
 		if potentialTaskrate >= remainingTaskRate {
@@ -619,7 +622,7 @@ func recycleWorkers(
 		}
 		stepDisplayName := utils.NullStringToString(stepName)
 		workerDisplayName := utils.NullStringToString(workerName)
-		recycledTaskrate += int(float64(newConcurrencyByWorkerID[workerId]) * (1.0 - recyclableMap[workerId].Occupation))
+		recycledTaskrate += max(int(float64(newConcurrencyByWorkerID[workerId])*(1.0-recyclableMap[workerId].Occupation)), 0)
 
 		// Emit WS update, including the worker name when available
 		ws.EmitWS("worker", workerId, "updated", struct {
@@ -647,10 +650,6 @@ func recycleWorkers(
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Commit failed: %v", err)
 		return 0, 0
-	}
-
-	for wid, m := range tempWeightUpdates {
-		weightMemory.Store(wid, m)
 	}
 
 	recruiter.CurrentWorkers += affected
@@ -856,7 +855,6 @@ func RecruiterCycle(
 	qm *QuotaManager,
 	creator WorkerCreator,
 	recruiterTimers map[RecruiterKey]RecruiterState,
-	weightMemory *sync.Map,
 	workflowCounterMemory map[int32]WorkflowCounter,
 	now time.Time,
 ) error {
@@ -893,7 +891,7 @@ func RecruiterCycle(
 		}
 	}
 
-	recyclableWorkers, err := findRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs), weightMemory)
+	recyclableWorkers, err := findRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs))
 	if err != nil {
 		return fmt.Errorf("failed to find recyclable workers: %w", err)
 	}
@@ -967,7 +965,6 @@ func RecruiterCycle(
 					keys(recruiterFlavorIDs),
 					newConcurrencyByWorkerID,
 					newPrefetchByWorkerID,
-					weightMemory,
 					remainingTaskrate,
 				)
 				remainingTaskrate -= recycledTaskrate
@@ -1050,7 +1047,6 @@ func StartRecruiterLoop(
 	qm *QuotaManager,
 	creator WorkerCreator,
 	recruiterInterval int,
-	weightMemory *sync.Map,
 ) {
 	go func() {
 		ticker := time.NewTicker(time.Duration(recruiterInterval) * time.Second)
@@ -1069,13 +1065,9 @@ func StartRecruiterLoop(
 				return
 
 			case now := <-ticker.C:
-				err := RecruiterCycle(ctx, db, qm, creator, recruiterTimers, weightMemory, workflowCounterMemory, now)
+				err := RecruiterCycle(ctx, db, qm, creator, recruiterTimers, workflowCounterMemory, now)
 				if err != nil {
 					log.Printf("⚠️ Recruiter cycle failed: %v", err)
-				}
-				err = memory.SaveWeightMemory(ctx, db, "weight_memory", weightMemory)
-				if err != nil {
-					log.Printf("⚠️ Could not save partial recycling memory: %v", err)
 				}
 
 			}
