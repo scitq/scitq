@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/scitq/scitq/client"
 	"github.com/scitq/scitq/server/config"
@@ -27,6 +28,7 @@ type FakeProvider struct {
 	AutoLaunch  bool
 	ServerAddr  string
 	WorkerToken string
+	DeployTime  int // seconds to wait before launching workers
 
 	cancels map[string]context.CancelFunc
 }
@@ -53,6 +55,7 @@ func NewFromConfig(cfg config.Config, config config.FakeProviderConfig) *FakePro
 		WorkerToken: cfg.Scitq.WorkerToken,
 		ServerAddr:  fmt.Sprintf("%s:%d", cfg.Scitq.ServerFQDN, cfg.Scitq.Port),
 		AutoLaunch:  config.AutoLaunch,
+		DeployTime:  config.DeployTime,
 	}
 }
 
@@ -82,6 +85,7 @@ func (f *FakeProvider) Create(workerName, flavor, location string, jobId int32) 
 			workerNameCopy := workerName
 			ctx, cancel := context.WithCancel(context.Background())
 			f.cancels[workerNameCopy] = cancel
+			time.Sleep(time.Duration(f.DeployTime) * time.Second)
 			go func() {
 				log.Printf("Auto-launching real worker client for %s", workerNameCopy)
 				tmpDir, err := os.MkdirTemp("", "scitq-worker-"+workerNameCopy+"-*")

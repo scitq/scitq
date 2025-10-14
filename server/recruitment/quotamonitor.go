@@ -1,6 +1,7 @@
 package recruitment
 
 import (
+	"log"
 	"sync"
 
 	"github.com/scitq/scitq/server/config"
@@ -40,10 +41,20 @@ func (qm *QuotaManager) CanLaunch(region, provider string, cpu int32, memGB floa
 	usage := val.(RegionalUsage)
 
 	if usage.UsedCPU+cpu > quota.MaxCPU {
+		log.Printf("[DEBUG] QuotaManager: cannot launch in %s/%s, usage CPU %d/%d, Mem %.1f/%.1f GB",
+			region, provider,
+			usage.UsedCPU, quota.MaxCPU,
+			usage.UsedMemGB, quota.MaxMemGB,
+		)
 		return false
 	}
 
 	if quota.MaxMemGB > 0 && usage.UsedMemGB+float32(memGB) > quota.MaxMemGB {
+		log.Printf("[DEBUG] QuotaManager: cannot launch in %s/%s, usage CPU %d/%d, Mem %.1f/%.1f GB",
+			region, provider,
+			usage.UsedCPU, quota.MaxCPU,
+			usage.UsedMemGB, quota.MaxMemGB,
+		)
 		return false
 	}
 
@@ -58,6 +69,11 @@ func (qm *QuotaManager) RegisterLaunch(region, provider string, cpu int32, memGB
 	usage.UsedCPU += cpu
 	usage.UsedMemGB += memGB
 
+	log.Printf("[DEBUG] QuotaManager: after launch in %s/%s, usage is now CPU %d/%d, Mem %.1f/%.1f GB",
+		region, provider,
+		usage.UsedCPU, qm.Quotas[key].MaxCPU,
+		usage.UsedMemGB, qm.Quotas[key].MaxMemGB,
+	)
 	qm.Usage.Store(key, usage)
 }
 
@@ -85,8 +101,10 @@ func NewQuotaManager(cfg *config.Config) *QuotaManager {
 	}
 	for _, p := range cfg.GetProviders() {
 		name := p.GetName()
+		log.Printf("QuotaManager: loading quotas for provider %s", name)
 		for region, quota := range p.GetQuotas() {
 			key := quotaKey(region, name)
+			log.Printf("  region %s: CPU %d, Mem %.1f GB", region, quota.MaxCPU, quota.MaxMemGB)
 			qm.Quotas[key] = RegionalQuota{
 				Region:   region,
 				Provider: name,

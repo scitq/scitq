@@ -16,6 +16,7 @@ type FakeProviderConfig struct {
 	// a running test server.
 	AutoLaunch bool   `yaml:"auto_launch"`
 	ServerAddr string `yaml:"server_addr"`
+	DeployTime int    `yaml:"delayed_deploy" default:"0"` // seconds to wait before launching workers
 }
 
 func (f *FakeProviderConfig) GetRegions() []string {

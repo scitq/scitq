@@ -1312,7 +1312,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var providerID int32
 		var regionName string
 		var flavorName string
-		var providerName string
+		var provider string
 		var cpu int32
 		var memory float32
 		var stepName sql.NullString
@@ -1322,14 +1322,14 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			VALUES (NULLIF($1,0), $5 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE, 'I')
 			RETURNING worker_id, worker_name, region_id, flavor_id, step_id
 		)
-		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name, r.region_name, f.flavor_name, f.cpu, f.mem, s.step_name
+		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name||'.'||p.config_name, r.region_name, f.flavor_name, f.cpu, f.mem, s.step_name
 		FROM insertquery iq
 		JOIN region r ON iq.region_id = r.region_id
 		JOIN flavor f ON iq.flavor_id = f.flavor_id
 		JOIN provider p ON r.provider_id = p.provider_id
 		LEFT JOIN step s ON s.step_id = iq.step_id`,
 			req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
-			&workerID, &workerName, &providerID, &providerName, &regionName, &flavorName, &cpu, &memory, &stepName)
+			&workerID, &workerName, &providerID, &provider, &regionName, &flavorName, &cpu, &memory, &stepName)
 		if err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf(
@@ -1344,7 +1344,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			return nil, err
 		}
 
-		s.qm.RegisterLaunch(regionName, providerName, cpu, memory)
+		s.qm.RegisterLaunch(regionName, provider, cpu, memory)
 
 		job := Job{
 			JobID:      jobID,

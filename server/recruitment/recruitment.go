@@ -89,6 +89,7 @@ type Recruiter struct {
 	PendingTasks          int
 	ActiveTaskrate        int
 	TargetTaskrate        int
+	PotentialTaskrate     int
 	WorkflowID            int32
 	TimeoutPassed         bool // <- new field
 	LastTrigger           time.Time
@@ -97,49 +98,81 @@ type Recruiter struct {
 
 func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[int32]WorkflowCounter) ([]Recruiter, error) {
 	const query = `
+        WITH pt_agg AS (
+            SELECT step_id, COUNT(*) AS pending
+            FROM task
+            WHERE status = 'P'
+            GROUP BY step_id
+        ),
+        active_agg AS (
+            SELECT step_id, COALESCE(SUM(weight),0) AS active_taskrate
+            FROM task
+            WHERE status = 'R'
+            GROUP BY step_id
+        ),
+        worker_load AS (
+            SELECT
+                w.worker_id,
+                w.step_id,
+                w.concurrency,
+                COALESCE(SUM(t.weight),0) AS load
+            FROM worker w
+            LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+            GROUP BY w.worker_id, w.step_id, w.concurrency
+        ),
+        worker_agg AS (
+            SELECT
+                step_id,
+                COUNT(*) AS current_workers,
+                SUM(concurrency) AS potential_taskrate, -- total capacity
+                SUM(GREATEST(concurrency - load, 0)) AS free_taskrate     -- capacity left (what we actually need)
+            FROM worker_load
+            GROUP BY step_id
+        )
         SELECT
-			r.step_id,
-			r.rank,
-			r.timeout,
-			r.protofilter,
-			r.worker_concurrency,
-			r.worker_prefetch,
-			r.rounds,
-			r.cpu_per_task,
-			r.memory_per_task,
-			r.disk_per_task,
-			r.prefetch_percent,
-			r.concurrency_min,
-			r.concurrency_max,
-			r.maximum_workers AS step_maximum,
-			COUNT(DISTINCT w.worker_id) AS current_workers,
-			wf.workflow_id,
-			COUNT(DISTINCT pt.task_id) AS pending_tasks,
-			CEIL(COUNT(DISTINCT pt.task_id) * 1.0 / r.rounds) AS target_taskrate,
-			COUNT(DISTINCT at.task_id) AS active_taskrate
-		FROM
-			recruiter r
-		JOIN
-			task pt ON pt.step_id = r.step_id AND pt.status = 'P'
-		LEFT JOIN
-			task at ON at.step_id = r.step_id AND at.status = 'R'
-		JOIN
-			step s ON s.step_id = r.step_id
-		JOIN
-			workflow wf ON wf.workflow_id = s.workflow_id
-		LEFT JOIN
-			worker w ON w.step_id = r.step_id
-		GROUP BY
-			r.step_id, r.rank, r.timeout, r.protofilter,
-			r.worker_concurrency, r.worker_prefetch,
-			r.maximum_workers, r.rounds,
-			r.cpu_per_task, r.memory_per_task, r.disk_per_task,
-			r.prefetch_percent, r.concurrency_min, r.concurrency_max,
-			wf.maximum_workers, wf.workflow_id
-		HAVING
-			COUNT(pt.task_id) > 0
-		ORDER BY
-			r.step_id, r.rank
+            r.step_id,
+            r.rank,
+            r.timeout,
+            r.protofilter,
+            r.worker_concurrency,
+            r.worker_prefetch,
+            r.rounds,
+            r.cpu_per_task,
+            r.memory_per_task,
+            r.disk_per_task,
+            r.prefetch_percent,
+            r.concurrency_min,
+            r.concurrency_max,
+            r.maximum_workers AS step_maximum,
+            COALESCE(wagg.current_workers, 0) AS current_workers,
+            wf.workflow_id,
+            pa.pending AS pending_tasks,
+            CEIL(pa.pending * 1.0 / r.rounds) AS target_taskrate,
+            COALESCE(aa.active_taskrate,0) AS active_taskrate,
+            COALESCE(wagg.free_taskrate, 0) AS potential_taskrate   -- NOTE: we store *free* capacity in potential_taskrate
+        FROM
+            recruiter r
+        JOIN
+            step s ON s.step_id = r.step_id
+        JOIN
+            workflow wf ON wf.workflow_id = s.workflow_id
+        JOIN
+            pt_agg pa ON pa.step_id = r.step_id
+        LEFT JOIN
+            active_agg aa ON aa.step_id = r.step_id
+        LEFT JOIN
+            worker_agg wagg ON wagg.step_id = r.step_id
+        GROUP BY
+            r.step_id, r.rank, r.timeout, r.protofilter,
+            r.worker_concurrency, r.worker_prefetch,
+            r.maximum_workers, r.rounds,
+            r.cpu_per_task, r.memory_per_task, r.disk_per_task,
+            r.prefetch_percent, r.concurrency_min, r.concurrency_max,
+            wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
+        HAVING
+            CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
+        ORDER BY
+            r.step_id, r.rank
     `
 	//			AND (wf.maximum_workers IS NULL OR COUNT(w.worker_id) < wf.maximum_workers)
 	//			AND (r.maximum_workers  IS NULL OR COUNT(w.worker_id) < r.maximum_workers)
@@ -172,6 +205,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.PendingTasks,
 			&r.TargetTaskrate,
 			&r.ActiveTaskrate,
+			&r.PotentialTaskrate,
 		)
 		if err != nil {
 			return nil, err
@@ -832,7 +866,7 @@ func deployWorkers(
 		log.Printf("✅ Deployed worker: step=%d flavor=%d region=%d provider=%s", recruiter.StepID, selected.FlavorID, selected.RegionID, regionInfo.Provider)
 		workflowCounterMemory.Counter++
 
-		qm.RegisterLaunch(regionInfo.Name, regionInfo.Provider, int32(newConcurrency), float32(newPrefetch))
+		//qm.RegisterLaunch(regionInfo.Name, regionInfo.Provider, int32(newConcurrency), float32(newPrefetch))
 
 		deployed++
 		remainingTaskrate -= newConcurrency
@@ -926,7 +960,7 @@ func RecruiterCycle(
 			recruiterRegionIDs[fr.RegionID] = struct{}{}
 		}
 
-		remainingTaskrate := recruiter.TargetTaskrate - recruiter.ActiveTaskrate
+		remainingTaskrate := recruiter.TargetTaskrate - recruiter.PotentialTaskrate
 		if remainingTaskrate <= 0 {
 			log.Printf("Recruiter step=%d rank=%d already meets target throughput (taskrate %d >= target %d).",
 				recruiter.StepID, recruiter.Rank, recruiter.ActiveTaskrate, recruiter.TargetTaskrate)
