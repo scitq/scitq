@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"log"
 	"testing"
 	"time"
 
@@ -165,12 +166,6 @@ func TestRecruitmentCycle(t *testing.T) {
 	}
 	require.True(t, foundWorker, "fake worker not found in worker list")
 
-	// --- 🔟 Start a real test worker client ---
-	// clientCleanup, _ := startClientForTest(t, serverAddr, workerName, token, 1)
-	// time.Sleep(2 * time.Second)
-	// t.Log("✅ Test worker client successfully started and connected")
-	// defer clientCleanup()
-
 	time.Sleep(3 * time.Second) // Wait for worker status update
 	wlist2, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
 	require.NoError(t, err)
@@ -290,7 +285,113 @@ func TestRecruitmentCycle(t *testing.T) {
 		require.NoError(t, err)
 		t.Logf("✅ Created recruiter for step 2: %v", rec2Resp.Success)
 
-		time.Sleep(45 * time.Second) // Wait for recruiter to act
+		time.Sleep(7 * time.Second) // Wait for recruiter to act
+
+		// check that two workers have been created
+		wlist, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
+		require.NoError(t, err)
+		var foundWorker1, foundWorker2 bool
+		var cheap8_id, exp16_id int32
+		for _, w := range wlist.Workers {
+			if w.Flavor == "cheap8" && w.Status == "R" {
+				foundWorker1 = true
+				t.Logf("✅ Found cheap8 worker created by recruiter: ID=%d, Name=%s",
+					w.WorkerId, w.Name)
+				cheap8_id = w.WorkerId
+			}
+			if w.Flavor == "exp16" && w.Status == "R" {
+				foundWorker2 = true
+				t.Logf("✅ Found exp16 worker created by recruiter: ID=%d, Name=%s",
+					w.WorkerId, w.Name)
+				exp16_id = w.WorkerId
+			}
+		}
+		require.True(t, foundWorker1, "cheap8 worker not found in worker list")
+		require.True(t, foundWorker2, "exp16 worker not found in worker list")
+		require.True(t, cheap8_id < exp16_id, "cheap8 worker ID should be lower than exp16 ID since created first")
+		taskDone := make(map[int32]bool)
+		var stepsRunning, steps1to10Done, atLeastOneTaskWithWeightNotOne, workersRecycled, steps11to20Done bool
+
+		StartTime := time.Now()
+		for {
+			time.Sleep(1 * time.Second) // Wait for tasks to complete
+			tasks, err := qc.ListTasks(ctx, &pb.ListTasksRequest{})
+			require.NoError(t, err)
+
+			for _, task := range tasks.Tasks {
+				if !stepsRunning {
+					if task.Status == "R" || task.Status == "U" || task.Status == "S" {
+						stepsRunning = true
+						log.Printf("✅ Step are begining to run")
+						break
+					}
+				}
+				if task.Status == "S" && !taskDone[task.TaskId] {
+					taskDone[task.TaskId] = true
+					log.Printf("✅ Task %d is done", task.TaskId)
+				}
+				if !steps1to10Done {
+					steps1to10Done = true
+					for id := int32(1); id <= 10; id++ {
+						steps1to10Done = steps1to10Done && taskDone[id]
+						if !atLeastOneTaskWithWeightNotOne {
+							atLeastOneTaskWithWeightNotOne = atLeastOneTaskWithWeightNotOne || (task.Weight != nil && *task.Weight < 1.0)
+							if atLeastOneTaskWithWeightNotOne {
+								log.Printf("✅ At least one task has weight != 1.0")
+							}
+						}
+						if !steps1to10Done {
+							break
+						}
+						if !steps1to10Done {
+							break
+						}
+					}
+					if steps1to10Done {
+						log.Printf("✅ Step 1 tasks 1 to 10 are done")
+					}
+				}
+				if !workersRecycled {
+					workers, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
+					require.NoError(t, err)
+					workersRecycled = true
+					for _, w := range workers.Workers {
+						workersRecycled = workersRecycled && (w.StepId != nil && *w.StepId == 2)
+						if !workersRecycled {
+							break
+						}
+					}
+					if workersRecycled {
+						log.Printf("✅ Workers have been recycled to step 2")
+					}
+				}
+				if !steps11to20Done {
+					steps11to20Done = true
+					for id := int32(11); id <= 20; id++ {
+						steps11to20Done = steps11to20Done && taskDone[id]
+						if !steps11to20Done {
+							break
+						}
+					}
+					if steps11to20Done {
+						log.Printf("✅ Step 2 tasks 11 to 20 are done")
+					}
+				}
+			}
+			if time.Since(StartTime) > 2*time.Minute {
+				log.Printf("⏲️ Timeout reached, ending wait loop")
+				break
+			}
+			if steps11to20Done {
+				break
+			}
+		}
+		require.True(t, stepsRunning, "steps should have started running")
+		require.True(t, steps1to10Done, "step 1 tasks 1 to 10 should be done")
+		require.True(t, atLeastOneTaskWithWeightNotOne, "at least one task should have weight != 1.0")
+		require.True(t, workersRecycled, "workers should have been recycled to step 2")
+		require.True(t, steps11to20Done, "step 2 tasks 11 to 20 should be done")
+
 	})
 }
 

@@ -1950,7 +1950,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
         SELECT
             t.task_id, t.task_name, t.command, t.container, t.container_options, t.status,
             t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden,
-            s.workflow_id
+            s.workflow_id, t.weight
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -2013,6 +2013,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&retryCount,
 			&hidden,
 			&wfIDNull,
+			&task.Weight,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -3807,7 +3808,10 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	} else {
 		log.Printf("🌙 HTTPS disabled by config (scitq.disable_https=true)")
 		// Keep Serve() alive even when only gRPC is enabled.
-		select {}
+		// select {}
+		<-ctx.Done()
+		log.Println("🛑 Serve() context cancelled, shutting down")
+		return ctx.Err()
 	}
 
 	return nil

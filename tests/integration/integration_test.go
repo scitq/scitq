@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -265,7 +266,11 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 		cfg.Scitq.DisableGRPCWeb = true
 		defaults.Set(&cfg)
 		if err := server.Serve(cfg, ctx, cancel); err != nil {
-			log.Fatalf("Server failed: %v", err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				log.Println("🛑 Serve() exited normally due to context cancellation")
+			} else {
+				log.Fatalf("Server failed: %v", err)
+			}
 		}
 	}()
 
