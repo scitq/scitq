@@ -42,6 +42,12 @@ type Attr struct {
 		List *struct {
 			Status     string `arg:"--status" help:"Filter tasks by status"`
 			ShowHidden bool   `arg:"--show-hidden" help:"Include tasks marked as hidden (e.g., previous failed attempts)"`
+			WorkerId   int32  `arg:"--worker-id" help:"Filter tasks by worker ID"`
+			WorkflowId int32  `arg:"--workflow-id" help:"Filter tasks by workflow ID"`
+			StepId     int32  `arg:"--step-id" help:"Filter tasks by step ID"`
+			Command    string `arg:"--command" help:"Filter tasks by command substring"`
+			Limit      int32  `arg:"--limit" default:"20" help:"Limit the number of tasks returned"`
+			Offset     int32  `arg:"--offset" help:"Offset for pagination of tasks"`
 		} `arg:"subcommand:list" help:"List all tasks"`
 
 		Output *struct {
@@ -287,12 +293,38 @@ func (c *CLI) TaskList() error {
 	defer cancel()
 
 	req := &pb.ListTasksRequest{}
+	// Status filter
 	if c.Attr.Task.List.Status != "" {
 		req.StatusFilter = &c.Attr.Task.List.Status
 	}
+	// ShowHidden filter
 	if c.Attr.Task.List.ShowHidden {
 		v := true
 		req.ShowHidden = &v
+	}
+	// WorkerId filter
+	if c.Attr.Task.List.WorkerId != 0 {
+		req.WorkerIdFilter = &c.Attr.Task.List.WorkerId
+	}
+	// WorkflowId filter
+	if c.Attr.Task.List.WorkflowId != 0 {
+		req.WorkflowIdFilter = &c.Attr.Task.List.WorkflowId
+	}
+	// StepId filter
+	if c.Attr.Task.List.StepId != 0 {
+		req.StepIdFilter = &c.Attr.Task.List.StepId
+	}
+	// Command filter
+	if c.Attr.Task.List.Command != "" {
+		req.CommandFilter = &c.Attr.Task.List.Command
+	}
+	// Limit filter
+	if c.Attr.Task.List.Limit > 0 {
+		req.Limit = &c.Attr.Task.List.Limit
+	}
+	// Offset filter
+	if c.Attr.Task.List.Offset > 0 {
+		req.Offset = &c.Attr.Task.List.Offset
 	}
 
 	res, err := c.QC.Client.ListTasks(ctx, req)
