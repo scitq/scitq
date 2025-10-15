@@ -83,6 +83,7 @@ type taskQueueServer struct {
 	workerStats       *sync.Map
 	sslCertificatePEM string
 	stats             *StepStatsAgg // In-memory step/workflow stats aggregator
+	activeJobs        sync.Map      // jobID -> context.CancelFunc
 }
 
 type TaskUpdateBroadcast struct {
@@ -3910,4 +3911,21 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	}
 
 	return nil
+}
+
+// getJobByID retrieves job details from the database.
+func (s *taskQueueServer) getJobByID(jobID int32) (Job, bool) {
+	var j Job
+	err := s.db.QueryRow(`
+        SELECT job_id, worker_id, provider_id, region, worker_name, action, retry
+        FROM job
+        WHERE job_id = $1
+    `, jobID).Scan(&j.JobID, &j.WorkerID, &j.ProviderID, &j.Region, &j.WorkerName, &j.Action, &j.Retry)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("⚠️ getJobByID failed for %d: %v", jobID, err)
+		}
+		return Job{}, false
+	}
+	return j, true
 }

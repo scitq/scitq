@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
@@ -29,11 +30,17 @@ type Job struct {
 // Start initializes the job queue.
 func (s *taskQueueServer) startJobQueue() {
 	s.semaphore = make(chan struct{}, defaultJobConcurrency)
+	s.activeJobs = sync.Map{}
 }
 
 // AddJob adds a new job and processes it immediately.
 func (s *taskQueueServer) addJob(job Job) {
-	go s.processJobWithTimeout(context.Background(), job)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.activeJobs.Store(job.JobID, cancel)
+	go func() {
+		defer s.activeJobs.Delete(job.JobID)
+		s.processJobWithTimeout(ctx, job)
+	}()
 }
 
 // processJobWithTimeout processes the job with a timeout.
@@ -61,14 +68,23 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 
 	select {
 	case <-ctx.Done():
-		log.Printf("⚠️ Job %d timed out", job.JobID)
-		// Handle timeout (e.g., mark job as failed)
-		if err := s.updateJobStatus(job.JobID, "F"); err != nil {
-			log.Printf("⚠️ Failed to update job status to failed: %v", err)
-		}
-		if job.Retry > 0 {
-			job.Retry--
-			s.addJob(job) // Retry job
+		// Check if context was cancelled or timed out
+		if ctx.Err() == context.Canceled {
+			log.Printf("🛑 Job %d cancelled", job.JobID)
+			// Update job status to cancelled
+			if err := s.updateJobStatus(job.JobID, "X"); err != nil {
+				log.Printf("⚠️ Failed to update job status to cancelled: %v", err)
+			}
+		} else {
+			log.Printf("⚠️ Job %d timed out", job.JobID)
+			// Handle timeout (e.g., mark job as failed)
+			if err := s.updateJobStatus(job.JobID, "F"); err != nil {
+				log.Printf("⚠️ Failed to update job status to failed: %v", err)
+			}
+			if job.Retry > 0 {
+				job.Retry--
+				s.addJob(job) // Retry job
+			}
 		}
 	case err := <-done:
 		if err != nil {
@@ -109,6 +125,32 @@ func (s *taskQueueServer) processJob(job Job) error {
 			return fmt.Errorf("worker created but db update failed %s: %v", job.WorkerName, err)
 		}
 	case 'D': // Delete
+		// Cancel any pending 'C' jobs for the same worker
+		s.activeJobs.Range(func(key, value interface{}) bool {
+			cancelFunc, ok := value.(context.CancelFunc)
+			if !ok {
+				return true
+			}
+			jobID, ok := key.(int32)
+			if !ok {
+				return true
+			}
+			// We need to find the job details for this jobID to check WorkerID and Action
+			// Since we don't have direct access here, let's assume we have a method to get job details by jobID:
+			// For this example, assume s.getJobByID(jobID) returns (Job, bool)
+			if pendingJob, found := s.getJobByID(jobID); found {
+				if pendingJob.WorkerID == job.WorkerID && pendingJob.Action == 'C' {
+					log.Printf("🛑 Cancelling creation job %d for worker %d", jobID, job.WorkerID)
+					cancelFunc()
+					// Mark the job as cancelled in DB
+					if err := s.updateJobStatus(jobID, "X"); err != nil {
+						log.Printf("⚠️ Failed to mark job %d as cancelled: %v", jobID, err)
+					}
+				}
+			}
+			return true
+		})
+
 		// Delete the worker
 		log.Printf("🗑️ Deleting worker %s : %s", job.WorkerName, job.Region)
 
