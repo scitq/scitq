@@ -25,6 +25,7 @@ import (
 	"github.com/scitq/scitq/server/providers"
 	"github.com/scitq/scitq/server/watchdog"
 	ws "github.com/scitq/scitq/server/websocket"
+	"github.com/scitq/scitq/utils"
 
 	"github.com/scitq/scitq/fetch"
 
@@ -2046,7 +2047,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
         SELECT
             t.task_id, t.task_name, t.command, t.container, t.container_options, t.status,
             t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden,
-            s.workflow_id, t.weight
+            s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -2086,14 +2087,12 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	var tasks []*pb.Task
 	for rows.Next() {
 		var (
-			task         pb.Task
-			taskName     sql.NullString
-			workerIDNull sql.NullInt32
-			stepIDNull   sql.NullInt32
-			prevTaskID   sql.NullInt32
-			wfIDNull     sql.NullInt32
-			retryCount   int32
-			hidden       bool
+			task                                                      pb.Task
+			taskName, shellNull, outputNull                           sql.NullString
+			inputNull, resourceNull                                   pq.StringArray
+			workerIDNull, stepIDNull, prevTaskID, wfIDNull, retryNull sql.NullInt32
+			retryCount                                                int32
+			hidden                                                    bool
 		)
 
 		if err := rows.Scan(
@@ -2110,26 +2109,26 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&hidden,
 			&wfIDNull,
 			&task.Weight,
+			&shellNull,
+			&inputNull,
+			&resourceNull,
+			&outputNull,
+			&retryNull,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
 		}
 
-		if taskName.Valid {
-			task.TaskName = &taskName.String
-		}
-		if workerIDNull.Valid {
-			task.WorkerId = proto.Int32(int32(workerIDNull.Int32))
-		}
-		if stepIDNull.Valid {
-			task.StepId = proto.Int32(int32(stepIDNull.Int32))
-		}
-		if prevTaskID.Valid {
-			task.PreviousTaskId = proto.Int32(int32(prevTaskID.Int32))
-		}
-		if wfIDNull.Valid {
-			task.WorkflowId = proto.Int32(int32(wfIDNull.Int32))
-		}
+		task.TaskName = utils.NullStringToPtr(taskName)
+		task.Shell = utils.NullStringToPtr(shellNull)
+		task.Input = utils.StringArrayToSlice(inputNull)
+		task.Resource = utils.StringArrayToSlice(resourceNull)
+		task.Output = utils.NullStringToPtr(outputNull)
+		task.WorkerId = utils.NullInt32ToPtr(workerIDNull)
+		task.StepId = utils.NullInt32ToPtr(stepIDNull)
+		task.PreviousTaskId = utils.NullInt32ToPtr(prevTaskID)
+		task.WorkflowId = utils.NullInt32ToPtr(wfIDNull)
+		task.Retry = utils.NullInt32ToPtr(retryNull)
 		task.RetryCount = retryCount
 		task.Hidden = hidden
 

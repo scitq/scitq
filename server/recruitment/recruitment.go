@@ -537,7 +537,7 @@ func recycleWorkers(
 	db *sql.DB,
 	recyclableWorkers []RecyclableWorker, // <- directly what FindRecyclableWorkers returns
 	workerIDs []int32,
-	recruiter Recruiter,
+	recruiter *Recruiter,
 	allowedFlavorIDs []int32,
 	newConcurrencyByWorkerID map[int32]int,
 	newPrefetchByWorkerID map[int32]int,
@@ -838,6 +838,13 @@ func deployWorkers(
 			return deployed, nil
 		}
 
+		// ---- ADDITION: recruiter MaximumWorkers guard clause ----
+		if recruiter.MaximumWorkers != nil && recruiter.CurrentWorkers+deployed >= *recruiter.MaximumWorkers {
+			log.Printf("⚠️ Step %d reached maximum workers (%d), giving up deployment", recruiter.StepID, *recruiter.MaximumWorkers)
+			return deployed, nil
+		}
+		// ---- END ADDITION ----
+
 		newConcurrency := computeConcurrencyForRecruiterWorker(recruiter,
 			RecyclableWorker{Cpu: &selected.Cpu, Memory: &selected.Memory, Disk: &selected.Disk})
 		var newPrefetch int
@@ -995,7 +1002,7 @@ func RecruiterCycle(
 					db,
 					recyclableWorkers,
 					selectedWorkerIDs,
-					recruiter,
+					&recruiter,
 					keys(recruiterFlavorIDs),
 					newConcurrencyByWorkerID,
 					newPrefetchByWorkerID,
