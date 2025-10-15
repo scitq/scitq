@@ -25,6 +25,7 @@ type AzureProvider struct {
 	az               config.AzureConfig
 	sshPublicKeyData string
 	cfg              config.Config
+	name             string
 }
 
 // expandPath expands a leading ~ in a file path to the user's home directory.
@@ -53,7 +54,7 @@ func readFileContent(filePath string) (string, error) {
 }
 
 // NewAzureProvider creates an AzureProvider with the given configuration.
-func New(cfg config.AzureConfig, scitqCfg config.Config) *AzureProvider {
+func New(name string, cfg config.AzureConfig, scitqCfg config.Config) *AzureProvider {
 
 	sshKeyContent, err := readFileContent(cfg.SSHPublicKey)
 	if err != nil {
@@ -64,6 +65,7 @@ func New(cfg config.AzureConfig, scitqCfg config.Config) *AzureProvider {
 		az:               cfg,
 		sshPublicKeyData: sshKeyContent,
 		cfg:              scitqCfg,
+		name:             name,
 	}
 }
 
@@ -184,11 +186,15 @@ func (ap *AzureProvider) Create(workerName, flavor, location string, jobId int32
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d`,
+  - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d -provider "%s" -region "%s"
+  - systemctl start scitq-client`,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
 			ap.cfg.Scitq.SwapProportion, ap.cfg.Scitq.WorkerToken,
-			jobId)
+			jobId,
+			ap.name,
+			location,
+		)
 		customData := base64.StdEncoding.EncodeToString([]byte(cloudInit))
 
 		// Create credential.
@@ -402,7 +408,7 @@ func (ap *AzureProvider) getIPAddressFromPubIPID(ctx context.Context, cred *azid
 }
 
 // List returns the worker names and IP addresses for VMs created by scitq.
-func (ap *AzureProvider) List() (map[string]string, error) {
+func (ap *AzureProvider) List(location string) (map[string]string, error) {
 	cred, err := azidentity.NewClientSecretCredential(ap.az.TenantID, ap.az.ClientID, ap.az.ClientSecret, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create credential: %w", err)
@@ -423,6 +429,9 @@ func (ap *AzureProvider) List() (map[string]string, error) {
 			return nil, fmt.Errorf("failed to get next page of resource groups: %w", err)
 		}
 		for _, rg := range page.ResourceGroupListResult.Value {
+			if rg.Location != nil && location != "" && *rg.Location != location {
+				continue
+			}
 			if rg.Name != nil && strings.HasSuffix(*rg.Name, ap.resourceGroupSuffix()) {
 				workerName := strings.TrimSuffix(*rg.Name, ap.resourceGroupSuffix())
 				vmClient, err := createClient(func() (*armcompute.VirtualMachinesClient, error) {

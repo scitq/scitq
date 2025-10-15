@@ -69,10 +69,11 @@ type Provider struct {
 	ExtNetworkID  string // external network ID for FIPs (env OPENSTACK_EXTNET_ID)
 	Keypair       string // existing keypair name (env OPENSTACK_KEYPAIR)
 	UserData      []byte // cloud-init content (from env or file)
+	Name          string // provider name (e.g., "openstack.myconfig")
 }
 
 // NewFromConfig constructs a Provider from YAML OpenstackConfig (no env required).
-func NewFromConfig(cfg config.Config, c config.OpenstackConfig) (*Provider, error) {
+func NewFromConfig(name string, cfg config.Config, c config.OpenstackConfig) (*Provider, error) {
 	p := &Provider{
 		cfg:           cfg,
 		C:             c,
@@ -81,6 +82,7 @@ func NewFromConfig(cfg config.Config, c config.OpenstackConfig) (*Provider, erro
 		NetworkID:     c.NetworkID,
 		ExtNetworkID:  c.ExtNetworkID,
 		Keypair:       c.Keypair,
+		Name:          name,
 	}
 	if c.Custom != nil {
 		if path, ok := c.Custom["userdata_file"].(string); ok && path != "" {
@@ -127,7 +129,7 @@ func getenvAny(keys ...string) string {
 
 // effectiveUserData returns explicit user-data if set; otherwise builds a default cloud-init
 // snippet from cfg.Scitq (like Azure) to install and start scitq-client.
-func (p *Provider) effectiveUserData(jobId int32) []byte {
+func (p *Provider) effectiveUserData(jobId int32, region string) []byte {
 	if len(p.UserData) > 0 {
 		return p.UserData
 	}
@@ -141,14 +143,18 @@ func (p *Provider) effectiveUserData(jobId int32) []byte {
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
-  - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d
+  - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d -provider "%s" -region "%s"
+  - systemctl start scitq-client
 `,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.ClientDownloadToken,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.Port,
 		p.cfg.Scitq.SwapProportion,
-		p.cfg.Scitq.WorkerToken, jobId)
+		p.cfg.Scitq.WorkerToken,
+		jobId,
+		p.Name,
+		region)
 	return []byte(cloudInit)
 }
 
@@ -283,7 +289,7 @@ func (p *Provider) Create(workerName, flavorName, location string, jobId int32) 
 		Networks:  nics,
 		Metadata:  metadata,
 	}
-	if ud := p.effectiveUserData(jobId); len(ud) > 0 {
+	if ud := p.effectiveUserData(jobId, location); len(ud) > 0 {
 		createOpts.UserData = ud
 	}
 
@@ -337,8 +343,8 @@ func (p *Provider) Create(workerName, flavorName, location string, jobId int32) 
 }
 
 // List returns a map of server name -> preferred IP (public if available, else private).
-func (p *Provider) List() (map[string]string, error) {
-	region := p.DefaultRegion
+func (p *Provider) List(location string) (map[string]string, error) {
+	region := location
 	if region == "" {
 		return nil, errors.New("default region is required for List(); set it in OpenstackConfig.region or pass location")
 	}

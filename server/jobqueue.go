@@ -111,7 +111,13 @@ func (s *taskQueueServer) processJob(job Job) error {
 	case 'D': // Delete
 		// Delete the worker
 		log.Printf("🗑️ Deleting worker %s : %s", job.WorkerName, job.Region)
-		err := s.providers[job.ProviderID].Delete(job.WorkerName, job.Region)
+
+		provider := s.providers[job.ProviderID]
+		if provider == nil {
+			return fmt.Errorf("provider %d not found for worker %s", job.ProviderID, job.WorkerName)
+		}
+
+		err := provider.Delete(job.WorkerName, job.Region)
 		if err != nil {
 			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
 		}

@@ -71,9 +71,10 @@ func (s *taskQueueServer) checkProviders() error {
 		case "azure":
 			for paramConfigName, config := range s.cfg.Providers.Azure {
 				if p.ConfigName == paramConfigName {
-					provider := azure.New(*config, s.cfg)
+					fullName := fmt.Sprintf("azure.%s", paramConfigName)
+					provider := azure.New(fullName, *config, s.cfg)
 					s.providers[p.ProviderID] = provider
-					s.providerConfig[fmt.Sprintf("azure.%s", paramConfigName)] = config
+					s.providerConfig[fullName] = config
 
 					if mappedConfig[p.ProviderName] == nil {
 						mappedConfig[p.ProviderName] = make(map[string]bool)
@@ -90,13 +91,14 @@ func (s *taskQueueServer) checkProviders() error {
 		case "openstack":
 			for paramConfigName, config := range s.cfg.Providers.Openstack {
 				if p.ConfigName == paramConfigName {
-					provider, err := openstack.NewFromConfig(s.cfg, *config)
+					fullName := fmt.Sprintf("openstack.%s", paramConfigName)
+					provider, err := openstack.NewFromConfig(fullName, s.cfg, *config)
 					if err != nil {
 						log.Printf("⚠️ Failed to create openstack provider from config %s: %v", paramConfigName, err)
 						continue
 					}
 					s.providers[p.ProviderID] = provider
-					s.providerConfig[fmt.Sprintf("openstack.%s", paramConfigName)] = config
+					s.providerConfig[fullName] = config
 
 					if mappedConfig[p.ProviderName] == nil {
 						mappedConfig[p.ProviderName] = make(map[string]bool)
@@ -112,9 +114,10 @@ func (s *taskQueueServer) checkProviders() error {
 		case "fake":
 			for paramConfigName, config := range s.cfg.Providers.Fake {
 				if p.ConfigName == paramConfigName {
-					provider := fake.NewFromConfig(s.cfg, *config)
+					fullName := fmt.Sprintf("fake.%s", paramConfigName)
+					provider := fake.NewFromConfig(fullName, s.cfg, *config)
 					s.providers[p.ProviderID] = provider
-					s.providerConfig[fmt.Sprintf("fake.%s", paramConfigName)] = config
+					s.providerConfig[fullName] = config
 
 					if mappedConfig[p.ProviderName] == nil {
 						mappedConfig[p.ProviderName] = make(map[string]bool)
@@ -138,6 +141,7 @@ func (s *taskQueueServer) checkProviders() error {
 	for configName, config := range s.cfg.Providers.Azure {
 		if _, ok := mappedConfig["azure"][configName]; !ok {
 			var providerId int32
+			fullName := fmt.Sprintf("azure.%s", configName)
 			log.Printf("Adding Azure provider %s: %v", "azure", configName)
 			err := tx.QueryRow(`INSERT INTO provider (provider_name, config_name) VALUES ($1, $2) RETURNING provider_id`,
 				"azure", configName).Scan(&providerId)
@@ -145,9 +149,9 @@ func (s *taskQueueServer) checkProviders() error {
 				log.Printf("⚠️ Failed to add provider: %v", err)
 				continue
 			}
-			provider := azure.New(*config, s.cfg)
+			provider := azure.New(fullName, *config, s.cfg)
 			s.providers[providerId] = provider
-			s.providerConfig[fmt.Sprintf("azure.%s", configName)] = config
+			s.providerConfig[fullName] = config
 
 			// Manage regions for this newly created provider
 			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {
@@ -166,7 +170,7 @@ func (s *taskQueueServer) checkProviders() error {
 				log.Printf("⚠️ Failed to add provider: %v", err)
 				continue
 			}
-			provider, err := openstack.NewFromConfig(s.cfg, *config)
+			provider, err := openstack.NewFromConfig("openstack."+configName, s.cfg, *config)
 			if err != nil {
 				return fmt.Errorf("failed to create openstack provider from config %s: %w", configName, err)
 			}
@@ -191,7 +195,7 @@ func (s *taskQueueServer) checkProviders() error {
 				log.Printf("⚠️ Failed to add fake provider: %v", err)
 				continue
 			}
-			provider := fake.NewFromConfig(s.cfg, *config)
+			provider := fake.NewFromConfig("fake."+configName, s.cfg, *config)
 			s.providers[providerId] = provider
 			s.providerConfig[fmt.Sprintf("fake.%s", configName)] = config
 			if err := s.syncRegions(tx, providerId, config.Regions, config.DefaultRegion); err != nil {

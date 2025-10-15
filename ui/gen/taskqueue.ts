@@ -33,6 +33,18 @@ export interface WorkerInfo {
      * @generated from protobuf field: optional int32 concurrency = 2
      */
     concurrency?: number;
+    /**
+     * @generated from protobuf field: optional bool is_permanent = 3
+     */
+    isPermanent?: boolean;
+    /**
+     * @generated from protobuf field: optional string provider = 4
+     */
+    provider?: string;
+    /**
+     * @generated from protobuf field: optional string region = 5
+     */
+    region?: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskRequest
@@ -2157,7 +2169,10 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
     constructor() {
         super("taskqueue.WorkerInfo", [
             { no: 1, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "concurrency", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 2, name: "concurrency", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "is_permanent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "provider", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "region", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerInfo>): WorkerInfo {
@@ -2178,6 +2193,15 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
                 case /* optional int32 concurrency */ 2:
                     message.concurrency = reader.int32();
                     break;
+                case /* optional bool is_permanent */ 3:
+                    message.isPermanent = reader.bool();
+                    break;
+                case /* optional string provider */ 4:
+                    message.provider = reader.string();
+                    break;
+                case /* optional string region */ 5:
+                    message.region = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2196,6 +2220,15 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
         /* optional int32 concurrency = 2; */
         if (message.concurrency !== undefined)
             writer.tag(2, WireType.Varint).int32(message.concurrency);
+        /* optional bool is_permanent = 3; */
+        if (message.isPermanent !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.isPermanent);
+        /* optional string provider = 4; */
+        if (message.provider !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.provider);
+        /* optional string region = 5; */
+        if (message.region !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.region);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

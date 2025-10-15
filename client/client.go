@@ -45,6 +45,9 @@ type WorkerConfig struct {
 	Name        string
 	Store       string
 	Token       string
+	IsPermanent bool
+	Provider    *string
+	Region      *string
 }
 
 var lostTrackSeen sync.Map // map[int32]time.Time
@@ -103,7 +106,14 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := client.RegisterWorker(ctx, &pb.WorkerInfo{Name: w.Name, Concurrency: &w.Concurrency})
+	res, err := client.RegisterWorker(ctx,
+		&pb.WorkerInfo{
+			Name:        w.Name,
+			Concurrency: &w.Concurrency,
+			IsPermanent: &w.IsPermanent,
+			Provider:    w.Provider,
+			Region:      w.Region,
+		})
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)
 	} else {
@@ -593,9 +603,13 @@ func excuterThread(
 }
 
 // / client launcher
-func Run(ctx context.Context, serverAddr string, concurrency int32, name, store, token string) error {
+func Run(ctx context.Context, serverAddr string, concurrency int32, name, store, token string, isPermanent bool, provider *string, region *string) error {
 
-	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token}
+	// Ensure store directory exists
+	if err := os.MkdirAll(store, 0777); err != nil {
+		return fmt.Errorf("could not create store directory %s: %v", store, err)
+	}
+	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token, IsPermanent: isPermanent, Provider: provider, Region: region}
 	taskWeights := &sync.Map{}
 	activeTasks := &sync.Map{}
 

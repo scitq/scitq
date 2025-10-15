@@ -70,6 +70,9 @@ type WorkerInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Concurrency   *int32                 `protobuf:"varint,2,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
+	IsPermanent   *bool                  `protobuf:"varint,3,opt,name=is_permanent,json=isPermanent,proto3,oneof" json:"is_permanent,omitempty"`
+	Provider      *string                `protobuf:"bytes,4,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
+	Region        *string                `protobuf:"bytes,5,opt,name=region,proto3,oneof" json:"region,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -116,6 +119,27 @@ func (x *WorkerInfo) GetConcurrency() int32 {
 		return *x.Concurrency
 	}
 	return 0
+}
+
+func (x *WorkerInfo) GetIsPermanent() bool {
+	if x != nil && x.IsPermanent != nil {
+		return *x.IsPermanent
+	}
+	return false
+}
+
+func (x *WorkerInfo) GetProvider() string {
+	if x != nil && x.Provider != nil {
+		return *x.Provider
+	}
+	return ""
+}
+
+func (x *WorkerInfo) GetRegion() string {
+	if x != nil && x.Region != nil {
+		return *x.Region
+	}
+	return ""
 }
 
 type TaskRequest struct {
@@ -6979,12 +7003,18 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\x0ftaskqueue.proto\x12\ttaskqueue\x1a\x1bgoogle/protobuf/empty.proto\"'\n" +
 	"\fTaskResponse\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"W\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\xe6\x01\n" +
 	"\n" +
 	"WorkerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
-	"\vconcurrency\x18\x02 \x01(\x05H\x00R\vconcurrency\x88\x01\x01B\x0e\n" +
-	"\f_concurrency\"\xe9\x05\n" +
+	"\vconcurrency\x18\x02 \x01(\x05H\x00R\vconcurrency\x88\x01\x01\x12&\n" +
+	"\fis_permanent\x18\x03 \x01(\bH\x01R\visPermanent\x88\x01\x01\x12\x1f\n" +
+	"\bprovider\x18\x04 \x01(\tH\x02R\bprovider\x88\x01\x01\x12\x1b\n" +
+	"\x06region\x18\x05 \x01(\tH\x03R\x06region\x88\x01\x01B\x0e\n" +
+	"\f_concurrencyB\x0f\n" +
+	"\r_is_permanentB\v\n" +
+	"\t_providerB\t\n" +
+	"\a_region\"\xe9\x05\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +

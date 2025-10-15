@@ -1141,9 +1141,65 @@ func (s *taskQueueServer) GetLogsChunk(ctx context.Context, req *pb.GetLogsReque
 	return &pb.LogChunkList{Logs: result}, nil
 }
 
+// tryRecoverWorkerRegion tries to find a region for a worker that registered without one.
+// It queries all providers and their regions, comparing worker names returned by List(location).
+func (s *taskQueueServer) tryRecoverWorkerRegion(workerID int32, name string) {
+	log.Printf("🔍 Attempting to recover region for worker %s (%d)", name, workerID)
+
+	for pid, provider := range s.providers {
+		regions, err := s.db.Query(`
+            SELECT r.region_name
+            FROM region r
+            WHERE r.provider_id = $1
+        `, pid)
+		if err != nil {
+			log.Printf("⚠️ Failed to query regions for provider %d: %v", pid, err)
+			continue
+		}
+
+		for regions.Next() {
+			var regionName string
+			if err := regions.Scan(&regionName); err != nil {
+				log.Printf("⚠️ Failed to scan region: %v", err)
+				continue
+			}
+
+			workers, err := provider.List(regionName)
+			if err != nil {
+				log.Printf("⚠️ Provider %d region %s listing failed: %v", pid, regionName, err)
+				continue
+			}
+
+			if _, exists := workers[name]; exists {
+				// Found a match: update worker region_id
+				_, err := s.db.Exec(`
+                    UPDATE worker
+                    SET region_id = r.region_id
+                    FROM region r
+                    WHERE r.region_name = $1
+                      AND r.provider_id = $2
+                      AND worker.worker_id = $3
+                `, regionName, pid, workerID)
+				if err != nil {
+					log.Printf("⚠️ Failed to update region for worker %s (%d): %v", name, workerID, err)
+				} else {
+					log.Printf("✅ Worker %s (%d) successfully reattached to region %s (provider %d)",
+						name, workerID, regionName, pid)
+				}
+				regions.Close()
+				return
+			}
+		}
+		regions.Close()
+	}
+
+	log.Printf("❌ Could not recover region for worker %s (%d)", name, workerID)
+}
+
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
 	var workerID int32
 	var isPermanent bool
+	var recoveryNeeded bool
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1155,9 +1211,43 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	// **Check if worker already exists**
 	err = tx.QueryRow(`SELECT worker_id,is_permanent FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID, &isPermanent)
 	if err == sql.ErrNoRows {
+		if req.IsPermanent != nil {
+			isPermanent = *req.IsPermanent
+		} else {
+			isPermanent = false
+		}
 		// **Worker doesn't exist, create a new worker ID**
-		err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, status, last_ping) VALUES ($1, $2, 'R', NOW()) RETURNING worker_id`,
-			req.Name, req.Concurrency).Scan(&workerID)
+		if req.Provider != nil && req.Region != nil {
+			var regionID int32
+			errLookup := tx.QueryRow(`SELECT r.region_id FROM region r
+			JOIN provider p ON r.provider_id=p.provider_id
+			WHERE p.provider_name||'.'||p.config_name=$1 AND r.region_name=$2`, *req.Provider, *req.Region).Scan(&regionID)
+			if errLookup == nil {
+				// Insert new region
+				err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, status, is_permanent, region_id, last_ping)
+						VALUES ($1, $2, 'R', $3, $4, NOW()) RETURNING worker_id`,
+					req.Name, req.Concurrency, isPermanent, regionID).Scan(&workerID)
+			} else {
+				// --- in RegisterWorker(), after failed region lookup ---
+				log.Printf("⚠️ Region lookup failed for %s (%v): registering without region", req.Name, errLookup)
+				err = tx.QueryRow(`
+					INSERT INTO worker (worker_name, concurrency, status, is_permanent, last_ping)
+					VALUES ($1, $2, 'R', $3, NOW())
+					RETURNING worker_id
+				`, req.Name, req.Concurrency, isPermanent).Scan(&workerID)
+				if err != nil {
+					tx.Rollback()
+					return nil, fmt.Errorf("failed to register worker %s without region: %v", req.Name, err)
+				}
+				if !isPermanent {
+					recoveryNeeded = true
+				}
+			}
+		} else {
+			err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, status, is_permanent, last_ping)
+							VALUES ($1, $2, 'R', $3, NOW()) RETURNING worker_id`,
+				req.Name, req.Concurrency, isPermanent).Scan(&workerID)
+		}
 		if err != nil {
 			log.Printf("⚠️ Failed to create worker: %v", err)
 			return nil, fmt.Errorf("failed to create worker: %w", err)
@@ -1205,6 +1295,11 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	// Ensure status goes through UpdateWorkerStatus (and emits WS)
 	if _, err := s.UpdateWorkerStatus(context.Background(), &pb.WorkerStatus{WorkerId: workerID, Status: "R"}); err != nil {
 		log.Printf("⚠️ Failed to set worker %d status to 'R' via UpdateWorkerStatus: %v", workerID, err)
+	}
+
+	// After successful tx.Commit(), if recoveryNeeded, launch the recovery goroutine
+	if recoveryNeeded {
+		go s.tryRecoverWorkerRegion(workerID, req.Name)
 	}
 
 	// After committing, fail previously active tasks via UpdateTaskStatus so that retries/WS/stats are handled uniformly

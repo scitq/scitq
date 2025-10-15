@@ -29,6 +29,7 @@ type FakeProvider struct {
 	ServerAddr  string
 	WorkerToken string
 	DeployTime  int // seconds to wait before launching workers
+	Name        string
 
 	cancels map[string]context.CancelFunc
 }
@@ -44,7 +45,7 @@ func New() *FakeProvider {
 }
 
 // NewFromConfig returns a new FakeProvider with regions initialized from config.
-func NewFromConfig(cfg config.Config, config config.FakeProviderConfig) *FakeProvider {
+func NewFromConfig(name string, cfg config.Config, config config.FakeProviderConfig) *FakeProvider {
 	rmap := make(map[string]map[string]string, len(config.Regions))
 	for _, region := range config.Regions {
 		rmap[region] = make(map[string]string)
@@ -56,6 +57,7 @@ func NewFromConfig(cfg config.Config, config config.FakeProviderConfig) *FakePro
 		ServerAddr:  fmt.Sprintf("%s:%d", cfg.Scitq.ServerFQDN, cfg.Scitq.Port),
 		AutoLaunch:  config.AutoLaunch,
 		DeployTime:  config.DeployTime,
+		Name:        name,
 	}
 }
 
@@ -108,7 +110,7 @@ func (f *FakeProvider) Create(workerName, flavor, location string, jobId int32) 
 				}
 
 				// Run the worker client with concurrency=1, block until context is canceled.
-				err = client.Run(ctx, f.ServerAddr, 1, workerNameCopy, storePath, f.WorkerToken)
+				err = client.Run(ctx, f.ServerAddr, 1, workerNameCopy, storePath, f.WorkerToken, false, &f.Name, &region)
 				if err != nil {
 					log.Printf("Worker client %s exited with error: %v", workerNameCopy, err)
 				} else {
@@ -124,16 +126,27 @@ func (f *FakeProvider) Create(workerName, flavor, location string, jobId int32) 
 }
 
 // List returns all currently known workers with their fake IPs across all regions.
-func (f *FakeProvider) List() (map[string]string, error) {
+func (f *FakeProvider) List(location string) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	out := make(map[string]string)
-	for _, workers := range f.regions {
-		for k, v := range workers {
-			out[k] = v
+	if location == "" {
+		for _, workers := range f.regions {
+			for k, v := range workers {
+				out[k] = v
+			}
+		}
+	} else {
+		if workers, ok := f.regions[location]; ok {
+			for k, v := range workers {
+				out[k] = v
+			}
+		} else {
+			return nil, fmt.Errorf("region %s not found", location)
 		}
 	}
+
 	return out, nil
 }
 

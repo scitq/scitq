@@ -138,6 +138,16 @@ func main() {
 	token := flag.String("token", "", "Token for authentication")
 	jobID := flag.Uint("job", 0, "Job ID for this deployment (for progress reporting)")
 	version_flag := flag.Bool("version", false, "Print version information and exit")
+	isPermanent := flag.Bool("permanent", false, "Register this worker as permanent (won't be deleted by the watchdog, use with care)")
+	provider := flag.String("provider", "", "Region ID (if applicable)")
+	region := flag.String("region", "", "Region ID (if applicable)")
+
+	if provider != nil && *provider == "" {
+		provider = nil
+	}
+	if region != nil && *region == "" {
+		region = nil
+	}
 
 	// Get the hostname
 	hostname, err := os.Hostname()
@@ -185,5 +195,6 @@ func main() {
 
 	// Start the client
 	ctx := context.Background()
-	client.Run(ctx, *serverAddr, int32(*concurrency), *name, *store, *token)
+
+	client.Run(ctx, *serverAddr, int32(*concurrency), *name, *store, *token, *isPermanent, provider, region)
 }
