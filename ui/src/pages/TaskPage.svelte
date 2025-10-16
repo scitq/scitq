@@ -932,6 +932,26 @@ async function handleWebSocketMessage(message) {
       <h2 id="modal-title" class="modal-title">
         📜 Logs for Task {selectedTaskId}:
       </h2>
+      <div class="task-attributes" style="display:flex; flex-direction:column; margin-bottom:1em; gap:0.25em;">
+        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.container}
+          <div>
+            <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Container:</span>
+            <code>{displayedTasks.find(t => t.taskId === selectedTaskId).container}</code>
+          </div>
+        {/if}
+        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.containerOptions}
+          <div>
+            <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Container options:</span>
+            <code>{displayedTasks.find(t => t.taskId === selectedTaskId).containerOptions}</code>
+          </div>
+        {/if}
+        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.shell}
+          <div>
+            <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Shell:</span>
+            <code>{displayedTasks.find(t => t.taskId === selectedTaskId).shell}</code>
+          </div>
+        {/if}
+      </div>
       <p class="tasks-command-preview"> {selectedTaskCommand}</p>
       <div class="tasks-log-columns">
         <!-- Stdout Log Panel -->

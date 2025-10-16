@@ -118,10 +118,8 @@
           <th>Wf</th>
           <th>Step</th>
           <th>Status</th>
-          <th>Start</th>
-          <th>Runtime</th>
+          <th>stdout/stderr</th>
           <th>Output</th>
-          <th>Error</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -139,22 +137,17 @@
             <td>
               <div class="tasks-status-pill {getJobStatusClass(task.status)}" title={getJobStatusText(task.status)}></div>
             </td>
-            <td></td>
-            <td>{task.runningTimeout}</td>
             <td>
               <div style="white-space: pre-wrap;">
                 {#each getLogsOut(task.taskId) as log (log.id)}
                   {log.text}<br/>
                 {/each}
-              </div>
-            </td>
-            <td>
-              <div style="white-space: pre-wrap;">
                 {#each getLogsErr(task.taskId) as log (log.id)}
                   {log.text}<br/>
                 {/each}
               </div>
             </td>
+            <td>{task.output}</td>
             
             <!-- Action Buttons -->
             <td class="workerCompo-actions">
