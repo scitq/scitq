@@ -72,28 +72,15 @@
   const MAX_HISTORY = 30;
   
   /**
-   * History of disk I/O metrics
-   * @type {Array<{time: Date, read: number, write: number}>}
+   * Per-worker history of disk I/O metrics
+   * @type {Record<number, Array<{time: Date, read: number, write: number}>>}
    */
-  let diskHistory: {time: Date, read: number, write: number}[] = [];
-  
+  let diskHistories: Record<number, {time: Date, read: number, write: number}[]> = {};
   /**
-   * History of network I/O metrics
-   * @type {Array<{time: Date, sent: number, received: number}>}
+   * Per-worker history of network I/O metrics
+   * @type {Record<number, Array<{time: Date, sent: number, received: number}>>}
    */
-  let networkHistory: {time: Date, sent: number, received: number}[] = [];
-  
-  /**
-   * Data for disk chart visualization
-   * @type {{line1: Array, line2: Array}}
-   */
-  let diskChartData = { line1: [], line2: [] };
-  
-  /**
-   * Data for network chart visualization
-   * @type {{line1: Array, line2: Array}}
-   */
-  let networkChartData = { line1: [], line2: [] };
+  let networkHistories: Record<number, {time: Date, sent: number, received: number}[]> = {};
   
   // Zoom controls
   /**
@@ -138,6 +125,9 @@
   // --- WS unsubscribe reference for cleanup ---
   let unsubscribeWS: (() => void) | null = null;
 
+  // Track per-worker previous totals for rate computation
+  let lastTotals: Record<number, { time: Date, diskRead: number, diskWrite: number, netRecv: number, netSent: number }> = {};
+
   // Make reactive
   $: diskZoom, networkZoom, diskAutoZoom, networkAutoZoom;
 
@@ -178,7 +168,36 @@
           case 'stats': {
             const raw = (payload as any).stats;
             if (raw) {
-              workersStatsMap[id] = WorkerStats.fromJson(raw);
+              // Compute per-second rates using previous totals
+              const now = new Date();
+              const prev = lastTotals[id];
+              const current = {
+                diskRead: raw.disk_io?.read_bytes_total || 0,
+                diskWrite: raw.disk_io?.write_bytes_total || 0,
+                netRecv: raw.net_io?.recv_bytes_total || 0,
+                netSent: raw.net_io?.sent_bytes_total || 0
+              };
+              const dt = prev ? (now.getTime() - prev.time.getTime()) / 1000 : 1;
+              const readRate = prev ? (current.diskRead - prev.diskRead) / dt : 0;
+              const writeRate = prev ? (current.diskWrite - prev.diskWrite) / dt : 0;
+              const recvRate = prev ? (current.netRecv - prev.netRecv) / dt : 0;
+              const sentRate = prev ? (current.netSent - prev.netSent) / dt : 0;
+              lastTotals[id] = { ...current, time: now };
+              // Build stats object compatible with WorkerStats.fromJson
+              const computedStats = {
+                ...raw,
+                disk_io: {
+                  ...raw.disk_io,
+                  read_bytes_rate: readRate,
+                  write_bytes_rate: writeRate
+                },
+                net_io: {
+                  ...raw.net_io,
+                  recv_bytes_rate: recvRate,
+                  sent_bytes_rate: sentRate
+                }
+              };
+              workersStatsMap[id] = WorkerStats.fromJson(computedStats);
               workersStatsMap = { ...workersStatsMap };
               updateHistoryFromStats();
             }
@@ -295,8 +314,6 @@
     hasLoaded = true;
   }
 
-  $: diskChartData = prepareChartData(diskHistory, 'disk');
-  $: networkChartData = prepareChartData(networkHistory, 'network');
 
   /**
    * Formats bytes into human-readable string
@@ -361,11 +378,6 @@
 
     if (isAutoZoom) {
       currentZoom = calculateAutoZoom(history, type);
-      if (type === 'disk') {
-        diskZoom = currentZoom;
-      } else {
-        networkZoom = currentZoom;
-      }
     }
 
     const dataValues = history.flatMap(d => 
@@ -410,22 +422,12 @@
   function toggleAutoZoom(type: 'disk' | 'network') {
     if (type === 'disk') {
       diskAutoZoom = !diskAutoZoom;
-      // Reset zoom when enabling auto
       if (diskAutoZoom) diskZoom = 1;
     } else {
       networkAutoZoom = !networkAutoZoom;
-      // Reset zoom when enabling auto
       if (networkAutoZoom) networkZoom = 1;
     }
-    
-    // Force immediate recalculation
-    if (type === 'disk') {
-      diskChartData = prepareChartData(diskHistory, 'disk');
-      diskChartData = {...diskChartData}; // Force update
-    } else {
-      networkChartData = prepareChartData(networkHistory, 'network');
-      networkChartData = {...networkChartData}; // Force update
-    }
+    // No need to force recalculation here; chart data is computed per-worker inline.
   }
   
   /**
@@ -441,7 +443,7 @@
     } else {
       diskZoom = 1;
     }
-    diskChartData = prepareChartData(diskHistory, 'disk');
+    // Chart data is computed per-worker inline.
   }
 
   /**
@@ -457,7 +459,7 @@
     } else {
       networkZoom = 1;
     }
-    networkChartData = prepareChartData(networkHistory, 'network');
+    // Chart data is computed per-worker inline.
   }
 
   /**
@@ -471,38 +473,31 @@
       const workerIds = internalWorkers.map(w => w.workerId);
       workersStatsMap = await getStats(workerIds);
 
-      // Update history data
+      // Update per-worker history data
       const now = new Date();
-      let totalRead = 0, totalWrite = 0, totalSent = 0, totalReceived = 0;
-
-      workerIds.forEach(id => {
+      for (const id of workerIds) {
         const stats = workersStatsMap[id];
-        if (stats?.diskIo) {
-          totalRead += stats.diskIo.readBytesRate || 0;
-          totalWrite += stats.diskIo.writeBytesRate || 0;
-        }
-        if (stats?.netIo) {
-          totalSent += stats.netIo.sentBytesRate || 0;
-          totalReceived += stats.netIo.recvBytesRate || 0;
-        }
-      });
-
-      // Always update history
-      diskHistory = [...diskHistory.slice(-MAX_HISTORY + 1), {
-        time: now,
-        read: totalRead,
-        write: totalWrite
-      }];
-
-      networkHistory = [...networkHistory.slice(-MAX_HISTORY + 1), {
-        time: now,
-        sent: totalSent,
-        received: totalReceived
-      }];
-
-      // Force chart updates
-      diskChartData = prepareChartData(diskHistory, 'disk');
-      networkChartData = prepareChartData(networkHistory, 'network');
+        // Disk I/O
+        if (!diskHistories[id]) diskHistories[id] = [];
+        diskHistories[id] = [
+          ...diskHistories[id].slice(-MAX_HISTORY + 1),
+          {
+            time: now,
+            read: stats?.diskIo?.readBytesRate || 0,
+            write: stats?.diskIo?.writeBytesRate || 0
+          }
+        ];
+        // Network I/O
+        if (!networkHistories[id]) networkHistories[id] = [];
+        networkHistories[id] = [
+          ...networkHistories[id].slice(-MAX_HISTORY + 1),
+          {
+            time: now,
+            sent: stats?.netIo?.sentBytesRate || 0,
+            received: stats?.netIo?.recvBytesRate || 0
+          }
+        ];
+      }
 
       // Replace per-worker and global task counts using getAllTaskStats
       const { perWorkerStatusCounts, globalStatusCounts, totalCount: t } = await getAllTaskStats();
@@ -516,38 +511,33 @@
   }
 
   /**
-   * Updates diskHistory and networkHistory from current workersStatsMap.
+   * Updates per-worker disk and network histories from current workersStatsMap.
    */
   function updateHistoryFromStats() {
     const now = new Date();
-    let totalRead = 0, totalWrite = 0, totalSent = 0, totalReceived = 0;
-
     for (const id in workersStatsMap) {
       const stats = workersStatsMap[id];
-      if (stats?.diskIo) {
-        totalRead += stats.diskIo.readBytesRate || 0;
-        totalWrite += stats.diskIo.writeBytesRate || 0;
-      }
-      if (stats?.netIo) {
-        totalSent += stats.netIo.sentBytesRate || 0;
-        totalReceived += stats.netIo.recvBytesRate || 0;
-      }
+      // Disk I/O
+      if (!diskHistories[id]) diskHistories[id] = [];
+      diskHistories[id] = [
+        ...diskHistories[id].slice(-MAX_HISTORY + 1),
+        {
+          time: now,
+          read: stats?.diskIo?.readBytesRate || 0,
+          write: stats?.diskIo?.writeBytesRate || 0
+        }
+      ];
+      // Network I/O
+      if (!networkHistories[id]) networkHistories[id] = [];
+      networkHistories[id] = [
+        ...networkHistories[id].slice(-MAX_HISTORY + 1),
+        {
+          time: now,
+          sent: stats?.netIo?.sentBytesRate || 0,
+          received: stats?.netIo?.recvBytesRate || 0
+        }
+      ];
     }
-
-    diskHistory = [...diskHistory.slice(-MAX_HISTORY + 1), {
-      time: now,
-      read: totalRead,
-      write: totalWrite
-    }];
-
-    networkHistory = [...networkHistory.slice(-MAX_HISTORY + 1), {
-      time: now,
-      sent: totalSent,
-      received: totalReceived
-    }];
-
-    diskChartData = prepareChartData(diskHistory, 'disk');
-    networkChartData = prepareChartData(networkHistory, 'network');
   }
 
   /**
@@ -919,24 +909,27 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                       <div class="io-chart-container">
                         <div class="chart-title">Disk I/O</div>
                         {#if workersStatsMap[worker.workerId]?.diskIo}
-                          <LineChart
-                            data-testid="disk-chart"
-                            line1={diskChartData.line1}
-                            line2={diskChartData.line2}
-                            color1="#36A2EB"
-                            color2="#FF6384"
-                            title1="Read" 
-                            title2="Write"
-                            value1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesRate || 0) + "/s"}
-                            value2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesRate || 0) + "/s"}
-                            total1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesTotal || 0)}
-                            total2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesTotal || 0)}
-                            zoomLevel={diskZoom}
-                            autoZoom={diskAutoZoom}
-                            onZoom={handleDiskZoom}
-                            onToggleAutoZoom={() => toggleAutoZoom('disk')}
-                            zoomIntensity={diskAutoZoom ? diskZoom/5 : 1}
-                          />
+                          {#key diskHistories[worker.workerId]}
+                            {@const diskChartData = prepareChartData(diskHistories[worker.workerId] || [], 'disk')}
+                            <LineChart
+                              data-testid="disk-chart"
+                              line1={diskChartData.line1}
+                              line2={diskChartData.line2}
+                              color1="#36A2EB"
+                              color2="#FF6384"
+                              title1="Read"
+                              title2="Write"
+                              value1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesRate || 0) + "/s"}
+                              value2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesRate || 0) + "/s"}
+                              total1={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.readBytesTotal || 0)}
+                              total2={formatBytes(workersStatsMap[worker.workerId]?.diskIo?.writeBytesTotal || 0)}
+                              zoomLevel={diskZoom}
+                              autoZoom={diskAutoZoom}
+                              onZoom={handleDiskZoom}
+                              onToggleAutoZoom={() => toggleAutoZoom('disk')}
+                              zoomIntensity={diskAutoZoom ? diskZoom / 5 : 1}
+                            />
+                          {/key}
                         {:else}
                           <div class="no-data">No disk data</div>
                         {/if}
@@ -945,24 +938,27 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                       <div class="io-chart-container" data-testid={`I/O-chart-${worker.workerId}`} >
                         <div class="chart-title">Network I/O</div>
                         {#if workersStatsMap[worker.workerId]?.netIo}
-                          <LineChart 
-                            data-testid="network-chart"
-                            line1={networkChartData.line1}
-                            line2={networkChartData.line2}
-                            color1="#36A2EB"
-                            color2="#FF6384"
-                            title1="Sent" 
-                            title2="Received"
-                            value1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesRate || 0) + "/s"}
-                            value2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesRate || 0) + "/s"}
-                            total1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesTotal || 0)}
-                            total2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesTotal || 0)}
-                            zoomLevel={networkZoom}
-                            autoZoom={networkAutoZoom}
-                            onZoom={handleNetworkZoom}
-                            onToggleAutoZoom={() => toggleAutoZoom('network')}
-                            zoomIntensity={networkAutoZoom ? networkZoom/5 : 1}
-                          />
+                          {#key networkHistories[worker.workerId]}
+                            {@const networkChartData = prepareChartData(networkHistories[worker.workerId] || [], 'network')}
+                            <LineChart
+                              data-testid="network-chart"
+                              line1={networkChartData.line1}
+                              line2={networkChartData.line2}
+                              color1="#36A2EB"
+                              color2="#FF6384"
+                              title1="Sent"
+                              title2="Received"
+                              value1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesRate || 0) + "/s"}
+                              value2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesRate || 0) + "/s"}
+                              total1={formatBytes(workersStatsMap[worker.workerId]?.netIo?.sentBytesTotal || 0)}
+                              total2={formatBytes(workersStatsMap[worker.workerId]?.netIo?.recvBytesTotal || 0)}
+                              zoomLevel={networkZoom}
+                              autoZoom={networkAutoZoom}
+                              onZoom={handleNetworkZoom}
+                              onToggleAutoZoom={() => toggleAutoZoom('network')}
+                              zoomIntensity={networkAutoZoom ? networkZoom / 5 : 1}
+                            />
+                          {/key}
                         {:else}
                           <div class="no-data">No network data</div>
                         {/if}
