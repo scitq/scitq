@@ -71,6 +71,7 @@ func (ab *AsperaBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsS
 		"--url=ssh://" + server + ":33001",
 		"--username=" + user,
 		"--ssh-keys=/ibm_aspera/aspera_bypass_dsa.pem",
+		"--retry=0",
 		"--ts=@json:{\"target_rate_kbps\":300000}",
 		"server",
 		"download", filePath,

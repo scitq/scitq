@@ -14,7 +14,7 @@ import (
 	"github.com/rclone/rclone/fs"
 )
 
-var defaultOptions = []string{"ena-aspera", "ena-ftp", "sra-tools"}
+var defaultOptions = []string{"ena-ftp", "sra-tools"}
 
 var fastqParity = regexp.MustCompile(`.*(1|2)\.f.*q(\.gz)?$`)
 
