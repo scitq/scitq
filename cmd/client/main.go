@@ -142,13 +142,6 @@ func main() {
 	provider := flag.String("provider", "", "Region ID (if applicable)")
 	region := flag.String("region", "", "Region ID (if applicable)")
 
-	if provider != nil && *provider == "" {
-		provider = nil
-	}
-	if region != nil && *region == "" {
-		region = nil
-	}
-
 	// Get the hostname
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -162,6 +155,13 @@ func main() {
 	swapProportion := flag.Float64("swap", 0.1, "Add automatically a swapfile in scratch of this proportion (0 to disable)")
 
 	flag.Parse()
+
+	if provider != nil && *provider == "" {
+		provider = nil
+	}
+	if region != nil && *region == "" {
+		region = nil
+	}
 
 	if *version_flag {
 		fmt.Println(version.Full())

@@ -1210,6 +1210,20 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	}
 	defer tx.Rollback()
 
+	// Debug: log incoming provider/region (including nil) to diagnose missing region assignment
+	funcStr := func(p *string) string {
+		if p == nil {
+			return "<nil>"
+		}
+		if strings.TrimSpace(*p) == "" {
+			return "<empty>"
+		}
+		return *p
+	}
+	log.Printf("🔎 RegisterWorker request: name=%s provider=%s region=%s isPermanent=%v",
+		req.Name, funcStr(req.Provider), funcStr(req.Region),
+		(req.IsPermanent != nil && *req.IsPermanent))
+
 	// **Check if worker already exists**
 	err = tx.QueryRow(`SELECT worker_id,is_permanent FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID, &isPermanent)
 	if err == sql.ErrNoRows {
@@ -1246,6 +1260,9 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 				}
 			}
 		} else {
+			// Log missing provider/region path
+			log.Printf("⚠️ RegisterWorker: missing provider/region for %s (provider=%s, region=%s) — registering without region",
+				req.Name, funcStr(req.Provider), funcStr(req.Region))
 			err = tx.QueryRow(`INSERT INTO worker (worker_name, concurrency, status, is_permanent, last_ping)
 							VALUES ($1, $2, 'R', $3, NOW()) RETURNING worker_id`,
 				req.Name, req.Concurrency, isPermanent).Scan(&workerID)
@@ -3377,7 +3394,8 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 
 	// Step 1: get the worker
 	var currentFlavorId sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT flavor_id FROM worker WHERE worker_id = $1`, req.WorkerId).Scan(&currentFlavorId)
+	var currentRegionId sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT flavor_id,region_id FROM worker WHERE worker_id = $1`, req.WorkerId).Scan(&currentFlavorId, &currentRegionId)
 	if err == sql.ErrNoRows {
 		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("worker %s not found", req.WorkerId)
 	} else if err != nil {
@@ -3424,11 +3442,15 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 		}
 
 		// Now add the new region to the worker
-		_, err = tx.ExecContext(ctx, `
+		if !currentRegionId.Valid {
+			_, err = tx.ExecContext(ctx, `
 			UPDATE worker SET region_id=$1,recyclable_scope='G' WHERE worker_id=$2
 		`, localRegionId, req.WorkerId)
-		if err != nil {
-			return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to associate worker with flavor region: %w", err)
+			if err != nil {
+				return &taskqueuepb.Ack{Success: false}, fmt.Errorf("failed to associate worker with flavor region: %w", err)
+			}
+		} else {
+			log.Printf("No changing region since region is already set to %d", currentRegionId.Int64)
 		}
 
 		_, err = tx.ExecContext(ctx, `
@@ -3916,8 +3938,11 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 func (s *taskQueueServer) getJobByID(jobID int32) (Job, bool) {
 	var j Job
 	err := s.db.QueryRow(`
-        SELECT job_id, worker_id, provider_id, region, worker_name, action, retry
-        FROM job
+        SELECT j.job_id, j.worker_id, p.provider_id, r.region_name, w.worker_name, j.action, j.retry
+        FROM job j 
+		LEFT JOIN region r ON r.region_id=j.region_id
+		LEFT JOIN provider p ON p.provider_id=r.provider_id
+		LEFT JOIN worker w ON w.worker_id=j.worker_id
         WHERE job_id = $1
     `, jobID).Scan(&j.JobID, &j.WorkerID, &j.ProviderID, &j.Region, &j.WorkerName, &j.Action, &j.Retry)
 	if err != nil {
