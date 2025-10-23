@@ -13,6 +13,13 @@ func NullInt32ToPtr(n sql.NullInt32) *int32 {
 	return nil
 }
 
+func NullInt64ToPtr(n sql.NullInt64) *int64 {
+	if n.Valid {
+		return &n.Int64
+	}
+	return nil
+}
+
 func NullFloat64ToPtr(n sql.NullFloat64) *float64 {
 	if n.Valid {
 		return &n.Float64

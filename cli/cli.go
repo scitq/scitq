@@ -1484,7 +1484,7 @@ func (c *CLI) StepStats() error {
 		"StepID", "Name", "Total", "Wait", "Pend", "Acc.", "Runn", "Upl.", "Succ", "Fail", "SuccRun", "FailRun", "CurrRun", "Download", "Upload")
 	fmt.Println(strings.Repeat("-", 222))
 	var totalSuccess, totalFailed, totalRunning, totalDownload, totalUpload float32
-	var startTime, endTime *int32
+	var startTime, endTime *int64
 
 	for _, stat := range res.Stats {
 		name := stat.StepName

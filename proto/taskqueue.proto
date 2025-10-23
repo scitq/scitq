@@ -125,6 +125,7 @@ message Task {
     bool hidden = 21;
     optional int32 previous_task_id = 22;
     optional double weight = 23; // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
+    optional int64 run_start_time = 24; // epoch timestamp of the first task start time
 }
 
 message TaskList {
@@ -540,8 +541,8 @@ message StepStats {
     Accum running_run = 14;  // running tasks' elapsed durations (at eval time)
     Accum download = 15;        // download durations
     Accum upload = 16;          // upload durations
-    optional int32 start_time = 17; // epoch timestamp of the first task start time
-    optional int32 end_time = 18;   // epoch timestamp of the last task end time
+    optional int64 start_time = 17; // epoch timestamp of the first task start time
+    optional int64 end_time = 18;   // epoch timestamp of the last task end time
     int32 stats_eval_time = 19; // epoch seconds when these stats were computed
 }
 

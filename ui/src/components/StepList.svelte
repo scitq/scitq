@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import * as grpcWeb from 'grpc-web';
-  import { getStepStats, delStep, listWorkers } from '../lib/api';
+import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { RefreshCw, PauseCircle, CircleX, Eraser } from 'lucide-svelte';
   import { formatDuration, showIfNonZero } from '../lib/format';
@@ -149,6 +149,14 @@
    */
   onMount(async () => {
     steps = await getStepStats({ workflowId });
+    // Restore running tasks map from API
+    const runningTasks = await getRunningTasks(workflowId);
+    for (const { stepId, taskId, runStartedEpoch } of runningTasks) {
+      let m = runningByStep.get(stepId);
+      if (!m) { m = new Map(); runningByStep.set(stepId, m); }
+      m.set(taskId, runStartedEpoch);
+    }
+    console.info('[StepList] restored', runningTasks.length, 'running tasks into runningByStep');
     const allWorkers = await listWorkers(workflowId);
     for (const w of allWorkers) {
       if (typeof w.stepId === 'number') {
@@ -260,9 +268,9 @@
             currentRunStats: { average: 0, min: 0, max: 0 },
           };
           if (isScrolledToTop) {
-            steps = [stepObj, ...steps];
+            steps = [...steps, stepObj];
           } else {
-            pendingSteps = [stepObj, ...pendingSteps];
+            pendingSteps = [...pendingSteps, stepObj];
             newStepsCount = pendingSteps.length;
             showNewStepsNotification = true;
           }
@@ -400,15 +408,19 @@
     // WORKER events: track assignment changes per step
     if (message.type === 'worker') {
       console.debug('[StepList] worker event:', message);
-      const p = message.payload || {};
+      let p = message.payload || {};
+
+      // unwrap if payload contains nested worker object
+      if (p.worker) p = p.worker;
+
       const wid: number | undefined = p.workerId ?? p.id;
       const sid: number | undefined = p.stepId;
 
       if (typeof wid !== 'number') {
+        console.warn('[StepList] ignoring worker event with invalid payload:', message);
         return;
       }
 
-      // Normalize a minimal worker object; keep name if provided
       const workerObj: taskqueue.Worker = {
         workerId: wid,
         name: p.name ?? `worker-${wid}`,
@@ -417,15 +429,23 @@
       switch (message.action) {
         case 'deleted':
           removeWorkerEverywhere(wid);
-          steps = steps; // nudge reactivity in case only removal happened
+          steps = steps; // nudge reactivity
           return;
-        default:
-          // If the event carries a stepId, keep it simple: ensure it’s there
+
+        case 'created':
+        case 'status':
           if (typeof sid === 'number') {
             removeWorkerEverywhere(wid);
             addWorkerToStep(sid, workerObj);
-            steps = steps; // nudge reactivity in case only removal happened
-            return;
+            steps = steps; // refresh UI
+          }
+          return;
+
+        default:
+          if (typeof sid === 'number') {
+            removeWorkerEverywhere(wid);
+            addWorkerToStep(sid, workerObj);
+            steps = steps;
           }
           return;
       }

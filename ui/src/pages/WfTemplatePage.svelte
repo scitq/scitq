@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { wsClient } from '../lib/wsClient';
   import { Plus, Check } from 'lucide-svelte';
   import { getTemplates, UploadTemplates, runTemp } from '../lib/api';
@@ -7,6 +7,10 @@
   import '../styles/wfTemplate.css';
   import type { UploadTemplateResponse } from '../lib/types';
   import { Template } from '../../gen/taskqueue';
+
+  let showRunSuccessModal = false;
+  let showRunErrorModal = false;
+  let successMessage = '';
 
   // Array of workflow templates
   let workflowsTemp = [];
@@ -244,11 +248,29 @@
       if (!selectedTemplate) return;
 
       const paramJson = JSON.stringify(userParams);
-      await runTemp(selectedTemplate.workflowTemplateId, paramJson);
+      const res = await runTemp(selectedTemplate.workflowTemplateId, paramJson);
+
+      if (res.status !== 'S') {
+        const msg = res.errorMessage || 'Template run failed (unknown error)';
+        errorMessage = msg;
+        showRunErrorModal = true;
+        return;
+      }
+
+      // ✅ Success case
+      successMessage = '✅ Template run created successfully!';
+      if (res.errorMessage) {
+        successMessage += `\n⚠️ ${res.errorMessage}`;
+      }
       showParamModal = false;
+      showRunSuccessModal = true;
+      await tick();
+      document.querySelector('.wfTemp-modal-backdrop')?.focus();
 
     } catch (error) {
       console.error("Failed to run template:", error);
+      errorMessage = error.message || "Unknown error occurred.";
+      showRunErrorModal = true;
     }
   }
 
@@ -345,6 +367,46 @@
       <div class="wfTemp-modal-actions">
         <button on:click={handleForceUpload}>Force Upload</button>
         <button on:click={resetFileSelection}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ----------- SUCCESS MODAL ---------- -->
+{#if showRunSuccessModal}
+  <div
+    class="wfTemp-modal-backdrop"
+    role="dialog"
+    aria-modal="true"
+    tabindex="0"
+    on:keydown={(e) => {
+      if (e.key === 'Escape') showRunSuccessModal = false;
+    }}
+  >
+    <div class="wfTemp-modal">
+      <h2>Workflow Created</h2>
+      <p>{successMessage}</p>
+      <div class="wfTemp-modal-actions">
+        <button class="button-primary" on:click={() => { showRunSuccessModal = false; window.location.hash = '#/workflows'; }}>
+          Go to workflows
+        </button>
+        <button class="button-secondary" on:click={() => (showRunSuccessModal = false)}>
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ----------- RUN ERROR MODAL ---------- -->
+{#if showRunErrorModal}
+  <div class="wfTemp-modal-backdrop" role="dialog" aria-modal="true" tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') showRunErrorModal = false; }}>
+    <div class="wfTemp-modal wfTemp-error-modal">
+      <h2 style="color: #ff5555;">Template Error: Workflow Not Created</h2>
+      <p>{errorMessage}</p>
+      <div class="wfTemp-modal-actions">
+        <button class="button-primary" on:click={() => showRunErrorModal = false}>Close</button>
       </div>
     </div>
   </div>

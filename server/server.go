@@ -588,13 +588,13 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 		// StartTime/EndTime from DB-derived epochs
 		if startEpoch.Valid {
-			start := int32(startEpoch.Int64)
+			start := startEpoch.Int64
 			if stepAgg.StartTime == nil || start < *stepAgg.StartTime {
 				stepAgg.StartTime = &start
 			}
 		}
 		if endEpoch.Valid {
-			end := int32(endEpoch.Int64)
+			end := endEpoch.Int64
 			if stepAgg.EndTime == nil || end > *stepAgg.EndTime {
 				stepAgg.EndTime = &end
 			}
@@ -2064,7 +2064,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
         SELECT
             t.task_id, t.task_name, t.command, t.container, t.container_options, t.status,
             t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden,
-            s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry
+            s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry,
+			EXTRACT(EPOCH FROM t.run_started_at)::bigint AS run_started_epoch
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -2108,6 +2109,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			taskName, shellNull, outputNull                           sql.NullString
 			inputNull, resourceNull                                   pq.StringArray
 			workerIDNull, stepIDNull, prevTaskID, wfIDNull, retryNull sql.NullInt32
+			runStartTimeNull                                          sql.NullInt64
 			retryCount                                                int32
 			hidden                                                    bool
 		)
@@ -2131,6 +2133,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&resourceNull,
 			&outputNull,
 			&retryNull,
+			&runStartTimeNull,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -2148,6 +2151,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		task.Retry = utils.NullInt32ToPtr(retryNull)
 		task.RetryCount = retryCount
 		task.Hidden = hidden
+		task.RunStartTime = utils.NullInt64ToPtr(runStartTimeNull)
 
 		tasks = append(tasks, &task)
 	}

@@ -13,6 +13,7 @@ import (
 
 	pq "github.com/lib/pq"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/utils"
 )
 
 // NewStepAgg creates a new StepAgg with sensible defaults.
@@ -66,8 +67,8 @@ type StepAgg struct {
 	RunningTasks map[int32]time.Time
 
 	// Time bounds (epoch seconds)
-	StartTime *int32
-	EndTime   *int32
+	StartTime *int64
+	EndTime   *int64
 }
 
 // StepStatsAgg holds in-memory aggregated statistics for steps in workflows.
@@ -174,15 +175,8 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			continue
 		}
 
-		var startPtr, endPtr *int32
-		if startEpoch.Valid && startEpoch.Int64 > 0 {
-			v := int32(startEpoch.Int64)
-			startPtr = &v
-		}
-		if endEpoch.Valid && endEpoch.Int64 > 0 {
-			v := int32(endEpoch.Int64)
-			endPtr = &v
-		}
+		startPtr := utils.NullInt64ToPtr(startEpoch)
+		endPtr := utils.NullInt64ToPtr(endEpoch)
 
 		if agg.data[workflowID] == nil {
 			agg.data[workflowID] = make(map[int32]*StepAgg)

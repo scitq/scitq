@@ -922,6 +922,33 @@ export async function getLogsBatch(taskIds: number[], chunkSize: number, skip?: 
   }
 }
 
+/**
+ * Retrieves all currently running tasks for a given workflow.
+ * @param workflowId - The workflow ID to filter by.
+ * @returns A list of { stepId, taskId, runStartedEpoch } for each running task.
+ */
+export async function getRunningTasks(
+  workflowId: number
+): Promise<{ stepId: number; taskId: number; runStartedEpoch: number }[]> {
+  try {
+    const request: taskqueue.ListTasksRequest = {
+      statusFilter: 'R',
+      workflowIdFilter: workflowId,
+    };
+    const taskUnary = await client.listTasks(request, await callOptionsUserToken());
+    const tasks = taskUnary.response?.tasks || [];
+
+    return tasks.map(t => ({
+      stepId: t.stepId!,
+      taskId: t.taskId!,
+      runStartedEpoch: Number(t.runStartTime),
+    }));
+  } catch (error) {
+    console.error("Error while retrieving running tasks:", error);
+    return [];
+  }
+}
+
 /* -------------------------------- STATUS -------------------------------- */ 
 
 /**

@@ -510,14 +510,18 @@ func findRecyclableWorkers(
 
 	freeWorkers := []RecyclableWorker{}
 	for _, w := range workers {
-		if w.StepID != nil {
-			if stepPendingTasks[*w.StepID] > 0 {
-				log.Printf("[DEBUG] ℹ️ Skipping worker %d (step %d) for recycling as its step has %d pending tasks exceeding free slots %d", w.WorkerID, *w.StepID, stepPendingTasks[*w.StepID], stepFreeSlots[*w.StepID])
-				stepPendingTasks[*w.StepID] -= max(w.Concurrency-int(math.Ceil(w.Occupation*float64(w.Concurrency))), 0)
-				continue
-			}
+		if w.StepID == nil {
+			// idle worker → fully recyclable
 			freeWorkers = append(freeWorkers, w)
+			continue
 		}
+		if stepPendingTasks[*w.StepID] > 0 {
+			log.Printf("[DEBUG] ℹ️ Skipping worker %d (step %d) for recycling as its step has %d pending tasks exceeding free slots %d",
+				w.WorkerID, *w.StepID, stepPendingTasks[*w.StepID], stepFreeSlots[*w.StepID])
+			stepPendingTasks[*w.StepID] -= max(w.Concurrency-int(math.Ceil(w.Occupation*float64(w.Concurrency))), 0)
+			continue
+		}
+		freeWorkers = append(freeWorkers, w)
 	}
 
 	return freeWorkers, stepRows.Err()
