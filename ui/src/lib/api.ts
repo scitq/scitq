@@ -433,6 +433,26 @@ export async function getTasksCount(workerId?: number): Promise<Record<string, n
 }
 
 
+/**
+ * Retries a failed task.
+ * @param taskId - The ID of the failed task to retry.
+ * @param retryCount - Optional override for the retry count.
+ * @returns The new task ID.
+ * @throws Error if the retry fails.
+ */
+export async function retryTask(taskId: number, retryCount?: number): Promise<number> {
+  try {
+    const request: taskqueue.RetryTaskRequest = { taskId };
+    if (retryCount !== undefined) request.retry = retryCount;
+    const response = await client.retryTask(request, await callOptionsUserToken());
+    return response.response.taskId;
+  } catch (error) {
+    console.error("Error while retrying task:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to retry task ${taskId}: ${errMsg}`);
+  }
+}
+
 /* -------------------------------- JOB -------------------------------- */ 
 
 /**

@@ -944,6 +944,154 @@ func getLogPath(taskID int32, logType string, logRoot string) string {
 	return filepath.Join(dir, fmt.Sprintf("%d_%s.log", taskID, logType))
 }
 
+func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
+	var (
+		oldID  = req.TaskId
+		newID  int32
+		wfID   sql.NullInt32
+		stepID sql.NullInt32
+	)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Combined query:
+	//  - validate failed + retryable
+	//  - create clone
+	//  - hide old task
+	err = tx.QueryRowContext(ctx, `
+		WITH validated AS (
+			SELECT 
+				t.task_id, t.retry, t.step_id, s.workflow_id
+			FROM task t
+			LEFT JOIN step s ON t.step_id = s.step_id
+			WHERE t.task_id = $1 
+			  AND t.status = 'F' 
+			  AND NOT t.hidden
+		),
+		cloned AS (
+			INSERT INTO task (
+				step_id, command, shell, container, container_options,
+				status, worker_id, input, resource,
+				output, output_files, output_is_compressed,
+				retry, is_final, uses_cache,
+				download_timeout, running_timeout, upload_timeout,
+				input_hash, previous_task_id, retry_count, task_name
+			)
+			SELECT
+				t.step_id, t.command, t.shell, t.container, t.container_options,
+				'P', NULL, t.input, t.resource,
+				t.output, '{}', FALSE,
+				GREATEST(COALESCE($2, t.retry) - 1, 0), t.is_final, t.uses_cache,
+				t.download_timeout, t.running_timeout, t.upload_timeout,
+				t.input_hash, t.task_id, t.retry_count + 1, t.task_name
+			FROM task t
+			WHERE t.task_id = (SELECT task_id FROM validated)
+			RETURNING task_id
+		),
+		hidden AS (
+			UPDATE task SET hidden = TRUE, modified_at = NOW()
+			WHERE task_id = (SELECT task_id FROM validated)
+			RETURNING TRUE
+		)
+		SELECT v.workflow_id, v.step_id, c.task_id
+		FROM validated v, cloned c;
+	`, oldID, req.Retry).Scan(&wfID, &stepID, &newID)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("task %d not found, not failed, or not retryable", oldID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed during clone/hide transaction: %w", err)
+	}
+
+	// Dependencies rewiring (same as before)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+		SELECT $2, prerequisite_task_id
+		FROM task_dependencies
+		WHERE dependent_task_id = $1
+		ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
+	`, oldID, newID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy prerequisites: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+		SELECT dependent_task_id, $2
+		FROM task_dependencies
+		WHERE prerequisite_task_id = $1
+		ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
+	`, oldID, newID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rewire dependents: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM task_dependencies
+		WHERE dependent_task_id = $1 OR prerequisite_task_id = $1
+	`, oldID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to clean up old dependencies: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit retry transaction: %w", err)
+	}
+
+	// Update step aggregator
+	if wfID.Valid && stepID.Valid {
+		s.stats.mu.Lock()
+		if wfmap, ok := s.stats.data[wfID.Int32]; ok {
+			if stepAgg, ok := wfmap[stepID.Int32]; ok {
+				if stepAgg.ReallyFailed > 0 {
+					stepAgg.ReallyFailed--
+					stepAgg.Failed++
+				}
+				stepAgg.Pending++
+			}
+		}
+		s.stats.mu.Unlock()
+	}
+
+	// 🔔 Emit WS events
+	ws.EmitWS("step-stats", wfID.Int32, "delta", struct {
+		WorkflowId int32  `json:"workflowId"`
+		StepId     int32  `json:"stepId"`
+		TaskId     int32  `json:"taskId"`
+		OldStatus  string `json:"oldStatus"`
+		NewStatus  string `json:"newStatus"`
+		Retried    bool   `json:"retried,omitempty"`
+	}{
+		WorkflowId: wfID.Int32,
+		StepId:     stepID.Int32,
+		TaskId:     newID,
+		OldStatus:  "F",
+		NewStatus:  "P",
+		Retried:    true,
+	})
+
+	ws.EmitWS("task", newID, "status", struct {
+		TaskId    int32  `json:"taskId"`
+		WorkerId  int32  `json:"workerId"`
+		OldStatus string `json:"oldStatus"`
+		Status    string `json:"status"`
+	}{
+		TaskId:    newID,
+		WorkerId:  0,
+		OldStatus: "F",
+		Status:    "P",
+	})
+
+	s.triggerAssign()
+
+	return &pb.TaskResponse{TaskId: newID}, nil
+}
+
 func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) error {
 	for {
 		logEntry, err := stream.Recv()

@@ -16,6 +16,7 @@ service TaskQueue {
     rpc StreamTaskLogsErr(TaskId) returns (stream TaskLog);
     rpc GetLogsChunk(GetLogsRequest) returns (LogChunkList);
     rpc ListTasks (ListTasksRequest) returns (TaskList);
+    rpc RetryTask (RetryTaskRequest) returns (TaskResponse);
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
@@ -130,6 +131,11 @@ message Task {
 
 message TaskList {
     repeated Task tasks = 1;
+}
+
+message RetryTaskRequest {
+    int32 task_id = 1;
+    optional int32 retry = 2;
 }
 
 message Worker {

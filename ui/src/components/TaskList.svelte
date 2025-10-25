@@ -1,11 +1,9 @@
 <script lang="ts">
-  import * as grpcWeb from 'grpc-web';
   import { onMount, afterUpdate } from 'svelte';
-  import { getJobStatusClass, getJobStatusText, getAllTasks, getSteps } from '../lib/api';
+  import { getJobStatusClass, getJobStatusText, getAllTasks, getSteps, retryTask } from '../lib/api';
   import { RefreshCcw, Download, Trash, Eye, Workflow } from 'lucide-svelte';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
-  import { TaskId, TaskLog } from '../../gen/taskqueue';
 
   /**
    * Mapping of task IDs to their saved logs
@@ -48,6 +46,8 @@
    * @type {Record<number, HTMLDivElement>}
    */
   let logContainers: Record<number, HTMLDivElement> = {};
+
+  let errorMessage: string | null = null;
 
   /**
    * Resolves and returns a display name based on provided identifiers
@@ -104,10 +104,24 @@
     const logs = taskLogsSaved.find(log => log.taskId === taskId)?.stderr || [];
     return logs.map((line, i) => ({ id: `${taskId}-err-${i}`, text: line }));
   }
+
+async function retryTaskClick(taskId: number) {
+  errorMessage = null;
+  try {
+    const newId = await retryTask(taskId);
+    console.log(`🔁 Retried task ${taskId} → new task ${newId}`);
+  } catch (err) {
+    console.error("Error retrying task:", err);
+    errorMessage = err.message || `Failed to retry task ${taskId}`;
+  }
+}
 </script>
 
 {#if displayedTasks && displayedTasks.length > 0}
   <div class="tasks-table-wrapper" >
+    {#if errorMessage}
+      <div class="error-banner">{errorMessage}</div>
+    {/if}
     <table class="listTable">
       <thead>
         <tr>
@@ -152,7 +166,7 @@
             <!-- Action Buttons -->
             <td class="workerCompo-actions">
               <button class="btn-action" title="Full Log" data-testid={`full-log-${task.taskId}`} on:click={() => onOpenModal(task.taskId)}><Eye /></button>
-              <button class="btn-action" title="Restart"><RefreshCcw /></button>
+              <button class="btn-action" title="Restart" on:click={() => retryTaskClick(task.taskId)}><RefreshCcw /></button>
               <br />
               <button class="btn-action" title="Download"><Download /></button>
               <button class="btn-action" title="Delete"><Trash /></button>
@@ -163,3 +177,14 @@
     </table>
   </div>
 {/if}
+
+<style>
+  .error-banner {
+    color: red;
+    background-color: #ffe6e6;
+    padding: 8px;
+    border: 1px solid red;
+    margin: 8px 0;
+    border-radius: 4px;
+  }
+</style>

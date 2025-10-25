@@ -53,6 +53,11 @@ type Attr struct {
 		Output *struct {
 			ID int32 `arg:"--id,required" help:"Task ID"`
 		} `arg:"subcommand:output" help:"Fetch task output logs"`
+
+		Retry *struct {
+			ID    int32  `arg:"--id,required" help:"Task ID to retry"`
+			Retry *int32 `arg:"--retry" help:"Number of retries left (optional)"`
+		} `arg:"subcommand:retry" help:"Retry a failed task"`
 	} `arg:"subcommand:task" help:"Manage tasks"`
 
 	// Worker Commands (Sub-Subcommands)
@@ -373,6 +378,27 @@ func (c *CLI) TaskOutput() error {
 		}
 		fmt.Printf("[%s] %s\n", msg.LogType, msg.LogText)
 	}
+	return nil
+}
+
+// TaskRetry retries a failed task.
+func (c *CLI) TaskRetry() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.RetryTaskRequest{
+		TaskId: c.Attr.Task.Retry.ID,
+	}
+	if c.Attr.Task.Retry.Retry != nil {
+		req.Retry = c.Attr.Task.Retry.Retry
+	}
+
+	res, err := c.QC.Client.RetryTask(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error retrying task: %w", err)
+	}
+
+	fmt.Printf("🔁 Retried task %d → new task ID %d\n", c.Attr.Task.Retry.ID, res.TaskId)
 	return nil
 }
 
@@ -1640,6 +1666,8 @@ func Run(c CLI) error {
 			err = c.TaskList()
 		case c.Attr.Task.Output != nil:
 			err = c.TaskOutput()
+		case c.Attr.Task.Retry != nil:
+			err = c.TaskRetry()
 		}
 	// Worker commands
 	case c.Attr.Worker != nil:

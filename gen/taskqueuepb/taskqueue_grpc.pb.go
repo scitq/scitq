@@ -29,6 +29,7 @@ const (
 	TaskQueue_StreamTaskLogsErr_FullMethodName      = "/taskqueue.TaskQueue/StreamTaskLogsErr"
 	TaskQueue_GetLogsChunk_FullMethodName           = "/taskqueue.TaskQueue/GetLogsChunk"
 	TaskQueue_ListTasks_FullMethodName              = "/taskqueue.TaskQueue/ListTasks"
+	TaskQueue_RetryTask_FullMethodName              = "/taskqueue.TaskQueue/RetryTask"
 	TaskQueue_ListWorkers_FullMethodName            = "/taskqueue.TaskQueue/ListWorkers"
 	TaskQueue_CreateWorker_FullMethodName           = "/taskqueue.TaskQueue/CreateWorker"
 	TaskQueue_UpdateWorkerStatus_FullMethodName     = "/taskqueue.TaskQueue/UpdateWorkerStatus"
@@ -93,6 +94,7 @@ type TaskQueueClient interface {
 	StreamTaskLogsErr(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskLog], error)
 	GetLogsChunk(ctx context.Context, in *GetLogsRequest, opts ...grpc.CallOption) (*LogChunkList, error)
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskList, error)
+	RetryTask(ctx context.Context, in *RetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
 	UpdateWorkerStatus(ctx context.Context, in *WorkerStatus, opts ...grpc.CallOption) (*Ack, error)
@@ -259,6 +261,16 @@ func (c *taskQueueClient) ListTasks(ctx context.Context, in *ListTasksRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskList)
 	err := c.cc.Invoke(ctx, TaskQueue_ListTasks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) RetryTask(ctx context.Context, in *RetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_RetryTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -768,6 +780,7 @@ type TaskQueueServer interface {
 	StreamTaskLogsErr(*TaskId, grpc.ServerStreamingServer[TaskLog]) error
 	GetLogsChunk(context.Context, *GetLogsRequest) (*LogChunkList, error)
 	ListTasks(context.Context, *ListTasksRequest) (*TaskList, error)
+	RetryTask(context.Context, *RetryTaskRequest) (*TaskResponse, error)
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
 	UpdateWorkerStatus(context.Context, *WorkerStatus) (*Ack, error)
@@ -855,6 +868,9 @@ func (UnimplementedTaskQueueServer) GetLogsChunk(context.Context, *GetLogsReques
 }
 func (UnimplementedTaskQueueServer) ListTasks(context.Context, *ListTasksRequest) (*TaskList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
+}
+func (UnimplementedTaskQueueServer) RetryTask(context.Context, *RetryTaskRequest) (*TaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RetryTask not implemented")
 }
 func (UnimplementedTaskQueueServer) ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkers not implemented")
@@ -1157,6 +1173,24 @@ func _TaskQueue_ListTasks_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).ListTasks(ctx, req.(*ListTasksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_RetryTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetryTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).RetryTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_RetryTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).RetryTask(ctx, req.(*RetryTaskRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2073,6 +2107,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTasks",
 			Handler:    _TaskQueue_ListTasks_Handler,
+		},
+		{
+			MethodName: "RetryTask",
+			Handler:    _TaskQueue_RetryTask_Handler,
 		},
 		{
 			MethodName: "ListWorkers",

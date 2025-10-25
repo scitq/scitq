@@ -230,6 +230,19 @@ export interface TaskList {
     tasks: Task[];
 }
 /**
+ * @generated from protobuf message taskqueue.RetryTaskRequest
+ */
+export interface RetryTaskRequest {
+    /**
+     * @generated from protobuf field: int32 task_id = 1
+     */
+    taskId: number;
+    /**
+     * @generated from protobuf field: optional int32 retry = 2
+     */
+    retry?: number;
+}
+/**
  * @generated from protobuf message taskqueue.Worker
  */
 export interface Worker {
@@ -2677,6 +2690,60 @@ class TaskList$Type extends MessageType<TaskList> {
  * @generated MessageType for protobuf message taskqueue.TaskList
  */
 export const TaskList = new TaskList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RetryTaskRequest$Type extends MessageType<RetryTaskRequest> {
+    constructor() {
+        super("taskqueue.RetryTaskRequest", [
+            { no: 1, name: "task_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "retry", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RetryTaskRequest>): RetryTaskRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.taskId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<RetryTaskRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RetryTaskRequest): RetryTaskRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 task_id */ 1:
+                    message.taskId = reader.int32();
+                    break;
+                case /* optional int32 retry */ 2:
+                    message.retry = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RetryTaskRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 task_id = 1; */
+        if (message.taskId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.taskId);
+        /* optional int32 retry = 2; */
+        if (message.retry !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.retry);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.RetryTaskRequest
+ */
+export const RetryTaskRequest = new RetryTaskRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Worker$Type extends MessageType<Worker> {
     constructor() {
@@ -9415,6 +9482,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "StreamTaskLogsErr", serverStreaming: true, options: {}, I: TaskId, O: TaskLog },
     { name: "GetLogsChunk", options: {}, I: GetLogsRequest, O: LogChunkList },
     { name: "ListTasks", options: {}, I: ListTasksRequest, O: TaskList },
+    { name: "RetryTask", options: {}, I: RetryTaskRequest, O: TaskResponse },
     { name: "ListWorkers", options: {}, I: ListWorkersRequest, O: WorkersList },
     { name: "CreateWorker", options: {}, I: WorkerRequest, O: WorkerIds },
     { name: "UpdateWorkerStatus", options: {}, I: WorkerStatus, O: Ack },
