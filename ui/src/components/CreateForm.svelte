@@ -29,6 +29,9 @@
   let showStepSuggestions = false;
   let hoveredWf: string | null = null;
 
+  // Error message state
+  let errorMessage = "";
+
   // Filtered suggestions
   let flavorSuggestions: string[] = [];
   let regionSuggestions: string[] = [];
@@ -200,20 +203,25 @@
    * @returns {Promise<void>}
    */
   async function handleAddWorker(): Promise<void> {
-    const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
-    const workerCreatedDetails = workersDetails[workersDetails.length - 1];
-    const statuses = await getStatus([workerCreatedDetails.workerId]);
-    const statusObj = statuses[0];
-    const workerStatus = statusObj ? statusObj.status : 'unknown';
+    try {
+      const workersDetails = await newWorker(concurrency, prefetch, flavor, region, provider, number, wfStep);
+      const workerCreatedDetails = workersDetails[workersDetails.length - 1];
+      const statuses = await getStatus([workerCreatedDetails.workerId]);
+      const statusObj = statuses[0];
+      const workerStatus = statusObj ? statusObj.status : 'unknown';
 
-    // Reset form
-    concurrency = 1;
-    prefetch = 1;
-    flavor = "";
-    region = "";
-    provider = "";
-    number = 1;
-    wfStep = "";
+      // Reset form
+      concurrency = 1;
+      prefetch = 1;
+      flavor = "";
+      region = "";
+      provider = "";
+      number = 1;
+      wfStep = "";
+      errorMessage = "";
+    } catch (error) {
+      errorMessage = `Failed to create worker: ${error.message || error}`;
+    }
   }
 </script>
 
@@ -395,4 +403,20 @@
   <button class="btn-validate createForm-add-button" on:click={handleAddWorker} aria-label="Add" data-testid="add-worker-button">
     Add
   </button>
+
+  {#if errorMessage}
+    <div class="createForm-error-message">{errorMessage}</div>
+  {/if}
 </div>
+
+<style>
+  .createForm-error-message {
+    color: #b00020;
+    background-color: #fddede;
+    border: 1px solid #b00020;
+    padding: 0.5em 1em;
+    margin-top: 1em;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+</style>
