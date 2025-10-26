@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
@@ -555,6 +555,12 @@
       internalWorkers = internalWorkers.map(w =>
         w.workerId === worker.workerId ? { ...w, [field]: newValue } : w
       );
+      // Perform gRPC update
+      try {
+        await updateWorkerConfig(worker.workerId, { [field]: newValue });
+      } catch (err) {
+        console.error('Failed to update worker config', worker.workerId, field, newValue, err);
+      }
     }
   }
 
