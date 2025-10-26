@@ -168,7 +168,7 @@
           case 'stats': {
             const raw = (payload as any).stats;
             if (raw) {
-              // Compute per-second rates using previous totals
+              // Compute per-second rates using previous totals, safely
               const now = new Date();
               const prev = lastTotals[id];
               const current = {
@@ -178,10 +178,12 @@
                 netSent: raw.net_io?.sent_bytes_total || 0
               };
               const dt = prev ? (now.getTime() - prev.time.getTime()) / 1000 : 1;
-              const readRate = prev ? (current.diskRead - prev.diskRead) / dt : 0;
-              const writeRate = prev ? (current.diskWrite - prev.diskWrite) / dt : 0;
-              const recvRate = prev ? (current.netRecv - prev.netRecv) / dt : 0;
-              const sentRate = prev ? (current.netSent - prev.netSent) / dt : 0;
+              const safeRate = (num: number) => !isFinite(num) || isNaN(num) ? 0 : num;
+
+              const readRate = safeRate(prev ? (current.diskRead - prev.diskRead) / dt : 0);
+              const writeRate = safeRate(prev ? (current.diskWrite - prev.diskWrite) / dt : 0);
+              const recvRate = safeRate(prev ? (current.netRecv - prev.netRecv) / dt : 0);
+              const sentRate = safeRate(prev ? (current.netSent - prev.netSent) / dt : 0);
               lastTotals[id] = { ...current, time: now };
               // Build stats object compatible with WorkerStats.fromJson
               const computedStats = {
