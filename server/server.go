@@ -895,15 +895,17 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				}
 				// 🔔 WS notify: task status change for retried task (oldStatus="F", newStatus="P")
 				ws.EmitWS("task", int32(newID), "status", struct {
-					TaskId    int32  `json:"taskId"`
-					WorkerId  int32  `json:"workerId"`
-					OldStatus string `json:"oldStatus"`
-					Status    string `json:"status"`
+					TaskId       int32  `json:"taskId"`
+					ParentTaskId int32  `json:"parentTaskId"`
+					WorkerId     int32  `json:"workerId"`
+					OldStatus    string `json:"oldStatus"`
+					Status       string `json:"status"`
 				}{
-					TaskId:    int32(newID),
-					WorkerId:  0,
-					OldStatus: "F",
-					Status:    "P",
+					TaskId:       int32(newID),
+					ParentTaskId: req.TaskId,
+					WorkerId:     0,
+					OldStatus:    "F",
+					Status:       "P",
 				})
 				// Best-effort: trigger assign for the fresh pending task
 				s.triggerAssign()
@@ -1076,15 +1078,17 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 	})
 
 	ws.EmitWS("task", newID, "status", struct {
-		TaskId    int32  `json:"taskId"`
-		WorkerId  int32  `json:"workerId"`
-		OldStatus string `json:"oldStatus"`
-		Status    string `json:"status"`
+		TaskId       int32  `json:"taskId"`
+		ParentTaskId int32  `json:"parentTaskId"`
+		WorkerId     int32  `json:"workerId"`
+		OldStatus    string `json:"oldStatus"`
+		Status       string `json:"status"`
 	}{
-		TaskId:    newID,
-		WorkerId:  0,
-		OldStatus: "F",
-		Status:    "P",
+		TaskId:       newID,
+		ParentTaskId: oldID,
+		WorkerId:     0,
+		OldStatus:    "F",
+		Status:       "P",
 	})
 
 	s.triggerAssign()

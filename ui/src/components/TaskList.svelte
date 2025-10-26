@@ -4,6 +4,8 @@
   import { RefreshCcw, Download, Trash, Eye, Workflow } from 'lucide-svelte';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
+  import { wsClient } from '../lib/wsClient';
+
 
   /**
    * Mapping of task IDs to their saved logs

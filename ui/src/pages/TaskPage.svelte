@@ -118,85 +118,77 @@ async function handleWebSocketMessage(message) {
     const action = message.action;
     const p = message.payload || {};
 
+    // Helper to check if a task passes current filters
+    function passesFilters(task) {
+      if (selectedWorkerId && task.workerId !== selectedWorkerId) return false;
+      if (selectedWfId && task.workflowId !== selectedWfId) return false;
+      if (selectedStepId && task.stepId !== selectedStepId) return false;
+      if (selectedStatus && task.status !== selectedStatus) return false;
+      return true;
+    }
+
+    // --- 1️⃣ Task created ---
     if (action === 'created') {
-      const newTask = {
-        taskId: p.taskId,
-        command: p.command || '',
-        status: p.status || 'P',
-        stepId: p.stepId ?? null,
-        workerId: p.workerId ?? null,
-        workflowId: p.workflowId ?? null,
-        taskName: p.taskName ?? null,
-      };
+      if (!passesFilters(p)) return;
 
-      if (!isScrolledToTop) {
-        pendingTasks = [...pendingTasks, newTask];
-        showNewTasksNotification = true;
-      } else {
-        displayedTasks = [newTask, ...displayedTasks];
-        firstTasks = [newTask, ...firstTasks];
-
-        const finishedTaskIds = displayedTasks
-          .filter(task => !['R', 'U', 'V'].includes(task.status))
-          .map(task => task.taskId);
-        if (finishedTaskIds.length > 0) {
-          taskLogsSaved = await getLogsBatch(finishedTaskIds, 2);
-        }
-      }
-
-      if (['R', 'U', 'V'].includes(newTask.status)) {
-        startStreaming(newTask);
+      const exists = displayedTasks.some(t => t.taskId === p.taskId);
+      if (!exists) {
+        displayedTasks = [p, ...displayedTasks];
+        if (['R', 'U', 'V'].includes(p.status)) startStreaming(p);
       }
       return;
     }
 
-    if (action === 'updated') {
-      const updatedTaskId = p.taskId;
-      const newStatus = p.status;
-      const workerId = p.workerId;
-
-      const updateTaskInArray = (tasks: Task[]) =>
-        tasks.map(task => {
-          if (task.taskId === updatedTaskId) {
-            const updatedTask = {
-              ...task,
-              status: newStatus ?? task.status,
-            };
-            if (workerId !== undefined) {
-              updatedTask.workerId = workerId;
-              if (workers.length > 0) {
-                const worker = workers.find(w => w.workerId === workerId);
-                if (worker) updatedTask.workerName = worker.name;
-              }
-            }
-            return updatedTask;
-          }
-          return task;
-        });
-
-      displayedTasks = updateTaskInArray(displayedTasks);
-      firstTasks = updateTaskInArray(firstTasks);
-      pendingTasks = updateTaskInArray(pendingTasks);
-
-      if (['R', 'U', 'V'].includes(newStatus)) {
-        let task = displayedTasks.find(t => t.taskId === updatedTaskId) || pendingTasks.find(t => t.taskId === updatedTaskId);
-        if (task && !streamedTasks.has(task.taskId)) {
-          startStreaming(task);
-        }
-      }
-      return;
-    }
-
+    // --- 2️⃣ Task deleted ---
     if (action === 'deleted') {
-      const id = p.taskId ?? message.id;
-      if (typeof id === 'number') {
-        displayedTasks = displayedTasks.filter(t => t.taskId !== id);
-        firstTasks = firstTasks.filter(t => t.taskId !== id);
-        pendingTasks = pendingTasks.filter(t => t.taskId !== id);
-        delete taskLogsOut[id];
-        delete taskLogsErr[id];
-        delete logSkipTracker[id];
-        streamedTasks.delete(id);
+      displayedTasks = displayedTasks.filter(t => t.taskId !== p.taskId);
+      stopStreaming(p.taskId);
+      return;
+    }
+
+    // --- 3️⃣ Task status ---
+    if (action === 'status') {
+      if (p.oldStatus === 'F' && p.status === 'P' && p.parentTaskId) {
+        // Retry case
+        const parentIdx = displayedTasks.findIndex(t => t.taskId === p.parentTaskId);
+        if (parentIdx !== -1) {
+          const parent = displayedTasks[parentIdx];
+          const merged = {
+            ...p,
+            taskName: parent.taskName,
+            command: parent.command,
+            output: parent.output,
+            shell: parent.shell,
+            container: parent.container,
+            containerOptions: parent.containerOptions,
+            input: parent.input,
+            resource: parent.resource,
+            workflowId: parent.workflowId,
+            stepId: parent.stepId,
+            workerId: undefined,
+          };
+          displayedTasks.splice(parentIdx, 1);
+          displayedTasks = [merged, ...displayedTasks];
+          startStreaming(merged);
+        }
+        return;
+      }
+
+      // Regular status change (only mutate status/workerId; do not overwrite other fields)
+      const id = (p && typeof p.taskId !== 'undefined') ? p.taskId : message?.id;
+      const idx = displayedTasks.findIndex(t => t.taskId === id);
+      if (idx !== -1) {
+        const current = displayedTasks[idx];
+        const next = {
+          ...current,
+          status: typeof p.status === 'string' ? p.status : current.status,
+          workerId: (typeof p.workerId === 'number') ? p.workerId : current.workerId,
+        };
+        displayedTasks[idx] = next;
+        displayedTasks = [...displayedTasks];
+      } else {
+        // If the task isn't currently listed (due to filters/pagination), ignore status-only events
+        // to avoid creating partial/incorrect rows. It will appear via a "created" event or next refresh.
       }
       return;
     }
@@ -519,6 +511,17 @@ async function handleWebSocketMessage(message) {
     // Start streaming both stdout and stderr
     streamTaskLogsOutput(task.taskId, handleLog);
     streamTaskLogsErr(task.taskId, handleLog);
+  }
+
+  /**
+   * Stops streaming logs for a given task
+   * @param {number} taskId - Task ID
+   */
+  function stopStreaming(taskId: number) {
+    streamedTasks.delete(taskId);
+    delete taskLogsOut[taskId];
+    delete taskLogsErr[taskId];
+    delete logSkipTracker[taskId];
   }
 
   /**
