@@ -3,7 +3,6 @@ package fetch
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -483,7 +482,7 @@ func loadConfigFromMemory(remotes *pb.RcloneRemotes) (string, error) {
 	configfile.Install()
 
 	LoadedRemotes = config.GetRemoteNames()
-	log.Printf("Rclone config loaded from memory with %d remotes: %v", len(LoadedRemotes), LoadedRemotes)
+	//log.Printf("Rclone config loaded from memory with %d remotes: %v", len(LoadedRemotes), LoadedRemotes)
 	return tmpName, nil
 }
 
@@ -533,7 +532,6 @@ func CleanConfig(tempPath string) {
 		tmpDir := os.TempDir()
 		rel, err := filepath.Rel(tmpDir, tempPath)
 		if err == nil && !strings.HasPrefix(rel, "..") {
-			fmt.Printf("Cleaning temporary conf %s\n", tempPath)
 			_ = os.Remove(tempPath)
 			return
 		}
