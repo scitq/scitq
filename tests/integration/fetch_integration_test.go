@@ -25,7 +25,7 @@ func TestFetchIntegration(t *testing.T) {
 
 	// --- 1️⃣ Prepare config override with a fake provider ---
 	override := &config.Config{}
-	override.Rclone.Remotes = map[string]map[string]string{
+	override.Rclone = map[string]map[string]string{
 		"s3test": {
 			"type":      "s3",
 			"provider":  "AWS",

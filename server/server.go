@@ -115,9 +115,9 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		log.Fatalf("⚠️ Failed to initialize step stats aggregator: %v", err)
 	}
 
-	// Build rcloneRemotes proto struct once here
+	// Build rcloneRemotes proto struct once here (cfg.Rclone is now a flat map[name]options)
 	remotes := make(map[string]*pb.RcloneRemote)
-	for name, opts := range cfg.Rclone.Remotes {
+	for name, opts := range cfg.Rclone {
 		remotes[name] = &pb.RcloneRemote{Options: opts}
 	}
 	s.rcloneRemotes = &pb.RcloneRemotes{Remotes: remotes}

@@ -56,9 +56,7 @@ type Config struct {
 		Openstack map[string]*OpenstackConfig    `yaml:"openstack"`
 		Fake      map[string]*FakeProviderConfig `yaml:"fake"`
 	} `yaml:"providers"`
-	Rclone struct {
-		Remotes map[string]map[string]string `yaml:"remotes"`
-	} `yaml:"rclone"`
+	Rclone map[string]map[string]string `yaml:"rclone"`
 }
 
 type Quota struct {
