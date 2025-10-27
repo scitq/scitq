@@ -87,11 +87,12 @@ type DownloadManager struct {
 	// Per-task chrono map for download durations
 	DownloadStart map[int32]time.Time
 	// Per-task pending set for download items
-	TaskPending map[int32]map[string]bool // Task ID → set of pending item keys (I:input, R:resource, D:docker)
+	TaskPending   map[int32]map[string]bool // Task ID → set of pending item keys (I:input, R:resource, D:docker)
+	RcloneRemotes *pb.RcloneRemotes
 }
 
 // NewDownloadManager initializes the download manager.
-func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager {
+func NewDownloadManager(store string, reporter *event.Reporter, rcloneRemotes *pb.RcloneRemotes) *DownloadManager {
 	return &DownloadManager{
 		ResourceDownloads: make(map[string][]*pb.Task),
 		ResourceMemory:    make(map[string]FileMetadata),
@@ -105,6 +106,7 @@ func NewDownloadManager(store string, reporter *event.Reporter) *DownloadManager
 		EnqueuedTasks:     make(map[int32]bool),
 		DownloadStart:     make(map[int32]time.Time),
 		TaskPending:       make(map[int32]map[string]bool),
+		RcloneRemotes:     rcloneRemotes,
 	}
 }
 
@@ -201,7 +203,7 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		switch file.FileType {
 		case ResourceFile, InputFile:
-			err = fetch.Copy(fetch.DefaultRcloneConfig, file.SourcePath, file.TargetPath)
+			err = fetch.Copy(dm.RcloneRemotes, file.SourcePath, file.TargetPath)
 
 		case DockerImage:
 			// Exponential backoff for docker pull timeout, capped at dockerPullTimeoutMax
@@ -244,7 +246,7 @@ func (dm *DownloadManager) downloadFile(file *FileTransfer) {
 	var size int64
 	var md5Str string
 	var srcModTime time.Time
-	info, err := fetch.Info(fetch.DefaultRcloneConfig, file.SourcePath)
+	info, err := fetch.Info(dm.RcloneRemotes, file.SourcePath)
 	if err != nil {
 		log.Printf("Error fetching file info for %s: %v", file.SourcePath, err)
 	} else {
@@ -325,7 +327,7 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 
 		if exists {
 			log.Printf("Checking resource %v", meta)
-			fileInfo, err := fetch.Info(fetch.DefaultRcloneConfig, meta.SourcePath)
+			fileInfo, err := fetch.Info(dm.RcloneRemotes, meta.SourcePath)
 			if err != nil {
 				// likely a file method that does not support Info, we have little choice but to trust
 				continue
@@ -745,8 +747,8 @@ func extractFilename(path string) string {
 }
 
 // run downloader
-func RunDownloader(store string, reporter *event.Reporter) *DownloadManager {
-	dm := NewDownloadManager(store, reporter)
+func RunDownloader(store string, reporter *event.Reporter, rcloneRemotes *pb.RcloneRemotes) *DownloadManager {
+	dm := NewDownloadManager(store, reporter, rcloneRemotes)
 	go func() { dm.StartDownloadWorkers() }()
 	go func() {
 		dm.loadResourceMemory()

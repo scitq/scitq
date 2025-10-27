@@ -167,13 +167,11 @@ func (uri URI) fs() (*MetaFileSystem, error) {
 	case "fastq", "run+fastq":
 		return NewMetaFileSystem(&FastqBackend{}, nil)
 	default:
-		// Check if the protocol is present in rclone configuration
-		if stringInSlice(uri.Proto, RcloneRemotes) {
-			rclone_uri := uri.Proto + ":" + uri.Component
-			ctx := context.Background()
-			return NewMetaFileSystem(NewRcloneBackend(ctx, rclone_uri))
-		}
-		return nil, fmt.Errorf("unsupported URI protocol: %s (protocols %v)", uri.Proto, RcloneRemotes)
+		// We can't check if the protocol is present in rclone configuration with the new context, let's hope for the best
+		rclone_uri := uri.Proto + ":" + uri.Component
+		ctx := context.Background()
+		return NewMetaFileSystem(NewRcloneBackend(ctx, rclone_uri))
+
 	}
 }
 

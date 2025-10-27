@@ -889,13 +889,26 @@ export interface JobUpdate {
     progression?: number; // 0..100 (server clamps)
 }
 /**
- * @generated from protobuf message taskqueue.RcloneConfig
+ * @generated from protobuf message taskqueue.RcloneRemotes
  */
-export interface RcloneConfig {
+export interface RcloneRemotes {
     /**
-     * @generated from protobuf field: string config = 1
+     * @generated from protobuf field: map<string, taskqueue.RcloneRemote> remotes = 1
      */
-    config: string;
+    remotes: {
+        [key: string]: RcloneRemote;
+    };
+}
+/**
+ * @generated from protobuf message taskqueue.RcloneRemote
+ */
+export interface RcloneRemote {
+    /**
+     * @generated from protobuf field: map<string, string> options = 1
+     */
+    options: {
+        [key: string]: string;
+    };
 }
 /**
  * @generated from protobuf message taskqueue.DockerCredential
@@ -5099,26 +5112,26 @@ class JobUpdate$Type extends MessageType<JobUpdate> {
  */
 export const JobUpdate = new JobUpdate$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class RcloneConfig$Type extends MessageType<RcloneConfig> {
+class RcloneRemotes$Type extends MessageType<RcloneRemotes> {
     constructor() {
-        super("taskqueue.RcloneConfig", [
-            { no: 1, name: "config", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        super("taskqueue.RcloneRemotes", [
+            { no: 1, name: "remotes", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "message", T: () => RcloneRemote } }
         ]);
     }
-    create(value?: PartialMessage<RcloneConfig>): RcloneConfig {
+    create(value?: PartialMessage<RcloneRemotes>): RcloneRemotes {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.config = "";
+        message.remotes = {};
         if (value !== undefined)
-            reflectionMergePartial<RcloneConfig>(this, message, value);
+            reflectionMergePartial<RcloneRemotes>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RcloneConfig): RcloneConfig {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RcloneRemotes): RcloneRemotes {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* string config */ 1:
-                    message.config = reader.string();
+                case /* map<string, taskqueue.RcloneRemote> remotes */ 1:
+                    this.binaryReadMap1(message.remotes, reader, options);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -5131,10 +5144,30 @@ class RcloneConfig$Type extends MessageType<RcloneConfig> {
         }
         return message;
     }
-    internalBinaryWrite(message: RcloneConfig, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* string config = 1; */
-        if (message.config !== "")
-            writer.tag(1, WireType.LengthDelimited).string(message.config);
+    private binaryReadMap1(map: RcloneRemotes["remotes"], reader: IBinaryReader, options: BinaryReadOptions): void {
+        let len = reader.uint32(), end = reader.pos + len, key: keyof RcloneRemotes["remotes"] | undefined, val: RcloneRemotes["remotes"][any] | undefined;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case 1:
+                    key = reader.string();
+                    break;
+                case 2:
+                    val = RcloneRemote.internalBinaryRead(reader, reader.uint32(), options);
+                    break;
+                default: throw new globalThis.Error("unknown map entry field for taskqueue.RcloneRemotes.remotes");
+            }
+        }
+        map[key ?? ""] = val ?? RcloneRemote.create();
+    }
+    internalBinaryWrite(message: RcloneRemotes, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* map<string, taskqueue.RcloneRemote> remotes = 1; */
+        for (let k of globalThis.Object.keys(message.remotes)) {
+            writer.tag(1, WireType.LengthDelimited).fork().tag(1, WireType.LengthDelimited).string(k);
+            writer.tag(2, WireType.LengthDelimited).fork();
+            RcloneRemote.internalBinaryWrite(message.remotes[k], writer, options);
+            writer.join().join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5142,9 +5175,72 @@ class RcloneConfig$Type extends MessageType<RcloneConfig> {
     }
 }
 /**
- * @generated MessageType for protobuf message taskqueue.RcloneConfig
+ * @generated MessageType for protobuf message taskqueue.RcloneRemotes
  */
-export const RcloneConfig = new RcloneConfig$Type();
+export const RcloneRemotes = new RcloneRemotes$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RcloneRemote$Type extends MessageType<RcloneRemote> {
+    constructor() {
+        super("taskqueue.RcloneRemote", [
+            { no: 1, name: "options", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "scalar", T: 9 /*ScalarType.STRING*/ } }
+        ]);
+    }
+    create(value?: PartialMessage<RcloneRemote>): RcloneRemote {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.options = {};
+        if (value !== undefined)
+            reflectionMergePartial<RcloneRemote>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RcloneRemote): RcloneRemote {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* map<string, string> options */ 1:
+                    this.binaryReadMap1(message.options, reader, options);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    private binaryReadMap1(map: RcloneRemote["options"], reader: IBinaryReader, options: BinaryReadOptions): void {
+        let len = reader.uint32(), end = reader.pos + len, key: keyof RcloneRemote["options"] | undefined, val: RcloneRemote["options"][any] | undefined;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case 1:
+                    key = reader.string();
+                    break;
+                case 2:
+                    val = reader.string();
+                    break;
+                default: throw new globalThis.Error("unknown map entry field for taskqueue.RcloneRemote.options");
+            }
+        }
+        map[key ?? ""] = val ?? "";
+    }
+    internalBinaryWrite(message: RcloneRemote, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* map<string, string> options = 1; */
+        for (let k of globalThis.Object.keys(message.options))
+            writer.tag(1, WireType.LengthDelimited).fork().tag(1, WireType.LengthDelimited).string(k).tag(2, WireType.LengthDelimited).string(message.options[k]).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.RcloneRemote
+ */
+export const RcloneRemote = new RcloneRemote$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DockerCredential$Type extends MessageType<DockerCredential> {
     constructor() {
@@ -9497,7 +9593,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListProviders", options: {}, I: Empty, O: ProviderList },
     { name: "ListRegions", options: {}, I: Empty, O: RegionList },
     { name: "CreateFlavor", options: {}, I: FlavorCreateRequest, O: FlavorId },
-    { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneConfig },
+    { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneRemotes },
     { name: "GetDockerCredentials", options: {}, I: Empty, O: DockerCredentials },
     { name: "Login", options: {}, I: LoginRequest, O: LoginResponse },
     { name: "Logout", options: {}, I: Token, O: Ack },

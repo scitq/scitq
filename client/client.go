@@ -22,7 +22,6 @@ import (
 	"github.com/scitq/scitq/client/event"
 	"github.com/scitq/scitq/client/install"
 	"github.com/scitq/scitq/client/workerstats"
-	"github.com/scitq/scitq/fetch"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/lib"
 	"github.com/scitq/scitq/utils"
@@ -620,14 +619,10 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	}
 	defer qclient.Close()
 
-	if _, err := os.Stat(fetch.DefaultRcloneConfig); os.IsNotExist(err) {
-		log.Printf("⚠️ Rclone config file not found, creating a new one.")
-		rCloneConfig, err := qclient.Client.GetRcloneConfig(ctx, &emptypb.Empty{})
-		if err != nil {
-			event.SendRuntimeEventWithRetry(config.ServerAddr, config.Token, 0, config.Name, "E", "rclone", "Failed to get Rclone config", map[string]any{"error": err.Error()})
-			return fmt.Errorf("could not get Rclone config: %v", err)
-		}
-		install.InstallRcloneConfig(rCloneConfig.Config, fetch.DefaultRcloneConfig)
+	rcloneRemotes, err := qclient.Client.GetRcloneConfig(ctx, &emptypb.Empty{})
+	if err != nil {
+		event.SendRuntimeEventWithRetry(config.ServerAddr, config.Token, 0, config.Name, "E", "rclone", "Failed to get Rclone config", map[string]any{"error": err.Error()})
+		return fmt.Errorf("could not get Rclone config: %v", err)
 	}
 
 	// Ensure docker credentials are present (write once)
@@ -654,10 +649,10 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	//TODO: we need to add somehow an error state (or we could update the task status in the task with the error notably in case download fails)
 
 	// Launching download Manager
-	dm := RunDownloader(store, reporter)
+	dm := RunDownloader(store, reporter, rcloneRemotes)
 
 	// Launching upload Manager
-	um := RunUploader(store, qclient.Client, activeTasks, reporter)
+	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks)

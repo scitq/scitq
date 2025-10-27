@@ -32,6 +32,7 @@ import (
 	"github.com/vbauerster/mpb/v8/decor"
 
 	_ "github.com/rclone/rclone/backend/all" // Ensure all backends are loaded
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
 
 //func CopyFiles(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
@@ -175,7 +176,7 @@ func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath str
 //}
 
 // FetchContext holds global configuration settings for the fetch package.
-var RcloneRemotes []string
+var LoadedRemotes []string
 
 // stringInSlice checks if a string is present in a slice of strings.
 func stringInSlice(target string, slice []string) bool {
@@ -442,40 +443,30 @@ type Operation struct {
 	tempConfigPath string
 }
 
-// Load Rclone config from a file into memory
-func loadConfigFromFile(configPath string) (string, error) {
-	config.SetConfigPath(configPath)
-	configfile.Install()
-
-	// Clone the loaded config into memory
-	cfg := config.Data()
-	tempConfig := make(map[string]map[string]string)
-	if cfg != nil {
-		// Convert to a temporary in-memory config
-		for _, remote := range cfg.GetSectionList() {
-			options := make(map[string]string)
-			for _, k := range cfg.GetKeyList(remote) {
-				options[k], _ = cfg.GetValue(remote, k)
-			}
-			tempConfig[remote] = options
-		}
+// Load Rclone config from a structured pb.RcloneRemotes into a temp file and set as active config
+// Accepts a pointer to pb.RcloneRemotes (from protobuf), writes an INI config, returns temp file name
+// Import "pb" package at the top:
+//
+//	import pb "your/protobuf/package/path"
+func loadConfigFromMemory(remotes *pb.RcloneRemotes) (string, error) {
+	if remotes == nil {
+		return "", fmt.Errorf("nil remotes struct provided")
 	}
 
 	tmpFile, err := os.CreateTemp("", "rclone-config-*.conf")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
-	//defer os.Remove(tmpFile.Name())
 	tmpName := tmpFile.Name()
 
-	// Write the cloned config to the temporary file
-	for name, options := range tempConfig {
+	// Write the config in INI format directly from remotes.Remotes
+	for name, remote := range remotes.Remotes {
 		_, err := fmt.Fprintf(tmpFile, "[%s]\n", name)
 		if err != nil {
 			tmpFile.Close()
 			return "", fmt.Errorf("failed to write temp config: %w", err)
 		}
-		for k, v := range options {
+		for k, v := range remote.Options {
 			_, err := fmt.Fprintf(tmpFile, "%s = %s\n", k, v)
 			if err != nil {
 				tmpFile.Close()
@@ -487,12 +478,12 @@ func loadConfigFromFile(configPath string) (string, error) {
 		return "", fmt.Errorf("failed to close temp config: %w", err)
 	}
 
-	// Set the fake config path
+	// Set the temp config as the active config for rclone
 	config.SetConfigPath(tmpName)
 	configfile.Install()
 
-	RcloneRemotes = config.GetRemoteNames()
-	log.Printf("Rclone config loaded from %s [remotes %s]", configPath, RcloneRemotes)
+	LoadedRemotes = config.GetRemoteNames()
+	log.Printf("Rclone config loaded from memory with %d remotes: %v", len(LoadedRemotes), LoadedRemotes)
 	return tmpName, nil
 }
 
@@ -550,8 +541,8 @@ func CleanConfig(tempPath string) {
 	// Do not delete non-temp config files
 }
 
-func NewOperation(rcloneConfig, srcStr, dstStr string) (*Operation, error) {
-	tmpPath, err := loadConfigFromFile(rcloneConfig)
+func NewOperation(remotes *pb.RcloneRemotes, srcStr, dstStr string) (*Operation, error) {
+	tmpPath, err := loadConfigFromMemory(remotes)
 	if err != nil {
 		return nil, err
 	}
@@ -701,8 +692,8 @@ func (op *Operation) Info() (fs.DirEntry, error) {
 	return op.src.fs.Info(path)
 }
 
-func Copy(rcloneConfig, srcStr, dstStr string) error {
-	op, err := NewOperation(rcloneConfig, srcStr, dstStr)
+func Copy(remotes *pb.RcloneRemotes, srcStr, dstStr string) error {
+	op, err := NewOperation(remotes, srcStr, dstStr)
 	if op != nil {
 		defer CleanConfig(op.tempConfigPath)
 	}
@@ -713,8 +704,8 @@ func Copy(rcloneConfig, srcStr, dstStr string) error {
 	return err
 }
 
-func RawList(rcloneConfig, srcStr string) (fs.DirEntries, error) {
-	op, err := NewOperation(rcloneConfig, srcStr, "")
+func RawList(remotes *pb.RcloneRemotes, srcStr string) (fs.DirEntries, error) {
+	op, err := NewOperation(remotes, srcStr, "")
 	if op != nil {
 		defer CleanConfig(op.tempConfigPath)
 	}
@@ -724,8 +715,8 @@ func RawList(rcloneConfig, srcStr string) (fs.DirEntries, error) {
 	return op.List()
 }
 
-func List(rcloneConfig, srcStr string) ([]string, error) {
-	op, err := NewOperation(rcloneConfig, srcStr, "")
+func List(remotes *pb.RcloneRemotes, srcStr string) ([]string, error) {
+	op, err := NewOperation(remotes, srcStr, "")
 	if op != nil {
 		defer CleanConfig(op.tempConfigPath)
 	}
@@ -748,8 +739,8 @@ func List(rcloneConfig, srcStr string) ([]string, error) {
 	return result, nil
 }
 
-func Info(rcloneConfig, srcStr string) (fs.DirEntry, error) {
-	op, err := NewOperation(rcloneConfig, srcStr, "")
+func Info(remotes *pb.RcloneRemotes, srcStr string) (fs.DirEntry, error) {
+	op, err := NewOperation(remotes, srcStr, "")
 	if op != nil {
 		defer CleanConfig(op.tempConfigPath)
 	}

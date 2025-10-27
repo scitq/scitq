@@ -63,9 +63,10 @@ type UploadManager struct {
 	reporter       *event.Reporter
 	pendingUploads SyncCounter // taskID → remaining files
 	uploadStart    sync.Map    // taskID -> time.Time
+	RcloneRemotes  *pb.RcloneRemotes
 }
 
-func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.Reporter) *UploadManager {
+func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.Reporter, rcloneRemotes *pb.RcloneRemotes) *UploadManager {
 	return &UploadManager{
 		UploadQueue:    make(chan *UploadFile, maxUploads),
 		Completion:     make(chan *pb.Task, maxQueueSize),
@@ -74,6 +75,7 @@ func NewUploadManager(store string, client pb.TaskQueueClient, reporter *event.R
 		Client:         client,
 		reporter:       reporter,
 		pendingUploads: SyncCounter{},
+		RcloneRemotes:  rcloneRemotes,
 	}
 }
 
@@ -155,7 +157,7 @@ func (um *UploadManager) uploadFile(file *UploadFile) error {
 	var err error
 	var message string
 	for attempt := 1; attempt <= uploadRetry; attempt++ {
-		err = fetch.Copy(fetch.DefaultRcloneConfig, file.SourcePath, file.TargetPath)
+		err = fetch.Copy(um.RcloneRemotes, file.SourcePath, file.TargetPath)
 		if err == nil {
 			log.Printf("✅ Uploaded: %s → %s", file.SourcePath, file.TargetPath)
 			um.Completion <- file.Task
@@ -205,8 +207,8 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 }
 
 // RunUploader starts upload workers and returns the manager.
-func RunUploader(store string, client pb.TaskQueueClient, activeTasks *sync.Map, reporter *event.Reporter) *UploadManager {
-	um := NewUploadManager(store, client, reporter)
+func RunUploader(store string, client pb.TaskQueueClient, activeTasks *sync.Map, reporter *event.Reporter, rcloneRemotes *pb.RcloneRemotes) *UploadManager {
+	um := NewUploadManager(store, client, reporter, rcloneRemotes)
 	go um.StartUploadWorkers(activeTasks)
 	return um
 }

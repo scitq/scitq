@@ -52,7 +52,7 @@ import type { Token } from "./taskqueue";
 import type { LoginResponse } from "./taskqueue";
 import type { LoginRequest } from "./taskqueue";
 import type { DockerCredentials } from "./taskqueue";
-import type { RcloneConfig } from "./taskqueue";
+import type { RcloneRemotes } from "./taskqueue";
 import type { FlavorId } from "./taskqueue";
 import type { FlavorCreateRequest } from "./taskqueue";
 import type { RegionList } from "./taskqueue";
@@ -198,7 +198,7 @@ export interface ITaskQueueClient {
     /**
      * @generated from protobuf rpc: GetRcloneConfig
      */
-    getRcloneConfig(input: Empty, options?: RpcOptions): UnaryCall<Empty, RcloneConfig>;
+    getRcloneConfig(input: Empty, options?: RpcOptions): UnaryCall<Empty, RcloneRemotes>;
     /**
      * @generated from protobuf rpc: GetDockerCredentials
      */
@@ -520,9 +520,9 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
     /**
      * @generated from protobuf rpc: GetRcloneConfig
      */
-    getRcloneConfig(input: Empty, options?: RpcOptions): UnaryCall<Empty, RcloneConfig> {
+    getRcloneConfig(input: Empty, options?: RpcOptions): UnaryCall<Empty, RcloneRemotes> {
         const method = this.methods[24], opt = this._transport.mergeOptions(options);
-        return stackIntercept<Empty, RcloneConfig>("unary", this._transport, method, opt, input);
+        return stackIntercept<Empty, RcloneRemotes>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: GetDockerCredentials

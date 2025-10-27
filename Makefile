@@ -2,7 +2,6 @@ BINARY_DIR=bin
 SRC_SERVER=./cmd/server
 SRC_CLIENT=./cmd/client
 SRC_CLI=./cmd/cli
-SRC_FETCH=./cmd/fetch
 ifeq ($(OS),Windows_NT)
 	EXE=.exe
 else
@@ -12,14 +11,13 @@ endif
 BINARY_SERVER=$(BINARY_DIR)/scitq-server$(EXE)
 BINARY_CLIENT=$(BINARY_DIR)/scitq-client$(EXE)
 BINARY_CLI=$(BINARY_DIR)/scitq$(EXE)
-BINARY_FETCH=$(BINARY_DIR)/scitq-fetch$(EXE)
 
 PLATFORMS=linux/amd64 darwin/amd64 windows/amd64
 OUTDIR=bin
 
-.PHONY: all build-server build-client build-cli build-fetch static-all static-server static-client static-cli static-fetch cross-build docs install
+.PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install
 
-all: build-server build-client build-cli build-fetch
+all: build-server build-client build-cli
 
 GIT_TAG    := $(shell git describe --tags --always --dirty)
 GIT_SHA    := $(shell git rev-parse --short HEAD)
@@ -42,10 +40,7 @@ build-client: | $(BINARY_DIR)
 build-cli: | $(BINARY_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLI) $(SRC_CLI)
 
-build-fetch: | $(BINARY_DIR)
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY_FETCH) $(SRC_FETCH)
-
-static-all: static-server static-client static-cli static-fetch
+static-all: static-server static-client static-cli
 
 static-server:
 	mkdir -p $(BINARY_DIR)
@@ -59,15 +54,10 @@ static-cli:
 	mkdir -p $(BINARY_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_CLI)-static -a -ldflags "$(STATIC_LDFLAGS)" $(SRC_CLI)
 
-static-fetch:
-	mkdir -p $(BINARY_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_FETCH)-static -a -ldflags "$(STATIC_LDFLAGS)" $(SRC_FETCH)
-
 cross-build:
 	$(foreach platform, $(PLATFORMS), $(call build_binary, $(platform), $(word 1,$(subst /, ,$(platform))), $(word 2,$(subst /, ,$(platform))), scitq-server))
 	$(foreach platform, $(PLATFORMS), $(call build_binary, $(platform), $(word 1,$(subst /, ,$(platform))), $(word 2,$(subst /, ,$(platform))), scitq-client))
 	$(foreach platform, $(PLATFORMS), $(call build_binary, $(platform), $(word 1,$(subst /, ,$(platform))), $(word 2,$(subst /, ,$(platform))), scitq-cli))
-	$(foreach platform, $(PLATFORMS), $(call build_binary, $(platform), $(word 1,$(subst /, ,$(platform))), $(word 2,$(subst /, ,$(platform))), scitq-fetch))
 
 # Documentation generation from .proto files
 docs:
@@ -122,7 +112,6 @@ ifeq ($(OS),Windows_NT)
 	@powershell -Command "Copy-Item -Force '$(BINARY_SERVER)' \"$$env:USERPROFILE\\bin\\scitq-server.exe\""
 	@powershell -Command "Copy-Item -Force '$(BINARY_CLIENT)' \"$$env:USERPROFILE\\bin\\scitq-client.exe\""
 	@powershell -Command "Copy-Item -Force '$(BINARY_CLI)'    \"$$env:USERPROFILE\\bin\\scitq.exe\""
-	@powershell -Command "Copy-Item -Force '$(BINARY_FETCH)'  \"$$env:USERPROFILE\\bin\\scitq-fetch.exe\""
 	@powershell -Command "$$userBin=[System.Environment]::ExpandEnvironmentVariables('%USERPROFILE%\bin'); $$path=[Environment]::GetEnvironmentVariable('PATH','User'); if (!($$path.Split(';') -contains $$userBin)) { [Environment]::SetEnvironmentVariable('PATH', $$path + ';' + $$userBin, 'User'); Write-Output 'PATH updated (persisted)'; } else { Write-Output 'Already in PATH.' }"
 	@echo To reload your PATH now, run this in PowerShell:
 	@echo   $$env:PATH = [System.Environment]::GetEnvironmentVariable('PATH','User') + ';' + [System.Environment]::GetEnvironmentVariable('PATH','Machine')
@@ -131,14 +120,12 @@ else
 	install -m 755 $(BINARY_SERVER) /usr/local/bin/
 	install -m 755 $(BINARY_CLIENT) /usr/local/bin/
 	install -m 755 $(BINARY_CLI)    /usr/local/bin/
-	install -m 755 $(BINARY_FETCH)  /usr/local/bin/
 endif
 
 install2: all
 	install -m 755 $(BINARY_SERVER) /usr/local/bin/scitq2-server
 	install -m 755 $(BINARY_CLIENT) /usr/local/bin/scitq2-client
 	install -m 755 $(BINARY_CLI) /usr/local/bin/scitq2
-	install -m 755 $(BINARY_FETCH) /usr/local/bin/scitq2-fetch
 
 
 

@@ -55,7 +55,6 @@ const defaultJobRetry = 3
 const defaultJobTimeout = 10 * time.Minute
 const defaultJobConcurrency = 10
 const defaultJobQueueSize = 100
-const DefaultRcloneConfig = "/etc/rclone.conf"
 
 //go:embed migrations/*
 var embeddedMigrations embed.FS
@@ -85,6 +84,7 @@ type taskQueueServer struct {
 	sslCertificatePEM string
 	stats             *StepStatsAgg // In-memory step/workflow stats aggregator
 	activeJobs        sync.Map      // jobID -> context.CancelFunc
+	rcloneRemotes     *pb.RcloneRemotes
 }
 
 type TaskUpdateBroadcast struct {
@@ -114,6 +114,13 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 	if err != nil {
 		log.Fatalf("⚠️ Failed to initialize step stats aggregator: %v", err)
 	}
+
+	// Build rcloneRemotes proto struct once here
+	remotes := make(map[string]*pb.RcloneRemote)
+	for name, opts := range cfg.Rclone.Remotes {
+		remotes[name] = &pb.RcloneRemote{Options: opts}
+	}
+	s.rcloneRemotes = &pb.RcloneRemotes{Remotes: remotes}
 
 	//go s.assignTasksLoop()
 	go s.waitForAssignEvents(s.ctx)
@@ -317,12 +324,8 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	return &pb.TaskResponse{TaskId: taskID}, nil
 }
 
-func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empty) (*pb.RcloneConfig, error) {
-	data, err := os.ReadFile(DefaultRcloneConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read rclone config: %w", err)
-	}
-	return &pb.RcloneConfig{Config: string(data)}, nil
+func (s *taskQueueServer) GetRcloneConfig(ctx context.Context, req *emptypb.Empty) (*pb.RcloneRemotes, error) {
+	return s.rcloneRemotes, nil
 }
 
 func (s *taskQueueServer) GetDockerCredentials(ctx context.Context, _ *emptypb.Empty) (*pb.DockerCredentials, error) {
@@ -3498,7 +3501,7 @@ func (s *taskQueueServer) GetWorkerStats(ctx context.Context, req *pb.GetWorkerS
 }
 
 func (s *taskQueueServer) FetchList(ctx context.Context, req *pb.FetchListRequest) (*pb.FetchListResponse, error) {
-	files, err := fetch.List(DefaultRcloneConfig, req.Uri)
+	files, err := fetch.List(s.rcloneRemotes, req.Uri)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "fetch list for %s failed: %v", req.Uri, err)
 	}
@@ -3507,7 +3510,7 @@ func (s *taskQueueServer) FetchList(ctx context.Context, req *pb.FetchListReques
 }
 
 func (s *taskQueueServer) FetchInfo(ctx context.Context, req *pb.FetchListRequest) (*pb.FetchInfoResponse, error) {
-	cloudObject, err := fetch.Info(DefaultRcloneConfig, req.Uri)
+	cloudObject, err := fetch.Info(s.rcloneRemotes, req.Uri)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "fetch info for %s failed: %v", req.Uri, err)
 	}

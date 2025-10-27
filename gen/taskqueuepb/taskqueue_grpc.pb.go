@@ -109,7 +109,7 @@ type TaskQueueClient interface {
 	ListProviders(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ProviderList, error)
 	ListRegions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RegionList, error)
 	CreateFlavor(ctx context.Context, in *FlavorCreateRequest, opts ...grpc.CallOption) (*FlavorId, error)
-	GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneConfig, error)
+	GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneRemotes, error)
 	GetDockerCredentials(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*DockerCredentials, error)
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 	Logout(ctx context.Context, in *Token, opts ...grpc.CallOption) (*Ack, error)
@@ -417,9 +417,9 @@ func (c *taskQueueClient) CreateFlavor(ctx context.Context, in *FlavorCreateRequ
 	return out, nil
 }
 
-func (c *taskQueueClient) GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneConfig, error) {
+func (c *taskQueueClient) GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneRemotes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RcloneConfig)
+	out := new(RcloneRemotes)
 	err := c.cc.Invoke(ctx, TaskQueue_GetRcloneConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -795,7 +795,7 @@ type TaskQueueServer interface {
 	ListProviders(context.Context, *emptypb.Empty) (*ProviderList, error)
 	ListRegions(context.Context, *emptypb.Empty) (*RegionList, error)
 	CreateFlavor(context.Context, *FlavorCreateRequest) (*FlavorId, error)
-	GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error)
+	GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneRemotes, error)
 	GetDockerCredentials(context.Context, *emptypb.Empty) (*DockerCredentials, error)
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	Logout(context.Context, *Token) (*Ack, error)
@@ -914,7 +914,7 @@ func (UnimplementedTaskQueueServer) ListRegions(context.Context, *emptypb.Empty)
 func (UnimplementedTaskQueueServer) CreateFlavor(context.Context, *FlavorCreateRequest) (*FlavorId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateFlavor not implemented")
 }
-func (UnimplementedTaskQueueServer) GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneConfig, error) {
+func (UnimplementedTaskQueueServer) GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneRemotes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRcloneConfig not implemented")
 }
 func (UnimplementedTaskQueueServer) GetDockerCredentials(context.Context, *emptypb.Empty) (*DockerCredentials, error) {

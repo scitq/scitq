@@ -12,16 +12,26 @@ import (
 	"time"
 
 	"github.com/alexflint/go-arg"
+	"github.com/scitq/scitq/fetch"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/internal/version"
 	"github.com/scitq/scitq/lib"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"gopkg.in/ini.v1"
+	"gopkg.in/yaml.v3"
 )
 
 // CLI struct encapsulates task & worker commands
 type Attr struct {
+	// Config commands
+	Config *struct {
+		ImportRclone *struct {
+			Path string `arg:"positional" default:"~/.config/rclone/rclone.conf" help:"Path to existing rclone.conf to import"`
+		} `arg:"subcommand:import-rclone" help:"Import an existing rclone.conf and print YAML fragment"`
+	} `arg:"subcommand:config" help:"Configuration tools"`
+
 	Server  string `arg:"-s,--server,env:SCITQ_SERVER" default:"localhost:50051" help:"gRPC server address"`
 	TimeOut int    `arg:"-t,--timeout" default:"300" help:"Timeout for server interaction (in seconds)"`
 	Token   string `arg:"-T,--token" default:"" help:"authentication token (used for tests)"`
@@ -177,11 +187,19 @@ type Attr struct {
 
 	// File commands
 	File *struct {
-		List *struct {
+		RemoteList *struct {
 			URI     string `arg:"positional,required" help:"URI to list files from (supports glob patterns)"`
 			Timeout int    `arg:"--timeout" default:"30" help:"Timeout for listing files (in seconds)"`
+		} `arg:"subcommand:remote-list" help:"List remote files"`
+		Copy *struct {
+			Src string `arg:"positional,required" help:"Source URI"`
+			Dst string `arg:"positional,required" help:"Destination URI"`
+		} `arg:"subcommand:copy" help:"Copy remote files"`
+
+		List *struct {
+			Src string `arg:"positional,required" help:"Source URI"`
 		} `arg:"subcommand:list" help:"List remote files"`
-	} `arg:"subcommand:file" help:"Remote file listing"`
+	} `arg:"subcommand:file" help:"Remote file operations"`
 
 	// (Workflow) Template commands
 	Template *struct {
@@ -874,11 +892,11 @@ func (c *CLI) StepDelete() error {
 }
 
 func (c *CLI) FileList() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.Attr.File.List.Timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.Attr.File.RemoteList.Timeout)*time.Second)
 	defer cancel()
 
 	req := &pb.FetchListRequest{
-		Uri: c.Attr.File.List.URI,
+		Uri: c.Attr.File.RemoteList.URI,
 	}
 
 	resp, err := c.QC.Client.FetchList(ctx, req)
@@ -1621,6 +1639,97 @@ func formatAccum(a *pb.Accum) string {
 	)
 }
 
+// ConfigImportRclone loads an rclone.conf and prints it as YAML fragment.
+func (c *CLI) ConfigImportRclone() error {
+	path := c.Attr.Config.ImportRclone.Path
+	// Expand ~ if present
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			path = home + path[1:]
+		}
+	}
+	cfg, err := ini.Load(path)
+	if err != nil {
+		return fmt.Errorf("failed to load rclone.conf: %w", err)
+	}
+	remotes := make(map[string]map[string]string)
+	for _, section := range cfg.Sections() {
+		name := section.Name()
+		if name == ini.DefaultSection {
+			continue
+		}
+		keys := section.KeysHash()
+		remotes[name] = keys
+	}
+	yamlObj := map[string]interface{}{
+		"rclone": remotes,
+	}
+	out, err := yaml.Marshal(yamlObj)
+	if err != nil {
+		return fmt.Errorf("failed to marshal YAML: %w", err)
+	}
+	fmt.Println("# Paste the following under the 'rclone:' section in /etc/scitq.yaml")
+	fmt.Print(string(out))
+	return nil
+}
+
+func (c *CLI) Copy() error {
+	// 1. Get rclone config from server via gRPC
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	remotes, err := c.QC.Client.GetRcloneConfig(ctx, &emptypb.Empty{})
+	if err != nil {
+		return fmt.Errorf("failed to fetch rclone config: %w", err)
+	}
+
+	// 3. Use fetch.NewOperation for copy
+	op, err := fetch.NewOperation(remotes, c.Attr.File.Copy.Src, c.Attr.File.Copy.Dst)
+	if err != nil {
+		return fmt.Errorf("failed to create fetch operation: %w", err)
+	}
+	defer fetch.CleanOperation(op)
+
+	err = op.Copy()
+	if err != nil {
+		return fmt.Errorf("copy failed: %w", err)
+	}
+	fmt.Printf("Copy successful: %s → %s\n", c.Attr.File.Copy.Src, c.Attr.File.Copy.Dst)
+	return nil
+}
+
+func (c *CLI) List() error {
+	// 1. Get rclone config from server via gRPC
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	remotes, err := c.QC.Client.GetRcloneConfig(ctx, &emptypb.Empty{})
+	if err != nil {
+		return fmt.Errorf("failed to fetch rclone config: %w", err)
+	}
+
+	// 3. Use fetch.NewOperation for copy
+	op, err := fetch.NewOperation(remotes, c.Attr.File.List.Src, "")
+	if err != nil {
+		return fmt.Errorf("failed to create fetch operation: %w", err)
+	}
+	defer fetch.CleanOperation(op)
+
+	files, err := op.List()
+	if err != nil {
+		return fmt.Errorf("list failed: %w", err)
+	}
+	for _, file := range files {
+		fileName := op.SrcBase() + file.String()
+		if fetch.IsDir(file) {
+			fileName += "/"
+		}
+		fmt.Println(fileName)
+	}
+	return nil
+}
+
 func Run(c CLI) error {
 	arg.MustParse(&c.Attr)
 
@@ -1635,6 +1744,8 @@ func Run(c CLI) error {
 		}
 		fmt.Printf("Hashed password: %s\n", string(hashedPassword))
 		return nil
+	case c.Attr.Config != nil && c.Attr.Config.ImportRclone != nil:
+		return c.ConfigImportRclone()
 	}
 	// Establish gRPC connection
 	// Ensure token exists (interactive if needed)
@@ -1756,8 +1867,12 @@ func Run(c CLI) error {
 		}
 	case c.Attr.File != nil:
 		switch {
-		case c.Attr.File.List != nil:
+		case c.Attr.File.RemoteList != nil:
 			err = c.FileList()
+		case c.Attr.File.Copy != nil:
+			err = c.Copy()
+		case c.Attr.File.List != nil:
+			err = c.List()
 		}
 	case c.Attr.Template != nil:
 		switch {

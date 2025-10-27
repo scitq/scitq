@@ -31,7 +31,7 @@ service TaskQueue {
     rpc ListProviders(google.protobuf.Empty) returns (ProviderList);
     rpc ListRegions(google.protobuf.Empty) returns (RegionList);
     rpc CreateFlavor(FlavorCreateRequest) returns (FlavorId);
-    rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
+    rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneRemotes);
     rpc GetDockerCredentials(google.protobuf.Empty) returns (DockerCredentials);
     rpc Login(LoginRequest) returns (LoginResponse);
     rpc Logout(Token) returns (Ack);
@@ -366,8 +366,12 @@ message JobUpdate {
   optional int32 progression = 4;        // 0..100 (server clamps)
 }
 
-message RcloneConfig {
-    string config = 1;
+message RcloneRemotes {
+    map<string, RcloneRemote> remotes = 1;
+}
+
+message RcloneRemote {
+    map<string, string> options = 1;
 }
 
 message DockerCredential {
