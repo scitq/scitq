@@ -258,7 +258,6 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 		cfg.Scitq.WorkerToken = workerToken
 		cfg.Scitq.JwtSecret = jwtSecret
 		cfg.Scitq.ScriptRoot = tempScriptRoot
-		cfg.Scitq.ScriptInterpreter = "/usr/bin/python3"
 		cfg.Scitq.RecruitmentInterval = 2
 		cfg.Scitq.AdminUser = adminUser
 		cfg.Scitq.AdminHashedPassword = string(adminHashedPassword)

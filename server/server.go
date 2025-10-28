@@ -43,6 +43,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/scitq/scitq/gen/taskqueuepb"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/python"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -3908,10 +3909,12 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		return fmt.Errorf("migration error: %v", err)
 	}
 
-	// Check workflow template directory
-	if err := validateScriptConfig(cfg.Scitq.ScriptRoot, cfg.Scitq.ScriptInterpreter); err != nil {
-		return fmt.Errorf("invalid script config: %w", err)
+	// Deploy Python DSL into the configured venv
+	log.Printf("🔧 Bootstrapping Python DSL environment at %s...", cfg.Scitq.ScriptVenv)
+	if err := python.Bootstrap(cfg.Scitq.ScriptVenv); err != nil {
+		log.Fatalf("❌ Python bootstrap failed: %v", err)
 	}
+	log.Printf("✅ Python DSL environment ready")
 
 	// Create the main server instance
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot, ctx, cancel)

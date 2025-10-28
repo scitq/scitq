@@ -1,0 +1,790 @@
+syntax = "proto3";
+
+package taskqueue;
+
+option go_package = "gen/taskqueuepb";
+
+import "google/protobuf/empty.proto";
+
+service TaskQueue {
+    rpc SubmitTask(TaskRequest) returns (TaskResponse);
+    rpc RegisterWorker(WorkerInfo) returns (WorkerId);
+    rpc PingAndTakeNewTasks(PingAndGetNewTasksRequest) returns (TaskListAndOther);
+    rpc UpdateTaskStatus(TaskStatusUpdate) returns (Ack);
+    rpc SendTaskLogs(stream TaskLog) returns (Ack);
+    rpc StreamTaskLogsOutput(TaskId) returns (stream TaskLog);
+    rpc StreamTaskLogsErr(TaskId) returns (stream TaskLog);
+    rpc GetLogsChunk(GetLogsRequest) returns (LogChunkList);
+    rpc ListTasks (ListTasksRequest) returns (TaskList);
+    rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
+    rpc CreateWorker(WorkerRequest) returns (WorkerIds);
+    rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
+    rpc DeleteWorker(WorkerDeletion) returns (JobId);
+    rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
+    rpc GetWorkerStatuses (WorkerStatusRequest) returns (WorkerStatusResponse);
+    rpc ListJobs (ListJobsRequest) returns (JobsList);
+    rpc GetJobStatuses (JobStatusRequest) returns (JobStatusResponse);
+    rpc DeleteJob (JobId) returns (Ack);
+    rpc UpdateJob(JobUpdate) returns (Ack);
+    rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
+    rpc ListProviders(google.protobuf.Empty) returns (ProviderList);
+    rpc ListRegions(google.protobuf.Empty) returns (RegionList);
+    rpc CreateFlavor(FlavorCreateRequest) returns (FlavorId);
+    rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneConfig);
+    rpc GetDockerCredentials(google.protobuf.Empty) returns (DockerCredentials);
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc Logout(Token) returns (Ack);
+    rpc CreateUser(CreateUserRequest) returns (UserId);
+    rpc ListUsers(google.protobuf.Empty) returns (UsersList);
+    rpc DeleteUser(UserId) returns (Ack);
+    rpc UpdateUser(User) returns (Ack);
+    rpc ChangePassword(ChangePasswordRequest) returns (Ack);
+    rpc ListRecruiters(RecruiterFilter) returns (RecruiterList);
+    rpc CreateRecruiter(Recruiter) returns (Ack);
+    rpc UpdateRecruiter(RecruiterUpdate) returns (Ack);
+    rpc DeleteRecruiter(RecruiterId) returns (Ack);
+    rpc ListWorkflows(WorkflowFilter) returns (WorkflowList);
+    rpc CreateWorkflow(WorkflowRequest) returns (WorkflowId);
+    rpc DeleteWorkflow(WorkflowId) returns (Ack);
+    rpc ListSteps(StepFilter) returns (StepList);
+    rpc CreateStep(StepRequest) returns (StepId);
+    rpc DeleteStep(StepId) returns (Ack);
+    rpc GetStepStats(StepStatsRequest) returns (StepStatsResponse);
+    rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
+    rpc FetchList (FetchListRequest) returns (FetchListResponse);
+    rpc FetchInfo (FetchListRequest) returns (FetchInfoResponse);
+    // Template system
+    rpc UploadTemplate(UploadTemplateRequest) returns (UploadTemplateResponse);
+    rpc RunTemplate(RunTemplateRequest) returns (TemplateRun);
+    rpc ListTemplates(TemplateFilter) returns (TemplateList);
+    rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
+    rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
+    rpc DeleteTemplateRun(DeleteTemplateRunRequest) returns (Ack);
+    rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
+    rpc RegisterSpecifications(ResourceSpec) returns (Ack);
+    // Worker events
+    rpc ReportWorkerEvent(WorkerEvent) returns (Ack);
+    rpc ListWorkerEvents(WorkerEventFilter) returns (WorkerEventList);
+    rpc DeleteWorkerEvent(WorkerEventId) returns (Ack);
+    rpc PruneWorkerEvents(WorkerEventPruneFilter) returns (WorkerEventPruneResult);
+}   
+
+message TaskResponse {
+    int32 task_id = 1;
+}
+
+message WorkerInfo {
+    string name = 1;
+    optional int32 concurrency = 2;
+    optional bool is_permanent = 3;
+    optional string provider = 4;
+    optional string region = 5;
+}
+
+message TaskRequest {
+    string command = 1;
+    optional string shell = 2;
+    string container = 3;
+    optional string container_options = 4;
+    optional int32 step_id = 5;
+    repeated string input = 6;
+    repeated string resource = 7;
+    optional string output = 8;
+    optional int32 retry = 9;
+    optional bool is_final  = 10;
+    optional bool uses_cache  = 11;
+    optional float download_timeout  = 12;
+    optional float running_timeout  = 13;
+    optional float upload_timeout  = 14;
+    string status = 15;
+    repeated int32 dependency = 16; // IDs of tasks that this task depends on
+    optional string task_name = 17;
+}
+
+message Task {
+    int32 task_id = 1;
+    string command = 2;
+    optional string shell = 3;
+    string container = 4;
+    optional string container_options = 5;
+    optional int32 step_id = 6;
+    repeated string input = 7;
+    repeated string resource = 8;
+    optional string output = 9;
+    optional int32 retry = 10;
+    optional bool is_final  = 11;
+    optional bool uses_cache  = 12;
+    optional float download_timeout  = 13;
+    optional float running_timeout  = 14;
+    optional float upload_timeout  = 15;
+    string status = 16;
+    optional int32 worker_id = 17;
+    optional int32 workflow_id = 18;
+    optional string task_name = 19;
+    int32 retry_count = 20;
+    bool hidden = 21;
+    optional int32 previous_task_id = 22;
+    optional double weight = 23; // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
+    optional int64 run_start_time = 24; // epoch timestamp of the first task start time
+}
+
+message TaskList {
+    repeated Task tasks = 1;
+}
+
+message Worker {
+    int32 worker_id = 1;
+    string name = 2;
+    int32 concurrency = 3;
+    int32 prefetch = 4;
+    string status = 5;
+    string ipv4 = 6;
+    string ipv6 = 7;
+    string flavor = 8;
+    string provider = 9;
+    string region = 10;
+    optional int32 step_id = 11;
+    optional string step_name = 12;
+}
+
+
+message WorkersList {
+    repeated Worker workers = 1;
+}
+
+message ListWorkersRequest {
+  optional int32 workflow_id = 1;
+}
+
+message TaskUpdate {
+    double weight = 1; 
+}
+
+message TaskUpdateList {
+    map<int32, TaskUpdate> updates = 1; // optional — can be empty
+}
+
+message TaskListAndOther {
+    repeated Task tasks = 1;
+    int32 concurrency = 2;
+    TaskUpdateList updates = 3;
+    repeated int32 active_tasks = 4;
+}
+
+message TaskStatusUpdate {
+    int32 task_id = 1;
+    string new_status = 2;
+    optional int32 duration = 3; // in seconds
+    optional bool free_retry = 4; // if new_status is F and this is true, then retry is increased by 1 before setting status to F
+}
+
+message TaskLog {
+    int32 task_id = 1;
+    string log_type = 2; // 'O' for stdout, 'E' for stderr
+    string log_text = 3;
+}
+
+message GetLogsRequest {
+  repeated int32 taskIds = 1;
+    int32 chunkSize = 2;
+  optional int32 skipFromEnd = 3;
+  optional string log_type = 4;
+}
+
+message LogChunk {
+  int32 taskId = 1;
+  repeated string stdout = 2;
+  repeated string stderr = 3;
+}
+
+message LogChunkList {
+  repeated LogChunk logs = 1;
+}
+
+message TaskIds {
+    repeated int32 task_ids = 1;
+}
+
+message TaskId {
+    int32 task_id = 1;
+}
+
+message WorkerId {
+    int32 worker_id = 1;
+}
+
+message WorkerDeletion {
+    int32 worker_id = 1;
+    optional bool undeployed = 2; // if true, the worker is already undeployed so deletion can proceed
+}
+
+message WorkerStatusRequest {
+  repeated int32 worker_ids = 1;
+}
+
+message WorkerStatus {
+  int32 worker_id = 1;
+  string status = 2;
+}
+
+message WorkerStatusResponse {
+  repeated WorkerStatus statuses = 1;
+}
+
+message WorkerDetails {
+  int32 worker_id = 1;
+  string worker_name = 2;
+  int32 job_id = 3;
+}
+
+message WorkerIds {
+  repeated WorkerDetails workers_details = 1;
+}
+
+message PingAndGetNewTasksRequest {
+    int32 worker_id = 1;
+    WorkerStats stats = 2; // Optional
+}
+
+message Ack {
+    bool success = 1;
+}
+
+message ListTasksRequest {
+    optional string status_filter = 1;      
+    optional int32 worker_id_filter = 2;   
+    optional int32 workflow_id_filter = 3;  
+    optional int32 step_id_filter = 4;   
+    optional string command_filter = 5;    
+    optional int32 limit = 6;            
+    optional int32 offset = 7;                
+    optional bool show_hidden = 8;
+}
+
+message WorkerRequest {
+    int32 provider_id = 1;
+    int32 flavor_id = 2;
+    int32 region_id = 3;
+    int32 number = 4;
+    int32 concurrency = 5;
+    int32 prefetch = 6;
+    optional int32 step_id = 7;
+}
+
+message WorkerUpdateRequest {
+    int32 worker_id = 1;
+    optional int32 provider_id = 2;
+    optional int32 flavor_id = 3;
+    optional int32 region_id = 4;
+    optional int32 concurrency = 5;
+    optional int32 prefetch = 6;
+    optional int32 step_id = 7;
+}
+
+message ListFlavorsRequest {
+    int32 limit = 1 ;
+    string filter = 2 ; 
+}
+
+message Flavor {
+  // Fields from the "flavor" table
+  int32 flavor_id      = 1;  // PRIMARY KEY
+  string flavor_name    = 2;  // Name of the flavor
+  int32 provider_id    = 3;  // Foreign key to provider table
+  string provider = 4; // Name of the provider (provider_name.config_name)
+  int32  cpu            = 5;  // Number of CPU cores
+  float mem             = 6;  // Memory in GB (or as needed)
+  float disk            = 7;  // Disk size in GB (or as needed)
+  int32  bandwidth      = 8;  // Bandwidth (if applicable)
+  string gpu            = 9;  // GPU description
+  int32  gpumem         = 10;  // GPU memory (in GB, for example)
+  bool   has_gpu        = 11; // Whether a GPU is present
+  bool   has_quick_disks = 12; // Whether quick disks are supported
+
+  // Fields from the "flavor_region" table
+  int32 region_id      = 13; // Foreign key to region table
+  string region         = 14; // (Optional) Region name
+  float  eviction       = 15; // Eviction rate value
+  float  cost           = 16; // Cost value
+}
+
+message FlavorsList {
+    repeated Flavor flavors = 1;
+}
+
+message ListJobsRequest {
+  optional int32 limit = 1;
+  optional int32 offset = 2; 
+}
+
+message Job {
+  int32 job_id = 1;
+  string status = 2;         
+  int32 flavor_id = 3;      
+  int32 retry = 4;          
+  int32 worker_id = 5;      
+  string action = 6;         
+  string created_at = 7;     
+  string modified_at = 8;    
+  int32 progression = 9;    
+  string log = 10;
+}
+
+message JobId {
+    int32 job_id = 1;
+}
+
+
+message JobsList {
+    repeated Job jobs = 1;
+}
+
+message JobStatusRequest {
+  repeated int32 job_ids = 1;
+}
+
+message JobStatus {
+  int32 job_id = 1;
+  string status = 2;
+  int32 progression = 3;
+}
+
+message JobStatusResponse {
+  repeated JobStatus statuses = 1;
+}
+
+message JobUpdate {
+  int32 job_id          = 1;             // which job to update
+  optional string status = 2;             // 'P'|'R'|'S'|'F'|'X' (only if you want to set it)
+  optional string append_log = 3;         // text appended to job.log (server prepends timestamp)
+  optional int32 progression = 4;        // 0..100 (server clamps)
+}
+
+message RcloneConfig {
+    string config = 1;
+}
+
+message DockerCredential {
+  string registry = 1;   // e.g., "3jfz1gy8.gra7.container-registry.ovh.net"
+  string auth = 2;   // auth string as found in .docker/config.json
+}
+
+message DockerCredentials {
+  repeated DockerCredential credentials = 1;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+}
+
+message Token {
+  string token = 1;
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string password = 2;
+  string email = 3;
+  bool is_admin = 4;
+}
+
+message UserId {
+  int32 user_id = 1;
+}
+
+message User {
+  int32 user_id = 1;
+  optional string username = 2;
+  optional string email = 3;
+  optional bool is_admin = 4;
+}
+
+message UsersList {
+  repeated User users = 1;
+}
+
+message ChangePasswordRequest {
+    string username = 1;
+  string old_password = 2;
+  string new_password = 3;
+}
+
+message RecruiterFilter {
+    optional int32 step_id = 1;
+}
+
+message RecruiterId {
+    int32 step_id = 1;
+    int32 rank = 2;
+}
+
+message Recruiter {
+    int32 step_id = 1;
+    int32 rank = 2;
+    string protofilter = 3;
+    optional int32 concurrency = 4;
+    optional int32 prefetch = 5;
+    optional int32 max_workers = 6;
+    int32 rounds = 7;
+    int32 timeout = 8;
+    optional int32 cpu_per_task = 9;
+    optional float memory_per_task = 10;
+    optional float disk_per_task = 11;
+    optional int32 prefetch_percent = 12;
+    optional int32 concurrency_min = 13;
+    optional int32 concurrency_max = 14;
+}
+
+message RecruiterUpdate {
+  int32 step_id = 1;
+  int32 rank = 2;
+  optional string protofilter = 3;
+  optional int32 concurrency = 4;
+  optional int32 prefetch = 5;
+  optional int32 max_workers = 6;
+  optional int32 rounds = 7;
+  optional int32 timeout = 8;
+  optional int32 cpu_per_task = 9;
+  optional float memory_per_task = 10;
+  optional float disk_per_task = 11;
+  optional int32 prefetch_percent = 12;
+  optional int32 concurrency_min = 13;
+  optional int32 concurrency_max = 14;
+}
+
+message RecruiterList {
+    repeated Recruiter recruiters = 1;
+}
+
+message WorkflowFilter {
+    optional string name_like = 1;
+    optional int32 limit = 2;
+    optional int32 offset = 3;
+}
+
+message WorkflowId {
+    int32 workflow_id = 1;
+}
+
+message Workflow {
+    int32 workflow_id = 1;
+    string name = 2;
+    string run_strategy = 4;
+    optional int32 maximum_workers = 5;
+}
+message WorkflowRequest {
+    string name = 1;
+    optional string run_strategy = 2;
+    optional int32 maximum_workers = 3;
+}
+
+message WorkflowList {
+    repeated Workflow workflows = 1;
+}
+
+message StepFilter {
+    int32 WorkflowId = 1;
+    optional int32 limit = 2;
+    optional int32 offset = 3;
+}
+
+message StepId {
+    int32 step_id = 1;
+}
+message Step {
+    int32 step_id = 1;
+    string workflow_name = 2;
+    int32 workflow_id = 3;
+    string name = 4;
+}
+message StepRequest {
+    optional string workflow_name = 1;
+    optional int32 workflow_id = 2;
+    string name = 3;
+}
+message StepList {
+    repeated Step steps = 1;
+}
+
+message StepStatsRequest {
+    optional int32 workflow_id = 1;
+    repeated int32 step_ids = 2;
+}
+
+
+message Accum {
+    int32 count = 1;  // number of observations
+    float sum = 2;    // total seconds
+    float min = 3;    // minimum seconds
+    float max = 4;    // maximum seconds
+}
+
+message StepStats {
+    int32 step_id = 1;
+    string step_name = 2;
+    int32 total_tasks = 3;
+    int32 waiting_tasks = 4;
+    int32 pending_tasks = 5;
+    int32 accepted_tasks = 6;
+    int32 running_tasks = 7;
+    int32 uploading_tasks = 8;
+    int32 successful_tasks = 9;
+    int32 failed_tasks = 10;
+    int32 really_failed_tasks = 11; // tasks that have exhausted all retries and are failed
+    Accum success_run = 12;     // succeeded tasks' run durations
+    Accum failed_run = 13;      // failed tasks' run durations
+    Accum running_run = 14;  // running tasks' elapsed durations (at eval time)
+    Accum download = 15;        // download durations
+    Accum upload = 16;          // upload durations
+    optional int64 start_time = 17; // epoch timestamp of the first task start time
+    optional int64 end_time = 18;   // epoch timestamp of the last task end time
+    int32 stats_eval_time = 19; // epoch seconds when these stats were computed
+}
+
+message StepStatsResponse {
+    repeated StepStats stats = 1;
+}
+
+
+message WorkerStats {
+    float cpu_usage_percent = 1;      // 0-100, float
+    float mem_usage_percent = 2;      // 0-100, float
+    float load_1min = 3;               // e.g., 0.58, float
+    float iowait_percent = 4;       // 0-100 float 
+
+    repeated DiskUsage disks = 5;      // Per-disk usage
+
+    DiskIOStats disk_io = 6;            // Global disk IO (aggregated)
+    NetIOStats net_io = 7;              // Global network IO (aggregated)
+}
+
+message DiskUsage {
+    string device_name = 1;            // E.g., "/dev/sda1"
+    float usage_percent = 2;            // 0-100, float
+}
+
+message DiskIOStats {
+    int64 read_bytes_total = 1;        // Total bytes read
+    int64 write_bytes_total = 2;       // Total bytes written
+    float read_bytes_rate = 3;          // Bytes per second
+    float write_bytes_rate = 4;         // Bytes per second
+}
+
+message NetIOStats {
+    int64 recv_bytes_total = 1;        // Total bytes received
+    int64 sent_bytes_total = 2;         // Total bytes sent
+    float recv_bytes_rate = 3;          // Bytes per second
+    float sent_bytes_rate = 4;          // Bytes per second
+}
+
+message GetWorkerStatsRequest {
+    repeated int32 worker_ids = 1;
+}
+
+message GetWorkerStatsResponse {
+    map<int32, WorkerStats> worker_stats = 1;
+}
+
+message FetchListRequest {
+  string uri = 1; // URI to fetch the list from (can include glob patterns)
+}
+
+message FetchListResponse {
+  repeated string files = 1; // Absolute paths from the given URI
+}
+
+message FetchInfoResponse {
+  string uri = 1;
+  string filename = 2;
+  string description = 3;
+  int64 size = 4;
+  bool is_file = 5;
+  bool is_dir = 6;
+}
+
+
+message UploadTemplateRequest {
+  bytes script = 1;
+  bool force = 2;
+}
+
+message UploadTemplateResponse {
+  bool success = 1;
+  string message = 2;
+  optional int32 workflow_template_id = 3;
+  optional string name = 4;
+  optional string version = 5;
+  optional string description = 6;
+  optional string param_json = 7;
+}
+
+
+message RunTemplateRequest {
+  int32 workflow_template_id = 1;
+  string param_values_json = 2;
+}
+
+message TemplateFilter {
+  optional int32 workflow_template_id = 1;
+  optional string name = 2;
+  optional string version = 3;
+}
+
+message Template {
+  int32 workflow_template_id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+  string param_json = 5;
+  string uploaded_at = 6;
+  optional int32 uploaded_by = 7;
+}
+
+message TemplateList {
+  repeated Template templates = 1;
+}
+
+message TemplateRun {
+  int32 template_run_id = 1;
+  int32 workflow_template_id = 2;
+  optional string template_name = 3;
+  optional string template_version = 4;
+  optional string workflow_name = 5;
+  optional int32 run_by = 6;
+  string status = 7;
+  optional int32 workflow_id = 8;
+  string created_at = 9;
+  string param_values_json = 10;
+  optional string error_message = 11;
+  optional string run_by_username = 12;
+}
+
+message TemplateRunList {
+  repeated TemplateRun runs = 1;
+}
+
+message TemplateRunFilter {
+  optional int32 workflow_template_id = 1;
+}
+
+message UpdateTemplateRunRequest {
+  int32 template_run_id = 1;
+  optional int32 workflow_id = 2;
+  optional string error_message = 3;
+}
+
+message WorkspaceRootRequest {
+  string provider = 1; // e.g., "azure.default" or "openstack.ovh"
+  string region   = 2; // e.g., "northeurope"
+}
+
+message WorkspaceRootResponse {
+  string root_uri = 1; // e.g., "aznorth://workspace"
+}
+
+message DeleteTemplateRunRequest {
+  int32 template_run_id = 1;
+}
+
+message ResourceSpec {
+  string worker_id = 1;
+  int32 cpu = 2;
+  float mem = 3;
+  float disk = 4;
+}
+
+message WorkerEvent {
+  // optional because a worker may fail before registration
+  optional int32 worker_id   = 1;
+  string  worker_name         = 2;  // free text (hostname or generated name)
+  string  level               = 3;  // single letter: D/I/W/E
+  string  event_class         = 4;  // e.g. "install", "bootstrap", "runtime", "network"
+  string  message             = 5;  // short human description
+  string  details_json        = 6;  // raw JSON string (optional)
+}
+
+message WorkerEventFilter {
+  optional int32 worker_id = 1;
+  optional string level     = 2; // 'D','I','W','E'
+  optional string class     = 3; // event_class filter
+  optional int32 limit     = 4; // max number of events (default 50)
+}
+
+message WorkerEventRecord {
+  int32 event_id   = 1;
+  string created_at = 2;
+  optional int32 worker_id = 3;
+  string  worker_name = 4;
+  string  level       = 5;
+  string  event_class = 6;
+  string  message     = 7;
+  string  details_json= 8;
+}
+
+message WorkerEventList {
+  repeated WorkerEventRecord events = 1;
+}
+
+message WorkerEventId {
+  int32 event_id = 1;
+}
+
+message WorkerEventPruneFilter {
+  optional string before   = 1; // RFC3339 UTC, e.g. "2025-08-19T00:00:00Z"
+  optional string level    = 2; // 'D'|'I'|'W'|'E'
+  optional string class    = 3; // event_class exact match
+  optional int32 worker_id = 4;
+  bool dry_run             = 5; // if true, count only; no deletion
+}
+
+message WorkerEventPruneResult {
+  int32 matched = 1;
+  int32 deleted = 2;
+}
+
+message Provider {
+  int32 provider_id = 1;
+  string provider_name = 2;
+  string config_name = 3;
+}
+
+message ProviderList {
+  repeated Provider providers = 1;
+}
+
+message Region {
+  int32 region_id = 1;
+  int32 provider_id = 2;
+  string region_name = 3;
+  bool is_default = 4;
+}
+
+message RegionList {
+  repeated Region regions = 1;
+}
+
+message FlavorCreateRequest {
+  string provider_name = 1;
+  string config_name = 2;
+  string flavor_name = 3;
+  int32 cpu = 4;
+  float memory = 5;
+  float disk = 6;
+  optional int32 bandwidth = 7;
+  optional string gpu = 8;
+  optional int32 gpumem = 9;
+  optional bool has_gpu = 10;
+  optional bool has_quick_disks = 11; 
+  repeated string region_names = 12;
+  repeated float costs = 13;
+  repeated float evictions = 14;
+}
+
+message FlavorId {
+ int32 flavor_id = 1;
+}

@@ -15,13 +15,27 @@ BINARY_CLI=$(BINARY_DIR)/scitq$(EXE)
 PLATFORMS=linux/amd64 darwin/amd64 windows/amd64
 OUTDIR=bin
 
-.PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install
+.PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install add-py-version tgz-python-src
 
-all: build-server build-client build-cli
+all: tgz-python-src build-server build-client build-cli
 
 GIT_TAG    := $(shell git describe --tags --always --dirty)
 GIT_SHA    := $(shell git rev-parse --short HEAD)
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+
+# Normalize version for Python (PEP 440 compliant)
+define normalize_pep440
+tag=$$(git describe --tags --always --dirty); \
+norm=$$(echo $$tag | sed 's/-dirty/.dev0/; s/-/./g'); \
+case $$norm in \
+  [0-9]*) echo $$norm ;; \
+  *) echo 0.0.0+$$norm ;; \
+esac
+endef
+
+PY_PEP440_TAG := $(shell $(normalize_pep440))
+
 LDFLAGS    := -X 'github.com/scitq/scitq/internal/version.Version=$(GIT_TAG)' \
               -X 'github.com/scitq/scitq/internal/version.Commit=$(GIT_SHA)' \
               -X 'github.com/scitq/scitq/internal/version.Date=$(BUILD_DATE)'
@@ -104,6 +118,31 @@ else
 UI_PREREQ := ui-embed
 endif
 
+# --- Python DSL version embedding -------------------------------------------
+PY_DIR := python
+PY_SRC := $(PY_DIR)/src/scitq2
+PY_VERSION_FILE := $(PY_SRC)/__version__.py
+PY_TGZ := $(PY_DIR)/python-src.tgz
+PY_PROTO := $(PY_DIR)/pyproject.proto
+PY_PROJECT := $(PY_DIR)/pyproject.toml
+
+add-py-version:
+	@mkdir -p $(PY_SRC)
+	@{ \
+	  echo "# generated at build time"; \
+	  echo "__version__ = '$(PY_PEP440_TAG)'"; \
+	  echo "__commit__ = '$(GIT_SHA)'"; \
+	  echo "__build_time__ = '$(BUILD_DATE)'"; \
+	} > $(PY_VERSION_FILE)
+	@echo "✓ Updated $(PY_VERSION_FILE)"
+	@printf '/^name =/a\\\nversion = "%s"\n' "$(PY_PEP440_TAG)" | sed -f - $(PY_PROTO) > $(PY_PROJECT)
+	@echo "✓ Generated $(PY_PROJECT) with version $(PY_PEP440_TAG)"
+
+# Package Python source tree into an embedded zip (for Go embedding)
+tgz-python-src: add-py-version
+	@echo "Zipping Python DSL source..."
+	@cd $(PY_DIR) && tar -czf python-src.tgz src pyproject.toml
+	@echo "✓ Created $(PY_TGZ)"
 
 install: $(UI_PREREQ) all
 ifeq ($(OS),Windows_NT)

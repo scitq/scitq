@@ -45,23 +45,6 @@ func versionAtLeast(v string, minMajor, minMinor int) bool {
 	return minor >= minMinor
 }
 
-// detectDSLVersion tries to obtain the installed pyscitq2 version using the configured interpreter.
-// It first tries:  <interpreter> -m pyscitq2 --version
-// If that fails, it falls back to: <interpreter> -c "import pyscitq2, sys; print(getattr(pyscitq2,'__version__','0.0.0'))"
-func (s *taskQueueServer) detectDSLVersion(ctx context.Context) (string, error) {
-	// Try module invocation
-	cmd := exec.CommandContext(ctx, s.cfg.Scitq.ScriptInterpreter, "-m", "scitq2", "--version")
-	out, err := cmd.CombinedOutput()
-	ver := strings.TrimSpace(string(out))
-	if err != nil {
-		return "", fmt.Errorf("failed to detect pyscitq2 version: %v; output: %s", err, ver)
-	}
-	if ver == "" {
-		return "", fmt.Errorf("pyscitq2 version not found (empty output)")
-	}
-	return ver, nil
-}
-
 func validateScriptConfig(root, interpreter string) error {
 	// Ensure script_root exists
 	fi, err := os.Stat(root)
@@ -152,7 +135,8 @@ func (s *taskQueueServer) scriptRunner(
 		return "", "", -1, fmt.Errorf("unknown mode: %q", mode)
 	}
 
-	cmd := exec.CommandContext(ctx, s.cfg.Scitq.ScriptInterpreter, append([]string{scriptPath}, args...)...)
+	venvPython := filepath.Join(s.cfg.Scitq.ScriptVenv, "bin", "python")
+	cmd := exec.CommandContext(ctx, venvPython, append([]string{scriptPath}, args...)...)
 
 	// 🌍 Inject environment variables
 	serverName := s.cfg.Scitq.ServerFQDN
@@ -169,8 +153,6 @@ func (s *taskQueueServer) scriptRunner(
 	if len(s.sslCertificatePEM) > 0 {
 		env = append(env, fmt.Sprintf("SCITQ_SSL_CERTIFICATE=%s", s.sslCertificatePEM))
 	}
-	// Optional hint for Python templates to self-check a minimum DSL version
-	env = append(env, "SCITQ_REQUIRE_DSL_MIN=0.3")
 	cmd.Env = append(os.Environ(), env...)
 
 	// 🔒 Drop privileges if configured
@@ -320,16 +302,6 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 	}
 
 	// 🏃 Actually run the script
-	// 🔎 Enforce minimum DSL version (>= 0.3) at run time as well
-	const minDSLMajor, minDSLMinor = 0, 3
-	dslVer, detErr := s.detectDSLVersion(ctx)
-	if detErr != nil {
-		return nil, fmt.Errorf("cannot detect pyscitq2 version: %v", detErr)
-	}
-	if !versionAtLeast(dslVer, minDSLMajor, minDSLMinor) {
-		return nil, fmt.Errorf("pyscitq2 %s is too old; require >= %d.%d", dslVer, minDSLMajor, minDSLMinor)
-	}
-
 	authToken := extractTokenFromContext(ctx)
 	stdout, stderr, exitCode, runErr := s.scriptRunner(
 		ctx,
@@ -464,16 +436,6 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		return nil, fmt.Errorf("failed to write script content: %w", err)
 	}
 	tempScript.Close()
-
-	// 🔎 Enforce minimum DSL version (>= 0.3) at upload time
-	const minDSLMajor, minDSLMinor = 0, 3
-	dslVer, detErr := s.detectDSLVersion(ctx)
-	if detErr != nil {
-		return &pb.UploadTemplateResponse{Success: false, Message: fmt.Sprintf("cannot detect pyscitq2 version: %v", detErr)}, nil
-	}
-	if !versionAtLeast(dslVer, minDSLMajor, minDSLMinor) {
-		return &pb.UploadTemplateResponse{Success: false, Message: fmt.Sprintf("pyscitq2 %s is too old; require >= %d.%d", dslVer, minDSLMajor, minDSLMinor)}, nil
-	}
 
 	// 2️⃣ Run with --metadata
 	authToken := extractTokenFromContext(ctx)

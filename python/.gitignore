@@ -1,0 +1,10 @@
+.DS_Store
+venv
+__pycache__/
+build
+private/
+# These files are auto-generated at build time
+pyproject.toml
+__version__.py
+# Embedded artifacts for Go build
+python-src.zip

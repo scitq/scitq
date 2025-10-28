@@ -20,7 +20,7 @@ type Config struct {
 		LogLevel             string `yaml:"log_level" default:"info"`
 		LogRoot              string `yaml:"log_root" default:"log"`
 		ScriptRoot           string `yaml:"script_root" default:"scripts"`
-		ScriptInterpreter    string `yaml:"script_interpreter" default:"python3"`
+		ScriptVenv           string `yaml:"script_venv" default:"/var/lib/scitq/python"`
 		ScriptRunnerUser     string `yaml:"script_runner_user" default:"nobody"`
 		ClientBinaryPath     string `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
 		ClientDownloadToken  string `yaml:"client_download_token"`
