@@ -4,7 +4,7 @@ Version: 0.3.2
 Summary: Python DSL for defining scitq2 workflows
 Author: Raynald de Lahondès
 License: MIT
-Project-URL: Homepage, https://github.com/gmtsciencedev/pyscitq2
+Project-URL: Homepage, https://github.com/scitq/scitq
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 License-File: LICENSE
