@@ -78,10 +78,39 @@ docs:
 	mkdir -p docs
 	protoc --doc_out=./docs --doc_opt=markdown,api.md proto/*.proto
 
+
 # Generate Go code from proto definitions
 .PHONY: proto
 proto:
 	protoc --go_out=. --go-grpc_out=. --proto_path=proto proto/taskqueue.proto
+
+# Generate Python gRPC stubs
+.PHONY: proto-python
+proto-python:
+	@echo "Generating Python gRPC stubs..."
+	@cd python && \
+	mkdir -p src/scitq2/pb && \
+	python3 -m grpc_tools.protoc \
+	  -I ../proto \
+	  --python_out=src/scitq2/pb \
+	  --grpc_python_out=src/scitq2/pb \
+	  --proto_path=../proto \
+	  --experimental_allow_proto3_optional \
+	  ../proto/taskqueue.proto && \
+	sed -i '' 's/^import taskqueue_pb2/from . import taskqueue_pb2/' src/scitq2/pb/taskqueue_pb2_grpc.py
+	@echo "✓ Python stubs generated in python/src/scitq2/pb/"
+
+# Generate Svelte (TypeScript) gRPC stubs
+.PHONY: proto-ui
+proto-ui:
+	@echo "Generating Svelte/TypeScript gRPC stubs..."
+	@cd ui && npm run gen-proto
+	@echo "✓ UI TypeScript stubs generated."
+
+# Generate all gRPC stubs (Go, Python, UI)
+.PHONY: proto-all
+proto-all: proto proto-python proto-ui
+	@echo "✓ All language stubs regenerated from proto definitions."
 
 # --- UI build/embed (opt-out with SKIP_UI=1) -------------------------------
 .PHONY: ui-deps ui-build ui-embed

@@ -19,6 +19,6 @@ python -m grpc_tools.protoc \
   --grpc_python_out=src/scitq2/pb \
   --proto_path=proto \
   --experimental_allow_proto3_optional \
-  proto/taskqueue.proto
+  ../proto/taskqueue.proto
 sed -i '' 's/^import taskqueue_pb2/from . import taskqueue_pb2/' src/scitq2/pb/taskqueue_pb2_grpc.py
 ```

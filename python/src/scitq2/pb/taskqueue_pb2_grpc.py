@@ -80,6 +80,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.ListTasksRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.TaskList.FromString,
                 _registered_method=True)
+        self.RetryTask = channel.unary_unary(
+                '/taskqueue.TaskQueue/RetryTask',
+                request_serializer=taskqueue__pb2.RetryTaskRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.TaskResponse.FromString,
+                _registered_method=True)
         self.ListWorkers = channel.unary_unary(
                 '/taskqueue.TaskQueue/ListWorkers',
                 request_serializer=taskqueue__pb2.ListWorkersRequest.SerializeToString,
@@ -153,7 +158,7 @@ class TaskQueueStub(object):
         self.GetRcloneConfig = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetRcloneConfig',
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
-                response_deserializer=taskqueue__pb2.RcloneConfig.FromString,
+                response_deserializer=taskqueue__pb2.RcloneRemotes.FromString,
                 _registered_method=True)
         self.GetDockerCredentials = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetDockerCredentials',
@@ -379,6 +384,12 @@ class TaskQueueServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def ListTasks(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RetryTask(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -728,6 +739,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     request_deserializer=taskqueue__pb2.ListTasksRequest.FromString,
                     response_serializer=taskqueue__pb2.TaskList.SerializeToString,
             ),
+            'RetryTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.RetryTask,
+                    request_deserializer=taskqueue__pb2.RetryTaskRequest.FromString,
+                    response_serializer=taskqueue__pb2.TaskResponse.SerializeToString,
+            ),
             'ListWorkers': grpc.unary_unary_rpc_method_handler(
                     servicer.ListWorkers,
                     request_deserializer=taskqueue__pb2.ListWorkersRequest.FromString,
@@ -801,7 +817,7 @@ def add_TaskQueueServicer_to_server(servicer, server):
             'GetRcloneConfig': grpc.unary_unary_rpc_method_handler(
                     servicer.GetRcloneConfig,
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
-                    response_serializer=taskqueue__pb2.RcloneConfig.SerializeToString,
+                    response_serializer=taskqueue__pb2.RcloneRemotes.SerializeToString,
             ),
             'GetDockerCredentials': grpc.unary_unary_rpc_method_handler(
                     servicer.GetDockerCredentials,
@@ -1228,6 +1244,33 @@ class TaskQueue(object):
             _registered_method=True)
 
     @staticmethod
+    def RetryTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/RetryTask',
+            taskqueue__pb2.RetryTaskRequest.SerializeToString,
+            taskqueue__pb2.TaskResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def ListWorkers(request,
             target,
             options=(),
@@ -1621,7 +1664,7 @@ class TaskQueue(object):
             target,
             '/taskqueue.TaskQueue/GetRcloneConfig',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
-            taskqueue__pb2.RcloneConfig.FromString,
+            taskqueue__pb2.RcloneRemotes.FromString,
             options,
             channel_credentials,
             insecure,
