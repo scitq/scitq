@@ -50,6 +50,7 @@ See the example.
 ---
 
 {{ include-markdown "../generated/config.md" }}
+*(If not displayed, see [reference/configuration.md](reference/configuration.md).)*
 
 ## Setup the server service
 

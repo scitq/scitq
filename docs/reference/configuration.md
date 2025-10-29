@@ -1,7 +1,7 @@
 # Configuration reference
 
-| Field | YAML key | Default | Type | Description |
-|-------|-----------|----------|------|-------------|
+| Section | Field | YAML key | Default | Type | Description |
+|---------|-------|-----------|----------|------|-------------|
 | Scitq |  | `scitq` |  |  | Scitq contains configuration parameters specific to the scitq server. |
 |  | Port | `scitq.port` | `50051` | `int` | Port is the TCP port on which the scitq server listens for gRPC incoming connections. |
 |  | DBURL | `scitq.db_url` | `postgres://localhost/scitq2?sslmode=disable` | `string` | DBURL is the database connection string used by scitq to connect to its PostgreSQL database. It should include the username, password, host, database name, and SSL mode. |
@@ -44,8 +44,8 @@
 | Rclone |  | `rclone` |  |  | Rclone holds configuration mappings for rclone integrations. Create your config using native rclone with `rclone config` then export the config to `scitq.yaml` with the CLI `scitq config import-rclone >> /etc/scitq.yaml` |
 
 ### AzureConfig (Providers.Azure map values)
-| Field | YAML key | Default | Type | Description |
-|-------|-----------|----------|------|-------------|
+| Section | Field | YAML key | Default | Type | Description |
+|---------|-------|-----------|----------|------|-------------|
 | AzureConfig |  | `azure.<account>` |  |  |  |
 |  | Name | `azure.<account>.-` | `` | `string` |  |
 |  | DefaultRegion | `azure.<account>.default_region` | `` | `string` |  |
@@ -68,8 +68,8 @@
 |  | LocalWorkspaceRoots | `azure.<account>.local_workspaces` | `` | `map[string]string` |  |
 
 ### AzureImage (AzureConfig.Image field)
-| Field | YAML key | Default | Type | Description |
-|-------|-----------|----------|------|-------------|
+| Section | Field | YAML key | Default | Type | Description |
+|---------|-------|-----------|----------|------|-------------|
 | AzureImage |  | `azure.<account>.image` |  |  |  |
 |  | Publisher | `azure.<account>.image.publisher` | `Canonical` | `string` |  |
 |  | Offer | `azure.<account>.image.offer` | `UbuntuServer` | `string` |  |
@@ -77,8 +77,8 @@
 |  | Version | `azure.<account>.image.version` | `latest` | `string` |  |
 
 ### OpenstackConfig (Providers.Openstack map values)
-| Field | YAML key | Default | Type | Description |
-|-------|-----------|----------|------|-------------|
+| Section | Field | YAML key | Default | Type | Description |
+|---------|-------|-----------|----------|------|-------------|
 | OpenstackConfig |  | `openstack.<account>` |  |  |  |
 |  | Name | `openstack.<account>.-` | `` | `string` |  |
 |  | AuthURL | `openstack.<account>.auth_url` | `` | `string` |  |

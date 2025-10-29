@@ -130,8 +130,8 @@ func main() {
 	}
 
 	fmt.Println("# Configuration reference\n")
-	fmt.Println("| Field | YAML key | Default | Type | Description |")
-	fmt.Println("|-------|-----------|----------|------|-------------|")
+	fmt.Println("| Section | Field | YAML key | Default | Type | Description |")
+	fmt.Println("|---------|-------|-----------|----------|------|-------------|")
 
 	printedSections := make(map[string]bool)
 
@@ -211,8 +211,8 @@ func main() {
 	// After main config, expand AzureConfig, AzureImage, OpenstackConfig as needed
 	if needAzure {
 		fmt.Println("\n### AzureConfig (Providers.Azure map values)")
-		fmt.Println("| Field | YAML key | Default | Type | Description |")
-		fmt.Println("|-------|-----------|----------|------|-------------|")
+		fmt.Println("| Section | Field | YAML key | Default | Type | Description |")
+		fmt.Println("|---------|-------|-----------|----------|------|-------------|")
 		if ts, ok := typeSpecs["AzureConfig"]; ok {
 			if st, ok := ts.Type.(*ast.StructType); ok {
 				walkStruct("AzureConfig", st, "azure.<account>", make(map[string]bool))
@@ -221,8 +221,8 @@ func main() {
 	}
 	if needAzureImage {
 		fmt.Println("\n### AzureImage (AzureConfig.Image field)")
-		fmt.Println("| Field | YAML key | Default | Type | Description |")
-		fmt.Println("|-------|-----------|----------|------|-------------|")
+		fmt.Println("| Section | Field | YAML key | Default | Type | Description |")
+		fmt.Println("|---------|-------|-----------|----------|------|-------------|")
 		if ts, ok := typeSpecs["AzureImage"]; ok {
 			if st, ok := ts.Type.(*ast.StructType); ok {
 				walkStruct("AzureImage", st, "azure.<account>.image", make(map[string]bool))
@@ -231,8 +231,8 @@ func main() {
 	}
 	if needOpenstack {
 		fmt.Println("\n### OpenstackConfig (Providers.Openstack map values)")
-		fmt.Println("| Field | YAML key | Default | Type | Description |")
-		fmt.Println("|-------|-----------|----------|------|-------------|")
+		fmt.Println("| Section | Field | YAML key | Default | Type | Description |")
+		fmt.Println("|---------|-------|-----------|----------|------|-------------|")
 		if ts, ok := typeSpecs["OpenstackConfig"]; ok {
 			if st, ok := ts.Type.(*ast.StructType); ok {
 				walkStruct("OpenstackConfig", st, "openstack.<account>", make(map[string]bool))
