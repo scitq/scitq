@@ -106,7 +106,7 @@ As you can see `--resource` and `--input` are quite similar, both are files, can
 
 ##### URI action
 
-The specification of input, resource or output uses a specific syntax that is called a URI for Uniform Resource Identifyer. It ressemble the internet URL except it is more general since unusual protocols such as `s3://` or `azure://` or `gcp://` can be accepted (provided an rclone resource named s3, azure or gcp exists in `scitq.yaml` rclone section). Note that rclone uses a slightly different notation, without the `//` juste after the `:`. 
+The specification of input, resource or output uses a specific syntax that is called a URI for Uniform Resource Identifyer. It ressemble the internet URL except it is more general since unusual protocols such as `s3://` or `azure://` or `gcp://` can be accepted (provided an rclone resource named s3, azure or gcp exists in `scitq.yaml` rclone section). 
 
 An URI action is an extension of a resource or an input URI that allow a transformation of the data before being mounted into the task. It is mostly used for resource since as being read only they cannot be modified by the task. If a task use a complexe resource that is made of several files, it is most convenient to distribute it as a TAR archive that is decompressed. This is done simply by adding `|untar` to the resource specification. If the resource is a collection of files present in `reference_data.tgz`, one can write:
 
@@ -114,10 +114,10 @@ An URI action is an extension of a resource or an input URI that allow a transfo
 scitq task create --resource s3://bucket/resource/mybinary --resource 's3://bucket/resource/reference_data.tgz|untar' --input s3://bucket/data/input1.dat --output s3://bucket/results/mybinary-input1/ --container alpine --command "/resource/mybinary -i /input/input1.dat -o /output/output.dat"
 ```
 
-Docker container are better when slim, which is why large reference data files are better distributed out of the container, and scit resource system is intended for that, with or without action.
+Docker containers are better when slim, which is why large reference data files are better distributed out of the container, and scit resource system is intended for that, with or without action.
 
 There are three possible actions, `|untar`, `|gunzip` and `|mv:...`:
-- `untar` dearchive TAR archive (compressed or not, .tgz or tar.bz2 archives, or even .zip files are handled gracefully). Contrarily to `tar xf ...`, the untar action consumes the archive which is destroyed and replace by its content at the end of the action,
+- `untar` dearchive TAR archive (compressed or not, .tgz or tar.bz2 archives, or even .zip files are handled gracefully). Contrarily to `tar xf ...`, the untar action consumes the archive which is destroyed and replace by its content,
 - `gunzip` decompress a gzipped file.  Like the `gunzip` command the `untar` action, it consumes the compressed file which is destroyed and replace by its content,
 - `mv:...` is an action that move the downloaded file or folder to a subfolder within `/input` or `/resource`. Technically it is not downloaded then moved, it is directly downloaded to the final destination (thus it would not overwrite a file with the same name at the root of `/input` or `/resource`). The final destination does not need to exist before, if it is missing it is created. Relative destination like `..` are forbiden.
 
@@ -140,20 +140,20 @@ Each status is defined by a letter, and there are 4 primary statuses that are ve
 
 | Letter |  Status  |       Description                                                             |
 |--------|----------|-------------------------------------------------------------------------------|
-|   W    | waiting  | The task is not ready to be launched (it depends on another task not succeeded yet) |
-| **P**  | **pending**  | The task is ready to be launched                                              |
-|   A    | assigned | The task has been assigned to a worker (but the worker does not know it yet)  |
-|   C    | accepted | The task has been accepted by the worker it was assigned to                   |
-|   D    | downloading | The task is preparing, it downloads inputs, resources, and containers      |
-|   O    | on hold  | The task is ready to be run but the worker does not have the bandwidth to run it right now |
-| **R**  | **running**  | The task is running                                                           |
-|   U    | uploading | Thet task has run successfully and the content of `/output` is copied to the output URI folder |
-|   V    | uploading on failure | Same as above but the task has failed                             |
-| **S**  | **succeeded** | The task is successful with its upload finished                              |
-| **F**  | **failed**   | The task has failed at any previous step                                      |
-|   Z    | suspended | The task is paused, execution is suspended and could resume                  |
-|   X    | canceled | For some reason the task was rejected by the worker before it ran.            |
-|   I    | inactive | This task is not to be run until some process move it to another status.      |
+| W | waiting | The task is not ready to be launched (it depends on another task not succeeded yet) |
+| **P** | **pending** | The task is ready to be launched                                              |
+| A | assigned | The task has been assigned to a worker (but the worker does not know it yet)  |
+| C | accepted | The task has been accepted by the worker it was assigned to                   |
+| D | downloading | The task is preparing, it downloads inputs, resources, and containers      |
+| O | on hold | The task is ready to be run but the worker does not have the bandwidth to run it right now |
+| **R** | **running** | The task is running                                                           |
+| U | uploading | Thet task has run successfully and the content of `/output` is copied to the output URI folder |
+| V | uploading on failure | Same as above but the task has failed                             |
+| **S** | **succeeded** | The task is successful with its upload finished                              |
+| **F** | **failed** | The task has failed at any previous step                                      |
+| Z | suspended | The task is paused, execution is suspended and could resume                  |
+| X | canceled | For some reason the task was rejected by the worker before it ran.            |
+| I | inactive | This task is not to be run until some process move it to another status.      |
 
 
 - `--worker-id` filter tasks associated to this worker (minimal status `A`)
