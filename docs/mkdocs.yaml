@@ -1,0 +1,46 @@
+site_name: scitq Documentation
+site_description: "Documentation for scitq  – distributed task queue engine (Go + Python + Svelte)"
+site_url: https://scitq.readthedocs.io/
+repo_url: https://github.com/scitq/scitq
+repo_name: scitq.scitq
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: teal
+      accent: cyan
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.instant
+    - content.code.annotate
+    - content.code.copy
+    - search.highlight
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python/pyscitq2]
+        go:
+          paths: [internal]
+  - include-markdown
+
+nav:
+  - Home: index.md
+  - Motivation: motivation.md
+  - Installation: install.md
+  - Quickstart: quickstart.md
+  - Usage:
+      - Web UI: usage/ui.md
+      - CLI: usage/cli.md
+      - Python DSL: usage/dsl.md
+      - API Reference: usage/api.md
+  - Reference:
+      - DB Schema: reference/db-schema.md
+      - Configuration: reference/configuration.md
+      - Glossary: reference/glossary.md
+  - Troubleshooting: troubleshooting.md

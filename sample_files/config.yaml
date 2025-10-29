@@ -1,16 +1,29 @@
 scitq:
   port: 50051
+  db_url: "postgres://scitq_user:certainlynottherightpassword@localhost/scitq2?sslmode=disable"
   log_level: "info"
-  worker_token: "changeMeIamUnsecure123"
-  jwt_secret: "weAreOnAMissionFromGod"
+  log_root: "log"
+  script_root: "scripts"
+  script_runner_user: nobody
+  server_name: "alpha2"
+  server_fqdn: "alpha2.gmt.bio"
+  client_download_token: "ChangeMeImInsecured1"
+  worker_token: "ChangeMeImInsecured2"
+  jwt_secret: "ChangeMeImInsecured3"
+  certificate_key: "/path/to/privkey.pem"
+  certificate_pem: "/path/to/fullchain.pem"
+  idle_timeout: 300
+  docker_credentials:
+  - registry: myprivate.docker.registry.net
+    secret: ChangeMeImLikelyNotTheRightPasswordAnyway
 providers:
   azure:
     primary:
       default_region: swedencentral
-      subscription_id: XXXXXX
-      client_id: XXXXX
-      client_secret: XXXXX
-      tenant_id: XXXXX
+      subscription_id: 12345678-1234-abcd-1234-123456789abc
+      client_id: 12345678-1234-abcd-1234-123456789abc
+      client_secret: ~whateve~the~real~password~is~
+      tenant_id: 12345678-1234-abcd-1234-123456789abc
       update_periodicity: 10m
       image:
         publisher: "Canonical"
@@ -19,29 +32,54 @@ providers:
         version: "latest"
       quotas:
         swedencentral:
-          cpu: 320
+          cpu: 340
+        westeurope:
+          cpu: 350
+      local_workspaces:
+        swedencentral: "azswed://rnd/workspace"
+        westeurope: "azwest://rnd/workspace"
   openstack:
     ovh:
-      auth_url: "https://ovh.example.com:5000/v3"
-      username: "ovhuser"
-      password: "ovhpass"
-      domain_name: "default"
-      tenant_name: "ovh-project"
-      region: "RegionOne"
-      image_id: "img-ovh"
-      flavor_id: "flavor-ovh"
-      network_id: "net-ovh"
+      auth_url: https://auth.cloud.ovh.net/v3
+      username: user-MyUserName
+      password: ProbablyNotTheRightPasswordEither
+      user_domain_name: Default
+      project_id: 123456789abcdef
+      project_name: "12345678901234567890"
+      project_domain_id: default
+      network_id: Ext-Net
+      image_id: "Ubuntu 24.04"
+      keypair: mykeyname
+      identity_api_version: 3
+      update_periodicity: 10m
+      local_workspaces:
+        GRA11: "s3://rnd/workspace"
+        GRA7: "s3://rnd/workspace"
+      quotas:
+        GRA11:
+          cpu: 2044
+        GRA7:
+          cpu: 2048
       custom:
-        quota_endpoint: "https://ovh.example.com/api/quotas"
-        pricing_endpoint: "https://ovh.example.com/api/pricing"
-    standard:
-      auth_url: "https://openstack.example.com:5000/v3"
-      username: "stduser"
-      password: "stdpass"
-      domain_name: "default"
-      tenant_name: "std-project"
-      region: "RegionTwo"
-      image_id: "img-std"
-      flavor_id: "flavor-std"
-      network_id: "net-std"
-      custom: {}
+        ovh_endpoint: ovh-eu
+        ovh_application_key: "123456789abcd"
+        ovh_application_secret: "0123456789abcdef01234567890abc"
+        ovh_consumer_key: "0123456789abcdef01234567890abcde"
+rclone:
+    azswed:
+        account: rnd1
+        key: super+password+whatever==
+        type: azureblob
+    azwest:
+        account: rnd1
+        key: super+password+whatever==
+        type: azureblob
+    s3:
+        access_key_id: 0123456789abcdef01234567890ab
+        acl: private
+        endpoint: https://s3.gra.io.cloud.ovh.net
+        env_auth: "false"
+        provider: Other
+        region: gra
+        secret_access_key: 0123456789abcdef01234567890cd
+        type: s3

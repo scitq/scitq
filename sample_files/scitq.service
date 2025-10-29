@@ -1,0 +1,12 @@
+[Unit]
+Description=scitq
+After=multi-user.target
+
+[Service]
+Type=simple
+Restart=on-failure
+Environment=HOME=/root
+ExecStart=/usr/local/bin/scitq-server -config /etc/scitq.yaml
+
+[Install]
+WantedBy=multi-user.target

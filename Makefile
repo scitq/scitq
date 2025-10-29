@@ -220,3 +220,6 @@ fresh-integration-test:
 	else \
 		go test -count=1 -v ./...; \
 	fi
+
+docs-config:
+	go run tools/gen_config_doc.go > docs/reference/configuration.md

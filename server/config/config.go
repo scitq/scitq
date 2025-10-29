@@ -12,53 +12,145 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// Config represents the overall configuration for the scitq server.
+// It includes settings for the server itself, cloud providers, and rclone integrations.
 type Config struct {
+	// Scitq contains configuration parameters specific to the scitq server.
 	Scitq struct {
-		Port                 int    `yaml:"port" default:"50051"`
-		DBURL                string `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
-		MaxDBConcurrency     int    `yaml:"max_db_concurrency" default:"50"`
-		LogLevel             string `yaml:"log_level" default:"info"`
-		LogRoot              string `yaml:"log_root" default:"log"`
-		ScriptRoot           string `yaml:"script_root" default:"scripts"`
-		ScriptVenv           string `yaml:"script_venv" default:"/var/lib/scitq/python"`
-		ScriptRunnerUser     string `yaml:"script_runner_user" default:"nobody"`
-		ClientBinaryPath     string `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
-		ClientDownloadToken  string `yaml:"client_download_token"`
-		CertificateKey       string `yaml:"certificate_key"`
-		CertificatePem       string `yaml:"certificate_pem"`
-		ServerName           string `yaml:"server_name"`
-		ServerFQDN           string `yaml:"server_fqdn"`
-		DockerRegistry       string `yaml:"docker_registry"`
+		// Port is the TCP port on which the scitq server listens for gRPC incoming connections.
+		Port int `yaml:"port" default:"50051"`
+
+		// DBURL is the database connection string used by scitq to connect to its PostgreSQL database.
+		// It should include the username, password, host, database name, and SSL mode.
+		DBURL string `yaml:"db_url" default:"postgres://localhost/scitq2?sslmode=disable"`
+
+		// MaxDBConcurrency limits the maximum number of concurrent database connections.
+		MaxDBConcurrency int `yaml:"max_db_concurrency" default:"50"`
+
+		// LogLevel sets the verbosity level of logging output.
+		// Common values include "debug", "info", "warn", and "error".
+		LogLevel string `yaml:"log_level" default:"info"`
+
+		// LogRoot specifies the root directory where remote task stdout/stderr files are stored.
+		LogRoot string `yaml:"log_root" default:"log"`
+
+		// ScriptRoot is the directory where (python) server-side scripts are located.
+		// Scripts run by scitq are expected to be found here.
+		ScriptRoot string `yaml:"script_root" default:"scripts"`
+
+		// ScriptVenv specifies the path to the Python virtual environment used to run scripts.
+		// This isolates script dependencies from the system Python environment.
+		// Python venv creation and DSL installation in the venv is managed automatically by server.
+		ScriptVenv string `yaml:"script_venv" default:"/var/lib/scitq/python"`
+
+		// ScriptRunnerUser is the system user account under which scripts are executed.
+		// Running scripts as a non-privileged user enhances security.
+		ScriptRunnerUser string `yaml:"script_runner_user" default:"nobody"`
+
+		// ClientBinaryPath is the filesystem path to the scitq client binary.
+		// This is used for automated client installation.
+		ClientBinaryPath string `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
+
+		// ClientDownloadToken is a secret token used to authorize client binary downloads.
+		// If not set, a random token is generated at startup.
+		ClientDownloadToken string `yaml:"client_download_token"`
+
+		// CertificateKey is the path or content of the TLS private key file for HTTPS.
+		// Required if you use your own certificates
+		CertificateKey string `yaml:"certificate_key"`
+
+		// CertificatePem is the path or content of the TLS certificate file for HTTPS.
+		// Required if you use your own certificates
+		CertificatePem string `yaml:"certificate_pem"`
+
+		// ServerName is the short name identifier for the server.
+		ServerName string `yaml:"server_name"`
+
+		// ServerFQDN is the fully qualified domain name of the server.
+		ServerFQDN string `yaml:"server_fqdn"`
+
+		// DockerRegistry specifies the default container registry URL for pulling images.
+		DockerRegistry string `yaml:"docker_registry"`
+
+		// DockerAuthentication holds the authentication token or credentials for the default Docker registry.
 		DockerAuthentication string `yaml:"docker_authentication"`
-		// Multiple registry credentials; each entry is a registry→secret pair.
-		// If empty, legacy fields DockerRegistry/DockerAuthentication (single pair) are used if set.
-		DockerCredentials     []DockerCredential `yaml:"docker_credentials"`
-		SwapProportion        float32            `yaml:"swap_proportion" default:"0.1"`
-		WorkerToken           string             `yaml:"worker_token"`
-		JwtSecret             string             `yaml:"jwt_secret"`
-		RecruitmentInterval   int                `yaml:"recruiter_interval" default:"5"`
-		IdleTimeout           int                `yaml:"idle_timeout" default:"300"`
-		NewWorkerIdleTimeout  int                `yaml:"new_worker_idle_timeout" default:"900"`
-		OfflineTimeout        int                `yaml:"offline_timeout" default:"30"`
-		TaskDownloadTimeout   int                `yaml:"task_download_timeout" default:"600"`
-		TaskExecutionTimeout  int                `yaml:"task_execution_timeout" default:"0"`
-		TaskUploadTimeout     int                `yaml:"task_upload_timeout" default:"600"`
-		ConsideredLostTimeout int                `yaml:"considered_lost_timeout" default:"300" `
-		AdminUser             string             `yaml:"admin_user" default:"admin"`
-		AdminHashedPassword   string             `yaml:"admin_hashed_password" default:""`
-		AdminEmail            string             `yaml:"admin_email" default:""`
-		DisableHTTPS          bool               `yaml:"disable_https" default:"false"`
-		DisableGRPCWeb        bool               `yaml:"disable_grpcweb" default:"false"`
-		HTTPSPort             int                `yaml:"https_port" default:"443"`
+
+		// DockerCredentials contains multiple registry→secret pairs for authenticating to container registries.
+		// Used by clients to access private registries.
+		DockerCredentials []DockerCredential `yaml:"docker_credentials"`
+
+		// SwapProportion defines the proportion of disk space dedicated to swap on worker automated deploy.
+		SwapProportion float32 `yaml:"swap_proportion" default:"0.1"`
+
+		// WorkerToken is a secret token used to authenticate worker nodes.
+		WorkerToken string `yaml:"worker_token"`
+
+		// JwtSecret is the secret key used to sign JWT tokens.
+		JwtSecret string `yaml:"jwt_secret"`
+
+		// RecruitmentInterval sets the interval in seconds for recruiting new workers.
+		RecruitmentInterval int `yaml:"recruiter_interval" default:"5"`
+
+		// IdleTimeout defines the timeout in seconds after which idle workers are considered for shutdown.
+		IdleTimeout int `yaml:"idle_timeout" default:"300"`
+
+		// NewWorkerIdleTimeout is the timeout in seconds for newly started workers before they are considered idle.
+		NewWorkerIdleTimeout int `yaml:"new_worker_idle_timeout" default:"900"`
+
+		// OfflineTimeout is the timeout in seconds after which offline workers are considered lost.
+		OfflineTimeout int `yaml:"offline_timeout" default:"30"`
+
+		// TaskDownloadTimeout is the timeout in seconds for task data downloads.
+		TaskDownloadTimeout int `yaml:"task_download_timeout" default:"600"`
+
+		// TaskExecutionTimeout is the timeout in seconds for task execution.
+		// A value of 0 disables the timeout.
+		TaskExecutionTimeout int `yaml:"task_execution_timeout" default:"0"`
+
+		// TaskUploadTimeout is the timeout in seconds for uploading task results.
+		TaskUploadTimeout int `yaml:"task_upload_timeout" default:"600"`
+
+		// ConsideredLostTimeout is the timeout in seconds after which a task is considered lost.
+		ConsideredLostTimeout int `yaml:"considered_lost_timeout" default:"300" `
+
+		// AdminUser is the username for the administrator account.
+		AdminUser string `yaml:"admin_user" default:"admin"`
+
+		// AdminHashedPassword is the hashed password for the administrator account.
+		// It can be generated by CLI : `scitq hashpassword MySuperPassword`
+		AdminHashedPassword string `yaml:"admin_hashed_password" default:""`
+
+		// AdminEmail is the email address of the administrator.
+		AdminEmail string `yaml:"admin_email" default:""`
+
+		// DisableHTTPS disables HTTPS support when set to true.
+		DisableHTTPS bool `yaml:"disable_https" default:"false"`
+
+		// DisableGRPCWeb disables gRPC-Web support when set to true.
+		// Used for test only
+		DisableGRPCWeb bool `yaml:"disable_grpcweb" default:"false"`
+
+		// HTTPSPort is the TCP port used for HTTPS connections.
+		HTTPSPort int `yaml:"https_port" default:"443"`
 	} `yaml:"scitq"`
+
+	// Providers contains configurations for different cloud providers supported by scitq.
+	// Each provider can use multiple account, so you can have several config called Primary, Secondary etc.
+	// For OVH, use an Openstack account (that you can name OVH)
+	// see the example for details
 	Providers struct {
 		Azure     map[string]*AzureConfig        `yaml:"azure"`
 		Openstack map[string]*OpenstackConfig    `yaml:"openstack"`
 		Fake      map[string]*FakeProviderConfig `yaml:"fake"`
 	} `yaml:"providers"`
+
+	// Rclone holds configuration mappings for rclone integrations.
+	// Create your config using native rclone with `rclone config`
+	// then export the config to `scitq.yaml` with the CLI `scitq config import-rclone >> /etc/scitq.yaml`
 	Rclone map[string]map[string]string `yaml:"rclone"`
 }
 
+// Quota defines resource limits such as CPU and memory for cloud provider instances.
 type Quota struct {
 	MaxCPU   int32   `yaml:"cpu"`
 	MaxMemGB float32 `yaml:"mem,omitempty"` // optional
