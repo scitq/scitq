@@ -138,23 +138,24 @@ Typically list all the tasks. The different options of this action are filters :
 
 Each status is defined by a letter, and there are 4 primary statuses that are very important in scitq, the (P)ending, (R)unning and (S)ucceeded or (F)ailed status. However, there is a lot of subtlety in the way tasks are handled in scitq, so here are all the status more ore less in their progression order:
 
-| Letter |  Status  |       Description                                                             |
-|--------|----------|-------------------------------------------------------------------------------|
-| W | waiting | The task is not ready to be launched (it depends on another task not succeeded yet) |
-| **P** | **pending** | The task is ready to be launched                                              |
-| A | assigned | The task has been assigned to a worker (but the worker does not know it yet)  |
-| C | accepted | The task has been accepted by the worker it was assigned to                   |
-| D | downloading | The task is preparing, it downloads inputs, resources, and containers      |
-| O | on hold | The task is ready to be run but the worker does not have the bandwidth to run it right now |
-| **R** | **running** | The task is running                                                           |
-| U | uploading | Thet task has run successfully and the content of `/output` is copied to the output URI folder |
-| V | uploading on failure | Same as above but the task has failed                             |
-| **S** | **succeeded** | The task is successful with its upload finished                              |
-| **F** | **failed** | The task has failed at any previous step                                      |
-| Z | suspended | The task is paused, execution is suspended and could resume                  |
-| X | canceled | For some reason the task was rejected by the worker before it ran.            |
-| I | inactive | This task is not to be run until some process move it to another status.      |
+### Task status codes
 
+| Letter | Status             | Description                                                                                  |
+|--------|--------------------|----------------------------------------------------------------------------------------------|
+| **W** | waiting            | Task is not ready to be launched (depends on another task not yet succeeded).                |
+| **P** | pending            | Task is ready to be launched.                                                               |
+| **A** | assigned           | Task has been assigned to a worker (worker not yet aware).                                  |
+| **C** | accepted           | Worker has acknowledged and accepted the task.                                             |
+| **D** | downloading        | Task is preparing by downloading inputs, resources, and containers.                         |
+| **O** | on hold            | Task is ready but the worker has no available capacity.                                     |
+| **R** | running            | Task is currently executing.                                                                |
+| **U** | uploading          | Task ran successfully and is uploading output data.                                         |
+| **V** | uploading (failed) | Task failed, uploading output or logs.                                                     |
+| **S** | succeeded          | Task completed successfully and upload finished.                                           |
+| **F** | failed             | Task failed during execution or upload.                                                    |
+| **Z** | suspended          | Task is paused and can resume later.                                                       |
+| **X** | canceled           | Task was canceled before running.                                                          |
+| **I** | inactive           | Task is defined but waiting for the workflow to be finalized before becoming pending.      |
 
 - `--worker-id` filter tasks associated to this worker (minimal status `A`)
 - `--step-id` filter tasks related to this step (see step below)
