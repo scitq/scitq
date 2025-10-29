@@ -37,13 +37,21 @@ A complete example is provided here:
 
 You can copy and adapt it for your environment.
 
-Please find a detailed explanation about config items:
+Please find a detailed explanation about config items :
+NB in what follow, you must set the *YAML key* as a yaml entry, setting `scitq.port` to 50051 means to write in YAML:
+
+```yaml
+scitq:
+    port: 50051
+```
+
+See the example.
 
 ---
 
 {{ include-markdown "../generated/config.md" }}
 
-## Setup the service
+## Setup the server service
 
 You'll need to setup the database like this:
 
@@ -70,4 +78,44 @@ sudo systemctl daemon-reload
 
 # Enable and start the service
 sudo systemctl enable --now scitq.service
+```
+
+## Installing manually a worker
+
+Most of the time worker are deployed automatically using a provider. It is however possible to deploy manually a worker:
+
+- copy the `scitq-client` binary to the worker,
+- install docker on the worker : `apt install docker.io`
+- if you have private docker registry, copy `.docker/config.json` to worker `/root/.docker/config.json`
+
+Launch it with :
+```sh
+scitq-client --store /scratch --token MySecretToken  -permanent
+```
+Where MySecretToken match server YAML `scitq.worker_token`.
+
+You can set it up as a service by creating `/etc/systemd/system/scitq-client.service`:
+
+```ini
+[Unit]
+Description=scitq-client
+After=multi-user.target
+
+[Service]
+Type=simple
+Restart=on-failure
+Environment=HOME=/root
+ExecStart=/usr/local/bin/scitq-client --store /scratch --token MySecretToken  -permanent
+
+[Install]
+WantedBy=multi-user.target
+```
+
+And then activate it as usual:
+```sh
+# Reload systemd configuration
+sudo systemctl daemon-reload
+
+# Enable and start the service
+sudo systemctl enable --now scitq-client.service
 ```
