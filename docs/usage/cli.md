@@ -169,4 +169,4 @@ About hidden tasks: A task transmitted to a worker cannot be changed. Thus if th
 
 
 
-If your task has no step, only a worker with no steop can handle it (this is the default situation). If your task has a step then only a worker belonging to this step can handle it. To affect the task to a specific step, this is done by specifying `--step-id` when creating the task, which means you need to create a step before, see below.
+If your task has no step, only a worker with no step can handle it (this is the default situation). If your task has a step then only a worker belonging to this step can handle it. To affect the task to a specific step, this is done by specifying `--step-id` when creating the task, which means you need to create a step before, see below.
