@@ -51,6 +51,13 @@ go get -u all
 ```
 
 ### do it each time protocol change
+
+There is now a global command to update stubs for the go/UI(svelte)/python part:
+
+```sh
+make proto-all
+```
+
 ```sh
 go mod tidy
 protoc --go_out=. --go-grpc_out=. --proto_path=proto proto/taskqueue.proto
