@@ -38,7 +38,71 @@
 |  | DisableGRPCWeb | `scitq.disable_grpcweb` | `false` | `bool` | DisableGRPCWeb disables gRPC-Web support when set to true. Used for test only |
 |  | HTTPSPort | `scitq.https_port` | `443` | `int` | HTTPSPort is the TCP port used for HTTPS connections. |
 | Providers |  | `providers` |  |  | Providers contains configurations for different cloud providers supported by scitq. Each provider can use multiple account, so you can have several config called Primary, Secondary etc. For OVH, use an Openstack account (that you can name OVH) see the example for details |
-|  | Azure | `providers.azure` | `` | `map[string]*ast.StarExpr` |  |
-|  | Openstack | `providers.openstack` | `` | `map[string]*ast.StarExpr` |  |
-|  | Fake | `providers.fake` | `` | `map[string]*ast.StarExpr` |  |
+|  | Azure | `providers.azure` |  | See below | Azure cloud provider configs |
+|  | Openstack | `providers.openstack` |  | See below | Openstack cloud provider configs |
+|  | Fake | `providers.fake` |  | Used for tests | Fake cloud provider configs |
 | Rclone |  | `rclone` |  |  | Rclone holds configuration mappings for rclone integrations. Create your config using native rclone with `rclone config` then export the config to `scitq.yaml` with the CLI `scitq config import-rclone >> /etc/scitq.yaml` |
+
+### AzureConfig (Providers.Azure map values)
+| Field | YAML key | Default | Type | Description |
+|-------|-----------|----------|------|-------------|
+| AzureConfig |  | `azure.<account>` |  |  |  |
+|  | Name | `azure.<account>.-` | `` | `string` |  |
+|  | DefaultRegion | `azure.<account>.default_region` | `` | `string` |  |
+|  | SubscriptionID | `azure.<account>.subscription_id` | `` | `string` |  |
+|  | ClientID | `azure.<account>.client_id` | `` | `string` |  |
+|  | ClientSecret | `azure.<account>.client_secret` | `` | `string` |  |
+|  | TenantID | `azure.<account>.tenant_id` | `` | `string` |  |
+|  | UseSpot | `azure.<account>.use_spot` | `true` | `bool` |  |
+|  | Username | `azure.<account>.username` | `ubuntu` | `string` | Default username for the VM, using OVH default |
+|  | SSHPublicKey | `azure.<account>.ssh_public_key` | `~/.ssh/id_rsa.pub` | `string` |  |
+|  | Image | `azure.<account>.image` | `` | `AzureImage` |  |
+| Image |  | `azure.<account>.image` |  |  |  |
+|  | Publisher | `azure.<account>.image.publisher` | `Canonical` | `string` |  |
+|  | Offer | `azure.<account>.image.offer` | `UbuntuServer` | `string` |  |
+|  | Sku | `azure.<account>.image.sku` | `24.04-LTS` | `string` |  |
+|  | Version | `azure.<account>.image.version` | `latest` | `string` |  |
+|  | Quotas | `azure.<account>.quotas` | `` | `map[string]Quota` | key: region |
+|  | Regions | `azure.<account>.regions` | `` | `[]string` |  |
+|  | UpdatePeriodicity | `azure.<account>.update_periodicity` | `` | `string` | Update periodicity in minutes |
+|  | LocalWorkspaceRoots | `azure.<account>.local_workspaces` | `` | `map[string]string` |  |
+
+### AzureImage (AzureConfig.Image field)
+| Field | YAML key | Default | Type | Description |
+|-------|-----------|----------|------|-------------|
+| AzureImage |  | `azure.<account>.image` |  |  |  |
+|  | Publisher | `azure.<account>.image.publisher` | `Canonical` | `string` |  |
+|  | Offer | `azure.<account>.image.offer` | `UbuntuServer` | `string` |  |
+|  | Sku | `azure.<account>.image.sku` | `24.04-LTS` | `string` |  |
+|  | Version | `azure.<account>.image.version` | `latest` | `string` |  |
+
+### OpenstackConfig (Providers.Openstack map values)
+| Field | YAML key | Default | Type | Description |
+|-------|-----------|----------|------|-------------|
+| OpenstackConfig |  | `openstack.<account>` |  |  |  |
+|  | Name | `openstack.<account>.-` | `` | `string` |  |
+|  | AuthURL | `openstack.<account>.auth_url` | `` | `string` |  |
+|  | Username | `openstack.<account>.username` | `` | `string` |  |
+|  | Password | `openstack.<account>.password` | `` | `string` |  |
+|  | DomainName | `openstack.<account>.domain_name` | `` | `string` |  |
+|  | DomainID | `openstack.<account>.domain_id` | `` | `string` |  |
+|  | TenantName | `openstack.<account>.tenant_name` | `` | `string` |  |
+|  | ProjectID | `openstack.<account>.project_id` | `` | `string` | Keystone project identifiers (either one can be used) |
+|  | ProjectName | `openstack.<account>.project_name` | `` | `string` |  |
+|  | UserDomainName | `openstack.<account>.user_domain_name` | `` | `string` | Domain scoping (Keystone v3) |
+|  | ProjectDomainID | `openstack.<account>.project_domain_id` | `` | `string` |  |
+|  | ApplicationCredentialID | `openstack.<account>.application_credential_id` | `` | `string` | Optional: prefer Application Credentials when provided (portable OpenStack) |
+|  | ApplicationCredentialSecret | `openstack.<account>.application_credential_secret` | `` | `string` |  |
+|  | Interface | `openstack.<account>.interface` | `` | `string` | Optional interface selection for service endpoints (public/internal/admin) |
+|  | IdentityAPIVersion | `openstack.<account>.identity_api_version` | `3` | `int` | Optional: Keystone identity API version (default 3) |
+|  | DefaultRegion | `openstack.<account>.region` | `` | `string` |  |
+|  | ImageID | `openstack.<account>.image_id` | `` | `string` |  |
+|  | FlavorID | `openstack.<account>.flavor_id` | `` | `string` |  |
+|  | NetworkID | `openstack.<account>.network_id` | `` | `string` |  |
+|  | ExtNetworkID | `openstack.<account>.ext_network_id` | `` | `string` |  |
+|  | Quotas | `openstack.<account>.quotas` | `` | `map[string]Quota` | key: region |
+|  | Regions | `openstack.<account>.regions` | `` | `[]string` |  |
+|  | Custom | `openstack.<account>.custom` | `` | `map[string]*ast.InterfaceType` | Vendor-specific custom settings |
+|  | UpdatePeriodicity | `openstack.<account>.update_periodicity` | `` | `string` | Update periodicity in minutes |
+|  | LocalWorkspaceRoots | `openstack.<account>.local_workspaces` | `` | `map[string]string` |  |
+|  | Keypair | `openstack.<account>.keypair` | `` | `string` | Name of the keypair to use for SSH access |

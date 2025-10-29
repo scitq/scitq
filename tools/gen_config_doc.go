@@ -76,6 +76,21 @@ func walkStruct(section string, st *ast.StructType, depth string, printedSection
 
 		desc := extractComment(field)
 
+		// Special-case Providers fields for Azure/Openstack/Fake
+		if section == "Providers" && len(field.Names) > 0 {
+			switch field.Names[0].Name {
+			case "Azure":
+				fmt.Printf("|  | Azure | `%s` |  | See below | Azure cloud provider configs |\n", full)
+				continue
+			case "Openstack":
+				fmt.Printf("|  | Openstack | `%s` |  | See below | Openstack cloud provider configs |\n", full)
+				continue
+			case "Fake":
+				fmt.Printf("|  | Fake | `%s` |  | Used for tests | Fake cloud provider configs |\n", full)
+				continue
+			}
+		}
+
 		// indent all fields under that section (no section name repetition)
 		fmt.Printf("|  | %s | `%s` | `%s` | `%s` | %s |\n",
 			field.Names[0].Name, full, def, ftype, desc)
@@ -120,6 +135,11 @@ func main() {
 
 	printedSections := make(map[string]bool)
 
+	// Track if Providers section was seen for later expansion
+	needAzure := false
+	needAzureImage := false
+	needOpenstack := false
+
 	// Find and expand Config struct
 	if ts, ok := typeSpecs["Config"]; ok {
 		if st, ok := ts.Type.(*ast.StructType); ok {
@@ -143,6 +163,36 @@ func main() {
 					printedSections[section] = true
 				}
 
+				// Providers special-case: mark for Azure/Openstack/Fake expansion
+				if section == "Providers" {
+					// Find the struct type for Providers
+					var providersStruct *ast.StructType
+					switch ft := field.Type.(type) {
+					case *ast.Ident:
+						if ts2, ok := typeSpecs[ft.Name]; ok {
+							if inner, ok := ts2.Type.(*ast.StructType); ok {
+								providersStruct = inner
+							}
+						}
+					case *ast.StructType:
+						providersStruct = ft
+					}
+					if providersStruct != nil {
+						for _, pf := range providersStruct.Fields.List {
+							if len(pf.Names) == 0 {
+								continue
+							}
+							switch pf.Names[0].Name {
+							case "Azure":
+								needAzure = true
+								needAzureImage = true
+							case "Openstack":
+								needOpenstack = true
+							}
+						}
+					}
+				}
+
 				// Dive into the struct
 				switch ft := field.Type.(type) {
 				case *ast.Ident:
@@ -154,6 +204,38 @@ func main() {
 				case *ast.StructType:
 					walkStruct(field.Names[0].Name, ft, yamlTag, printedSections)
 				}
+			}
+		}
+	}
+
+	// After main config, expand AzureConfig, AzureImage, OpenstackConfig as needed
+	if needAzure {
+		fmt.Println("\n### AzureConfig (Providers.Azure map values)")
+		fmt.Println("| Field | YAML key | Default | Type | Description |")
+		fmt.Println("|-------|-----------|----------|------|-------------|")
+		if ts, ok := typeSpecs["AzureConfig"]; ok {
+			if st, ok := ts.Type.(*ast.StructType); ok {
+				walkStruct("AzureConfig", st, "azure.<account>", make(map[string]bool))
+			}
+		}
+	}
+	if needAzureImage {
+		fmt.Println("\n### AzureImage (AzureConfig.Image field)")
+		fmt.Println("| Field | YAML key | Default | Type | Description |")
+		fmt.Println("|-------|-----------|----------|------|-------------|")
+		if ts, ok := typeSpecs["AzureImage"]; ok {
+			if st, ok := ts.Type.(*ast.StructType); ok {
+				walkStruct("AzureImage", st, "azure.<account>.image", make(map[string]bool))
+			}
+		}
+	}
+	if needOpenstack {
+		fmt.Println("\n### OpenstackConfig (Providers.Openstack map values)")
+		fmt.Println("| Field | YAML key | Default | Type | Description |")
+		fmt.Println("|-------|-----------|----------|------|-------------|")
+		if ts, ok := typeSpecs["OpenstackConfig"]; ok {
+			if st, ok := ts.Type.(*ast.StructType); ok {
+				walkStruct("OpenstackConfig", st, "openstack.<account>", make(map[string]bool))
 			}
 		}
 	}
