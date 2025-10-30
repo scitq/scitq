@@ -138,7 +138,7 @@ Typically list all the tasks. The different options for this action are filters 
 
 Each status is defined by a letter, and there are 4 primary statuses that are very important in scitq, the (P)ending, (R)unning and (S)ucceeded or (F)ailed status. However, there is a lot of subtlety in the way tasks are handled in scitq, so here are all the status more or less in their progression order:
 
-### Task status codes
+##### Task status codes
 
 | Letter | Status             | Description                                                                                  |
 |--------|--------------------|----------------------------------------------------------------------------------------------|
@@ -165,8 +165,128 @@ Each status is defined by a letter, and there are 4 primary statuses that are ve
 
 About hidden tasks: A task transmitted to a worker cannot be changed. Thus if the task fails to run for any reason (like if the worker disappear, or if the command simply failed), it won't be modified to remember what happened. It can be retried, though, either automatically in workflows or manually when created with the CLI. When retried, the old task is hidden and a new one is created. The reason for that is that in most cases, what matters is the latest temptative of the task, especially if the outcome is different (e.g. it eventually succeeds). So by default, previous attempts are hidden and not displayed. Showing hidden tasks, however, permits to see previous failure to understand what happened. 
 
+#### `retry`
 
+As shown just above a failed task can be retried: e.g. the previous (failed) task is hidden and a new pending task is created:
 
+```sh
+scitq task retry --id <task id>
+```
 
+The action optionnaly permits to place an auto-retry on task, so to retry the task and let retry three more times if needed:
 
-If your task has no step, only a worker with no step can handle it (this is the default situation). If your task has a step then only a worker belonging to this step can handle it. To assign the task to a specific step, this is done by specifying `--step-id` when creating the task, which means you need to create a step before, see below.
+```sh
+scitq task retry --id <task id> --retry 3
+```
+
+#### `output`
+
+This action enables to see the lines printed by the task (stdout/stderr).
+
+```sh
+scitq task output --id <task id>
+```
+
+### `flavor`
+
+`flavor` is the term coined by Openstack to describe a type of instance, scitq kept it.
+
+#### `list`
+
+`list` is the only available action for `flavor` objects. It lists instance types or server models. It takes two option:
+- `--limit` default to 10, list the cheapest flavors matching the filtering criteria (see below),
+- `--filter` apply a filter on listed flavors.
+
+Filters are a column `:` separated list of simple requirements of the form:
+- `cpu>32` : flavor with strictly more than 32 vcpu,
+- `mem>=10` : flavor with 10Gb or more memory (e.g. RAM, not disks, see below),
+- `disk<1000` : flavor with less than 1000Gb disks.
+
+So for instance:
+```sh
+scitq flavor list --filter 'cpu>32:mem>=10:disk<1000'
+```
+
+Filters can contain other criteria:
+- `provider~%azure%` : the provider name must contain azure (providers are always in small caps),
+- `region~%swed%` : the region must contain swed (swedencentral is a great Azure region),
+- `eviction<50` : the eviction(*) stats (not always reliable) must be below 50% (which is very high). If you say nothing, by default a filter `eviction<=5` is applied - which is a sound default (and Azure minimal stat) since a high eviction rate will make workers very inefficients.
+- `gpumem>=10` : the instance has more than 10Gb of GPU memory.
+- `gpu~%Tesla%` : the description of the GPU contains Tesla.
+
+(*) eviction is the Azure expression for reclaiming an instance (only spot instances are reclaimed, but they are very cheap and used by default in scitq). A reclaimed instance is killed. You can revive it but it is generally not efficient so the current strategy is to delete it and redeploy.
+
+NB: if a `scitq flavor list` without filter gives you an empty list, it's likely that the providers updates are not properly configured in `scitq.yaml`, see [configuration](../reference/configuration.md).
+
+### `worker`
+
+Workers are the compute units that actually execute tasks. They can be deployed automatically by the recruiter engine or manually through the CLI.  
+Each worker is associated with a **provider** (e.g. Azure, OpenStack), an optional **region**, and optionally a **step** it serves in a workflow.  
+
+#### `list`
+
+Lists all workers known to the scheduler.
+
+```sh
+scitq worker list
+```
+
+Displays for each worker its ID, name, status, concurrency, prefetch value, IP addresses, flavor, provider, and region.
+
+#### `deploy`
+
+Deploys a new worker manually.  
+This command queries available flavors to match the specified provider, region, and flavor name, then creates the requested number of instances.
+
+```sh
+scitq worker deploy --provider <provider.config> --flavor <flavor_name> [--region <region>] [--count <n>] [--step <step_id>] [--concurrency <n>] [--prefetch <n>]
+```
+
+Options:
+
+- `--provider` (required): provider and configuration name, e.g. `azure.primary`.  
+- `--flavor` (required): flavor name identifying the instance type.  
+- `--region`: optional region (defaults to the provider’s default).  
+- `--count`: number of workers to deploy (default: `1`).  
+- `--step`: optional step ID to attach the worker to.  
+- `--concurrency`: number of tasks the worker can run in parallel (default: `1`).  
+- `--prefetch`: number of tasks pre-fetched by the worker (default: `0`).  
+
+Example:
+
+```sh
+scitq worker deploy --provider azure.primary --region swedencentral --flavor Standard_D8s_v3 --count 2 --step 14 --concurrency 4
+```
+
+This deploys two workers on Azure, each able to execute four tasks concurrently for step ID 14.
+
+#### `delete`
+
+Deletes a worker by its ID.
+
+```sh
+scitq worker delete --worker-id <id>
+```
+
+The command sends a deletion order to the provider.  
+Use with care, since ongoing tasks will be interrupted.
+
+#### `stats`
+
+Displays live resource usage for one or several workers.
+
+```sh
+scitq worker stats --worker-id <id1> [--worker-id <id2> ...]
+```
+
+Shows, for each worker:
+- CPU and memory usage
+- system load and I/O wait
+- disk usage and read/write rates
+- network input/output throughput
+
+Example:
+
+```sh
+scitq worker stats --worker-id 12 --worker-id 13
+```
