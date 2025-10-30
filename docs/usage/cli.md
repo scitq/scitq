@@ -731,3 +731,111 @@ scitq user change-password --username <name>
 
 - Prompts for current password, then for the new password twice.
 - Uses the server set by `SCITQ_SERVER` (defaults to `localhost:50051`).
+
+### `worker-event`
+
+Worker event commands let you inspect, delete, or prune event logs emitted by workers.  
+Events include informational, warning, error, and debug messages related to worker lifecycle and xecution.
+
+#### `list`
+
+Lists recorded events. You can filter by worker, severity level, or class.
+
+```sh
+scitq worker-event list [--worker-id <id>] [--level <D|I|W|E>] [--class <name>] [--limit <n>]
+```
+
+Options:
+- `--worker-id`: show only events from this worker.
+- `--level`: filter by severity level (`D`: Debug, `I`: Info, `W`: Warning, `E`: Error).
+- `--class`: restrict to a specific event class (e.g. `phase`, `runtime`, `trace`, `task`, `diagnostics`, etc.).
+- `--limit`: maximum number of events to show (default: 20).
+
+Example:
+
+```sh
+scitq worker-event list --worker-id 12 --level E
+```
+
+#### `delete`
+
+Deletes a worker event by ID.
+
+```sh
+scitq worker-event delete --id <event_id>
+```
+
+Use this to remove obsolete or duplicate logs.
+
+Example:
+
+```sh
+scitq worker-event delete --id 42
+```
+
+#### `prune`
+
+Deletes multiple worker events matching filters or older than a given age.
+
+```sh
+scitq worker-event prune --older-than <age> [--level <D|I|W|E>] [--class <name>] [--worker-id <id>] --dry-run]
+```
+
+Options:
+- `--older-than`: duration before now (e.g. `7d`, `12h`, `30m`) — required unless `--dry-run` is used.
+- `--level`: optional severity filter.
+- `--class`: optional class filter.
+- `--worker-id`: restrict pruning to a specific worker.
+- `--dry-run`: count matching events without deleting them.
+
+Examples:
+
+```sh
+scitq worker-event prune --older-than 7d
+scitq worker-event prune --older-than 24h --level W --class recruitment --dry-run
+```
+
+
+### `hashpassword`
+
+Hashes a password using bcrypt, suitable for inclusion in configuration files.
+
+```sh
+scitq hashpassword <password>
+```
+
+This produces a secure bcrypt hash that can be used, for example, to set the admin password in `scitq.yaml`.
+
+Example:
+
+```sh
+scitq hashpassword MySecret123
+```
+
+Output:
+
+```
+$2a$10$Ff...ZqNQvJfFzJ7rO9I1KOdwb.x7y7Kz7JZkX8ZyF4jO
+```
+
+### `config`
+
+Configuration-related utilities for importing or generating configuration fragments.
+
+#### `import-rclone`
+
+Imports an existing `rclone.conf` file and prints a corresponding YAML fragment suitable for inclusion in `scitq.yaml`.
+
+```sh
+scitq config import-rclone [<path>]
+```
+
+- `<path>`: optional path to an existing `rclone.conf` (defaults to `~/.config/rclone/rclone.conf`).
+
+Example:
+
+```sh
+scitq config import-rclone
+```
+
+The command will print a YAML fragment that can be copied at the end of your `scitq.yaml` configuration.
