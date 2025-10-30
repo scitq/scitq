@@ -39,14 +39,15 @@ type Attr struct {
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
 		Create *struct {
-			Name      *string  `arg:"--name" help:"Optional name of the task"`
-			Container string   `arg:"--container,required" help:"Container to run"`
-			Command   string   `arg:"--command,required" help:"Command to execute"`
-			Shell     *string  `arg:"--shell" help:"Shell to use"`
-			Input     []string `arg:"--input,separate" help:"Input values for the task (can be repeated)"`
-			Resource  []string `arg:"--resource,separate" help:"Input values for the task (can be repeated)"`
-			Output    string   `arg:"--output,separate" help:"Output folder where results are copied for the task"`
-			StepId    *int32   `arg:"--step-id" help:"Step ID if task is affected to a step"`
+			Name         *string  `arg:"--name" help:"Optional name of the task"`
+			Container    string   `arg:"--container,required" help:"Container to run"`
+			Command      string   `arg:"--command,required" help:"Command to execute"`
+			Shell        *string  `arg:"--shell" help:"Shell to use"`
+			Input        []string `arg:"--input,separate" help:"Input values for the task (can be repeated)"`
+			Resource     []string `arg:"--resource,separate" help:"Input values for the task (can be repeated)"`
+			Output       string   `arg:"--output,separate" help:"Output folder where results are copied for the task"`
+			StepId       *int32   `arg:"--step-id" help:"Step ID if task is affected to a step"`
+			Dependencies []int32  `arg:"--dependency,separate" help:"IDs of tasks that this task depends on (can be repeated)"`
 		} `arg:"subcommand:create" help:"Create a new task"`
 
 		List *struct {
@@ -293,14 +294,15 @@ func (c *CLI) TaskCreate() error {
 	defer cancel()
 
 	req := &pb.TaskRequest{
-		Command:   c.Attr.Task.Create.Command,
-		Container: c.Attr.Task.Create.Container,
-		Shell:     c.Attr.Task.Create.Shell,
-		Input:     c.Attr.Task.Create.Input,
-		Resource:  c.Attr.Task.Create.Resource,
-		Output:    &c.Attr.Task.Create.Output,
-		StepId:    c.Attr.Task.Create.StepId,
-		TaskName:  c.Attr.Task.Create.Name,
+		Command:    c.Attr.Task.Create.Command,
+		Container:  c.Attr.Task.Create.Container,
+		Shell:      c.Attr.Task.Create.Shell,
+		Input:      c.Attr.Task.Create.Input,
+		Resource:   c.Attr.Task.Create.Resource,
+		Output:     &c.Attr.Task.Create.Output,
+		StepId:     c.Attr.Task.Create.StepId,
+		TaskName:   c.Attr.Task.Create.Name,
+		Dependency: c.Attr.Task.Create.Dependencies,
 	}
 	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {

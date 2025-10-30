@@ -123,6 +123,11 @@ There are three possible actions, `|untar`, `|gunzip` and `|mv:...`:
 
 Note: while mainly used for resources, URI action also works for inputs. They are only forbidden for output.
 
+
+##### Dependencies
+
+A task may depends on other tasks, this is declared by the `--dependency <task id>` flag which can be repeated. A task created with dependencies will wait (see waiting status below) until all the tasks it depends upon succeed.
+
 #### `list`
 
 List action exists for almost all objects and list this kind of object.
@@ -290,3 +295,128 @@ Example:
 ```sh
 scitq worker stats --worker-id 12 --worker-id 13
 ```
+
+
+### `workflow`
+
+Workflows are structured collections of steps, each step grouping related tasks.  
+They define the logical flow of computation — for example, preprocessing → alignment → analysis.
+
+#### `list`
+
+Lists all workflows currently registered on the server.
+
+```sh
+scitq workflow list
+```
+
+Displays for each workflow its ID, name, run strategy, and maximum allowed workers (if any).
+
+#### `create`
+
+Creates a new workflow.
+
+```sh
+scitq workflow create --name <workflow_name> [--run-strategy <strategy>] [--maximum-workers <n>]
+```
+
+Options:
+
+- `--name` (required): human-readable name of the workflow.  
+- `--run-strategy`: controls how tasks are distributed between workers.  
+  - `B`: **Batch-wise** (default) — workers focus on completing one step before moving to the next.  
+  - `T`: **Thread-wise** — workers advance tasks as far as possible across steps.  
+  - `D`: **Debug** mode.  
+  - `Z`: **Suspended** — workflow is created but not yet launched.  
+- `--maximum-workers`: caps the total number of workers the workflow can use.
+
+Example:
+
+```sh
+scitq workflow create --name myworkflow --run-strategy B --maximum-workers 50
+```
+
+#### `delete`
+
+Deletes a workflow by ID.
+
+```sh
+scitq workflow delete --id <workflow_id>
+```
+
+The workflow and its associated steps and tasks will be removed.  
+Use with care, as this cannot be undone.
+
+---
+
+### `step`
+
+A step is a subdivision of a workflow that groups tasks requiring similar execution environments (same container, resources, or logic).  
+Steps generally represent the order: tasks in step *N* usually depend on successful completion of step *N−1*. But dependancies are implemented at task level, so the real logic may be very different from that simple rule.
+
+#### `list`
+
+Lists all steps belonging to a given workflow.
+
+```sh
+scitq step list --workflow-id <workflow_id>
+```
+
+Displays for each step its ID and name.
+
+#### `create`
+
+Creates a new step within a workflow.
+
+```sh
+scitq step create --workflow-id <workflow_id> --name <step_name>
+```
+
+Options:
+
+- `--workflow-id`: numeric ID of the workflow to attach this step to.  
+- `--workflow-name`: alternative to `--workflow-id` (resolves the ID automatically).  
+- `--name`: required, name of the step.
+
+Example:
+
+```sh
+scitq step create --workflow-name myworkflow --name quality_control
+```
+
+#### `delete`
+
+Deletes a step by ID.
+
+```sh
+scitq step delete --id <step_id>
+```
+
+Removes the step and its task associations.
+
+#### `stats`
+
+Displays detailed runtime statistics for one or several steps.
+
+```sh
+scitq step stats [--workflow-id <workflow_id>] [--workflow-name <workflow_name>] [--step-id <id1>,<id2>...] [--task-name <substring>] [--totals]
+```
+
+Options:
+
+- `--workflow-id` or `--workflow-name`: filter stats by workflow.  
+- `--step-id`: specific step IDs to include (comma-separated).  
+- `--task-name`: only include steps containing tasks with this substring in their name.  
+- `--totals`: adds a totals line summarizing cumulative execution times.
+
+The output includes, per step:
+- number of tasks per status (waiting, running, succeeded, failed, etc.)
+- average and total durations of each execution phase
+- start and end timestamps
+- cumulative totals if `--totals` is used
+
+Example:
+
+```sh
+scitq step stats --workflow-name myworkflow --totals
+``
