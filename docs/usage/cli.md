@@ -650,3 +650,84 @@ Deletes a template run by ID.
 scitq run delete --id <run_id>
 ```
 
+
+### `user`
+
+User commands manage accounts authorized to use the scitq server. Appart for the user list command, you must have the admin status to use these commands.
+
+#### `list`
+
+Lists all registered users.
+
+```sh
+scitq user list
+```
+
+Shows: user ID, username, email, and whether the user is an admin.
+
+#### `create`
+
+Creates a new user account. 
+
+```sh
+scitq user create --username <name> --email <email> --password <password> [--admin]
+```
+
+Options:
+- `--username` (required): login name.
+- `--email` (required)
+- `--password` (required)
+- `--admin`: grant admin rights.
+
+Example:
+
+```sh
+scitq user create --username alice --email alice@example.org --password 'S3cure!' --admin
+```
+
+#### `update`
+
+Updates an existing user.
+
+```sh
+scitq user update --id <user_id> [--username <name>] [--email <email>] [--admin | --no-admin]
+```
+
+Options:
+- `--id` (required): user ID to update.
+- `--username`: new login name.
+- `--email`: new email.
+- `--admin`: grant admin rights.
+- `--no-admin`: remove admin rights.
+
+Examples:
+
+```sh
+scitq user update --id 12 --username alice2
+scitq user update --id 12 --no-admin
+```
+
+#### `delete`
+
+Deletes a user account by ID.
+
+```sh
+scitq user delete --id <user_id>
+```
+
+Example:
+
+```sh
+scitq user delete --id 12
+```
+
+#### `change-password`
+
+Interactively changes a user password (prompts for current and new password).
+
+```sh
+scitq user change-password --username <name>
+```
+
+- Prompts for current password, then for the new password twice.
+- Uses the server set by `SCITQ_SERVER` (defaults to `localhost:50051`).
