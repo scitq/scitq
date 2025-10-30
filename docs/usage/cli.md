@@ -347,8 +347,6 @@ scitq workflow delete --id <workflow_id>
 The workflow and its associated steps and tasks will be removed.  
 Use with care, as this cannot be undone.
 
----
-
 ### `step`
 
 A step is a subdivision of a workflow that groups tasks requiring similar execution environments (same container, resources, or logic).  
@@ -564,11 +562,75 @@ Shows a template’s metadata and parameters (including names, types, defaults, 
 scitq template detail [--id <template_id> | --name <template_name>] [--version <ver>]
 ```
 
----
 
-### `run`
+### `file`
 
-Operations on **template runs** (executions started via `template run`).
+File commands let you list or copy files between local paths and remote storages configured via `rclone` in `scitq.yaml`. Arguments are **positional** unless noted.
+
+
+#### `list`
+
+Lists files and directories using the client helper with the server’s rclone config.
+
+```sh
+scitq file list <src>
+```
+
+- `<src>`: source URI or local path to list.
+
+Examples:
+
+```sh
+scitq file list aznorth://rnd/test/
+scitq file list /data/results/
+```
+
+#### `copy`
+
+Copies data between locations. **Both arguments are positional.**
+
+```sh
+scitq file copy <src> <dst>
+```
+
+- `<src>`: source URI or local path.
+- `<dst>`: destination URI or local path.
+
+Examples:
+
+```sh
+scitq file copy /tmp/output/ azure://rnd/results/
+scitq file copy azure://rnd/input.fastq.gz s3://results/tmp/input.fastq.gz
+```
+
+Notes:
+- Supported schemes include:
+  - rclone entries in server configuration `scitq.yaml`, followed by `://`, likely `azure://`, `swift://`, `s3://`, 
+  - Regular filesystem paths, classical http/https/ftp URLs, 
+  - Specific protocols such as `asp://` for Aspera,
+  - Specific genetic entries for public databases like `run+fastq://<run accession>` (FASTQ files are DNA sequence files and a run is a sequencing experiment performed with a sequencer)
+
+
+#### `remote-list`
+
+Lists files and directories on a remote **from the server side** (useful when client cannot reach the storage directly). Not commonly used, prefer `list` which is more efficient.
+
+```sh
+scitq file remote-list <uri> [--timeout <seconds>]
+```
+
+- `<uri>`: remote URI to list (e.g. `aznorth://rnd/project/`).
+- `--timeout`: optional, defaults to `30` seconds.
+
+Example:
+
+```sh
+scitq file remote-list aznorth://rnd/test/ --timeout 30
+```
+
+### run
+
+Operations on **template runs** (executions started via `scitq template run`).
 
 #### `list`
 
