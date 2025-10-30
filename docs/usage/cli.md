@@ -126,7 +126,7 @@ Note: while mainly used for resources, URI action also works for inputs. They ar
 
 ##### Dependencies
 
-A task may depends on other tasks, this is declared by the `--dependency <task id>` flag which can be repeated. A task created with dependencies will wait (see waiting status below) until all the tasks it depends upon succeed.
+A task may depend on other tasks, this is declared by the `--dependency <task id>` flag which can be repeated. A task created with dependencies will wait (see waiting status below) until all the tasks it depends upon succeed.
 
 #### `list`
 
@@ -147,38 +147,38 @@ Each status is defined by a letter, and there are 4 primary statuses that are ve
 
 | Letter | Status             | Description                                                                                  |
 |--------|--------------------|----------------------------------------------------------------------------------------------|
-| **W** | waiting            | Task is not ready to be launched (depends on another task not yet succeeded).                |
-| **P** | pending            | Task is ready to be launched.                                                               |
-| **A** | assigned           | Task has been assigned to a worker (worker not yet aware).                                  |
-| **C** | accepted           | Worker has acknowledged and accepted the task.                                             |
-| **D** | downloading        | Task is preparing by downloading inputs, resources, and containers.                         |
-| **O** | on hold            | Task is ready but the worker has no available capacity.                                     |
-| **R** | running            | Task is currently executing.                                                                |
-| **U** | uploading          | Task ran successfully and is uploading output data.                                         |
-| **V** | uploading (failed) | Task failed, uploading output or logs.                                                     |
-| **S** | succeeded          | Task completed successfully and upload finished.                                           |
-| **F** | failed             | Task failed during execution or upload.                                                    |
-| **Z** | suspended          | Task is paused and can resume later.                                                       |
-| **X** | canceled           | Task was canceled before running.                                                          |
-| **I** | inactive           | Task is defined but waiting for the workflow to be finalized before becoming pending.      |
+| **W** | waiting            | The task is not ready to be launched (depends on another task not yet succeeded).                |
+| **P** | pending            | The task is ready to be launched.                                                               |
+| **A** | assigned           | The task has been assigned to a worker (worker not yet aware).                                  |
+| **C** | accepted           | A worker has acknowledged and accepted the task.                                             |
+| **D** | downloading        | The task is preparing by downloading inputs, resources, and containers.                         |
+| **O** | on hold            | The task is ready but the worker has no available capacity.                                     |
+| **R** | running            | The task is currently executing.                                                                |
+| **U** | uploading          | The task ran successfully and is uploading output data.                                         |
+| **V** | uploading (failed) | The task failed, uploading output or logs.                                                     |
+| **S** | succeeded          | The task was completed successfully and upload finished.                                           |
+| **F** | failed             | The task failed during execution or upload.                                                    |
+| **Z** | suspended          | The task is paused and can resume later.                                                       |
+| **X** | canceled           | The task was canceled before running.                                                          |
+| **I** | inactive           | The task is defined but waiting for the workflow to be finalized before becoming pending.      |
 
 - `--worker-id` filter tasks associated to this worker (minimal status `A`)
 - `--step-id` filter tasks related to this step (see step below)
 - `--workflow-id` filter tasks related to this workflow (see workflow below)
-- `--command` filter tasks containing this substring in their command (use of % is possible as a widecar for globbing)
+- `--command` filter tasks containing this substring in their command (use of % is possible as a wide car for globbing)
 - `--show-hidden` display hidden tasks.
 
-About hidden tasks: A task transmitted to a worker cannot be changed. Thus if the task fails to run for any reason (like if the worker disappear, or if the command simply failed), it won't be modified to remember what happened. It can be retried, though, either automatically in workflows or manually when created with the CLI. When retried, the old task is hidden and a new one is created. The reason for that is that in most cases, what matters is the latest temptative of the task, especially if the outcome is different (e.g. it eventually succeeds). So by default, previous attempts are hidden and not displayed. Showing hidden tasks, however, permits to see previous failure to understand what happened. 
+About hidden tasks: A task transmitted to a worker cannot be changed. Thus if the task fails to run for any reason (like if the worker disappear, or if the command simply failed), it won't be modified to remember what happened. It can be retried, though, either automatically in workflows or manually when created with the CLI. When retried, the old task is hidden and a new one is created. The reason for that is that in most cases, what matters is the latest attempt of the task, especially if the outcome is different (e.g., it eventually succeeds). So by default, previous attempts are hidden and not displayed. Showing hidden tasks, however, permits to see previous failure to understand what happened. 
 
 #### `retry`
 
-As shown just above a failed task can be retried: e.g. the previous (failed) task is hidden and a new pending task is created:
+As shown just above a failed task can be retried: e.g., the previous (failed) task is hidden and a new pending task is created:
 
 ```sh
 scitq task retry --id <task id>
 ```
 
-The action optionnaly permits to place an auto-retry on task, so to retry the task and let retry three more times if needed:
+The action optionally permits placing an auto-retry on the task, so to retry the task and let retry three more times if needed:
 
 ```sh
 scitq task retry --id <task id> --retry 3
@@ -186,7 +186,7 @@ scitq task retry --id <task id> --retry 3
 
 #### `output`
 
-This action enables to see the lines printed by the task (stdout/stderr).
+This action enables one to see the printed output of the task (stdout/stderr).
 
 ```sh
 scitq task output --id <task id>
@@ -198,14 +198,14 @@ scitq task output --id <task id>
 
 #### `list`
 
-`list` is the only available action for `flavor` objects. It lists instance types or server models. It takes two option:
+`list` is the only available action for `flavor` objects. It lists instance types or server models. It takes two options:
 - `--limit` default to 10, list the cheapest flavors matching the filtering criteria (see below),
 - `--filter` apply a filter on listed flavors.
 
 Filters are a column `:` separated list of simple requirements of the form:
 - `cpu>32` : flavor with strictly more than 32 vcpu,
 - `mem>=10` : flavor with 10Gb or more memory (e.g. RAM, not disks, see below),
-- `disk<1000` : flavor with less than 1000Gb disks.
+- `disk<1000` : flavor with a total disk space below 1000Gb.
 
 So for instance:
 ```sh
@@ -215,13 +215,13 @@ scitq flavor list --filter 'cpu>32:mem>=10:disk<1000'
 Filters can contain other criteria:
 - `provider~%azure%` : the provider name must contain azure (providers are always in small caps),
 - `region~%swed%` : the region must contain swed (swedencentral is a great Azure region),
-- `eviction<50` : the eviction(*) stats (not always reliable) must be below 50% (which is very high). If you say nothing, by default a filter `eviction<=5` is applied - which is a sound default (and Azure minimal stat) since a high eviction rate will make workers very inefficients.
+- `eviction<50` : the eviction(*) stats (not always reliable) must be below 50% (which is very high). If you say nothing, by default a filter `eviction<=5` is applied - which is a sound default (and Azure minimal stat) since a high eviction rate will make workers very inefficient.
 - `gpumem>=10` : the instance has more than 10Gb of GPU memory.
 - `gpu~%Tesla%` : the description of the GPU contains Tesla.
 
 (*) eviction is the Azure expression for reclaiming an instance (only spot instances are reclaimed, but they are very cheap and used by default in scitq). A reclaimed instance is killed. You can revive it but it is generally not efficient so the current strategy is to delete it and redeploy.
 
-NB: if a `scitq flavor list` without filter gives you an empty list, it's likely that the providers updates are not properly configured in `scitq.yaml`, see [configuration](../reference/configuration.md).
+NB: if a `scitq flavor list` without filter gives you an empty list, it's likely that the providers’ updates are not properly configured in `scitq.yaml`, see [configuration](../reference/configuration.md).
 
 ### `worker`
 
@@ -350,7 +350,7 @@ Use with care, as this cannot be undone.
 ### `step`
 
 A step is a subdivision of a workflow that groups tasks requiring similar execution environments (same container, resources, or logic).  
-Steps generally represent the order: tasks in step *N* usually depend on successful completion of step *N−1*. But dependancies are implemented at task level, so the real logic may be very different from that simple rule.
+Steps generally represent the order: tasks in step *N* usually depend on successful completion of step *N−1*. But dependencies are implemented at task level, so the real logic may be very different than this simple rule suggests.
 
 #### `list`
 
@@ -457,11 +457,11 @@ scitq recruiter create --step-id <id> --filter <expr> [--rank <n>] [--concurrenc
 - `--filter`: selection rule for compatible flavors (e.g. `"cpu>=8:mem>=16:region~%central%"`) (see flavor list above for a complete description)
 
 Options allow both **fixed concurrency** and **adaptive concurrency** modes:
-**Fixed concurrency** means any recruited worker will have the same concurrency and prefetch will have the same number of concurrent task excutions allowed:
+**Fixed concurrency** means any recruited worker will have the same concurrency and prefetch will have the same number of concurrent task executions allowed:
 - `--concurrency`: fixed number of concurrent tasks per worker
 - `--prefetch`: task prefetching configuration
 
-**Adaptative concurrency** means the number of concurrent task executions allowed depends on the worker capacity and the task requirement (if the cpu is limitating, then cpu requirement dictate the concurrency, if the memory is limitating it's the memory, etc.): 
+**Adaptative concurrency** means the number of concurrent task executions allowed depends on the worker capacity and the task requirement (if the cpu is limiting, then cpu requirement dictates the concurrency, if the memory is limiting it's the memory, etc.): 
 - `--cpu-per-task`, `--memory-per-task`, `--disk-per-task`: adaptive concurrency resource scaling
 - `--concurrency-min`, `--concurrency-max`: adaptive concurrency bounds
 - `--prefetch-percent`: express prefetch as a percentage of concurrency, thus 50 means when the adaptative concurrency sets to 10, prefetch sets to 5.
@@ -613,7 +613,7 @@ Notes:
 
 #### `remote-list`
 
-Lists files and directories on a remote **from the server side** (useful when client cannot reach the storage directly). Not commonly used, prefer `list` which is more efficient.
+Lists files and directories on a remote **from the server side** (useful when the client cannot reach the storage directly). Not commonly used, prefer `list` which is more efficient.
 
 ```sh
 scitq file remote-list <uri> [--timeout <seconds>]
@@ -653,7 +653,7 @@ scitq run delete --id <run_id>
 
 ### `user`
 
-User commands manage accounts authorized to use the scitq server. Appart for the user list command, you must have the admin status to use these commands.
+User commands manage accounts authorized to use the scitq server. Apart for the user list command, you must have the admin status to use these commands.
 
 #### `list`
 
@@ -723,7 +723,7 @@ scitq user delete --id 12
 
 #### `change-password`
 
-Interactively changes a user password (prompts for current and new password).
+Interactively changes a user’s password (prompts for current and new password).
 
 ```sh
 scitq user change-password --username <name>
@@ -735,11 +735,11 @@ scitq user change-password --username <name>
 ### `worker-event`
 
 Worker event commands let you inspect, delete, or prune event logs emitted by workers.  
-Events include informational, warning, error, and debug messages related to worker lifecycle and xecution.
+Events include informational, warning, error, and debug messages related to worker lifecycle and execution.
 
 #### `list`
 
-Lists recorded events. You can filter by worker, severity level, or class.
+Lists recorded events. You can filter by worker ID, severity level, or class.
 
 ```sh
 scitq worker-event list [--worker-id <id>] [--level <D|I|W|E>] [--class <name>] [--limit <n>]
