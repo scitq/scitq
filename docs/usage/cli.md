@@ -499,3 +499,92 @@ scitq recruiter delete --step-id 14 --rank 1
 
 Removes the recruiter from the scheduler.  
 Existing workers remain active, but no new workers will be recruited for that step.
+
+### `template`
+
+Templates, also called workflow templates, provide reusable workflow definitions, which can be uploaded once and executed with different parameter sets. They use the [python DSL language](dsl.md).
+
+#### `upload`
+
+Uploads a new template file to the server.
+
+```sh
+scitq template upload --path <file> [--force]
+```
+
+Registers a template script and makes it available for later runs.
+
+Options:
+- `--path` (required): path to the local template script (e.g. `qc.py`).
+- `--force`: overwrite an existing template that has the same name/version (if applicable).
+
+Example:
+
+```sh
+scitq template upload --path qc.py --force
+```
+
+#### `run`
+
+Runs a previously uploaded template. You can select it by name+version or by ID. Parameters are passed as comma‑separated `key=value` pairs.
+
+```sh
+scitq template run [--id <template_id> | --name <template_name>] [--version <ver>] [--param "k1=v1,k2=v2,..."]
+```
+
+Options:
+- `--id`: template ID to execute.
+- `--name`: template name (alternative to `--id`).
+- `--version`: optional version (defaults to latest when omitted with `--name`).
+- `--param`: comma‑separated key=value pairs (client converts them to JSON for the server).
+
+Examples:
+
+```sh
+scitq template run --name qc_step --version 1.2.0 --param "sample=A12,threads=8"
+scitq template run --id 42 --param "input_uri=s3://bucket/x.fastq.gz"
+```
+
+#### `list`
+
+Lists uploaded templates. You can filter by name and/or version.
+
+```sh
+scitq template list [--name <pattern>] [--version <ver>] [--latest]
+```
+
+- `--name`: filter by template name (supports wildcards like `meta%`).
+- `--version`: filter by version; with `--latest`, shows only the most recent version per name.
+
+#### `detail`
+
+Shows a template’s metadata and parameters (including names, types, defaults, and help text). You can target it by ID or by name+version.
+
+```sh
+scitq template detail [--id <template_id> | --name <template_name>] [--version <ver>]
+```
+
+---
+
+### `run`
+
+Operations on **template runs** (executions started via `template run`).
+
+#### `list`
+
+Lists previous template runs. You can filter by template ID.
+
+```sh
+scitq run list [--template-id <id>]
+```
+
+Shows for each run: run ID, template name/version, workflow name, creation time, status, and user.
+
+#### `delete`
+
+Deletes a template run by ID.
+
+```sh
+scitq run delete --id <run_id>
+```
+

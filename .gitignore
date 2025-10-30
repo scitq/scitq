@@ -34,3 +34,12 @@ scripts
 *.njsproj
 *.sln
 *.sw?
+
+# python
+pyproject.toml
+__version__.py
+python-src.tgz
+
+# svelte
+server/public/
+version.ts
