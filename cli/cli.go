@@ -130,7 +130,7 @@ type Attr struct {
 		Create *struct {
 			StepId          int32    `arg:"--step-id,required" help:"Step ID"`
 			Rank            int32    `arg:"--rank" default:"1" help:"Recruiter rank"`
-			Protofilter     string   `arg:"--protofilter,required" help:"A protofilter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
+			Protofilter     string   `arg:"--filter,required" help:"A filter like 'cpu>=12:mem>=30' or 'flavor~Standard_D2s_%:region is default'"`
 			Concurrency     *int32   `arg:"--concurrency" help:"Worker initial concurrency"`
 			Prefetch        *int32   `arg:"--prefetch" help:"Worker initial prefetch"`
 			PrefetchPercent *int32   `arg:"--prefetch-percent" help:"Worker initial prefetc (expressed as a %% of concurrency)"`
@@ -758,6 +758,7 @@ func (c *CLI) RecruiterCreate() error {
 		PrefetchPercent: c.Attr.Recruiter.Create.PrefetchPercent,
 		CpuPerTask:      c.Attr.Recruiter.Create.CpuPerTask,
 		MemoryPerTask:   c.Attr.Recruiter.Create.MemoryPerTask,
+		DiskPerTask:     c.Attr.Recruiter.Create.DiskPerTask,
 		ConcurrencyMin:  c.Attr.Recruiter.Create.ConcurrencyMin,
 		ConcurrencyMax:  c.Attr.Recruiter.Create.ConcurrencyMax,
 		MaxWorkers:      c.Attr.Recruiter.Create.MaxWorkers,

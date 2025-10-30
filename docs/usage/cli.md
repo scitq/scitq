@@ -419,4 +419,83 @@ Example:
 
 ```sh
 scitq step stats --workflow-name myworkflow --totals
-``
+```
+
+### `recruiter`
+
+Recruiters are the components that automatically manage worker deployment and recycling for workflow steps.  
+Each recruiter applies a filter to select valid flavors and providers, defines concurrency and prefetch rules, and determines how many workers to maintain.
+
+#### `list`
+
+Lists recruiters registered on the server.
+
+```sh
+scitq recruiter list [--step-id <id>]
+```
+
+Displays for each recruiter:
+- step ID and rank
+- filter expression
+- concurrency (fixed or adaptive)
+- prefetch or prefetch percentage
+- adaptive parameters (CPU, memory, disk per task)
+- number of rounds, timeout, and maximum workers
+
+Example output:
+
+```
+Step 12 | Rank 1 | Filter cpu>=8:mem>=30 | Concurrency=4 Prefetch=1 Rounds=3 Timeout=10 Maximum Workers=50
+```
+
+#### `create`
+
+Creates a new recruiter.
+
+```sh
+scitq recruiter create --step-id <id> --filter <expr> [--rank <n>] [--concurrency <n>] [--prefetch <n>] [--prefetch-percent <n>] [--cpu-per-task <n>] [--memory-per-task <gb>] [--disk-per-task <gb>] [--concurrency-min <n>] [--concurrency-max <n>] [--max-workers <n>] [--rounds <n>] [--timeout <s>]
+```
+
+- `--filter`: selection rule for compatible flavors (e.g. `"cpu>=8:mem>=16:region~%central%"`) (see flavor list above for a complete description)
+
+Options allow both **fixed concurrency** and **adaptive concurrency** modes:
+**Fixed concurrency** means any recruited worker will have the same concurrency and prefetch will have the same number of concurrent task excutions allowed:
+- `--concurrency`: fixed number of concurrent tasks per worker
+- `--prefetch`: task prefetching configuration
+
+**Adaptative concurrency** means the number of concurrent task executions allowed depends on the worker capacity and the task requirement (if the cpu is limitating, then cpu requirement dictate the concurrency, if the memory is limitating it's the memory, etc.): 
+- `--cpu-per-task`, `--memory-per-task`, `--disk-per-task`: adaptive concurrency resource scaling
+- `--concurrency-min`, `--concurrency-max`: adaptive concurrency bounds
+- `--prefetch-percent`: express prefetch as a percentage of concurrency, thus 50 means when the adaptative concurrency sets to 10, prefetch sets to 5.
+
+- `--max-workers`: upper limit of workers managed by this recruiter
+- `--rounds`: number of recruitment rounds per cycle
+- `--timeout`: seconds between recruitment cycles
+
+Examples:
+
+```sh
+scitq recruiter create --step-id 14 --filter 'cpu>=8:mem>=30' --concurrency 4 --prefetch 1 --max-workers 50
+```
+
+```sh
+scitq recruiter create --step-id 14 --filter 'cpu>=8:mem>=30' --cpu-per-task 2 --prefetch-percent 50 --max-workers 50
+```
+
+
+#### `delete`
+
+Deletes a recruiter by its step and rank.
+
+```sh
+scitq recruiter delete --step-id <id> --rank <n>
+```
+
+Example:
+
+```sh
+scitq recruiter delete --step-id 14 --rank 1
+```
+
+Removes the recruiter from the scheduler.  
+Existing workers remain active, but no new workers will be recruited for that step.
