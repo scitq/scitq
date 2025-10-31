@@ -165,13 +165,16 @@ func runCLICommand(c cli.CLI, args []string) (string, error) {
 	output := captureOutput(func() {
 		err = cli.Run(c2) // Generic CLI entry point if available
 	})
-	if err != nil && (strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "Unavailable")) {
+	if err != nil && (strings.Contains(err.Error(), "connection refused") ||
+		strings.Contains(err.Error(), "Unavailable")) {
 		for i := 0; i < 10; i++ {
 			time.Sleep(500 * time.Millisecond)
+			log.Printf("Error connecting CLI, retrying (%d/10)...", i+1)
 			output = captureOutput(func() {
 				err = cli.Run(c2)
 			})
 			if err == nil {
+				log.Printf("Connection successful after %d attempt(s)", i+1)
 				break
 			}
 		}
@@ -293,6 +296,22 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	time.Sleep(2 * time.Second)
 
 	serverAddr = fmt.Sprintf("localhost:%d", serverPort)
+
+	// Wait for gRPC server readiness
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", serverPort), 500*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			log.Println("✅ gRPC server is ready")
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Server did not become ready within timeout: %v", err)
+		}
+		log.Printf("⏳ Waiting for server to be ready: %v", err)
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Cleanup func closes container and temp dirs
 	cleanup = func() {

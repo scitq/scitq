@@ -200,7 +200,7 @@ define build_binary
 endef
 
 .PHONY: integration-test
-integration-test:
+integration-test: tgz-python-src
 	@cd tests/integration && \
 	if [ -n "$(TEST)" ]; then \
 		go test -v -run '$(TEST)' ./...; \
@@ -209,7 +209,7 @@ integration-test:
 	fi
 
 .PHONY: fresh-integration-test
-fresh-integration-test:
+fresh-integration-test: tgz-python-src
 	@cd tests/integration && \
 	if [ -n "$(TEST)" ]; then \
 		go test -count=1 -v -run '$(TEST)' ./...; \
