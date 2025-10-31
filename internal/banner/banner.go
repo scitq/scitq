@@ -9,6 +9,6 @@ import (
 )
 
 func init() {
-	app := filepath.Base(os.Args[0]) // e.g., scitq-server, scitq-client, scitq-cli
+	app := filepath.Base(os.Args[0]) // e.g., scitq-server, scitq-client, scitq
 	log.Printf("%s %s", app, version.Full())
 }

@@ -606,7 +606,11 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 
 	// Ensure store directory exists
 	if err := os.MkdirAll(store, 0777); err != nil {
-		return fmt.Errorf("could not create store directory %s: %v", store, err)
+		store = "/tmp/" + store
+		if err := os.MkdirAll(store, 0777); err != nil {
+			return fmt.Errorf("could not create store directory %s: %v", store, err)
+		}
+		log.Printf("Using a temporary store.")
 	}
 	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token, IsPermanent: isPermanent, Provider: provider, Region: region}
 	taskWeights := &sync.Map{}

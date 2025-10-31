@@ -23,13 +23,13 @@
   [✅] Fix concurrent-write hazard (writer pump per connection)
   [ ] Add event envelope with monotonic event_id + server ring buffer (to replay missed events)
   [ ] wsClient.ts small upgrades: lastEventId tracking/since, single dispatcher -> route by msg.type
-[ ] implement download/execution/upload timeout in client (using either config setting or database content for the task)
-[ ] add access to timeout in python DSL
+[✅] implement download/execution/upload timeout in client (using either config setting or database content for the task)
+[✅] add access to timeout in python DSL
+[✅] add run duration measurement
+[✅] add helper as `source /resource/shell_helpers.sh` (or `source /builtinresource/shell_helpers.sh` ?), rather than copying it in all scripts, same for find_pairs, (`source /builtinresource/shell_biology.sh`)
 
 # TODO later
 
 [ ] implement some timeouts for workflow template scripts
 [ ] implement debug mode
 [ ] implement workflow strategy (sticky)
-[ ] add run duration measurement
-[ ] add helper as `source /resource/shell_helpers.sh` (or `source /builtinresource/shell_helpers.sh` ?), rather than copying it in all scripts, same for find_pairs, (`source /builtinresource/shell_biology.sh`)

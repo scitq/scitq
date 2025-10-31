@@ -7,8 +7,8 @@
 |  | DBURL | `scitq.db_url` | `postgres://localhost/scitq2?sslmode=disable` | `string` | DBURL is the database connection string used by scitq to connect to its PostgreSQL database. It should include the username, password, host, database name, and SSL mode. |
 |  | MaxDBConcurrency | `scitq.max_db_concurrency` | `50` | `int` | MaxDBConcurrency limits the maximum number of concurrent database connections. |
 |  | LogLevel | `scitq.log_level` | `info` | `string` | LogLevel sets the verbosity level of logging output. Common values include "debug", "info", "warn", and "error". |
-|  | LogRoot | `scitq.log_root` | `log` | `string` | LogRoot specifies the root directory where remote task stdout/stderr files are stored. |
-|  | ScriptRoot | `scitq.script_root` | `scripts` | `string` | ScriptRoot is the directory where (python) server-side scripts are located. Scripts run by scitq are expected to be found here. |
+|  | LogRoot | `scitq.log_root` | `/var/lib/scitq/tasks` | `string` | LogRoot specifies the root directory where remote task stdout/stderr files are stored. |
+|  | ScriptRoot | `scitq.script_root` | `/var/lib/scitq/scripts` | `string` | ScriptRoot is the directory where (python) server-side scripts are located. Scripts run by scitq are expected to be found here. |
 |  | ScriptVenv | `scitq.script_venv` | `/var/lib/scitq/python` | `string` | ScriptVenv specifies the path to the Python virtual environment used to run scripts. This isolates script dependencies from the system Python environment. Python venv creation and DSL installation in the venv is managed automatically by server. |
 |  | ScriptRunnerUser | `scitq.script_runner_user` | `nobody` | `string` | ScriptRunnerUser is the system user account under which scripts are executed. Running scripts as a non-privileged user enhances security. |
 |  | ClientBinaryPath | `scitq.client_binary_path` | `/usr/local/bin/scitq-client` | `string` | ClientBinaryPath is the filesystem path to the scitq client binary. This is used for automated client installation. |

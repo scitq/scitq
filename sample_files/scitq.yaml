@@ -2,8 +2,9 @@ scitq:
   port: 50051
   db_url: "postgres://scitq_user:certainlynottherightpassword@localhost/scitq2?sslmode=disable"
   log_level: "info"
-  log_root: "log"
-  script_root: "scripts"
+  log_root: "/var/lib/scitq/tasks"
+  script_root: "/var/lib/scitq/scripts"
+  script_venv: "/var/lib/scitq/python"
   script_runner_user: nobody
   server_name: "alpha2"
   server_fqdn: "alpha2.gmt.bio"

@@ -38,9 +38,16 @@ func main() {
 		return
 	}
 
-	cfg, err := config.LoadConfig(*config_file)
-	if err != nil {
-		log.Fatalf("failed to load configuration: %v", err)
+	var cfg *config.Config
+	if *config_file != "" {
+		var err error
+		cfg, err = config.LoadConfig(*config_file)
+		if err != nil {
+			log.Fatalf("failed to load configuration: %v", err)
+		}
+	} else {
+		log.Printf("[WARNING] Test server NEVER USE IN PRODUCTION")
+		cfg = config.Default()
 	}
 
 	var wg sync.WaitGroup

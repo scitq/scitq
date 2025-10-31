@@ -32,11 +32,11 @@ type Config struct {
 		LogLevel string `yaml:"log_level" default:"info"`
 
 		// LogRoot specifies the root directory where remote task stdout/stderr files are stored.
-		LogRoot string `yaml:"log_root" default:"log"`
+		LogRoot string `yaml:"log_root" default:"/var/lib/scitq/tasks"`
 
 		// ScriptRoot is the directory where (python) server-side scripts are located.
 		// Scripts run by scitq are expected to be found here.
-		ScriptRoot string `yaml:"script_root" default:"scripts"`
+		ScriptRoot string `yaml:"script_root" default:"/var/lib/scitq/scripts"`
 
 		// ScriptVenv specifies the path to the Python virtual environment used to run scripts.
 		// This isolates script dependencies from the system Python environment.
@@ -434,4 +434,28 @@ func randomToken() string {
 	}
 	// Use RawURLEncoding to avoid padding and ensure URL safety.
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func Default() *Config {
+	var c Config
+	if err := defaults.Set(&c); err != nil {
+		log.Printf("failed to set defaults: %v", err)
+	}
+	// Quick-start overrides (do NOT restate any struct-tag defaults):
+	c.Scitq.DBURL = "postgres://scitq:scitq@localhost/scitq?sslmode=disable"
+	c.Scitq.LogRoot = "/tmp/scitq/tasks"
+	c.Scitq.ScriptRoot = "/tmp/scitq/scripts"
+	c.Scitq.ScriptVenv = "/tmp/scitq/python"
+
+	// Fields without defaults that must be set to pass Validate():
+	if c.Scitq.ClientDownloadToken == "" {
+		c.Scitq.ClientDownloadToken = randomToken()
+	}
+	if c.Scitq.JwtSecret == "" {
+		c.Scitq.JwtSecret = randomToken()
+	}
+	if c.Scitq.WorkerToken == "" {
+		c.Scitq.WorkerToken = "quickstart"
+	}
+	return &c
 }

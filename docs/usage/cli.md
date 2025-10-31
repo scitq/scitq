@@ -48,7 +48,7 @@ You can always type `scitq --help` or `scitq <object> --help` or `scitq <object>
 
 ### `task`
 
-#### `create`
+#### `task create`
 
 Create a new task in scitq. This task will be handled by the first worker that can be assigned to it. Task and Worker are assigned to small work groups called steps. Only workers belonging to your task step will be able to handle it. To keep things simple, we will first stay in the default situation where there are no steps for either tasks or workers.
 
@@ -128,7 +128,7 @@ Note: while mainly used for resources, URI action also works for inputs. They ar
 
 A task may depend on other tasks, this is declared by the `--dependency <task id>` flag which can be repeated. A task created with dependencies will wait (see waiting status below) until all the tasks it depends upon succeed.
 
-#### `list`
+#### `task list`
 
 List action exists for almost all objects and list this kind of object.
 
@@ -170,7 +170,7 @@ Each status is defined by a letter, and there are 4 primary statuses that are ve
 
 About hidden tasks: A task transmitted to a worker cannot be changed. Thus if the task fails to run for any reason (like if the worker disappear, or if the command simply failed), it won't be modified to remember what happened. It can be retried, though, either automatically in workflows or manually when created with the CLI. When retried, the old task is hidden and a new one is created. The reason for that is that in most cases, what matters is the latest attempt of the task, especially if the outcome is different (e.g., it eventually succeeds). So by default, previous attempts are hidden and not displayed. Showing hidden tasks, however, permits to see previous failure to understand what happened. 
 
-#### `retry`
+#### `task retry`
 
 As shown just above a failed task can be retried: e.g., the previous (failed) task is hidden and a new pending task is created:
 
@@ -184,7 +184,7 @@ The action optionally permits placing an auto-retry on the task, so to retry the
 scitq task retry --id <task id> --retry 3
 ```
 
-#### `output`
+#### `task output`
 
 This action enables one to see the printed output of the task (stdout/stderr).
 
@@ -196,7 +196,7 @@ scitq task output --id <task id>
 
 `flavor` is the term coined by Openstack to describe a type of instance, scitq kept it.
 
-#### `list`
+#### `flavor list`
 
 `list` is the only available action for `flavor` objects. It lists instance types or server models. It takes two options:
 - `--limit` default to 10, list the cheapest flavors matching the filtering criteria (see below),
@@ -228,7 +228,7 @@ NB: if a `scitq flavor list` without filter gives you an empty list, it's likely
 Workers are the compute units that actually execute tasks. They can be deployed automatically by the recruiter engine or manually through the CLI.  
 Each worker is associated with a **provider** (e.g. Azure, OpenStack), an optional **region**, and optionally a **step** it serves in a workflow.  
 
-#### `list`
+#### `worker list`
 
 Lists all workers known to the scheduler.
 
@@ -238,7 +238,7 @@ scitq worker list
 
 Displays for each worker its ID, name, status, concurrency, prefetch value, IP addresses, flavor, provider, and region.
 
-#### `deploy`
+#### `worker deploy`
 
 Deploys a new worker manually.  
 This command queries available flavors to match the specified provider, region, and flavor name, then creates the requested number of instances.
@@ -265,7 +265,7 @@ scitq worker deploy --provider azure.primary --region swedencentral --flavor Sta
 
 This deploys two workers on Azure, each able to execute four tasks concurrently for step ID 14.
 
-#### `delete`
+#### `worker delete`
 
 Deletes a worker by its ID.
 
@@ -276,7 +276,7 @@ scitq worker delete --worker-id <id>
 The command sends a deletion order to the provider.  
 Use with care, since ongoing tasks will be interrupted.
 
-#### `stats`
+#### `worker stats`
 
 Displays live resource usage for one or several workers.
 
@@ -302,7 +302,7 @@ scitq worker stats --worker-id 12 --worker-id 13
 Workflows are structured collections of steps, each step grouping related tasks.  
 They define the logical flow of computation — for example, preprocessing → alignment → analysis.
 
-#### `list`
+#### `workflow list`
 
 Lists all workflows currently registered on the server.
 
@@ -312,7 +312,7 @@ scitq workflow list
 
 Displays for each workflow its ID, name, run strategy, and maximum allowed workers (if any).
 
-#### `create`
+#### `workflow create`
 
 Creates a new workflow.
 
@@ -336,7 +336,7 @@ Example:
 scitq workflow create --name myworkflow --run-strategy B --maximum-workers 50
 ```
 
-#### `delete`
+#### `workflow delete`
 
 Deletes a workflow by ID.
 
@@ -352,7 +352,7 @@ Use with care, as this cannot be undone.
 A step is a subdivision of a workflow that groups tasks requiring similar execution environments (same container, resources, or logic).  
 Steps generally represent the order: tasks in step *N* usually depend on successful completion of step *N−1*. But dependencies are implemented at task level, so the real logic may be very different than this simple rule suggests.
 
-#### `list`
+#### `step list`
 
 Lists all steps belonging to a given workflow.
 
@@ -362,7 +362,7 @@ scitq step list --workflow-id <workflow_id>
 
 Displays for each step its ID and name.
 
-#### `create`
+#### `step create`
 
 Creates a new step within a workflow.
 
@@ -382,7 +382,7 @@ Example:
 scitq step create --workflow-name myworkflow --name quality_control
 ```
 
-#### `delete`
+#### `step delete`
 
 Deletes a step by ID.
 
@@ -392,7 +392,7 @@ scitq step delete --id <step_id>
 
 Removes the step and its task associations.
 
-#### `stats`
+#### `step stats`
 
 Displays detailed runtime statistics for one or several steps.
 
@@ -424,7 +424,7 @@ scitq step stats --workflow-name myworkflow --totals
 Recruiters are the components that automatically manage worker deployment and recycling for workflow steps.  
 Each recruiter applies a filter to select valid flavors and providers, defines concurrency and prefetch rules, and determines how many workers to maintain.
 
-#### `list`
+#### `recruiter list`
 
 Lists recruiters registered on the server.
 
@@ -446,7 +446,7 @@ Example output:
 Step 12 | Rank 1 | Filter cpu>=8:mem>=30 | Concurrency=4 Prefetch=1 Rounds=3 Timeout=10 Maximum Workers=50
 ```
 
-#### `create`
+#### `recruiter create`
 
 Creates a new recruiter.
 
@@ -481,7 +481,7 @@ scitq recruiter create --step-id 14 --filter 'cpu>=8:mem>=30' --cpu-per-task 2 -
 ```
 
 
-#### `delete`
+#### `recruiter delete`
 
 Deletes a recruiter by its step and rank.
 
@@ -502,7 +502,7 @@ Existing workers remain active, but no new workers will be recruited for that st
 
 Templates, also called workflow templates, provide reusable workflow definitions, which can be uploaded once and executed with different parameter sets. They use the [python DSL language](dsl.md).
 
-#### `upload`
+#### `template upload`
 
 Uploads a new template file to the server.
 
@@ -522,7 +522,7 @@ Example:
 scitq template upload --path qc.py --force
 ```
 
-#### `run`
+#### `template run`
 
 Runs a previously uploaded template. You can select it by name+version or by ID. Parameters are passed as comma‑separated `key=value` pairs.
 
@@ -543,7 +543,7 @@ scitq template run --name qc_step --version 1.2.0 --param "sample=A12,threads=8"
 scitq template run --id 42 --param "input_uri=s3://bucket/x.fastq.gz"
 ```
 
-#### `list`
+#### `template list`
 
 Lists uploaded templates. You can filter by name and/or version.
 
@@ -554,7 +554,7 @@ scitq template list [--name <pattern>] [--version <ver>] [--latest]
 - `--name`: filter by template name (supports wildcards like `meta%`).
 - `--version`: filter by version; with `--latest`, shows only the most recent version per name.
 
-#### `detail`
+#### `template detail`
 
 Shows a template’s metadata and parameters (including names, types, defaults, and help text). You can target it by ID or by name+version.
 
@@ -568,7 +568,7 @@ scitq template detail [--id <template_id> | --name <template_name>] [--version <
 File commands let you list or copy files between local paths and remote storages configured via `rclone` in `scitq.yaml`. Arguments are **positional** unless noted.
 
 
-#### `list`
+#### `file list`
 
 Lists files and directories using the client helper with the server’s rclone config.
 
@@ -585,7 +585,7 @@ scitq file list aznorth://rnd/test/
 scitq file list /data/results/
 ```
 
-#### `copy`
+#### `file copy`
 
 Copies data between locations. **Both arguments are positional.**
 
@@ -611,7 +611,7 @@ Notes:
   - Specific genetic entries for public databases like `run+fastq://<run accession>` (FASTQ files are DNA sequence files and a run is a sequencing experiment performed with a sequencer)
 
 
-#### `remote-list`
+#### `file remote-list`
 
 Lists files and directories on a remote **from the server side** (useful when the client cannot reach the storage directly). Not commonly used, prefer `list` which is more efficient.
 
@@ -632,7 +632,7 @@ scitq file remote-list aznorth://rnd/test/ --timeout 30
 
 Operations on **template runs** (executions started via `scitq template run`).
 
-#### `list`
+#### run list
 
 Lists previous template runs. You can filter by template ID.
 
@@ -642,7 +642,7 @@ scitq run list [--template-id <id>]
 
 Shows for each run: run ID, template name/version, workflow name, creation time, status, and user.
 
-#### `delete`
+#### run delete
 
 Deletes a template run by ID.
 
@@ -655,7 +655,7 @@ scitq run delete --id <run_id>
 
 User commands manage accounts authorized to use the scitq server. Apart for the user list command, you must have the admin status to use these commands.
 
-#### `list`
+#### user list
 
 Lists all registered users.
 
@@ -665,7 +665,7 @@ scitq user list
 
 Shows: user ID, username, email, and whether the user is an admin.
 
-#### `create`
+#### user create
 
 Creates a new user account. 
 
@@ -685,7 +685,7 @@ Example:
 scitq user create --username alice --email alice@example.org --password 'S3cure!' --admin
 ```
 
-#### `update`
+#### user update
 
 Updates an existing user.
 
@@ -707,7 +707,7 @@ scitq user update --id 12 --username alice2
 scitq user update --id 12 --no-admin
 ```
 
-#### `delete`
+#### user delete
 
 Deletes a user account by ID.
 
@@ -721,7 +721,7 @@ Example:
 scitq user delete --id 12
 ```
 
-#### `change-password`
+#### user change-password
 
 Interactively changes a user’s password (prompts for current and new password).
 
@@ -737,7 +737,7 @@ scitq user change-password --username <name>
 Worker event commands let you inspect, delete, or prune event logs emitted by workers.  
 Events include informational, warning, error, and debug messages related to worker lifecycle and execution.
 
-#### `list`
+#### worker-event list
 
 Lists recorded events. You can filter by worker ID, severity level, or class.
 
@@ -757,7 +757,7 @@ Example:
 scitq worker-event list --worker-id 12 --level E
 ```
 
-#### `delete`
+#### worker-event delete
 
 Deletes a worker event by ID.
 
@@ -773,7 +773,7 @@ Example:
 scitq worker-event delete --id 42
 ```
 
-#### `prune`
+#### worker-event prune
 
 Deletes multiple worker events matching filters or older than a given age.
 
@@ -822,7 +822,7 @@ $2a$10$Ff...ZqNQvJfFzJ7rO9I1KOdwb.x7y7Kz7JZkX8ZyF4jO
 
 Configuration-related utilities for importing or generating configuration fragments.
 
-#### `import-rclone`
+#### `config import-rclone`
 
 Imports an existing `rclone.conf` file and prints a corresponding YAML fragment suitable for inclusion in `scitq.yaml`.
 

@@ -25,16 +25,10 @@ BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 
 # Normalize version for Python (PEP 440 compliant)
-define normalize_pep440
-tag=$$(git describe --tags --always --dirty); \
-norm=$$(echo $$tag | sed 's/-dirty/.dev0/; s/-/./g'); \
-case $$norm in \
-  [0-9]*) echo $$norm ;; \
-  *) echo 0.0.0+$$norm ;; \
-esac
-endef
+normalize_pep440 = git describe --tags --always --dirty | sed -E 's/-dirty/.dev0/; s/-/./g; /^[0-9a-z]{3,8}/s/^/0.0.0+/'
+PY_PEP440_TAG = $(shell $(normalize_pep440))
 
-PY_PEP440_TAG := $(shell $(normalize_pep440))
+PY_PEP440_TAG = $(shell $(normalize_pep440))
 
 LDFLAGS    := -X 'github.com/scitq/scitq/internal/version.Version=$(GIT_TAG)' \
               -X 'github.com/scitq/scitq/internal/version.Commit=$(GIT_SHA)' \
@@ -164,8 +158,10 @@ add-py-version:
 	  echo "__build_time__ = '$(BUILD_DATE)'"; \
 	} > $(PY_VERSION_FILE)
 	@echo "✓ Updated $(PY_VERSION_FILE)"
-	@printf '/^name =/a\\\nversion = "%s"\n' "$(PY_PEP440_TAG)" | sed -f - $(PY_PROTO) > $(PY_PROJECT)
-	@echo "✓ Generated $(PY_PROJECT) with version $(PY_PEP440_TAG)"
+	# Normalize version string to be PEP 440 compliant before writing to pyproject.toml
+	@norm_version="$(PY_PEP440_TAG)"; \
+	sed "s/^version = .*/version = \"$$norm_version\"/" $(PY_PROTO) > $(PY_PROJECT); \
+	echo "✓ Generated $(PY_PROJECT) with version $$norm_version"
 
 # Package Python source tree into an embedded zip (for Go embedding)
 tgz-python-src: add-py-version

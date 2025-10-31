@@ -135,7 +135,7 @@ func main() {
 	serverAddr := flag.String("server", "localhost:50051", "gRPC server address")
 	concurrency := flag.Uint("concurrency", 1, "Number of concurrent tasks")
 	store := flag.String("store", "/scratch", "Path to the store directory")
-	token := flag.String("token", "", "Token for authentication")
+	token := flag.String("token", "quickstart", "Token for authentication")
 	jobID := flag.Uint("job", 0, "Job ID for this deployment (for progress reporting)")
 	version_flag := flag.Bool("version", false, "Print version information and exit")
 	isPermanent := flag.Bool("permanent", false, "Register this worker as permanent (won't be deleted by the watchdog, use with care)")
@@ -196,5 +196,5 @@ func main() {
 	// Start the client
 	ctx := context.Background()
 
-	client.Run(ctx, *serverAddr, int32(*concurrency), *name, *store, *token, *isPermanent, provider, region)
+	log.Print(client.Run(ctx, *serverAddr, int32(*concurrency), *name, *store, *token, *isPermanent, provider, region))
 }
