@@ -217,6 +217,10 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	if err := os.MkdirAll(tempScriptRoot, 0o755); err != nil {
 		t.Fatalf("failed to create temp script root: %v", err)
 	}
+	tempPythonEnv := filepath.Join(baseTmp, "python")
+	if err := os.MkdirAll(tempPythonEnv, 0o755); err != nil {
+		t.Fatalf("failed to create temp python env root: %v", err)
+	}
 
 	// Pick a free server port to avoid collisions between tests
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -258,6 +262,7 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 		cfg.Scitq.WorkerToken = workerToken
 		cfg.Scitq.JwtSecret = jwtSecret
 		cfg.Scitq.ScriptRoot = tempScriptRoot
+		cfg.Scitq.ScriptVenv = tempPythonEnv
 		cfg.Scitq.RecruitmentInterval = 2
 		cfg.Scitq.AdminUser = adminUser
 		cfg.Scitq.AdminHashedPassword = string(adminHashedPassword)
