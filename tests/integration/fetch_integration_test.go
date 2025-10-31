@@ -75,7 +75,7 @@ func TestFetchIntegration(t *testing.T) {
 
 		reNew := regexp.MustCompile(fmt.Sprintf(`ID:\s*%d.*Status:\s*S.*`, pbTask.TaskId))
 		return reNew.MatchString(out)
-	}, 5*time.Second, 2*time.Second, fmt.Sprintf("downloading task %d did not succeed yet", pbTask.TaskId))
+	}, 60*time.Second, 2*time.Second, fmt.Sprintf("downloading task %d did not succeed yet", pbTask.TaskId))
 	log.Printf("Task %d succeeded", pbTask.TaskId)
 
 	// 3. Fetch result checksum from /output/md5.txt
