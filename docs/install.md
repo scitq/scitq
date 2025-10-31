@@ -120,3 +120,46 @@ sudo systemctl daemon-reload
 # Enable and start the service
 sudo systemctl enable --now scitq-client.service
 ```
+
+# Production polishing
+
+## Using proper SSL certificates (Let's Encrypt)
+
+By default, scitq uses self-signed certificates, which is quite inconvenient with modern browsers, so it is recommended to use real world certificates and Let's Encrypt free ones are perfect for this.
+
+- Install certbot for `other` types of webserver and `linux-pip` : https://certbot.eff.org/instructions?ws=other&os=pip
+- You cannot specify directly letsencrypt files in `scitq.yaml` because of some permission issues, so you should have something like:
+
+```yaml
+scitq:
+  [...]
+  certificate_key: "/etc/scitq/privkey.pem"
+  certificate_pem: "/etc/scitq/fullchain.pem"
+```
+
+- create the folder: `mkdir /etc/scitq`
+- then create a certbot post-hook:
+```sh
+SERVER=my.server.fqdn
+cat <<EOF >/usr/local/bin/copycerts.sh
+#!/bin/sh
+cp /etc/letsencrypt/live/$SERVER/fullchain.pem /etc/scitq/
+cp /etc/letsencrypt/live/$SERVER/privkey.pem /etc/scitq/
+EOF
+chmod a+x /usr/local/bin/copycerts.sh
+```
+- then in the crontab (by default in `/etc/crontab`) entry certbot made you add, change this:
+```sh
+0 0,12 * * * root sleep XXXX && certbot renew -q
+```
+to this:
+```sh
+0 0,12 * * * root sleep XXXX && certbot renew --post-hook /usr/local/bin/copycerts.sh -q
+```
+
+## Backuping
+
+To backup a scitq install, backup:
+- PostgreSQL (using pg_dump) : it contains all history
+- `/etc/scitq.yaml` : your configuration (it contains passwords for your providers so be careful)
+- `/var/lib/scitq` : it contains your scripts, task logs and python DSL environment (this is the default location, the location may be changed in `/etc/scitq.yaml`)

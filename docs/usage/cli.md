@@ -1,4 +1,4 @@
-# Basic Usage with the CLI
+# CLI Reference
 
 ## Login
 
@@ -98,9 +98,9 @@ This is not the only folder that is mounted in the docker container, there are a
 scitq task create --resource s3://bucket/resource/mybinary --input s3://bucket/data/input1.dat --output s3://bucket/results/mybinary-input1/ --container alpine --command "/resource/mybinary -i /input/input1.dat -o /output/output.dat"
 ```
 
-As you can see `--output` is a folder (it needs not to exist before creating the task), everything that is written to the `/output/` folder will be copied to this location at the end of the task (whether it succeeds or not). `--input` is a file, you can have several of them, and specify a folder as `--input` is possible, and it means all the (recursive) content of the folder. Globing patterns such as `s3://bucket/data/*.dat` are also possible as an input pattern (but not fancy patterns such as curly brace ones, the only special char admitted is `*`). `--output` does not have this flexibility, it is necessarily a folder.
+Contrarily to `--resource`/`--input`, `--output` must be a folder (it needs not to exist before creating the task) and can only be specified once, everything that is written to the `/output/` folder will be copied to this location at the end of the task (whether it succeeds or not). `--input` is a generally speaking a file, you can have several of them, and specify a folder as `--input` is possible, and it means all the (recursive) content of the folder. Glob patterns such as `s3://bucket/data/*.dat` are also possible as an input pattern (but not fancy patterns such as curly brace ones, the only special char admitted is `*`). `--output` does not have this flexibility, it is necessarily a folder.
 
-As you can see `--resource` and `--input` are quite similar, both are files, can be specified several times and offer some flexibility by allowing also folders and globing patterns. They differ in two ways:
+At a first glance, `--resource` and `--input` seem similar, both are files, can be specified several times and offer some flexibility by allowing also folders and glob patterns. They differ in two ways:
 - first they are made available to tasks through two different folders,
 - second, resources are shared between tasks, while inputs are unique. For this reason `/resource` is a read-only folder contrarily to `/input`. For a binary that is not modified during execution, it is best brought to the task as a resource. It is the same for a reference data. Processed data are typically inputs and not resources.
 
