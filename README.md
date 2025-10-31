@@ -12,8 +12,6 @@
 
 A distributed task queue for scientific and cloud workloads, built in Go with PostgreSQL and gRPC.
 
-A lightweight and efficient distributed task queue in Go with gRPC using PostgreSQL.
-
 ### Quick Start
 
 This example demonstrates how to quickly set up and run a minimal instance locally.
