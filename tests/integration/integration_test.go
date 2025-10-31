@@ -165,6 +165,17 @@ func runCLICommand(c cli.CLI, args []string) (string, error) {
 	output := captureOutput(func() {
 		err = cli.Run(c2) // Generic CLI entry point if available
 	})
+	if err != nil && (strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "Unavailable")) {
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			output = captureOutput(func() {
+				err = cli.Run(c2)
+			})
+			if err == nil {
+				break
+			}
+		}
+	}
 	return output, err
 }
 
