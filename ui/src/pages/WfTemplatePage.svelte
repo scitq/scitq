@@ -228,11 +228,11 @@
   async function handleRunTemplate() {
     showParamErrors = false;
     paramErrors = {};
-    
+
     try {
       const parsedParams = JSON.parse(selectedTemplate?.paramJson || '[]');
       let hasErrors = false;
-      
+
       parsedParams.forEach(param => {
         if (param.required && (!userParams[param.name] || userParams[param.name].trim() === '')) {
           paramErrors[param.name] = 'This field is required';
@@ -247,12 +247,16 @@
 
       if (!selectedTemplate) return;
 
-      const paramJson = JSON.stringify(userParams);
-      const res = await runTemp(selectedTemplate.workflowTemplateId, paramJson);
+      // Only include paramJson if userParams is non-empty
+      const hasParams = Object.keys(userParams).length > 0;
+      const res = hasParams
+        ? await runTemp(selectedTemplate.workflowTemplateId, JSON.stringify(userParams))
+        : await runTemp(selectedTemplate.workflowTemplateId, '{}');
 
       if (res.status !== 'S') {
         const msg = res.errorMessage || 'Template run failed (unknown error)';
         errorMessage = msg;
+        showParamModal = false;
         showRunErrorModal = true;
         return;
       }
@@ -270,6 +274,7 @@
     } catch (error) {
       console.error("Failed to run template:", error);
       errorMessage = error.message || "Unknown error occurred.";
+      showParamModal = false;
       showRunErrorModal = true;
     }
   }

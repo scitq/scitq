@@ -165,7 +165,7 @@ def run(func: Callable):
 
     result = None
     has_run = False
-    if args.values:
+    if args.values and args.values!='{}':
         if param_class is None:
             print("❌ --values was provided but the workflow function does not accept parameters.", file=sys.stderr)
             sys.exit(1)

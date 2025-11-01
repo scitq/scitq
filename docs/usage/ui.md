@@ -154,3 +154,10 @@ The template page upper form enables you to upload new/updated templates:
 Clicking on the `+` button will give you a file selector to select a new DSL file, which upload will be validated by the green check button.
 
 
+## Settings page
+
+![settings page](imgs/settings-page.png)
+
+The setting page has two parts, the upper part, available for all users. It enables to change your password.
+
+The lower part enable to add and edit users.
