@@ -467,8 +467,12 @@ Options allow both **fixed concurrency** and **adaptive concurrency** modes:
 - `--prefetch-percent`: express prefetch as a percentage of concurrency, thus 50 means when the adaptative concurrency sets to 10, prefetch sets to 5.
 
 - `--max-workers`: upper limit of workers managed by this recruiter
-- `--rounds`: number of recruitment rounds per cycle
+- `--rounds`: number of execution rounds to tarket to complete the workload
 - `--timeout`: seconds between recruitment cycles
+
+The round setting is a key tactical number for a recruitment rule. If a step has 100 tasks to do, and each worker ends up with a concurrency of 10. If rounds is set to 1 (its default), it means recruit 10 workers to execute all the tasks as quickly as possible. If rounds is set to 2, then only 5 workers will be recruited.
+
+If your task requires a significant amount of preparation (lots of download, long loading time), then increasing the rounds paramater is likely to be more efficient in terms of costs (at the price of a little more delay).
 
 Examples:
 
