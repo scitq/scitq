@@ -53,6 +53,7 @@ class BearerAuth(grpc.AuthMetadataPlugin):
 
 class Scitq2Client:
     """
+    NO_PUBLIC_DOC
     Client for interacting with the scitq2 gRPC backend.
 
     This client handles:

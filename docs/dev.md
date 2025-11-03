@@ -48,3 +48,13 @@ When the .proto file is changed, you must re-generate the stubs for Go, Svelte.j
 ```sh
 make proto-all
 ```
+
+## Updating python doc
+
+You'll need to definde a python venv for that but the code will be installed and updated in it. 
+I use a venv folder within the python subfolder. 
+
+```sh
+make dsl-doc VENV=./python/venv
+```
+

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: scitq2
-Version: 0.0.0+de348ab.dev0
+Version: 0.0.0+e24b732.dev0
 Summary: Python DSL for defining scitq2 workflows
 Author: Raynald de Lahondès
 License: MIT

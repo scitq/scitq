@@ -226,3 +226,7 @@ ifndef VENV
 endif
 	python3 -m venv $(VENV)
 	. $(VENV)/bin/activate && pip install -e ./python
+
+dsl-doc: venv
+	@echo "Generating Python DSL..."
+	@python ./python/tools/gen_dsl_doc.py 

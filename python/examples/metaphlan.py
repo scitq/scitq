@@ -7,7 +7,7 @@ class Params(metaclass=ParamSpec):
     depth = Param.string(default="10M")
     version = Param.enum(choices=["4.0", "4.1"], required=True)
     custom_catalog = Param.string(required=False)
-    download_locally = Param.boolean(default=False)
+    paired = Param.boolean(default=False)
     limit = Param.integer(required=False)
     location = Param.provider_region(required=True, help="Provider and region for the workflow execution.")
 
@@ -21,7 +21,7 @@ def MetaPhlAnWorkflow(params: Params):
         tag=f"{params.identifier}-{params.depth}",
         language=Shell("bash"),
         worker_pool=WorkerPool(
-            W.cpu == 32,
+            W.cpu >= 32,
             W.mem >= 120,
             W.disk >= 400,
             max_recruited=10,
@@ -60,7 +60,7 @@ def MetaPhlAnWorkflow(params: Params):
             name="fastp",
             tag=sample.sample_accession,
             command=cond(
-                (sample.library_layout == "PAIRED",
+                (params.paired,
                     fr"""
                     . /builtin/std.sh
                     _para zcat /input/*1.f*q.gz > /tmp/read1.fastq
@@ -97,7 +97,7 @@ def MetaPhlAnWorkflow(params: Params):
             name="humanfilter",
             tag=sample.sample_accession,
             command=cond(
-                (sample.library_layout == "PAIRED",
+                (params.paired,
                     fr"""
                     . /builtin/std.sh
                     bowtie2 -p $CPU --mm -x /resource/chm13v2.0/chm13v2.0 \
@@ -136,7 +136,7 @@ def MetaPhlAnWorkflow(params: Params):
                 tag=sample.sample_accession,
                 inputs=humanfilter.output("fastqs"),
                 command=cond(
-                    (sample.library_layout == "PAIRED",
+                    (params.paired,
                         fr"""
                         . /builtin/std.sh
                         _para seqtk sample -s42 /input/{sample.sample_accession}.1.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.1.fastq.gz

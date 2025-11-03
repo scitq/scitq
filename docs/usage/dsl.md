@@ -268,3 +268,250 @@ step4 = workflow.Step(
 
 And for the second condition we see here the call to `step3.grouped()` to define the dependencies. The `grouped()` method of a Step provide a GroupedStep object that is equivalent to a list of all the Tasks belonging to the step. If the .grouped() has been omitted (`depends=step3`) it would have mean: depends on the latest step3 (the last since it is out of the loop). With the GroupedTask is like if we had collected all the steps during the loop and provided this list as depends: it depends on all step3.
 
+## A real life example
+
+scitq can be used in lots of different contexts, but it was invented for Bioinformatics. Most bioinformatics tools are autonomous commands you typically run from the Unix command line. So here we propose the use of a famous aligner command to identify the different species in a metagenomic samples, MetaPhlAn. It is recommanded to prepare the sequences before passing it to MetaPhlAn:
+- removing sequencing errors and low quality parts (fastp),
+- removing the human part of the DNA (bowtie and samtools),
+- normalizing the sample (seqtk),
+- and aligning with MetaPhlAn.
+
+You may compile all the results together with a tool provided by the MetaPhlAn team (the Huttenhower Lab). 
+And the beauty of the Bioinformatics academic world is that all these tools are free and open source. 
+
+```python
+from scitq2 import Workflow, Param, WorkerPool, W, TaskSpec, Resource, Shell, URI, cond, Outputs, run, ParamSpec
+from scitq2.biology import ENA, SRA, S, SampleFilter
+
+class Params(metaclass=ParamSpec):
+    data_source = Param.enum(choices=["ENA", "SRA", "URI"], required=True, help="Data source for the samples: ENA, SRA, or URI.")
+    identifier = Param.string(required=True)
+    depth = Param.string(default="10M")
+    version = Param.enum(choices=["4.0", "4.1"], required=True)
+    custom_catalog = Param.string(required=False)
+    paired = Param.boolean(default=False)
+    limit = Param.integer(required=False)
+    location = Param.provider_region(required=True, help="Provider and region for the workflow execution.")
+
+
+def MetaPhlAnWorkflow(params: Params):
+
+    workflow = Workflow(
+        name="metaphlan4",
+        description="Workflow for running MetaPhlAn4 on WGS data from ENA or SRA.",
+        version="1.0.0",
+        tag=f"{params.identifier}-{params.depth}",
+        language=Shell("bash"),
+        worker_pool=WorkerPool(
+            W.cpu >= 32,
+            W.mem >= 120,
+            W.disk >= 400,
+            max_recruited=10,
+            task_batches=2
+        ),
+        provider=params.location.provider,
+        region=params.location.region,
+    )
+
+    if params.data_source == "ENA":
+        samples = ENA(
+            identifier=params.identifier,
+            group_by="sample_accession",
+            filter=SampleFilter(S.library_strategy == "WGS")
+        )
+    elif params.data_source == "SRA":
+        samples = SRA(
+            identifier=params.identifier,
+            group_by="sample_accession",
+            filter=SampleFilter(S.library_strategy == "WGS")
+        )
+    elif params.data_source == "URI":
+        samples = URI.find(params.identifier,
+            group_by="folder",
+            filter="*.f*q.gz",
+            field_map={
+                "sample_accession": "folder.name",
+                "project_accession": "folder.basename",
+                "fastqs": "file.uris",
+            }
+        )
+
+    for sample in samples:
+    
+        fastp = workflow.Step(
+            name="fastp",
+            tag=sample.sample_accession,
+            command=cond(
+                (params.paired,
+                    fr"""
+                    . /builtin/std.sh
+                    _para zcat /input/*1.f*q.gz > /tmp/read1.fastq
+                    _para zcat /input/*2.f*q.gz > /tmp/read2.fastq
+                    _wait
+                    fastp \
+                    --adapter_sequence AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
+                    --adapter_sequence_r2 AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT \
+                    --cut_front --cut_tail --n_base_limit 0 --length_required 60 \
+                    --in1 /tmp/read1.fastq --in2 /tmp/read2.fastq \
+                    --json /output/{sample.sample_accession}_fastp.json \
+                    -z 1 --out1 /output/{sample.sample_accession}.1.fastq.gz \
+                        --out2 /output/{sample.sample_accession}.2.fastq.gz
+                    """),
+                default= 
+                    fr"""
+                    . /builtin/std.sh
+                    zcat /input/*.f*q.gz | fastp \
+                    --adapter_sequence AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
+                    --cut_front --cut_tail --n_base_limit 0 --length_required 60 \
+                    --stdin \
+                    --json /output/{sample.sample_accession}_fastp.json \
+                    -z 1 -o /output/{sample.sample_accession}.fastq.gz
+                    """
+            ),
+            container="gmtscience/scitq2:0.1.0",
+            inputs=sample.fastqs,
+            outputs=Outputs(fastqs="*.fastq.gz", json="*.json"),
+            task_spec=TaskSpec(cpu=5, mem=10, prefetch="100%"),
+            worker_pool=workflow.worker_pool.clone_with(max_recruited=5)
+        )
+        
+        humanfilter = workflow.Step(
+            name="humanfilter",
+            tag=sample.sample_accession,
+            command=cond(
+                (params.paired,
+                    fr"""
+                    . /builtin/std.sh
+                    bowtie2 -p $CPU --mm -x /resource/chm13v2.0/chm13v2.0 \
+                    -1 /input/{sample.sample_accession}.1.fastq.gz \
+                    -2 /input/{sample.sample_accession}.2.fastq.gz --reorder \
+                    2> /output/{sample.sample_accession}.bowtie2.log \
+                    | samtools fastq -@ 2 -f 12 -F 256 \
+                        -1 /output/{sample.sample_accession}.1.fastq \
+                        -2 /output/{sample.sample_accession}.2.fastq \
+                        -0 /dev/null -s /dev/null
+                    for fastq in /output/*.fastq
+                    do
+                        _para pigz -p 4 $fastq
+                    done
+                    _wait
+                    """),
+                default= 
+                    fr"""
+                    . /builtin/std.sh
+                    bowtie2 -p ${{CPU}} --mm -x /resource/chm13v2.0/chm13v2.0 \
+                    -U /input/{sample.sample_accession}.fastq.gz --reorder \
+                    2> /output/{sample.sample_accession}.bowtie2.log \
+                    | samtools fastq -@ 2 -f 4 -F 256 \
+                        -0 /output/{sample.sample_accession}.fastq -s /dev/null
+                    pigz /output/*.fastq
+                    """
+            ),
+            container="gmtscience/bowtie2:2.5.1",
+            inputs=fastp.output("fastqs"),
+            outputs=Outputs(fastqs="*.fastq.gz", log="*.log"),
+        )
+
+        if params.depth is not None:
+            seqtk = workflow.Step(
+                name="seqtk",
+                tag=sample.sample_accession,
+                inputs=humanfilter.output("fastqs"),
+                command=cond(
+                    (params.paired,
+                        fr"""
+                        . /builtin/std.sh
+                        _para seqtk sample -s42 /input/{sample.sample_accession}.1.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.1.fastq.gz
+                        _para seqtk sample -s42 /input/{sample.sample_accession}.2.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.2.fastq.gz
+                        _wait
+                        """),
+                    default= 
+                        fr"""
+                        . /builtin/std.sh
+                        seqtk sample -s42 /input/{sample.sample_accession}.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.fastq.gz
+                        """
+                ),
+                container="gmtscience/seqtk:1.4",
+                task_spec=TaskSpec(mem=60)
+            )
+        
+        metaphlan = workflow.Step(
+            name="metaphlan",
+            tag=sample.sample_accession,
+            inputs=cond(
+                (params.depth is not None, seqtk.output("fastqs")),
+                default=humanfilter.output("fastqs")
+            ),
+            command=fr"""
+            pigz -dc /input/*.fastq.gz | metaphlan \
+                --input_type fastq --no_map --offline \
+                --bowtie2db /resource/metaphlan/bowtie2 \
+                --nproc $CPU \
+                -o /output/{sample.sample_accession}.metaphlan4_profile.txt \
+                2>&1 > /output/{sample.sample_accession}.metaphlan4.log
+            """,
+            container=cond(
+                (params.version == "4.0", "gmtscience/metaphlan4:4.0.6.1"),
+                default="gmtscience/metaphlan4:4.1"
+            ),
+            resources=cond(
+                (params.custom_catalog is not None, Resource(path=params.custom_catalog, action="untar")),
+                (params.version == "4.0", Resource(path="azure://rnd/resource/metaphlan4.0.5.tgz", action="untar")),
+                default=Resource(path="azure://rnd/resource/metaphlan/metaphlan4.1.tgz", action="untar")
+            ),
+            outputs=Outputs(metaphlan="*.txt", logs="*.log"),
+            task_spec=TaskSpec(cpu=8),
+            worker_pool=workflow.worker_pool.clone_with(max_recruited=5)
+        )
+
+    compile_step = workflow.Step(
+        name="compile",
+        inputs=metaphlan.output("metaphlan",grouped=True),
+        command=fr"""
+        cd /input
+        merge_metaphlan_tables.py *profile.txt > /output/merged_abundance_table.tsv
+        """,
+        container=metaphlan.container,
+        outputs=Outputs(
+            abundances="*.tsv",
+            logs="*.log",
+            publish=f"azure://rnd/results/metaphlan4/{params.identifier}/",
+        ),
+        task_spec=TaskSpec(cpu=4, mem=10)
+    )
+
+run(MetaPhlAnWorkflow)
+```
+
+### Imports
+
+```python
+from scitq2 import Workflow, Param, WorkerPool, W, TaskSpec, Resource, Shell, URI, cond, Outputs, run, ParamSpec
+from scitq2.biology import ENA, SRA, S, SampleFilter
+```
+
+The first line is similar to what we've seen before (a little more explicit if you like it more like that). The second like is specific to biological resources: ENA and SRA are two well known services for genomic sequences publicly available, hosted  respectively by Europe EMBL-EBI institute and by US NIH NCBI institute. We also take a class called a SampleFilter which as you guess help filtering samples and a mysterious S class... S (like the above W) is used in filters, much like in Django or SQLAlchemy.
+
+### Real world params
+
+```python
+class Params(metaclass=ParamSpec):
+    data_source = Param.enum(choices=["ENA", "SRA", "URI"], required=True, help="Data source for the samples: ENA, SRA, or URI.")
+    identifier = Param.string(required=True)
+    depth = Param.string(default="10M")
+    version = Param.enum(choices=["4.0", "4.1"], required=True)
+    custom_catalog = Param.string(required=False)
+    paired = Param.boolean(default=False)
+    limit = Param.integer(required=False)
+    location = Param.provider_region(required=True, help="Provider and region for the workflow execution.")
+```
+
+
+## Reference
+
+see [DSL Reference](../reference/python_dsl.md)
+
+
+
+
+
