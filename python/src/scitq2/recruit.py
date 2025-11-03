@@ -161,6 +161,7 @@ class WorkerPool:
             if task_spec.concurrency is None:
                 options["cpu_per_task"]=task_spec.cpu
                 options["memory_per_task"]=task_spec.mem
+                options["disk_per_task"]=task_spec.disk
                 options["prefetch_percent"]=int(task_spec.prefetch*100)
             else:
                 concurrency = task_spec.concurrency
@@ -168,8 +169,6 @@ class WorkerPool:
                 options["concurrency"] = concurrency
                 if prefetch >= 0:
                     options["prefetch"] = prefetch
-
-            
 
         return options
     
