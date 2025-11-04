@@ -1,4 +1,4 @@
 # generated at build time
-__version__ = '0.0.0+e24b732.dev0'
-__commit__ = 'e24b732'
-__build_time__ = '2025-11-03T23:07:03Z'
+__version__ = '0.0.0+52ee1ec'
+__commit__ = '52ee1ec'
+__build_time__ = '2025-11-04T08:52:27Z'
