@@ -506,6 +506,79 @@ class Params(metaclass=ParamSpec):
     location = Param.provider_region(required=True, help="Provider and region for the workflow execution.")
 ```
 
+We find the same types of template parameters (Param) that we had before with additions:
+- Param.enum() : this is a choice Param, it is displayed as a select,
+- Param.provider_region() : this is displayed as a select also but its values are directly provided by the server configuration, it list all the available providers and regions.
+
+This is of major importance for most providers, notably because of transfer fees. Transfer fees are obey an almost universal rule:
+- input traffic is free,
+- output traffic is paid, and is generally costly, so that you keep the data in the provider infrastructure and all computation occurs there.
+
+So not only you're incitated to stay with the initial provider of a project, but often to stay in the same region (for instance this is the case with Azure, while OVH does not apply fees for inter-regional transfers if you stay in OVH). Bottom line, for Azure at least, it is recommanded to stick in one region in a consistent manner in a given workflow, at least until the data volume decrease significantly. So chosing one region for a workflow is strategical to contains costs. 
+
+It's also good to be able to change regions since another universal rule is that instance quotas are regionalized. Meaning that if you need to maximize workforce in a workflow, you may need to saturate quotas in the region you chose for one workflow. So having other regions at hand enables you to launch several workflows in a concurrent way. This tactical element is particularly important for Azure since spot is used and spot quotas are low (which makes sense since this is a discount offer).
+
+### A Real world workflow
+
+```python
+workflow = Workflow(
+    name="metaphlan4",
+    description="Workflow for running MetaPhlAn4 on WGS data from ENA or SRA.",
+    version="1.0.0",
+    tag=f"{params.identifier}-{params.depth}",
+    language=Shell("bash"),
+    worker_pool=WorkerPool(
+        W.cpu >= 32,
+        W.mem >= 120,
+        W.disk >= 400,
+        max_recruited=10,
+        task_batches=2
+    ),
+    provider=params.location.provider,
+    region=params.location.region,
+)
+```
+
+We find back the typical attributes we've seen before:
+- name: a unique name for the template,
+- description: a help introduction for users,
+- version: a unique version,
+- tag: the extension added to the template name to create each workglow name,
+- language: the default language (here shell) in which the different commands are written.
+
+Plus some new comers:
+- worker_pool,
+- region and provider.
+
+#### A real world WorkerPool
+
+The worker_pool takes a WorkerPool object, which we've seen before, but only for the loca.local provider and its local region. The real world WorkerPool is quite different:
+
+It begins with several filtering expressions using the W. notation. This enable the construction of the flavor filter described in [CLI](cli.md#flavor-list) in a pythonic way:
+
+```python
+WorkerPool(
+    W.cpu>=32, 
+    W.mem>=120,
+    W.disk>=400
+)
+```
+
+Is equivalent to the filter `cpu>=32:mem>=120:disk>=400`, and means 32 cpu at least with at least 120 Gb of memory and at least 400 Gb of disk.
+
+The last two options in the WorkerPool are `max_recruited`, this is the maximum for this workflow, and `task_batches`. `task_batches` is the target number of batches each worker must do to complete the total number of tasks of each type the workflow. So if each worker can do 2 tasks in the meantime (concurrency=2) and `task_batches` is 2, it means each worker should do 2*2 = 4 tasks total in two rounds. So it there are 40 tasks to do, we need 10 workers.
+
+Note that we did not specify the region and provider in the WorkerPool like we did before and we are going to see why just now.
+
+#### provider and region in a real world workflow
+
+Provider and region are specified but this time not in the WorkerPool itself. The reason is that it is used for two things:
+- the WorkerPool will look for the Worker provider and region setting if has none of its own (so there no difference at WorkerPool level where you define them),
+- the Workflow also uses that to chose a local workspace.
+
+If you look in [configuration](../reference/configuration.md) and in example configurations, you'll see that each region may have a workspace. The reason is the same than we've seen before: transfer fees. Since it costly to move data out of a region, it is essential that working data stay in the region. For this reason, Workflow objects have an underlying workspace that is regionalized, and which is chosen using the region and the configuration settings.
+
+
 
 ## Reference
 
