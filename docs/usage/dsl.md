@@ -368,7 +368,7 @@ def MetaPhlAnWorkflow(params: Params):
                     -z 1 -o /output/{sample.sample_accession}.fastq.gz
                     """
             ),
-            container="gmtscience/scitq2:0.1.0",
+            container="staphb/fastp:1.0.1",
             inputs=sample.fastqs,
             outputs=Outputs(fastqs="*.fastq.gz", json="*.json"),
             task_spec=TaskSpec(cpu=5, mem=10, prefetch="100%"),
@@ -593,37 +593,37 @@ Our previous examples did not rely on scientific data input, while this is parti
 Here this portion of the code takes two params, params.data_source (`ENA`, `SRA` or `URI`) and params.identifier (a project accession like `PRJEB49516` or a folder URI, like `s3://rnd/data/myproject`). It provides a list of Sample object, each with a `fastqs` field that contain scitq compatible URIs to fetch FASTQ data, the standard genetic format files. scitq contains a specific URI adapted to this kind of resources.
 
 ```python
-   if params.data_source == "ENA":
-        samples = ENA(
-            identifier=params.identifier,
-            group_by="sample_accession",
-            filter=SampleFilter(S.library_strategy == "WGS")
-        )
-    elif params.data_source == "SRA":
-        samples = SRA(
-            identifier=params.identifier,
-            group_by="sample_accession",
-            filter=SampleFilter(S.library_strategy == "WGS")
-        )
-    elif params.data_source == "URI":
-        samples = URI.find(params.identifier,
-            group_by="folder",
-            filter="*.f*q.gz",
-            field_map={
-                "sample_accession": "folder.name",
-                "project_accession": "folder.basename",
-                "fastqs": "file.uris",
-            }
-        )
+if params.data_source == "ENA":
+    samples = ENA(
+        identifier=params.identifier,
+        group_by="sample_accession",
+        filter=SampleFilter(S.library_strategy == "WGS")
+    )
+elif params.data_source == "SRA":
+    samples = SRA(
+        identifier=params.identifier,
+        group_by="sample_accession",
+        filter=SampleFilter(S.library_strategy == "WGS")
+    )
+elif params.data_source == "URI":
+    samples = URI.find(params.identifier,
+        group_by="folder",
+        filter="*.f*q.gz",
+        field_map={
+            "sample_accession": "folder.name",
+            "project_accession": "folder.basename",
+            "fastqs": "file.uris",
+        }
+    )
 ```
 
 This part is really highly dependant on the field. Here in the biology field, data is often attached to the notion of sample, notably samples from the public databanks such as ENA or SRA. Samples are collected from a project defined by its project accession (identifier), grouped by sample or run level (defined each time by their field "sample_accession" or "run_accession"). Last, samples may be filtered with a SampleFilter construct, using S fields much like the WorkerPool construct. See [DSL Reference](../reference/python_dsl.md#samplefilter) for details.
 
-The URI construct is a more universal since it regroup files of a certain nature, specified with a globbing pattern in `filter`. It can take advantage of the file hierarchy (`folder.name`, parent folder name as `folder.basename`) to fill in custom field, here to mimick a Sample such as provided by ENA/SRA. See [DSL Reference](../reference/python_dsl.md#uri).
+The URI construct is a more universal since it regroups files of a certain nature, specified with a globbing pattern in `filter`. It can take advantage of the file hierarchy (`folder.name`, parent folder name as `folder.basename`) to fill in custom field, here to mimick a Sample such as provided by ENA/SRA. See [DSL Reference](../reference/python_dsl.md#uri).
 
 ### A first real step
 
-New step in our code is to take advantages of the collected samples to generate a loop. 
+New step in our code is to take advantages of the collected samples to generate a loop, and in this loop a first task, a data curation step typical of bioinformatic workflows.
 
 ```python
 for sample in samples:
@@ -658,13 +658,353 @@ for sample in samples:
                 -z 1 -o /output/{sample.sample_accession}.fastq.gz
                 """
         ),
-        container="gmtscience/scitq2:0.1.0",
+        container="staphb/fastp:1.0.1",
         inputs=sample.fastqs,
         outputs=Outputs(fastqs="*.fastq.gz", json="*.json"),
         task_spec=TaskSpec(cpu=5, mem=10, prefetch="100%"),
         worker_pool=workflow.worker_pool.clone_with(max_recruited=5)
     )
 ```
+
+This first step begins exactly like our previous example with a name and a tag. Here the tag is the official identifier of a biological sample, something real. 
+
+#### `cond` keyword
+
+`command` bears a first specificity, it uses the `cond` keyword, which is very much like an if/then/else structure except it can be used in variable affectation. We could use the pythonic `command=x if y else z` but this is less readable, especially if x and z are large in size and y is very small. In the DSL, using the `cond()` keyword is recommanded for readability. `cond()` takes an arbitrary number of pairs (condition, value) and returns the value associated with the first condition that is true. It may take an optional default value which is returned if all conditions are false.
+
+#### Using builtins
+
+Builtins are specific libraries, dedicated to shell usage. Shell is a choice language when using executable, and performing peripheral actions. However, due to its main usage in interactive environments, and to its long history, there are several issues with shell (hence some innovations like zsh (minor evolution) and fish (major evolution) and other more modern shells): notably error treatment defaults are not appropriate, parallel executions are hard to manage. 
+
+There are lots of solutions to address these issues, notably changing default behavior in shell (like with `set -e` which will make shell behave like most modern language, e.g. stop at the first error), or using power tools such as GNU parallel for parallel tasks execution. However we must also take account of the docker issue: we like to reuse ready made dockers, it saves a lot of time, thus in most cases we would like to avoid specific requirements in containers (like always having bash, always having GNU parallel and pigz, and lots of utility we would love to have). scitq does not tell you what to do on this score, so if you prefer always have your dockers with your requirements, it is perfectly fine and you can do that. However we wanted to provide an alternative light approach, which is the builtins. It's a serie of ready made shell library which you can import with the typical shell dot notation:
+
+```sh
+. /builtin/std.sh
+```
+
+Builtins are available in `/builtin` folder which is mounted by default in all containers. It may be safely ignored, but you can also import anything in this folder. For now there are two libs, std.sh and bio.sh.
+
+##### std.sh
+
+std.sh is activated by:
+```sh
+. /builtin/std.sh
+```
+
+The first thing it implements is the `_strict` mode which is enforced by default. This sets `set -e` which makes the script fails at first error and the `set -o pipefail` which makes a shell pipe fails if the first command fails:
+
+For instance: this will succeed if `my_failing_command` outputs anything, including if the command fails in the end, this is (alas) standard shell behavior:
+```sh
+set -e
+my_failing_command |gzip
+```
+
+Failing if `my_failing_command` fails requires:
+```sh
+set -e
+set -o pipefail
+my_failing_command |gzip
+```
+Which works in bash but not in all shells... 
+
+```sh
+. /builtin/std.sh
+my_failing_command |gzip>/output/out.dat
+```
+
+Will do that and avoid failing if the shell cannot do it. You may also disable this stricter error treatement for one command with the `_canfail` function:
+
+```sh
+. /builtin/std.sh
+my_important_command |gzip>/output/out.dat
+_canfail my_less_important_command |gzip>/output/logs.gz
+```
+
+You may also disable the strict mode completely wih `_nostrict` and re-enable it later with `_strict`.
+
+But probably the most interesting function of std.sh is `_para`, it works almost like:
+```sh
+task1 &
+task2 &
+wait
+```
+
+Except wait won't fail if task1 or task2 fails, whereas this will work as expected:
+
+```sh
+. /builtin/std.sh
+_para task1
+_para task2
+_wait
+```
+
+_wait will fail if task1 or task2 fails. 
+
+This will also work as expected :
+
+```sh
+. /builtin/std.sh
+_para zcat /input/*1.f*q.gz > /tmp/read1.fastq
+_para zcat /input/*2.f*q.gz > /tmp/read2.fastq
+_wait
+```
+
+This will work in most shells, like bash, but also alpine sh (busybox) or debian sh (dash) or zsh. You can see the code of `std.sh` in client/helpers.go.
+
+std.sh offers a last keyword, `_retry`. As its name suggests, `_retry` enable to retry several times a certain command. In its simple form it is used like this:
+
+```sh
+. /builtin/std.sh
+_retry my_unsure_command
+```
+
+It will retry the command 5 times with a 1 second delay, and eventually fails if all fail or succeed if the last attempt succeeds. Of course you could write that yourself with an until command, but it's difficult to get it right in standard shells.
+
+```sh
+. /builtin/std.sh
+_retry 6 my_unsure_command
+```
+This will retry 6 times.
+
+```sh
+. /builtin/std.sh
+_retry 6 2 my_unsure_command
+```
+This will retry 6 times with a 2 second delay between each attempt.
+
+
+##### bio.sh
+
+This is work in progress, it contains a single command for now: `_find_pairs` which tries its best to find pairs of FASTQ. Genetic sequence files are often "paired" (a DNA fragment may be sequenced from both ends), and depending on researchers practices there are different ways to specify that (ending with `.1.f*q.gz` or `.2.f*q.gz` but sometimes `_1.f*q.gz` and sometimes there are three files... `_find_pairs` will do its best to find the different pairs and store them in `$READ1` and `$READ2`)
+
+```sh
+. /builtin/std.sh
+. /builtin/bio.sh
+
+_find_pairs /input/*.f*q.gz
+_para zcat $READS1 > /tmp/read1.fastq
+_para zcat $READS2 > /tmp/read2.fastq
+_wait
+```
+
+The implementation of _find_pairs is this:
+```sh
+_find_pairs() {
+  # do not assume arrays; keep it POSIX
+  for sep in _ . r R ""; do
+    r1=""; r2=""; extra=""
+    c1=0;  c2=0
+    for fq do
+      case "$fq" in
+        *${sep}1.f*q.gz) r1="${r1}${r1:+ }$fq"; c1=$((c1+1));;
+        *${sep}2.f*q.gz) r2="${r2}${r2:+ }$fq"; c2=$((c2+1));;
+        *)                extra="${extra}${extra:+ }$fq";;
+      esac
+    done
+    if [ "$c1" -gt 0 ] && [ "$c1" -eq "$c2" ]; then
+      READS1=$r1
+      READS2=$r2
+      EXTRA=$extra
+      return 0
+    fi
+    # else: try next separator
+  done
+  return 1
+}
+```
+
+Same spirit as std.sh, shell agnostic, as portable as possible with shell limitations.
+
+Apart from the `builtin/std.sh` and the `cond()` keyword, `command` is like before a shell instruction specified in a `fr""` string. Because it's an fr string, `{sample.sample_accession}` is interpreted in python, not in shell.
+
+#### Real inputs and outputs
+
+`inputs` are taken from our sample item, `sample.fastqs` provides a ready made URI list providing all the FASTQs for that specific sample. Strings object, in the scitq style using rclone components or specific URIs. Here ENA and SRA functions provide ready made specific URI for biological samples.
+
+##### Specific biological URIs
+
+ENA or SRA provides in the `.fastqs` field of the Sample object a list of specific URIs: 
+
+`run+fastq://<run_accession>` 
+
+This will provide the cleaned FASTQs provided by public databanks. The URI accept several options such as the transport option, option in URIs are specified with `@<option-name>`. For instance, one can use `@ena-ftp` transport option:
+
+`run+fastq@ena-ftp://<run_accession>` 
+
+This will force ENA FTP transport option.
+
+The following transport options are available:
+- `@ena-ftp` : use ENA FTP,
+- `@ena-aspera` : use ENA Aspera (currently not recommanded),
+- `@sra-tools` : use SRA tools.
+
+`ENA()` will decorate the URI with the appropriate transport option if `use_ftp` is set to True, or if `use_aspera` is set to True. `SRA()` will use `@sra-tools` by default.
+
+There is a last option, `@only-read1`, that is automatically added if you specify `layout=SINGLE` in `ENA()` or `SRA()` and the sample is detected to be paired. 
+
+In the resulting URI, options can be cumulated:
+`run+fastq@ena-ftp@ena-aspera@only-read1://<run_accession>` 
+
+Which means use first ena-ftp, then ena-aspera, and filter for only read1 FASTQ(s).
+
+##### Outputs
+
+The outputs field takes an `Outputs` object. This object enable to define one or several output connectors to the step that can be plugged into other steps inputs. The concept is (shamelessly) borrowed from Nextflow. 
+
+Here we read:
+
+```python
+outputs=Outputs(fastqs="*.fastq.gz", json="*.json"),
+```
+
+which means, there are two types of output produced in the /output folder, FASTQ files and JSON files, some steps will need the first ones, some other steps will need the second ones. This will also clarify what is needed by each step. This is entirely facultative. 
+
+If outputs are only used as a whole, you don't need to specify outputs at all. Contrarily to what happens in [CLI](cli.md#task-create), an output folder is automatically provided to Tasks provided a Workspace is defined, which is automatically the case if the provider and region defined for the Workflow object are associated with a workspace root.
+
+If a workspace root is correctly defined for the provider/region (see [configuration](../reference/configuration.md)), the automatic output folder of a task is this:
+```python
+f"{wf.workspace_root}/{wf.full_name}/{task.full_name}/"
+```
+
+Note that the default region, the `local` region of `local.local` provider, does not have a `local_workspace` by default, it should be defined in the server YAML configuration if you want the output to be automatically managed even with the local provider:
+```yaml
+providers:
+  local:
+    local:
+      local_workspaces:
+        local: "s3://local/workspace"
+```
+
+You may also use a publish clause which allow you to specify any custom path you want:
+
+```python
+Step(
+    [...]
+    outputs=Outputs(publish='azure://results/myproject/')
+)
+```
+
+There is also a specific meaning attached to this: the default workspace that depends on the workspace root is deemed a temporary workspace, it may be deleted to get some free space or to reduce costs. Published outputs represent data stored specifically in a separate space that is here to stay.
+
+#### Real task_specs
+
+Nothing new here compared to previous examples. Here our TaskSpec object uses dynamic concurrency which is often recommended in production.
+
+#### Real step worker_pool
+
+First it is safe not to specify anything here, including in a production setup. There are two reasons why you would want to specify a worker pool different from the workflow worker pool:
+- to restrict the number of workers - which is done here, the workflow worker pool is cloned but with a restriction on the number of workers: this will force the recruiter to reserve some workers for the other steps of the workflow,
+- to change the type of workers required: if this particular step requires a different kind of worker, you can change here.
+
+```python
+worker_pool=workflow.worker_pool.clone_with(max_recruited=5)
+```
+
+It is good practice to use this cloning style with restriction on max_recruited (you cannot enlarge the pool size past the workflow pool size). It maximizes the chance of recycling a worker, something that will save useful computation time and money. Only change the worker pool if the step has strong requirements on specific hardware (like some large disk space or GPU).
+
+### Other steps
+
+```python
+humanfilter = workflow.Step(
+    name="humanfilter",
+    tag=sample.sample_accession,
+    command=cond(
+        (params.paired,
+            fr"""
+            . /builtin/std.sh
+            bowtie2 -p $CPU --mm -x /resource/chm13v2.0/chm13v2.0 \
+            -1 /input/{sample.sample_accession}.1.fastq.gz \
+            -2 /input/{sample.sample_accession}.2.fastq.gz --reorder \
+            2> /output/{sample.sample_accession}.bowtie2.log \
+            | samtools fastq -@ 2 -f 12 -F 256 \
+                -1 /output/{sample.sample_accession}.1.fastq \
+                -2 /output/{sample.sample_accession}.2.fastq \
+                -0 /dev/null -s /dev/null
+            for fastq in /output/*.fastq
+            do
+                _para pigz -p 4 $fastq
+            done
+            _wait
+            """),
+        default= 
+            fr"""
+            . /builtin/std.sh
+            bowtie2 -p ${{CPU}} --mm -x /resource/chm13v2.0/chm13v2.0 \
+            -U /input/{sample.sample_accession}.fastq.gz --reorder \
+            2> /output/{sample.sample_accession}.bowtie2.log \
+            | samtools fastq -@ 2 -f 4 -F 256 \
+                -0 /output/{sample.sample_accession}.fastq -s /dev/null
+            pigz /output/*.fastq
+            """
+    ),
+    container="gmtscience/bowtie2:2.5.1",
+    inputs=fastp.output("fastqs"),
+    outputs=Outputs(fastqs="*.fastq.gz", log="*.log"),
+)
+```
+
+There is very little difference with the previous step, except for one thing: the inputs:
+```python
+inputs=fastp.output("fastqs"),
+```
+Here we use the outputs system we described previously in the previous step but as an input source for the next step. It may be used with a connector (which requires specifying connectors in the previous step affecting an `Outputs(<connector_name>=<globbing pattern>)` object to outputs) or without (`inputs=fastp.output()`) in which case all output files are taken.
+
+This does two things:
+- it set inputs as in [CLI](cli.md#task-create),
+- it creates a dependency link between the two tasks.
+
+It is possible to dissociate input and dependency using the `depends` Step attribute in addition to the `inputs`, but it is more idiomatic to use a previous step `output()` clause which generate a specific `Output` object that carries both information.
+
+NB in certain steps below the first one, you'll see `cond()` keyword used for inputs, which enable to have flexible templates with optional steps. This does not introduce any new concept, so we'll pass directly to the last final step.
+
+### Real final step
+
+```python
+compile_step = workflow.Step(
+    name="compile",
+    inputs=metaphlan.output("metaphlan",grouped=True),
+    command=fr"""
+    cd /input
+    merge_metaphlan_tables.py *profile.txt > /output/merged_abundance_table.tsv
+    """,
+    container=metaphlan.container,
+    outputs=Outputs(
+        abundances="*.tsv",
+        logs="*.log",
+        publish=f"azure://rnd/results/metaphlan4/{params.identifier}/",
+    ),
+    task_spec=TaskSpec(cpu=4, mem=10)
+)
+```
+
+We had already introduced the final step concept previously, so you should have no surprises here:
+- this step is out of the main loop,
+- and in the input we see the `grouped` keyword used, meaning that it does not depends only on the last metaphlan task but on all of them.
+
+One subtlety here though, this is specified differently from what we saw previously:
+
+```python
+inputs=metaphlan.output("metaphlan",grouped=True),
+```
+
+VS
+
+```python
+depends=step3.grouped(),
+```
+
+So it does the two-in-one action of specifying an output object (with `.output()`) as inputs, which beside specifying inputs files also carries the dependancy information. And it does not use `metaphlan.grouped()`. Well there is no reason to that, both expressions are correct:
+
+```python
+inputs=metaphlan.output("metaphlan",grouped=True),
+```
+
+is syntactic sugar for:
+```python
+inputs=metaphlan.grouped().output("metaphlan"),
+```
+
+Use whatever suits you best.
 
 ## Reference
 

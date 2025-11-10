@@ -217,7 +217,7 @@ fresh-integration-test: tgz-python-src
 		go test -count=1 -v ./...; \
 	fi
 
-docs-config:
+config-doc:
 	go run tools/gen_config_doc.go > docs/reference/configuration.md
 
 venv: add-py-version

@@ -142,6 +142,7 @@ type Config struct {
 		Azure     map[string]*AzureConfig        `yaml:"azure"`
 		Openstack map[string]*OpenstackConfig    `yaml:"openstack"`
 		Fake      map[string]*FakeProviderConfig `yaml:"fake"`
+		Local     map[string]*LocalConfig        `yaml:"local"`
 	} `yaml:"providers"`
 
 	// Rclone holds configuration mappings for rclone integrations.
@@ -224,6 +225,13 @@ type OpenstackConfig struct {
 	UpdatePeriodicity   string                 `yaml:"update_periodicity"` // Update periodicity in minutes
 	LocalWorkspaceRoots map[string]string      `yaml:"local_workspaces"`
 	Keypair             string                 `yaml:"keypair"` // Name of the keypair to use for SSH access
+}
+
+type LocalConfig struct {
+	Name                string            `yaml:"-"`
+	DefaultRegion       string            `yaml:"default_region"`
+	Regions             []string          `yaml:"regions"`
+	LocalWorkspaceRoots map[string]string `yaml:"local_workspaces"`
 }
 
 func (c *Config) Validate() error {
@@ -370,6 +378,60 @@ func (o *OpenstackConfig) GetWorkspaceRoot(region string) (string, bool) {
 	return "", false
 }
 
+func (l *LocalConfig) GetRegions() []string {
+	found := false
+	for _, region := range l.Regions {
+		if region == "local" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		l.Regions = append(l.Regions, "local")
+	}
+	return l.Regions
+}
+
+func (l *LocalConfig) GetDefaultRegion() string {
+	if l.DefaultRegion == "" {
+		return "local"
+	}
+	return l.DefaultRegion
+}
+
+func (l *LocalConfig) SetRegions(r []string) {
+	l.Regions = r
+}
+
+func (l *LocalConfig) GetQuotas() map[string]Quota {
+	return nil
+}
+
+func (l *LocalConfig) GetUpdatePeriodicity() time.Duration {
+	return 0
+}
+
+func (l *LocalConfig) GetName() string {
+	return l.Name
+}
+
+func (l *LocalConfig) SetName(name string) {
+	l.Name = name
+}
+
+func (l *LocalConfig) GetWorkspaceRoot(region string) (string, bool) {
+	if l.LocalWorkspaceRoots == nil {
+		return "", false
+	}
+	if root, ok := l.LocalWorkspaceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := l.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
+}
+
 func (cfg *Config) GetProviders() []ProviderConfig {
 	var providers []ProviderConfig
 	for n, p := range cfg.Providers.Azure {
@@ -382,6 +444,13 @@ func (cfg *Config) GetProviders() []ProviderConfig {
 	}
 	for n, p := range cfg.Providers.Fake {
 		p.SetName("fake." + n)
+		providers = append(providers, p)
+	}
+	for n, p := range cfg.Providers.Local {
+		if n != "local" {
+			log.Fatalf("warning: local provider config name should be 'local', got %q", n)
+		}
+		p.SetName("local." + n)
 		providers = append(providers, p)
 	}
 	return providers

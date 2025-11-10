@@ -41,6 +41,7 @@
 |  | Azure | `providers.azure` |  | See below | Azure cloud provider configs |
 |  | Openstack | `providers.openstack` |  | See below | Openstack cloud provider configs |
 |  | Fake | `providers.fake` |  | Used for tests | Fake cloud provider configs |
+|  | Local | `providers.local` |  | Used for permanent worker (no recruit) | Local provider config |
 | Rclone |  | `rclone` |  |  | Rclone holds configuration mappings for rclone integrations. Create your config using native rclone with `rclone config` then export the config to `scitq.yaml` with the CLI `scitq config import-rclone >> /etc/scitq.yaml` |
 
 ### AzureConfig (Providers.Azure map values)
@@ -106,3 +107,12 @@
 |  | UpdatePeriodicity | `openstack.<account>.update_periodicity` | `` | `string` | Update periodicity in minutes |
 |  | LocalWorkspaceRoots | `openstack.<account>.local_workspaces` | `` | `map[string]string` |  |
 |  | Keypair | `openstack.<account>.keypair` | `` | `string` | Name of the keypair to use for SSH access |
+
+### LocalConfig (Providers.Local map values)
+| Section | Field | YAML key | Default | Type | Description |
+|---------|-------|-----------|----------|------|-------------|
+| LocalConfig |  | `local.local` |  |  |  |
+|  | Name | `local.local.-` | `` | `string` |  |
+|  | DefaultRegion | `local.local.default_region` | `` | `string` |  |
+|  | Regions | `local.local.regions` | `` | `[]string` |  |
+|  | LocalWorkspaceRoots | `local.local.local_workspaces` | `` | `map[string]string` |  |

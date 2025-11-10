@@ -90,6 +90,9 @@ func walkStruct(section string, st *ast.StructType, depth string, printedSection
 			case "Fake":
 				fmt.Printf("|  | Fake | `%s` |  | Used for tests | Fake cloud provider configs |\n", full)
 				continue
+			case "Local":
+				fmt.Printf("|  | Local | `%s` |  | Used for permanent worker (no recruit) | Local provider config |\n", full)
+				continue
 			}
 		}
 
@@ -141,6 +144,7 @@ func main() {
 	needAzure := false
 	needAzureImage := false
 	needOpenstack := false
+	needLocal := false
 
 	// Find and expand Config struct
 	if ts, ok := typeSpecs["Config"]; ok {
@@ -190,6 +194,8 @@ func main() {
 								needAzureImage = true
 							case "Openstack":
 								needOpenstack = true
+							case "Local":
+								needLocal = true
 							}
 						}
 					}
@@ -238,6 +244,16 @@ func main() {
 		if ts, ok := typeSpecs["OpenstackConfig"]; ok {
 			if st, ok := ts.Type.(*ast.StructType); ok {
 				walkStruct("OpenstackConfig", st, "openstack.<account>", make(map[string]bool))
+			}
+		}
+	}
+	if needLocal {
+		fmt.Println("\n### LocalConfig (Providers.Local map values)")
+		fmt.Println("| Section | Field | YAML key | Default | Type | Description |")
+		fmt.Println("|---------|-------|-----------|----------|------|-------------|")
+		if ts, ok := typeSpecs["LocalConfig"]; ok {
+			if st, ok := ts.Type.(*ast.StructType); ok {
+				walkStruct("LocalConfig", st, "local.local", make(map[string]bool))
 			}
 		}
 	}

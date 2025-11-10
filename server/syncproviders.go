@@ -132,6 +132,25 @@ func (s *taskQueueServer) checkProviders() error {
 		case "local":
 			// Do nothing: local is registered unconditionally
 			log.Printf("✅ Detected local provider in DB: %q", p.ConfigName)
+			for paramConfigName, config := range s.cfg.Providers.Local {
+				if p.ConfigName == paramConfigName {
+					if paramConfigName != "local" {
+						log.Printf("⚠️ Unexpected local provider config name %q in DB; expected 'local'", paramConfigName)
+						continue
+					}
+					fullName := "local.local"
+					s.providerConfig[fullName] = config
+
+					if mappedConfig[p.ProviderName] == nil {
+						mappedConfig[p.ProviderName] = make(map[string]bool)
+					}
+					mappedConfig[p.ProviderName][p.ConfigName] = true
+
+					if err := s.syncRegions(tx, p.ProviderID, config.Regions, config.DefaultRegion); err != nil {
+						log.Printf("⚠️ Failed to sync regions for fake provider %s: %v", config.Name, err)
+					}
+				}
+			}
 		default:
 			return fmt.Errorf("unknown provider %s", p.ProviderName)
 		}

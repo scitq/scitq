@@ -49,7 +49,9 @@ When the .proto file is changed, you must re-generate the stubs for Go, Svelte.j
 make proto-all
 ```
 
-## Updating python doc
+## Updating doc
+
+### Updating python doc
 
 You'll need to definde a python venv for that but the code will be installed and updated in it. 
 I use a venv folder within the python subfolder. 
@@ -58,3 +60,8 @@ I use a venv folder within the python subfolder.
 make dsl-doc VENV=./python/venv
 ```
 
+### Updating configuration doc
+
+```sh
+make config-doc
+```
