@@ -329,6 +329,10 @@ def dot_join(*args: str) -> str:
 
 
 class Step:
+    """A Step hybrid object, encompassing Step specific attributes and one or more Task objects (see grouped() method to access Tasks).
+    Steps should be contructed using Workflow.Step() method not Step() constructor directly.
+    """
+
     def __init__(self, name: str, workflow: "Workflow", worker_pool: Optional[WorkerPool] = None, task_spec: Optional[TaskSpec] = None,
                  naming_strategy: callable = dot_join):
         self.name = name
@@ -353,6 +357,7 @@ class Step:
         depends: Optional[Union["Step",List["Step"]]] = None,
         retry: Optional[int]=None
     ):
+        """Complete an existing Step object with a new Task."""
         if outputs:
             if self.outputs_globs and outputs.globs != self.outputs_globs:
                 raise ValueError(f"Inconsistent outputs declared in step '{self.name}'")
@@ -398,6 +403,7 @@ class Step:
         return Output(task=task, grouped=grouped, globs=output_glob, move=move, action=action)
 
     def compile(self, client: Scitq2Client):
+        """Compile the Step into real scitq objects by calling appropriate gRPC functions. Called automatically during the template run phase."""
         self.step_id = client.create_step(self.workflow.workflow_id, self.name)
 
         pool = self.worker_pool or self.workflow.worker_pool
@@ -431,6 +437,21 @@ class Step:
         return self.tasks[-1]
 
 class Workflow:
+    """Workflow objects are the corner stone of scitq DSL. They define the name, version and description of the template, 
+    as well as the defining settings for future scitq workflows created by the template. All Steps and Tasks are attached to the
+    Workflow and there can only be one Workflow object in a scitq DSL script.
+    - name: the template name (must be unique in scitq instance),
+    - version: enable to have different versions of the same template,
+    - description: a help text for users that shows in both UI and CLI,
+    - tag: a subname added (see naming_strategy) to the template name to create a workflow name that help distinguish each run (otherwise they are numbered),
+    - language: (default step value) language of commands in steps,
+    - worker_pool: definition of the workflow level worker pool (see WorkerPool objects), the workflow WorkerPool maximum_recruited define the workflow maximal recruitment,
+    - provider: instance provider ('local.local' for permanent workers, "azure.primary" or "openstack.ovh" for cloud workers, etc.),
+    - region: instance region (e.g. 'swedencentral' for Microsoft or 'GRA11' for OVH)
+    - naming_strategy: function to define how workflow and step names are constructed (default to dot_join),
+    - task_naming_strategy: function to define how task names are constructed (default to dot_join),
+    - retry: default number of retry for each task in the workflow (can be overridden at step level)
+    """
     last_created = None
 
     def __init__(self, name: str, version:str, description: str = "", worker_pool: Optional[WorkerPool] = None, language: Optional[Language] = None, tag: Optional[str] = None,
@@ -472,6 +493,21 @@ class Workflow:
         depends: Optional[Union["Step", List["Step"]]] = None,
         retry: Optional[int] = None
     ) -> Step:
+        """Add a Step to the Workflow with a single Task.
+        If the Step already exists with the same name, the Task is added to the existing Step.
+        - name: the step name,
+        - command: the command to run in the task,
+        - container: the container image to use for the task,
+        - tag: an optional tag to distinguish multiple tasks within the same step,
+        - inputs: optional inputs for the task (can be str, Output, or list of these),
+        - outputs: optional Outputs object defining the task outputs,
+        - resources: optional resources required for the task (can be Resource, str, or list of these),
+        - language: optional language for the task command (overrides workflow default),
+        - worker_pool: optional worker pool for the step (overrides workflow default),
+        - task_spec: optional task specification for the step (overrides workflow default),
+        - naming_strategy: optional naming strategy for the step (overrides workflow default),
+        - depends: optional dependencies for the task (can be Step or list of Steps),
+        - retry: optional number of retries for the task (overrides workflow default)"""
         if naming_strategy is None:
             naming_strategy = self.task_naming_strategy
         if retry is None:

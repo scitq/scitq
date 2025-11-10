@@ -566,19 +566,105 @@ WorkerPool(
 
 Is equivalent to the filter `cpu>=32:mem>=120:disk>=400`, and means 32 cpu at least with at least 120 Gb of memory and at least 400 Gb of disk.
 
-The last two options in the WorkerPool are `max_recruited`, this is the maximum for this workflow, and `task_batches`. `task_batches` is the target number of batches each worker must do to complete the total number of tasks of each type the workflow. So if each worker can do 2 tasks in the meantime (concurrency=2) and `task_batches` is 2, it means each worker should do 2*2 = 4 tasks total in two rounds. So it there are 40 tasks to do, we need 10 workers.
+```python
+WorkerPool(
+    [...]
+    max_recruited = 10,
+    task_batches = 2
+)
+```
+
+The last two options in the WorkerPool are `max_recruited`, this is the maximum for this workflow, and `task_batches`. `task_batches` is the target number of batches each worker must do to complete the total number of tasks of each type the workflow. So if each worker can do 10 tasks in the meantime (concurrency=10) and `task_batches` is 2, it means each worker should do 10*2 = 20 tasks total in two rounds. So it there are 40 tasks to do, we need 2 workers. If concurrency is dynamic, the recruiter will recruit different workers up to the required task execution rate.
 
 Note that we did not specify the region and provider in the WorkerPool like we did before and we are going to see why just now.
 
 #### provider and region in a real world workflow
 
-Provider and region are specified but this time not in the WorkerPool itself. The reason is that it is used for two things:
-- the WorkerPool will look for the Worker provider and region setting if has none of its own (so there no difference at WorkerPool level where you define them),
+`provider` and `region` are specified but this time not in the WorkerPool itself like previously. The reason is that they are used for two things:
+- the WorkerPool will look for the Workflow provider and region setting if has none of its own (so there no difference at WorkerPool level where you define them),
 - the Workflow also uses that to chose a local workspace.
 
 If you look in [configuration](../reference/configuration.md) and in example configurations, you'll see that each region may have a workspace. The reason is the same than we've seen before: transfer fees. Since it costly to move data out of a region, it is essential that working data stay in the region. For this reason, Workflow objects have an underlying workspace that is regionalized, and which is chosen using the region and the configuration settings.
 
+### Fetching data in the real world
 
+Our previous examples did not rely on scientific data input, while this is particularly common in the real world.
+
+Here this portion of the code takes two params, params.data_source (`ENA`, `SRA` or `URI`) and params.identifier (a project accession like `PRJEB49516` or a folder URI, like `s3://rnd/data/myproject`). It provides a list of Sample object, each with a `fastqs` field that contain scitq compatible URIs to fetch FASTQ data, the standard genetic format files. scitq contains a specific URI adapted to this kind of resources.
+
+```python
+   if params.data_source == "ENA":
+        samples = ENA(
+            identifier=params.identifier,
+            group_by="sample_accession",
+            filter=SampleFilter(S.library_strategy == "WGS")
+        )
+    elif params.data_source == "SRA":
+        samples = SRA(
+            identifier=params.identifier,
+            group_by="sample_accession",
+            filter=SampleFilter(S.library_strategy == "WGS")
+        )
+    elif params.data_source == "URI":
+        samples = URI.find(params.identifier,
+            group_by="folder",
+            filter="*.f*q.gz",
+            field_map={
+                "sample_accession": "folder.name",
+                "project_accession": "folder.basename",
+                "fastqs": "file.uris",
+            }
+        )
+```
+
+This part is really highly dependant on the field. Here in the biology field, data is often attached to the notion of sample, notably samples from the public databanks such as ENA or SRA. Samples are collected from a project defined by its project accession (identifier), grouped by sample or run level (defined each time by their field "sample_accession" or "run_accession"). Last, samples may be filtered with a SampleFilter construct, using S fields much like the WorkerPool construct. See [DSL Reference](../reference/python_dsl.md#samplefilter) for details.
+
+The URI construct is a more universal since it regroup files of a certain nature, specified with a globbing pattern in `filter`. It can take advantage of the file hierarchy (`folder.name`, parent folder name as `folder.basename`) to fill in custom field, here to mimick a Sample such as provided by ENA/SRA. See [DSL Reference](../reference/python_dsl.md#uri).
+
+### A first real step
+
+New step in our code is to take advantages of the collected samples to generate a loop. 
+
+```python
+for sample in samples:
+    
+    fastp = workflow.Step(
+        name="fastp",
+        tag=sample.sample_accession,
+        command=cond(
+            (params.paired,
+                fr"""
+                . /builtin/std.sh
+                _para zcat /input/*1.f*q.gz > /tmp/read1.fastq
+                _para zcat /input/*2.f*q.gz > /tmp/read2.fastq
+                _wait
+                fastp \
+                --adapter_sequence AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
+                --adapter_sequence_r2 AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT \
+                --cut_front --cut_tail --n_base_limit 0 --length_required 60 \
+                --in1 /tmp/read1.fastq --in2 /tmp/read2.fastq \
+                --json /output/{sample.sample_accession}_fastp.json \
+                -z 1 --out1 /output/{sample.sample_accession}.1.fastq.gz \
+                    --out2 /output/{sample.sample_accession}.2.fastq.gz
+                """),
+            default= 
+                fr"""
+                . /builtin/std.sh
+                zcat /input/*.f*q.gz | fastp \
+                --adapter_sequence AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
+                --cut_front --cut_tail --n_base_limit 0 --length_required 60 \
+                --stdin \
+                --json /output/{sample.sample_accession}_fastp.json \
+                -z 1 -o /output/{sample.sample_accession}.fastq.gz
+                """
+        ),
+        container="gmtscience/scitq2:0.1.0",
+        inputs=sample.fastqs,
+        outputs=Outputs(fastqs="*.fastq.gz", json="*.json"),
+        task_spec=TaskSpec(cpu=5, mem=10, prefetch="100%"),
+        worker_pool=workflow.worker_pool.clone_with(max_recruited=5)
+    )
+```
 
 ## Reference
 

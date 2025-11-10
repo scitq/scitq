@@ -34,6 +34,13 @@ def try_float(s):
         return 0.0
 
 class FieldExpr:
+    """A object representing a Sample filtering condition. This should not be used directly, use SampleFilter together with an S expression
+    
+    Example:
+    expr = S.library_strategy == "WGS"
+    """
+
+
     def __init__(self, field: str, op: str, value: Any):
         self.field = field
         self.op = op
@@ -119,6 +126,43 @@ class S:
 
 
 class SampleFilter:
+    """A SampleFilter object to filter Samples based on FieldExpr expressions.
+    Usage:
+    filter = SampleFilter(
+        S.library_strategy == "WGS",
+        S.read_count >= 1000000
+    )
+    samples = ENA(
+        identifier="PRJNA123456",
+        group_by="sample_accession",
+        filter=filter
+    )
+
+    SampleFilter can use the following atributes from S:
+    - run_accession
+    - first_public
+    - last_updated
+    - experiment_accession
+    - library_name
+    - library_strategy
+    - library_selection
+    - library_source
+    - library_layout
+    - instrument_platform
+    - instrument_model
+    - study_accession
+    - sample_accession
+    - scientific_name
+    - sample_alias
+    - secondary_sample_accession
+    - insert_size
+    - tax_id
+    - read_count
+    - base_count
+    - nominal_length
+    - fastq_bytes
+    """
+
     def __init__(self, *expressions: FieldExpr):
         self.expressions = expressions
 
@@ -226,6 +270,14 @@ def _group_samples(data: List[Dict[str, Any]], group_by: str, download_method: s
     return samples
 
 def ENA(identifier: str, group_by: str, filter: Optional[SampleFilter] = None, use_ftp: bool = False, use_aspera: bool = False, layout: str=AUTO) -> List[Sample]:
+    """A Constructor of Sample objects extracted from a public project present in EMBL-EBI ENA https://www.ebi.ac.uk/ena/
+    - identifier: the project accession from which the Samples are created,
+    - group_by: how to group data information in what constitutes a base object, is the sample based upon the sample_accession, or the run_accession, or grouped by another variable,
+    - filter: See SampleFilter on how to use this,
+    - use_ftp: Force FTP transport in scitq URI (scitq provides sane defaults otherwise),
+    - use_aspera: Force Aspera transport in scitq URI (scitq provides sane defaults otherwise),
+    - layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred). 
+    """
     if group_by not in ALLOWED_FIELDS:
         raise ValueError(f"Invalid group_by field: {group_by}. Must be one of {ALLOWED_FIELDS}")
     url = (
@@ -258,6 +310,14 @@ def ENA(identifier: str, group_by: str, filter: Optional[SampleFilter] = None, u
 
 
 def SRA(identifier: str, group_by: str, filter: Optional[SampleFilter] = None, layout: str=AUTO) -> List[Sample]:
+    """A Constructor of Sample objects extracted from a public project present in NIH NCBI SRA https://www.ncbi.nlm.nih.gov/sra
+    - identifier: the project accession from which the Samples are created,
+    - group_by: how to group data information in what constitutes a base object, is the sample based upon the sample_accession, or the run_accession, or grouped by another variable,
+    - filter: See SampleFilter on how to use this,
+    - layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred). 
+    
+    With SRA, transport is always sra-tools, maybe not the most performant but the most reliable tranport.
+    """
     cmd = [
         "docker", "run", "--rm", "ncbi/edirect", "sh", "-c",
         f'"esearch -db sra -query {identifier} | efetch -format runinfo"'

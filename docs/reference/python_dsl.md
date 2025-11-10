@@ -119,7 +119,7 @@ _No documentation available._
 _No documentation available._
 ## `URI`
 
-_No documentation available._
+A utility class to discover and group URIs (e.g. rclone resources specified in scitq style) from a remote source.
 ### `find(uri_base: str, group_by: Optional[str] = None, pattern: Optional[str] = None, filter: Optional[str] = None, event_name: Optional[str] = None, field_map: Optional[Dict[str, str]] = None) -> Iterator[scitq2.uri.URIObject]`
 
   Discover and group URIs from a remote source.
@@ -197,10 +197,37 @@ _No documentation available._
 
 ## `Workflow`
 
-_No documentation available._
+Workflow objects are the corner stone of scitq DSL. They define the name, version and description of the template, 
+as well as the defining settings for future scitq workflows created by the template. All Steps and Tasks are attached to the
+Workflow and there can only be one Workflow object in a scitq DSL script.
+- name: the template name (must be unique in scitq instance),
+- version: enable to have different versions of the same template,
+- description: a help text for users that shows in both UI and CLI,
+- tag: a subname added (see naming_strategy) to the template name to create a workflow name that help distinguish each run (otherwise they are numbered),
+- language: (default step value) language of commands in steps,
+- worker_pool: definition of the workflow level worker pool (see WorkerPool objects), the workflow WorkerPool maximum_recruited define the workflow maximal recruitment,
+- provider: instance provider ('local.local' for permanent workers, "azure.primary" or "openstack.ovh" for cloud workers, etc.),
+- region: instance region (e.g. 'swedencentral' for Microsoft or 'GRA11' for OVH)
+- naming_strategy: function to define how workflow and step names are constructed (default to dot_join),
+- task_naming_strategy: function to define how task names are constructed (default to dot_join),
+- retry: default number of retry for each task in the workflow (can be overridden at step level)
 ### `Step(self, *, name: str, command: str, container: str, tag: Optional[str] = None, inputs: Union[str, scitq2.workflow.OutputBase, List[str], List[scitq2.workflow.OutputBase], NoneType] = None, outputs: Optional[scitq2.workflow.Outputs] = None, resources: Union[scitq2.uri.Resource, str, List[scitq2.uri.Resource], List[str], NoneType] = None, language: Optional[scitq2.language.Language] = None, worker_pool: Optional[scitq2.recruit.WorkerPool] = None, task_spec: Optional[scitq2.workflow.TaskSpec] = None, naming_strategy: Optional[<built-in function callable>] = None, depends: Union[ForwardRef('Step'), List[ForwardRef('Step')], NoneType] = None, retry: Optional[int] = None) -> scitq2.workflow.Step`
 
-_No documentation available._
+  Add a Step to the Workflow with a single Task.
+  If the Step already exists with the same name, the Task is added to the existing Step.
+  - name: the step name,
+  - command: the command to run in the task,
+  - container: the container image to use for the task,
+  - tag: an optional tag to distinguish multiple tasks within the same step,
+  - inputs: optional inputs for the task (can be str, Output, or list of these),
+  - outputs: optional Outputs object defining the task outputs,
+  - resources: optional resources required for the task (can be Resource, str, or list of these),
+  - language: optional language for the task command (overrides workflow default),
+  - worker_pool: optional worker pool for the step (overrides workflow default),
+  - task_spec: optional task specification for the step (overrides workflow default),
+  - naming_strategy: optional naming strategy for the step (overrides workflow default),
+  - depends: optional dependencies for the task (can be Step or list of Steps),
+  - retry: optional number of retries for the task (overrides workflow default)
 
 ### `compile(self, client: scitq2.grpc_client.Scitq2Client) -> int`
 
@@ -213,7 +240,13 @@ _No documentation available._
 
 ### `ENA(identifier: str, group_by: str, filter: Optional[scitq2.biology.SampleFilter] = None, use_ftp: bool = False, use_aspera: bool = False, layout: str = 'AUTO') -> List[scitq2.biology.Sample]`
 
-_No documentation available._
+A Constructor of Sample objects extracted from a public project present in EMBL-EBI ENA https://www.ebi.ac.uk/ena/
+- identifier: the project accession from which the Samples are created,
+- group_by: how to group data information in what constitutes a base object, is the sample based upon the sample_accession, or the run_accession, or grouped by another variable,
+- filter: See SampleFilter on how to use this,
+- use_ftp: Force FTP transport in scitq URI (scitq provides sane defaults otherwise),
+- use_aspera: Force Aspera transport in scitq URI (scitq provides sane defaults otherwise),
+- layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred).
 
 ### `FASTQ(roots: Union[Iterable[str], str], *, group_by: str = 'folder', layout: Literal['AUTO', 'PAIRED', 'SINGLE'] = 'AUTO', only_read1: Optional[bool] = None, strict_pairs: bool = False, allow_unknown: bool = True, study_vote: Literal['majority', 'all'] = 'majority', filter: Optional[str] = None, pattern: Optional[str] = None) -> List[scitq2.biology.Sample]`
 
@@ -228,7 +261,13 @@ Returns a list of sample dicts with keys:
 
 ### `SRA(identifier: str, group_by: str, filter: Optional[scitq2.biology.SampleFilter] = None, layout: str = 'AUTO') -> List[scitq2.biology.Sample]`
 
-_No documentation available._
+A Constructor of Sample objects extracted from a public project present in NIH NCBI SRA https://www.ncbi.nlm.nih.gov/sra
+- identifier: the project accession from which the Samples are created,
+- group_by: how to group data information in what constitutes a base object, is the sample based upon the sample_accession, or the run_accession, or grouped by another variable,
+- filter: See SampleFilter on how to use this,
+- layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred). 
+
+With SRA, transport is always sra-tools, maybe not the most performant but the most reliable tranport.
 
 ### `find_sample_parity(fastqs: List[str]) -> Dict[str, Any]`
 
@@ -245,17 +284,6 @@ _No documentation available._
 
 ## Classes
 
-## `Any`
-
-Special type indicating an unconstrained type.
-
-- Any is compatible with every type.
-- Any assumed to have all methods.
-- All values assumed to be instances of Any.
-
-Note that all the above statements are true from the point of view of
-static type checkers. At runtime, Any should not be used with instance
-checks.
 ## `FieldBuilder`
 
 _No documentation available._
@@ -265,11 +293,10 @@ _No documentation available._
 
 ## `FieldExpr`
 
-_No documentation available._
-### `matches(self, record: Dict[str, Any]) -> bool`
+A object representing a Sample filtering condition. This should not be used directly, use SampleFilter together with an S expression
 
-_No documentation available._
-
+Example:
+expr = S.library_strategy == "WGS"
 ## `S`
 
 Static filter interface for ENA/SRA fields.
@@ -294,14 +321,44 @@ _No documentation available._
 
 ## `SampleFilter`
 
-_No documentation available._
-### `matches(self, record: Dict[str, Any]) -> bool`
+A SampleFilter object to filter Samples based on FieldExpr expressions.
+Usage:
+filter = SampleFilter(
+    S.library_strategy == "WGS",
+    S.read_count >= 1000000
+)
+samples = ENA(
+    identifier="PRJNA123456",
+    group_by="sample_accession",
+    filter=filter
+)
 
-_No documentation available._
-
+SampleFilter can use the following atributes from S:
+- run_accession
+- first_public
+- last_updated
+- experiment_accession
+- library_name
+- library_strategy
+- library_selection
+- library_source
+- library_layout
+- instrument_platform
+- instrument_model
+- study_accession
+- sample_accession
+- scientific_name
+- sample_alias
+- secondary_sample_accession
+- insert_size
+- tax_id
+- read_count
+- base_count
+- nominal_length
+- fastq_bytes
 ## `URI`
 
-_No documentation available._
+A utility class to discover and group URIs (e.g. rclone resources specified in scitq style) from a remote source.
 ### `find(uri_base: str, group_by: Optional[str] = None, pattern: Optional[str] = None, filter: Optional[str] = None, event_name: Optional[str] = None, field_map: Optional[Dict[str, str]] = None) -> Iterator[scitq2.uri.URIObject]`
 
   Discover and group URIs from a remote source.

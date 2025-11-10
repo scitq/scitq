@@ -26,10 +26,16 @@ MODULES = [
     ("scitq2", "Main DSL API"),
     ("scitq2.biology", "Biology extensions"),
 ]
+SKIP = {'Any', 'matches'}
 
 def should_skip(obj):
     doc = inspect.getdoc(obj)
+    name = obj.__name__
     if doc and ("NO_PUBLIC_DOC" in doc):
+        print(f"Skipping {name} (NO_PUBLIC_DOC)")
+        return True
+    if name in SKIP:
+        print(f"Skipping {name}, present in SKIP")
         return True
     return False
 
@@ -62,7 +68,6 @@ def gen_class_doc(cls):
         if mname.startswith("_"):
             continue
         if should_skip(mfunc):
-            print(f"Skipping {mname} (NO_PUBLIC_DOC)")
             continue
         sig = str(inspect.signature(mfunc))
         doc = format_docstring(inspect.getdoc(mfunc), indent=2)
@@ -77,9 +82,6 @@ def gen_section(module_name: str, title: str) -> str:
     # --- Functions ---
     funcs = [m for m in inspect.getmembers(module, inspect.isfunction) if not m[0].startswith("_")]
     funcs = [f for f in funcs if not should_skip(f[1])]
-    for name, func in [m for m in inspect.getmembers(module, inspect.isfunction) if not m[0].startswith("_")]:
-        if should_skip(func):
-            print(f"Skipping {name} (NO_PUBLIC_DOC)")
     if funcs:
         out.append("## Functions\n")
         for name, func in funcs:
@@ -93,9 +95,6 @@ def gen_section(module_name: str, title: str) -> str:
         if not m[0].startswith("_") and m[0] not in SKIP_CLASSES
     ]
     classes = [c for c in classes if not should_skip(c[1])]
-    for name, cls in [m for m in inspect.getmembers(module, inspect.isclass) if not m[0].startswith("_")]:
-        if should_skip(cls):
-            print(f"Skipping {name} (NO_PUBLIC_DOC)")
     if classes:
         out.append("\n## Classes\n")
         for name, cls in classes:

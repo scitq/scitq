@@ -32,6 +32,8 @@ class URIObject:
 
 
 class URI:
+    """A utility class to discover and group URIs (e.g. rclone resources specified in scitq style) from a remote source."""
+
     @staticmethod
     def find(
         uri_base: str,
