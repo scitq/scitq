@@ -230,3 +230,6 @@ endif
 dsl-doc: venv
 	@echo "Generating Python DSL..."
 	@python ./python/tools/gen_dsl_doc.py 
+
+api-docs:
+	protoc --doc_out=docs --doc_opt=markdown,api.md proto/taskqueue.proto

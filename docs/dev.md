@@ -49,6 +49,9 @@ When the .proto file is changed, you must re-generate the stubs for Go, Svelte.j
 make proto-all
 ```
 
+## Proto documentation (API)
+The gRPC protocol (.proto) is documented in the [API](api.md) document.
+
 ## Updating doc
 
 ### Updating python doc
@@ -75,6 +78,21 @@ pg_dump -h localhost -p 5432 -d scitq -U scitq -s -F p -E UTF-8 -f scitq.sql
 ```
 (the password is `scitq`)
 
-And upload the file in https://dbdiagram.io/
+And upload the file in https://dbdiagram.io/ in a new diagram.
+
+Group the table (manually) composing different logical groups:
+- workflow, step, recruiter,
+- provider, region, flavor, flavor_region,
+- worker, job, worker_event,
+- template_run, workflow_template, scitq_user, scitq_user_session
+- task, task_dependencies.
+
+Put aside memory_store and schema_migration that are not linked to anything.
+
 Then export in SVG.
 
+### Updating API (proto) documentation
+
+```sh
+make api-docs
+```
