@@ -65,3 +65,16 @@ make dsl-doc VENV=./python/venv
 ```sh
 make config-doc
 ```
+
+### Updating SQL Schema diagram
+
+Execute the sequence from the README.md to initialize a database. Then execute:
+
+```sh
+pg_dump -h localhost -p 5432 -d scitq -U scitq -s -F p -E UTF-8 -f scitq.sql
+```
+(the password is `scitq`)
+
+And upload the file in https://dbdiagram.io/
+Then export in SVG.
+

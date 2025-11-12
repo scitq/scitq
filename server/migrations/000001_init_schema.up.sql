@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS flavor (
 -- Flavor Region table 
 CREATE TABLE IF NOT EXISTS flavor_region (
     flavor_id SERIAL PRIMARY KEY,
-    region_id INT REFERENCES region(region_id) ON DELETE CASCADE,
+    region_id INT,
     eviction FLOAT DEFAULT 0, -- the risk of an instance to be reclaimed, the name come from Azure Spot
     cost FLOAT DEFAULT 0
 );
