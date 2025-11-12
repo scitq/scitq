@@ -4099,6 +4099,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 // getJobByID retrieves job details from the database.
 func (s *taskQueueServer) getJobByID(jobID int32) (Job, bool) {
 	var j Job
+	var action string
 	err := s.db.QueryRow(`
         SELECT j.job_id, j.worker_id, p.provider_id, r.region_name, w.worker_name, j.action, j.retry
         FROM job j 
@@ -4106,7 +4107,10 @@ func (s *taskQueueServer) getJobByID(jobID int32) (Job, bool) {
 		LEFT JOIN provider p ON p.provider_id=r.provider_id
 		LEFT JOIN worker w ON w.worker_id=j.worker_id
         WHERE job_id = $1
-    `, jobID).Scan(&j.JobID, &j.WorkerID, &j.ProviderID, &j.Region, &j.WorkerName, &j.Action, &j.Retry)
+    `, jobID).Scan(&j.JobID, &j.WorkerID, &j.ProviderID, &j.Region, &j.WorkerName, &action, &j.Retry)
+	if len(action) > 0 {
+		j.Action = rune(action[0])
+	}
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("⚠️ getJobByID failed for %d: %v", jobID, err)
