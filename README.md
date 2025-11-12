@@ -5,7 +5,7 @@
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/scitq/scitq)](https://golang.org/)
 [![Build](https://github.com/scitq/scitq/actions/workflows/build.yml/badge.svg)](https://github.com/scitq/scitq/actions/workflows/build.yml)
-[![License](https://img.shields.io/github/license/scitq/scitq)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-beta-yellow)]()
 <!-- [![Docs](https://img.shields.io/badge/docs-Read%20the%20Docs-blue)](https://scitq.readthedocs.io/) -->
 
