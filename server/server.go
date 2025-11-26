@@ -1588,8 +1588,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var stepName sql.NullString
 
 		err = tx.QueryRow(`WITH insertquery AS (
-			INSERT INTO worker (step_id, worker_name, concurrency, flavor_id, region_id, is_permanent, status)
-			VALUES (NULLIF($1,0), $5 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, FALSE, 'I')
+			INSERT INTO worker (step_id, worker_name, concurrency, prefetch, flavor_id, region_id, is_permanent, status)
+			VALUES (NULLIF($1,0), $6 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, $5, FALSE, 'I')
 			RETURNING worker_id, worker_name, region_id, flavor_id, step_id
 		)
 		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name||'.'||p.config_name, r.region_name, f.flavor_name, f.cpu, f.mem, s.step_name
@@ -1598,7 +1598,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		JOIN flavor f ON iq.flavor_id = f.flavor_id
 		JOIN provider p ON r.provider_id = p.provider_id
 		LEFT JOIN step s ON s.step_id = iq.step_id`,
-			req.StepId, req.Concurrency, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
+			req.StepId, req.Concurrency, req.Prefetch, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
 			&workerID, &workerName, &providerID, &provider, &regionName, &flavorName, &cpu, &memory, &stepName)
 		if err != nil {
 			tx.Rollback()
