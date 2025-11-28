@@ -21,63 +21,7 @@ import (
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/server/config"
 	"google.golang.org/protobuf/proto"
-
-	"golang.org/x/sys/unix"
 )
-
-// versionAtLeast compares semantic versions by major/minor, ignoring patch.
-func versionAtLeast(v string, minMajor, minMinor int) bool {
-	parts := strings.Split(strings.TrimSpace(v), ".")
-	if len(parts) < 2 {
-		return false
-	}
-	major, err1 := strconv.Atoi(parts[0])
-	minor, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	if major > minMajor {
-		return true
-	}
-	if major < minMajor {
-		return false
-	}
-	return minor >= minMinor
-}
-
-func validateScriptConfig(root, interpreter string) error {
-	// Ensure script_root exists
-	fi, err := os.Stat(root)
-	if os.IsNotExist(err) {
-		log.Printf("⚠️ script_root %q does not exist, attempting to create it", root)
-		if err := os.MkdirAll(root, 0o755); err != nil {
-			return fmt.Errorf("failed to create script_root %q: %w", root, err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("could not stat script_root %q: %w", root, err)
-	} else if !fi.IsDir() {
-		return fmt.Errorf("script_root %q exists but is not a directory", root)
-	}
-
-	// Check writability
-	testFile := filepath.Join(root, ".scitq_tmp_write_check")
-	if err := os.WriteFile(testFile, []byte("ok"), 0o644); err != nil {
-		return fmt.Errorf("script_root %q is not writable: %w", root, err)
-	}
-	_ = os.Remove(testFile) // clean up
-
-	// Check interpreter exists
-	if _, err := os.Stat(interpreter); err != nil {
-		return fmt.Errorf("script_interpreter %q not found: %w", interpreter, err)
-	}
-
-	// Optionally check executable bit (UNIX only)
-	if err := unix.Access(interpreter, unix.X_OK); err != nil {
-		return fmt.Errorf("script_interpreter %q is not executable: %w", interpreter, err)
-	}
-
-	return nil
-}
 
 func (s *taskQueueServer) UpdateTemplateRun(ctx context.Context, req *pb.UpdateTemplateRunRequest) (*pb.Ack, error) {
 	if req.TemplateRunId == 0 {
@@ -227,6 +171,11 @@ func (s *taskQueueServer) scriptRunner(
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				log.Printf("scriptRunner: killed by context: %v", err)
+			} else {
+				log.Printf("scriptRunner: non-ExitError (%T): %v", err, err)
+			}
 			return "", "", -1, fmt.Errorf("scriptRunner: command failed to run: %w", err)
 		}
 	} else {
@@ -303,8 +252,11 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 
 	// 🏃 Actually run the script
 	authToken := extractTokenFromContext(ctx)
+	timeout := time.Duration(s.cfg.Scitq.GRPCDSLTimeout) * time.Second
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	stdout, stderr, exitCode, runErr := s.scriptRunner(
-		ctx,
+		runCtx,
 		filepath.Join(s.cfg.Scitq.ScriptRoot, fmt.Sprintf("%d.py", req.WorkflowTemplateId)),
 		"run",               // mode
 		req.ParamValuesJson, // paramJSON

@@ -309,12 +309,13 @@ def ENA(identifier: str, group_by: str, filter: Optional[SampleFilter] = None, u
     return _group_samples(data, group_by, download_method='ena-aspera' if use_aspera else 'ena-ftp' if use_ftp else '', layout=layout)
 
 
-def SRA(identifier: str, group_by: str, filter: Optional[SampleFilter] = None, layout: str=AUTO) -> List[Sample]:
+def SRA(identifier: str, group_by: str, filter: Optional[SampleFilter] = None, layout: str=AUTO, download_method: str="sra-aws") -> List[Sample]:
     """A Constructor of Sample objects extracted from a public project present in NIH NCBI SRA https://www.ncbi.nlm.nih.gov/sra
     - identifier: the project accession from which the Samples are created,
     - group_by: how to group data information in what constitutes a base object, is the sample based upon the sample_accession, or the run_accession, or grouped by another variable,
     - filter: See SampleFilter on how to use this,
-    - layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred). 
+    - layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred).
+    - download_method: specify the download method to use for FASTQ retrieval. Options are 'sra-tools' or 'sra-aws'. 
     
     With SRA, transport is always sra-tools, maybe not the most performant but the most reliable tranport.
     """
@@ -357,7 +358,7 @@ def SRA(identifier: str, group_by: str, filter: Optional[SampleFilter] = None, l
     if filter:
         data = [r for r in data if filter.matches(r)]
 
-    return _group_samples(data, group_by, download_method='sra-tools', layout=layout)
+    return _group_samples(data, group_by, download_method=download_method, layout=layout)
 
 # -----------------------------
 # FASTQ discovery on top of URI

@@ -14,7 +14,7 @@ import (
 	"github.com/rclone/rclone/fs"
 )
 
-var defaultOptions = []string{"ena-ftp", "sra-tools"}
+var defaultOptions = []string{"ena-ftp", "sra-aws", "sra-tools"}
 
 var fastqParity = regexp.MustCompile(`.*(1|2)\.f.*q(\.gz)?$`)
 
@@ -81,12 +81,23 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 	// testing the different options in right order
 	for _, option := range options {
 		if option == "sra-tools" {
-			err := fb.fetchFromSRA(runAccession, absPath, onlyRead1)
+			err := fb.fetchFromSRA_sratool(runAccession, absPath, onlyRead1)
 			sraToolTested = true
 			if err == nil {
 				return nil
 			} else {
-				log.Printf("FastqBackend failed on SRA : %v", err)
+				log.Printf("FastqBackend failed on SRA sra-tools : %v", err)
+				continue
+			}
+		}
+
+		if option == "sra-aws" {
+			err := fb.fetchFromSRA_AWS(runAccession, absPath, onlyRead1)
+			sraToolTested = true
+			if err == nil {
+				return nil
+			} else {
+				log.Printf("FastqBackend failed on SRA AWS : %v", err)
 				continue
 			}
 		}
@@ -273,8 +284,20 @@ func (fb *FastqBackend) downloadFastqs(method string, urls, md5s []string, folde
 	return true
 }
 
-// fetchFromSRA downloads a FASTQ file using SRA toolkit inside Docker.
 func (fb *FastqBackend) fetchFromSRA(runAccession, destination string, onlyRead1 bool) error {
+	// First try AWS srapath method
+	err := fb.fetchFromSRA_AWS(runAccession, destination, onlyRead1)
+	if err == nil {
+		return nil
+	}
+	log.Printf("SRA fetch via AWS srapath failed: %v, falling back to standard sra-tools method", err)
+
+	// Fallback to standard sra-tools method
+	return fb.fetchFromSRA_sratool(runAccession, destination, onlyRead1)
+}
+
+// fetchFromSRA downloads a FASTQ file using SRA toolkit inside Docker.
+func (fb *FastqBackend) fetchFromSRA_sratool(runAccession, destination string, onlyRead1 bool) error {
 	//log.Printf("Fetching FASTQ from SRA: %s", runAccession)
 
 	// Build an optional step to drop R2 fastqs before compression if requested
@@ -288,7 +311,7 @@ func (fb *FastqBackend) fetchFromSRA(runAccession, destination string, onlyRead1
 		"ncbi/sra-tools",
 		"sh", "-c",
 		fmt.Sprintf(
-			"cd /destination && prefetch -X 9999999999999 %s && fasterq-dump -f --split-files %s && (%sfor f in *.fastq; do gzip \"$f\" & done; wait; rm -fr %s) || exit 1",
+			"cd /destination && prefetch -X 9999999999999 %s && fasterq-dump -f --split-files %s && (%sfor f in *.fastq; do gzip -1 \"$f\" & done; wait; rm -fr %s) || exit 1",
 			runAccession, runAccession, dropR2, runAccession,
 		),
 	)
@@ -312,4 +335,42 @@ func (fb *FastqBackend) Mkdir(path string) error {
 }
 func (fb *FastqBackend) Info(path string) (fs.DirEntry, error) {
 	return nil, fmt.Errorf("FastqBackend does not support list")
+}
+
+// fetchFromSRA downloads a FASTQ file using SRA toolkit with AWS srapath inside Docker.
+func (fb *FastqBackend) fetchFromSRA_AWS(runAccession, destination string, onlyRead1 bool) error {
+	dropR2 := ""
+	if onlyRead1 {
+		dropR2 = `for f in *2.fastq; do [ -e "$f" ] && rm "$f"; done;`
+	}
+
+	script := fmt.Sprintf(`
+		set -e
+		cd /destination
+
+		SRAPATH=$(srapath %s | grep 's3.amazonaws.com' | head -n 1)
+		if [ -z "$SRAPATH" ]; then exit 1; fi
+
+		wget -q "$SRAPATH"
+		fasterq-dump -f --split-files %s
+		%s
+		for f in *.fastq; do gzip -1 "$f" & done
+		wait
+
+		rm -f %s
+	`, runAccession, runAccession, dropR2, runAccession)
+
+	cmd := exec.Command(
+		"docker", "run", "--rm",
+		"-v", destination+":/destination",
+		"ncbi/sra-tools",
+		"sh", "-c", script,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("SRA fetch failed: %v (%s)", err, string(output))
+	}
+
+	return nil
 }

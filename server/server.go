@@ -3979,6 +3979,8 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
 		grpc.MaxConcurrentStreams(uint32(cfg.Scitq.MaxDBConcurrency)),
+		grpc.MaxRecvMsgSize(50<<20), // 50 MiB
+		grpc.MaxSendMsgSize(50<<20), // 50 MiB
 	)
 
 	// 🚦 8. Start gRPC + job manager

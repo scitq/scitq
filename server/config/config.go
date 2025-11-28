@@ -132,6 +132,9 @@ type Config struct {
 
 		// HTTPSPort is the TCP port used for HTTPS connections.
 		HTTPSPort int `yaml:"https_port" default:"443"`
+
+		// GRPCDSLTimeout is the timeout (in seconds) for DSL scripts which can take a long time to complete.
+		GRPCDSLTimeout int `yaml:"grpc_dsl_timeout" default:"1800"`
 	} `yaml:"scitq"`
 
 	// Providers contains configurations for different cloud providers supported by scitq.

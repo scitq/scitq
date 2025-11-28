@@ -1104,7 +1104,8 @@ func parseCommaSeparatedParams(input string) (string, error) {
 }
 
 func (c *CLI) TemplateRun() error {
-	ctx, cancel := c.WithTimeout()
+	// Long-running DSL scripts may take many minutes; use a large static timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	// Resolve TemplateId by Name/Version if --name is provided

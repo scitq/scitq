@@ -37,6 +37,7 @@
 |  | DisableHTTPS | `scitq.disable_https` | `false` | `bool` | DisableHTTPS disables HTTPS support when set to true. |
 |  | DisableGRPCWeb | `scitq.disable_grpcweb` | `false` | `bool` | DisableGRPCWeb disables gRPC-Web support when set to true. Used for test only |
 |  | HTTPSPort | `scitq.https_port` | `443` | `int` | HTTPSPort is the TCP port used for HTTPS connections. |
+|  | GRPCDSLTimeout | `scitq.grpc_dsl_timeout` | `1800` | `int` | GRPCDSLTimeout is the timeout (in seconds) for DSL scripts which can take a long time to complete. |
 | Providers |  | `providers` |  |  | Providers contains configurations for different cloud providers supported by scitq. Each provider can use multiple account, so you can have several config called Primary, Secondary etc. For OVH, use an Openstack account (that you can name OVH) see the example for details |
 |  | Azure | `providers.azure` |  | See below | Azure cloud provider configs |
 |  | Openstack | `providers.openstack` |  | See below | Openstack cloud provider configs |

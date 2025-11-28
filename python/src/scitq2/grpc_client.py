@@ -79,7 +79,14 @@ class Scitq2Client:
         call_credentials = grpc.metadata_call_credentials(BearerAuth(token))
         composite_credentials = grpc.composite_channel_credentials(credentials, call_credentials)
 
-        self.channel = grpc.secure_channel(server, composite_credentials)
+        self.channel = grpc.secure_channel(
+            server,
+            composite_credentials,
+            options=[
+                ('grpc.max_send_message_length', 50 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 50 * 1024 * 1024),
+            ],
+        )
         self.stub = taskqueue_pb2_grpc.TaskQueueStub(self.channel)
 
     def create_workflow(self, name: str, maximum_workers: Optional[int] = None) -> int:
