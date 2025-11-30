@@ -54,7 +54,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			onlyRead1 = true
 			continue
 		}
-		if !isLocal && (option == "ena-aspera" || option == "sra-tools") {
+		if !isLocal && (option == "ena-aspera" || option == "sra-tools" || option == "sra-aws") {
 			log.Printf("Rejecting option %s as dst is not local\n", option)
 			continue
 		}
@@ -346,19 +346,21 @@ func (fb *FastqBackend) fetchFromSRA_AWS(runAccession, destination string, onlyR
 
 	script := fmt.Sprintf(`
 		set -e
-		cd /destination
+		RUNACCESSION=%s
 
-		SRAPATH=$(srapath %s | grep 's3.amazonaws.com' | head -n 1)
+		cd /destination
+		SRAPATH=$(srapath $RUNACCESSION | grep 's3.amazonaws.com' | head -n 1)
 		if [ -z "$SRAPATH" ]; then exit 1; fi
 
-		wget -q "$SRAPATH"
-		fasterq-dump -f --split-files %s
+		wget -q "$SRAPATH" -O "$RUNACCESSION"
+		fasterq-dump -f --split-files "./$RUNACCESSION"
 		%s
+
 		for f in *.fastq; do gzip -1 "$f" & done
 		wait
 
-		rm -f %s
-	`, runAccession, runAccession, dropR2, runAccession)
+		rm -f "$RUNACCESSION"
+	`, runAccession, dropR2)
 
 	cmd := exec.Command(
 		"docker", "run", "--rm",
