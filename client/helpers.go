@@ -21,26 +21,29 @@ _nostrict() {
 }
 
 _canfail() {
-  if [ "$#" -gt 0 ]; then
-    # save current state (best-effort)
-    _had_errexit=0; (set -o | grep -q 'errexit.*on') && _had_errexit=1
-    _had_pipefail=0; (set -o 2>/dev/null | grep -q 'pipefail.*on') && _had_pipefail=1
-
-    set +e
-    set +o pipefail 2>/dev/null || true
-    "$@"; _rc=$?
-
-    # restore
-    [ "$_had_errexit" -eq 1 ] && set -e || set +e
-    if [ "$_had_pipefail" -eq 1 ]; then
-      set -o pipefail 2>/dev/null || true
-    else
-      set +o pipefail 2>/dev/null || true
-    fi
-    return $_rc
-  else
+  if [ "$#" -eq 0 ]; then
     _nostrict
+    return 0
   fi
+
+  # save current state (best-effort)
+  _had_errexit=0; (set -o | grep -q 'errexit.*on') && _had_errexit=1
+  _had_pipefail=0; (set -o 2>/dev/null | grep -q 'pipefail.*on') && _had_pipefail=1
+
+  set +e
+  set +o pipefail 2>/dev/null || true
+
+  "$@"; _CANFAIL_RC=$?
+
+  # restore
+  [ "$_had_errexit" -eq 1 ] && set -e || set +e
+  if [ "$_had_pipefail" -eq 1 ]; then
+    set -o pipefail 2>/dev/null || true
+  else
+    set +o pipefail 2>/dev/null || true
+  fi
+
+  return 0
 }
 
 _para() {
