@@ -245,12 +245,21 @@ export function formatBytesPair(a: number | bigint, b: number | bigint, decimals
 /**
  * Updates a worker's configuration.
  * @param workerId - The ID of the worker.
- * @param concurrency - Optional concurrency level.
- * @param prefetch - Optional prefetch value.
+ * @param updates - Partial fields to update: concurrency, prefetch, isPermanent, recyclableScope.
  */
-export async function updateWorkerConfig(workerId: number, updates: Partial<{ concurrency: number; prefetch: number }>) {
+export async function updateWorkerConfig(
+  workerId: number,
+  updates: Partial<{ concurrency: number; prefetch: number; isPermanent: boolean; recyclableScope: string }>
+) {
   try {
-    await client.updateWorker({ workerId, ...updates }, await callOptionsUserToken());
+    const req: any = { workerId };
+
+    if (updates.concurrency !== undefined) req.concurrency = updates.concurrency;
+    if (updates.prefetch !== undefined) req.prefetch = updates.prefetch;
+    if (updates.isPermanent !== undefined) req.is_permanent = updates.isPermanent;
+    if (updates.recyclableScope !== undefined) req.recyclable_scope = updates.recyclableScope;
+
+    await client.updateWorker(req, await callOptionsUserToken());
   } catch (error) {
     console.error("Update Worker Config error:", error);
     throw error;

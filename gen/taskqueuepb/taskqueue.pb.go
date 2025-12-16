@@ -639,21 +639,25 @@ func (x *RetryTaskRequest) GetRetry() int32 {
 }
 
 type Worker struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Concurrency   int32                  `protobuf:"varint,3,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
-	Prefetch      int32                  `protobuf:"varint,4,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
-	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
-	Ipv4          string                 `protobuf:"bytes,6,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
-	Ipv6          string                 `protobuf:"bytes,7,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
-	Flavor        string                 `protobuf:"bytes,8,opt,name=flavor,proto3" json:"flavor,omitempty"`
-	Provider      string                 `protobuf:"bytes,9,opt,name=provider,proto3" json:"provider,omitempty"`
-	Region        string                 `protobuf:"bytes,10,opt,name=region,proto3" json:"region,omitempty"`
-	StepId        *int32                 `protobuf:"varint,11,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
-	StepName      *string                `protobuf:"bytes,12,opt,name=step_name,json=stepName,proto3,oneof" json:"step_name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkerId        int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	Name            string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Concurrency     int32                  `protobuf:"varint,3,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Prefetch        int32                  `protobuf:"varint,4,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
+	Status          string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	Ipv4            string                 `protobuf:"bytes,6,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	Ipv6            string                 `protobuf:"bytes,7,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	Flavor          string                 `protobuf:"bytes,8,opt,name=flavor,proto3" json:"flavor,omitempty"`
+	Provider        string                 `protobuf:"bytes,9,opt,name=provider,proto3" json:"provider,omitempty"`
+	Region          string                 `protobuf:"bytes,10,opt,name=region,proto3" json:"region,omitempty"`
+	StepId          *int32                 `protobuf:"varint,11,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	StepName        *string                `protobuf:"bytes,12,opt,name=step_name,json=stepName,proto3,oneof" json:"step_name,omitempty"`
+	IsPermanent     bool                   `protobuf:"varint,13,opt,name=is_permanent,json=isPermanent,proto3" json:"is_permanent,omitempty"`
+	RecyclableScope string                 `protobuf:"bytes,14,opt,name=recyclable_scope,json=recyclableScope,proto3" json:"recyclable_scope,omitempty"`
+	WorkflowId      *int32                 `protobuf:"varint,15,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
+	WorkflowName    *string                `protobuf:"bytes,16,opt,name=workflow_name,json=workflowName,proto3,oneof" json:"workflow_name,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Worker) Reset() {
@@ -766,6 +770,34 @@ func (x *Worker) GetStepId() int32 {
 func (x *Worker) GetStepName() string {
 	if x != nil && x.StepName != nil {
 		return *x.StepName
+	}
+	return ""
+}
+
+func (x *Worker) GetIsPermanent() bool {
+	if x != nil {
+		return x.IsPermanent
+	}
+	return false
+}
+
+func (x *Worker) GetRecyclableScope() string {
+	if x != nil {
+		return x.RecyclableScope
+	}
+	return ""
+}
+
+func (x *Worker) GetWorkflowId() int32 {
+	if x != nil && x.WorkflowId != nil {
+		return *x.WorkflowId
+	}
+	return 0
+}
+
+func (x *Worker) GetWorkflowName() string {
+	if x != nil && x.WorkflowName != nil {
+		return *x.WorkflowName
 	}
 	return ""
 }
@@ -2031,16 +2063,18 @@ func (x *WorkerRequest) GetStepId() int32 {
 }
 
 type WorkerUpdateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
-	ProviderId    *int32                 `protobuf:"varint,2,opt,name=provider_id,json=providerId,proto3,oneof" json:"provider_id,omitempty"`
-	FlavorId      *int32                 `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3,oneof" json:"flavor_id,omitempty"`
-	RegionId      *int32                 `protobuf:"varint,4,opt,name=region_id,json=regionId,proto3,oneof" json:"region_id,omitempty"`
-	Concurrency   *int32                 `protobuf:"varint,5,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
-	Prefetch      *int32                 `protobuf:"varint,6,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
-	StepId        *int32                 `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkerId        int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	ProviderId      *int32                 `protobuf:"varint,2,opt,name=provider_id,json=providerId,proto3,oneof" json:"provider_id,omitempty"`
+	FlavorId        *int32                 `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3,oneof" json:"flavor_id,omitempty"`
+	RegionId        *int32                 `protobuf:"varint,4,opt,name=region_id,json=regionId,proto3,oneof" json:"region_id,omitempty"`
+	Concurrency     *int32                 `protobuf:"varint,5,opt,name=concurrency,proto3,oneof" json:"concurrency,omitempty"`
+	Prefetch        *int32                 `protobuf:"varint,6,opt,name=prefetch,proto3,oneof" json:"prefetch,omitempty"`
+	StepId          *int32                 `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	IsPermanent     *bool                  `protobuf:"varint,8,opt,name=is_permanent,json=isPermanent,proto3,oneof" json:"is_permanent,omitempty"`
+	RecyclableScope *string                `protobuf:"bytes,9,opt,name=recyclable_scope,json=recyclableScope,proto3,oneof" json:"recyclable_scope,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *WorkerUpdateRequest) Reset() {
@@ -2120,6 +2154,20 @@ func (x *WorkerUpdateRequest) GetStepId() int32 {
 		return *x.StepId
 	}
 	return 0
+}
+
+func (x *WorkerUpdateRequest) GetIsPermanent() bool {
+	if x != nil && x.IsPermanent != nil {
+		return *x.IsPermanent
+	}
+	return false
+}
+
+func (x *WorkerUpdateRequest) GetRecyclableScope() string {
+	if x != nil && x.RecyclableScope != nil {
+		return *x.RecyclableScope
+	}
+	return ""
 }
 
 type ListFlavorsRequest struct {
@@ -7209,7 +7257,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10RetryTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x19\n" +
 	"\x05retry\x18\x02 \x01(\x05H\x00R\x05retry\x88\x01\x01B\b\n" +
-	"\x06_retry\"\xdd\x02\n" +
+	"\x06_retry\"\x9d\x04\n" +
 	"\x06Worker\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -7223,11 +7271,18 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x06region\x18\n" +
 	" \x01(\tR\x06region\x12\x1c\n" +
 	"\astep_id\x18\v \x01(\x05H\x00R\x06stepId\x88\x01\x01\x12 \n" +
-	"\tstep_name\x18\f \x01(\tH\x01R\bstepName\x88\x01\x01B\n" +
+	"\tstep_name\x18\f \x01(\tH\x01R\bstepName\x88\x01\x01\x12!\n" +
+	"\fis_permanent\x18\r \x01(\bR\visPermanent\x12)\n" +
+	"\x10recyclable_scope\x18\x0e \x01(\tR\x0frecyclableScope\x12$\n" +
+	"\vworkflow_id\x18\x0f \x01(\x05H\x02R\n" +
+	"workflowId\x88\x01\x01\x12(\n" +
+	"\rworkflow_name\x18\x10 \x01(\tH\x03R\fworkflowName\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_idB\f\n" +
 	"\n" +
-	"_step_name\":\n" +
+	"_step_nameB\x0e\n" +
+	"\f_workflow_idB\x10\n" +
+	"\x0e_workflow_name\":\n" +
 	"\vWorkersList\x12+\n" +
 	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"J\n" +
 	"\x12ListWorkersRequest\x12$\n" +
@@ -7333,7 +7388,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bprefetch\x18\x06 \x01(\x05R\bprefetch\x12\x1c\n" +
 	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
 	"\n" +
-	"\b_step_id\"\xd7\x02\n" +
+	"\b_step_id\"\xd5\x03\n" +
 	"\x13WorkerUpdateRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12$\n" +
 	"\vprovider_id\x18\x02 \x01(\x05H\x00R\n" +
@@ -7342,7 +7397,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tregion_id\x18\x04 \x01(\x05H\x02R\bregionId\x88\x01\x01\x12%\n" +
 	"\vconcurrency\x18\x05 \x01(\x05H\x03R\vconcurrency\x88\x01\x01\x12\x1f\n" +
 	"\bprefetch\x18\x06 \x01(\x05H\x04R\bprefetch\x88\x01\x01\x12\x1c\n" +
-	"\astep_id\x18\a \x01(\x05H\x05R\x06stepId\x88\x01\x01B\x0e\n" +
+	"\astep_id\x18\a \x01(\x05H\x05R\x06stepId\x88\x01\x01\x12&\n" +
+	"\fis_permanent\x18\b \x01(\bH\x06R\visPermanent\x88\x01\x01\x12.\n" +
+	"\x10recyclable_scope\x18\t \x01(\tH\aR\x0frecyclableScope\x88\x01\x01B\x0e\n" +
 	"\f_provider_idB\f\n" +
 	"\n" +
 	"_flavor_idB\f\n" +
@@ -7351,7 +7408,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\n" +
 	"\n" +
-	"\b_step_id\"B\n" +
+	"\b_step_idB\x0f\n" +
+	"\r_is_permanentB\x13\n" +
+	"\x11_recyclable_scope\"B\n" +
 	"\x12ListFlavorsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xa9\x03\n" +

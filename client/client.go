@@ -245,7 +245,10 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := scanner.Text()
-			stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: logType, LogText: line})
+			if err := stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: logType, LogText: line}); err != nil {
+				log.Printf("⚠️ Failed to send log line for task %d: %v", task.TaskId, err)
+				break
+			}
 		}
 		stream.CloseSend() // ✅ Ensure closure of log stream
 	}

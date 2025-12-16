@@ -19,14 +19,21 @@ func LogMessage(msg string, client pb.TaskQueueClient, taskID int32) {
 	stream, serr := client.SendTaskLogs(context.Background())
 	if serr != nil {
 		log.Printf("❌ Failed to open error log stream: %v", serr)
+		return
+	}
+	if stream == nil {
+		log.Printf("❌ Received nil stream from SendTaskLogs")
+		return
 	}
 	defer stream.CloseSend()
 
-	stream.Send(&pb.TaskLog{
+	if err := stream.Send(&pb.TaskLog{
 		TaskId:  taskID,
 		LogType: "stderr",
 		LogText: msg,
-	})
+	}); err != nil {
+		log.Printf("❌ Failed to send log message: %v", err)
+	}
 }
 
 func ReportInstallError(c pb.TaskQueueClient, workerName, msg string, err error, ctx context.Context) {

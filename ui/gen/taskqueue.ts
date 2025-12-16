@@ -294,6 +294,22 @@ export interface Worker {
      * @generated from protobuf field: optional string step_name = 12
      */
     stepName?: string;
+    /**
+     * @generated from protobuf field: bool is_permanent = 13
+     */
+    isPermanent: boolean;
+    /**
+     * @generated from protobuf field: string recyclable_scope = 14
+     */
+    recyclableScope: string;
+    /**
+     * @generated from protobuf field: optional int32 workflow_id = 15
+     */
+    workflowId?: number;
+    /**
+     * @generated from protobuf field: optional string workflow_name = 16
+     */
+    workflowName?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -660,6 +676,14 @@ export interface WorkerUpdateRequest {
      * @generated from protobuf field: optional int32 step_id = 7
      */
     stepId?: number;
+    /**
+     * @generated from protobuf field: optional bool is_permanent = 8
+     */
+    isPermanent?: boolean;
+    /**
+     * @generated from protobuf field: optional string recyclable_scope = 9
+     */
+    recyclableScope?: string;
 }
 /**
  * @generated from protobuf message taskqueue.ListFlavorsRequest
@@ -2772,7 +2796,11 @@ class Worker$Type extends MessageType<Worker> {
             { no: 9, name: "provider", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 10, name: "region", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 11, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 12, name: "step_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 12, name: "step_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 13, name: "is_permanent", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 14, name: "recyclable_scope", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 15, name: "workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 16, name: "workflow_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -2787,6 +2815,8 @@ class Worker$Type extends MessageType<Worker> {
         message.flavor = "";
         message.provider = "";
         message.region = "";
+        message.isPermanent = false;
+        message.recyclableScope = "";
         if (value !== undefined)
             reflectionMergePartial<Worker>(this, message, value);
         return message;
@@ -2831,6 +2861,18 @@ class Worker$Type extends MessageType<Worker> {
                     break;
                 case /* optional string step_name */ 12:
                     message.stepName = reader.string();
+                    break;
+                case /* bool is_permanent */ 13:
+                    message.isPermanent = reader.bool();
+                    break;
+                case /* string recyclable_scope */ 14:
+                    message.recyclableScope = reader.string();
+                    break;
+                case /* optional int32 workflow_id */ 15:
+                    message.workflowId = reader.int32();
+                    break;
+                case /* optional string workflow_name */ 16:
+                    message.workflowName = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2880,6 +2922,18 @@ class Worker$Type extends MessageType<Worker> {
         /* optional string step_name = 12; */
         if (message.stepName !== undefined)
             writer.tag(12, WireType.LengthDelimited).string(message.stepName);
+        /* bool is_permanent = 13; */
+        if (message.isPermanent !== false)
+            writer.tag(13, WireType.Varint).bool(message.isPermanent);
+        /* string recyclable_scope = 14; */
+        if (message.recyclableScope !== "")
+            writer.tag(14, WireType.LengthDelimited).string(message.recyclableScope);
+        /* optional int32 workflow_id = 15; */
+        if (message.workflowId !== undefined)
+            writer.tag(15, WireType.Varint).int32(message.workflowId);
+        /* optional string workflow_name = 16; */
+        if (message.workflowName !== undefined)
+            writer.tag(16, WireType.LengthDelimited).string(message.workflowName);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4264,7 +4318,9 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
             { no: 4, name: "region_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "concurrency", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "prefetch", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 7, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 7, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "is_permanent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 9, name: "recyclable_scope", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerUpdateRequest>): WorkerUpdateRequest {
@@ -4300,6 +4356,12 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
                 case /* optional int32 step_id */ 7:
                     message.stepId = reader.int32();
                     break;
+                case /* optional bool is_permanent */ 8:
+                    message.isPermanent = reader.bool();
+                    break;
+                case /* optional string recyclable_scope */ 9:
+                    message.recyclableScope = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4333,6 +4395,12 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
         /* optional int32 step_id = 7; */
         if (message.stepId !== undefined)
             writer.tag(7, WireType.Varint).int32(message.stepId);
+        /* optional bool is_permanent = 8; */
+        if (message.isPermanent !== undefined)
+            writer.tag(8, WireType.Varint).bool(message.isPermanent);
+        /* optional string recyclable_scope = 9; */
+        if (message.recyclableScope !== undefined)
+            writer.tag(9, WireType.LengthDelimited).string(message.recyclableScope);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

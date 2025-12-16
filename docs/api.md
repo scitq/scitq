@@ -1669,6 +1669,10 @@ Foreign key to region table |
 | region | [string](#string) |  |  |
 | step_id | [int32](#int32) | optional |  |
 | step_name | [string](#string) | optional |  |
+| is_permanent | [bool](#bool) |  |  |
+| recyclable_scope | [string](#string) |  |  |
+| workflow_id | [int32](#int32) | optional |  |
+| workflow_name | [string](#string) | optional |  |
 
 
 
@@ -1985,6 +1989,8 @@ Foreign key to region table |
 | concurrency | [int32](#int32) | optional |  |
 | prefetch | [int32](#int32) | optional |  |
 | step_id | [int32](#int32) | optional |  |
+| is_permanent | [bool](#bool) | optional |  |
+| recyclable_scope | [string](#string) | optional |  |
 
 
 

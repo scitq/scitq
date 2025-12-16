@@ -38,6 +38,10 @@ func CreateLoginClient(serverAddr string) (QueueClient, error) {
 	conn, err := grpc.NewClient(
 		serverAddr,
 		grpc.WithTransportCredentials(creds),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(50<<20), // 50 MiB to match server
+			grpc.MaxCallSendMsgSize(50<<20), // 50 MiB to match server
+		),
 	)
 	qc := QueueClient{
 		conn:   conn,
@@ -57,6 +61,10 @@ func CreateClient(serverAddr, token string) (QueueClient, error) {
 		serverAddr,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithUnaryInterceptor(authInterceptor(fmt.Sprintf("Bearer %s", token))),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(50<<20), // 50 MiB to match server
+			grpc.MaxCallSendMsgSize(50<<20), // 50 MiB to match server
+		),
 	)
 	qc := QueueClient{
 		conn:   conn,

@@ -974,8 +974,7 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 				t.task_id, t.retry, t.step_id, s.workflow_id
 			FROM task t
 			LEFT JOIN step s ON t.step_id = s.step_id
-			WHERE t.task_id = $1 
-			  AND t.status = 'F' 
+			WHERE t.task_id = $1
 			  AND NOT t.hidden
 		),
 		cloned AS (
@@ -1763,6 +1762,16 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 		args = append(args, req.GetStepId())
 		i++
 	}
+	if req.IsPermanent != nil {
+		sets = append(sets, fmt.Sprintf("is_permanent=$%d", i))
+		args = append(args, req.GetIsPermanent())
+		i++
+	}
+	if req.RecyclableScope != nil {
+		sets = append(sets, fmt.Sprintf("recyclable_scope=$%d", i))
+		args = append(args, req.GetRecyclableScope())
+		i++
+	}
 
 	if len(sets) == 0 {
 		return &pb.Ack{Success: false}, fmt.Errorf("no fields provided to update")
@@ -2439,12 +2448,17 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			COALESCE(p.provider_name || '.' || p.config_name, '') AS provider,
 			COALESCE(f.flavor_name, '') AS flavor,
 			w.step_id,
-			s.step_name
+			s.step_name,
+			w.is_permanent,
+			w.recyclable_scope,
+			wf.workflow_id,
+			wf.workflow_name
 		FROM worker w
 		LEFT JOIN region r ON r.region_id = w.region_id
 		LEFT JOIN provider p ON r.provider_id = p.provider_id
 		LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
 		LEFT JOIN step s ON s.step_id = w.step_id
+		LEFT JOIN workflow wf ON wf.workflow_id = s.workflow_id
 		`
 
 	if req.WorkflowId != nil {
@@ -2468,13 +2482,14 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 
 	for rows.Next() {
 		var worker pb.Worker
-		var stepId sql.NullInt32
-		var stepName sql.NullString
+		var stepId, workflowId sql.NullInt32
+		var stepName, workflowName sql.NullString
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
-			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor, &stepId, &stepName)
+			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor, &stepId, &stepName,
+			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName)
 		if err != nil {
-			log.Printf("⚠️ Failed to scan task: %v", err)
+			log.Printf("⚠️ Failed to scan worker: %v", err)
 			continue
 		}
 		if stepId.Valid {
@@ -2482,6 +2497,12 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		}
 		if stepName.Valid {
 			worker.StepName = &stepName.String
+		}
+		if workflowId.Valid {
+			worker.WorkflowId = &workflowId.Int32
+		}
+		if workflowName.Valid {
+			worker.WorkflowName = &workflowName.String
 		}
 
 		workers = append(workers, &worker)

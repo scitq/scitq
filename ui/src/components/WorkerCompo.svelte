@@ -651,6 +651,43 @@
     }
   }
 
+
+  /** State for workflow/step editor */
+  let editingWorkflowStepFor: number | null = null;
+
+  let workflowOptions: Array<any> = [];
+  let workflowOffset: number = 0;
+  let selectedWorkflowId: number | null = null;
+
+  let stepOptions: Array<any> = [];
+  let selectedStepId: number | null = null;
+
+  let loadingWorkflows: boolean = false;
+  let loadingSteps: boolean = false;
+
+  /**
+   * Loads initial workflows lazily (first page only)
+   */
+  async function loadWorkflows() {
+    if (loadingWorkflows) return;
+    loadingWorkflows = true;
+
+    try {
+      const api = await import('../lib/api');
+      const res = await api.listWorkflows({ limit: 10, offset: workflowOffset });
+
+      const newList = res?.workflows ?? [];
+      workflowOptions = [...workflowOptions, ...newList];
+
+      workflowOffset += newList.length;
+    } catch (err) {
+      console.error("Failed to load workflows:", err);
+    } finally {
+      loadingWorkflows = false;
+    }
+  }
+
+
 // function to display task counts
 function displayTasksCount(workerId: number, ...statuses: string[]): string {
   const n = statuses
@@ -658,6 +695,37 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
     .reduce((a, b) => a + b, 0);
   return n === 0 ? "" : n.toString();
 }
+
+  /**
+   * Loads steps for a specific workflow, replacing any previously loaded list.
+   * Called when user selects a workflow during inline editing.
+   */
+  async function loadStepsForWorkflow(workflowId: number | null) {
+    if (!workflowId) {
+      stepOptions = [];
+      selectedStepId = null;
+      return;
+    }
+
+    if (loadingSteps) return;
+    loadingSteps = true;
+
+    try {
+      const api = await import('../lib/api');
+      const res = await api.listSteps({ workflowId });
+
+      stepOptions = res?.steps ?? [];
+
+      // Auto-select first step only if nothing is selected
+      if (selectedStepId === null && stepOptions.length > 0) {
+        selectedStepId = stepOptions[0].stepId;
+      }
+    } catch (err) {
+      console.error("Failed to load steps for workflow", workflowId, err);
+    } finally {
+      loadingSteps = false;
+    }
+  }
 
 </script>
 
@@ -688,6 +756,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
               <!-- Table mode - show all columns -->
               <th>Name</th>
               <th>Wf.Step</th>
+              <th>Scope</th>
               <th>Status</th>
               <th>Concu</th>
               <th>Pref</th>
@@ -723,11 +792,113 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
         <tbody>
           {#each internalWorkers as worker (worker.workerId)}
             <tr data-testid={`worker-${worker.workerId}`}>
-              <td> <a href="#/tasks?workerId={worker.workerId}" data-testid={`worker-name-${worker.workerId}`} class="workerCompo-clickable">{worker.name}</a> </td>
-              <td class="workerCompo-actions">
-                {worker.stepName}
-                <button class="btn-action" title="Edit"><Edit /></button>
+              <td>
+                <a
+                  href="#/tasks?workerId={worker.workerId}"
+                  data-testid={`worker-name-${worker.workerId}`}
+                  class="workerCompo-clickable"
+                >
+                  {worker.name}
+                  {#if worker.isPermanent}
+                    <span title="Permanent worker" style="margin-left:4px; color:#e6b800;">★</span>
+                  {/if}
+                </a>
               </td>
+              <td class="workerCompo-actions">
+  {#if editingWorkflowStepFor === worker.workerId}
+    <!-- WORKFLOW SELECTOR -->
+    <div class="step-edit-block">
+      <label>
+        Workflow:
+        <select
+          bind:value={selectedWorkflowId}
+          on:change={() => loadStepsForWorkflow(selectedWorkflowId)}
+        >
+          <option value={null}>-- select workflow --</option>
+          {#each workflowOptions as wf}
+            <option value={wf.workflowId}>{wf.workflowName}</option>
+          {/each}
+        </select>
+      </label>
+
+      <button
+        class="btn-action"
+        on:click={loadWorkflows}
+        disabled={loadingWorkflows}
+        title="Load more workflows"
+      >+</button>
+
+      <!-- STEP SELECTOR -->
+      <label>
+        Step:
+        <select bind:value={selectedStepId}>
+          <option value={null}>-- select step --</option>
+          {#each stepOptions as st}
+            <option value={st.stepId}>{st.stepName}</option>
+          {/each}
+        </select>
+      </label>
+
+      <!-- SAVE / CANCEL -->
+      <button
+        class="btn-action"
+        title="Save"
+        on:click={async () => {
+          if (selectedStepId !== null) {
+            await updateWorkerConfig(worker.workerId, { stepId: selectedStepId });
+            internalWorkers = internalWorkers.map(w =>
+              w.workerId === worker.workerId
+                ? {
+                    ...w,
+                    stepId: selectedStepId,
+                    stepName: stepOptions.find(s => s.stepId === selectedStepId)?.stepName,
+                    workflowId: selectedWorkflowId,
+                    workflowName: workflowOptions.find(wf => wf.workflowId === selectedWorkflowId)?.workflowName
+                  }
+                : w
+            );
+          }
+          editingWorkflowStepFor = null;
+        }}
+      >✓</button>
+
+      <button
+        class="btn-action"
+        title="Cancel"
+        on:click={() => {
+          editingWorkflowStepFor = null;
+          stepOptions = [];
+        }}
+      >✗</button>
+    </div>
+  {:else}
+    <span title="{worker.workflowName} › {worker.stepName}">
+      {#if worker.workflowName}
+        {worker.workflowName.length > 20
+          ? `${worker.workflowName.slice(0, 20)}…`
+          : worker.workflowName}
+        › {worker.stepName}
+      {:else}
+        {worker.stepName}
+      {/if}
+    </span>
+
+    <button
+      class="btn-action"
+      title="Edit workflow/step"
+      on:click={() => {
+        editingWorkflowStepFor = worker.workerId;
+        selectedWorkflowId = worker.workflowId ?? null;
+        selectedStepId = worker.stepId ?? null;
+        workflowOptions = [];
+        workflowOffset = 0;
+        loadWorkflows();
+        if (selectedWorkflowId) loadStepsForWorkflow(selectedWorkflowId);
+      }}
+    ><Edit /></button>
+  {/if}
+</td>
+              <td>{worker.recyclableScope}</td>
               <td>
                 <div class="workerCompo-status-pill {getWorkerStatusClass(worker.status)}" title={getWorkerStatusText(worker.status)}></div>
               </td>

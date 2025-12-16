@@ -518,15 +518,47 @@ func (c *CLI) WorkerDeploy() error {
 		regionFilter = fmt.Sprintf("region=%s", c.Attr.Worker.Deploy.Region)
 	}
 
+	// Try to parse flavor as ID first, then fall back to name
+	flavorID, err := strconv.Atoi(c.Attr.Worker.Deploy.Flavor)
+	var filter string
+
+	if err == nil {
+		// Input is a valid integer, search by flavor ID
+		filter = fmt.Sprintf("provider=%s:flavor_id=%d:%s", c.Attr.Worker.Deploy.Provider, flavorID, regionFilter)
+	} else {
+		// Input is not a valid integer, search by flavor name
+		filter = fmt.Sprintf("provider=%s:flavor_name=%s:%s", c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Flavor, regionFilter)
+	}
+
 	req := &pb.ListFlavorsRequest{
 		Limit:  1,
-		Filter: fmt.Sprintf("provider=%s:flavor_name=%s:%s", c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Flavor, regionFilter),
+		Filter: filter,
 	}
 	res, err := c.QC.Client.ListFlavors(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error fetching flavor: %w", err)
 	}
 	if len(res.Flavors) != 1 {
+		// Provide diagnostic help when no flavors are found
+		if len(res.Flavors) == 0 {
+			// Try to find flavors without provider/region constraints to help diagnose the issue
+			diagReq := &pb.ListFlavorsRequest{
+				Limit:  10,
+				Filter: fmt.Sprintf("flavor_name=%s", c.Attr.Worker.Deploy.Flavor),
+			}
+			diagRes, diagErr := c.QC.Client.ListFlavors(ctx, diagReq)
+			if diagErr == nil && len(diagRes.Flavors) > 0 {
+				// Flavor exists but not with the specified provider/region
+				var availableProviders []string
+				for _, f := range diagRes.Flavors {
+					availableProviders = append(availableProviders, f.Provider)
+				}
+				return fmt.Errorf("flavor '%s' not found for provider '%s' and region '%s'. Available providers for this flavor: %v. Use 'scitq flavor list --filter flavor_name=%s' to see details",
+					c.Attr.Worker.Deploy.Flavor, c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Region, availableProviders, c.Attr.Worker.Deploy.Flavor)
+			}
+			return fmt.Errorf("no flavors found matching provider='%s', flavor='%s', region='%s'. Please check your provider, flavor name, and region. Use 'scitq flavor list' to see available flavors",
+				c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Flavor, c.Attr.Worker.Deploy.Region)
+		}
 		return fmt.Errorf("expected exactly one flavor, got %d", len(res.Flavors))
 	}
 

@@ -151,6 +151,10 @@ message Worker {
     string region = 10;
     optional int32 step_id = 11;
     optional string step_name = 12;
+    bool is_permanent = 13;
+    string recyclable_scope = 14;
+    optional int32 workflow_id = 15;
+    optional string workflow_name = 16;
 }
 
 
@@ -285,6 +289,8 @@ message WorkerUpdateRequest {
     optional int32 concurrency = 5;
     optional int32 prefetch = 6;
     optional int32 step_id = 7;
+    optional bool is_permanent = 8;
+    optional string recyclable_scope = 9;
 }
 
 message ListFlavorsRequest {

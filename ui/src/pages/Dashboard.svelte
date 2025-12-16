@@ -178,8 +178,10 @@ import { getJobs, delWorker, delJob } from '../lib/api';
 
 </script>
 
-<!-- Main dashboard container -->
-<div class="dashboard-content" data-testid="dashboard-page">
+<!-- Page-level scroll wrapper -->
+<div class="dashboard-scroll-wrapper">
+  <!-- Main dashboard container -->
+  <div class="dashboard-content" data-testid="dashboard-page">
   <!-- Workers section -->
   <div class="dashboard-worker-section">
     <WorkerCompo />
@@ -223,4 +225,12 @@ import { getJobs, delWorker, delJob } from '../lib/api';
       <CreateForm/>
     </div>
   </div>
-</div>
+    </div> <!-- end dashboard-content -->
+</div> <!-- end dashboard-scroll-wrapper -->
+
+<style>
+  .dashboard-scroll-wrapper {
+    height: 100vh;
+    overflow-y: auto;
+  }
+</style>
