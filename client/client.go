@@ -138,6 +138,44 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 //	}
 //}
 
+// getScriptExtension determines the appropriate file extension based on the shell/interpreter
+func getScriptExtension(shell string) string {
+	// Extract the base name from the shell path (handles /usr/bin/python3, /opt/venv/bin/python, etc.)
+	baseShell := filepath.Base(shell)
+	
+	// Check for shell-like interpreters (all end with 'sh')
+	if strings.HasSuffix(baseShell, "sh") {
+		return ".sh"
+	}
+	
+	// Check for Python interpreters (python, python3, python3.12, etc.)
+	if strings.HasPrefix(baseShell, "python") {
+		return ".py"
+	}
+	
+	// Check for R interpreter
+	if baseShell == "R" || baseShell == "Rscript" {
+		return ".R"
+	}
+	
+	// Check for other common interpreters
+	switch baseShell {
+	case "perl":
+		return ".pl"
+	case "ruby":
+		return ".rb"
+	case "lua":
+		return ".lua"
+	case "node", "nodejs":
+		return ".js"
+	case "php":
+		return ".php"
+	}
+	
+	// Default extension for unknown interpreters
+	return ".cmd"
+}
+
 // executeTask runs the Docker command and streams logs.
 func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32) {
 	defer wg.Done()
@@ -171,11 +209,14 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return // ❌ Do not execute if task is marked as failed
 	}
 
+	// Add scripts folder for long commands
 	command := []string{"run", "--rm", "-e", fmt.Sprintf("CPU=%d", cpu)}
 	option := ""
-	for _, folder := range []string{"input", "output", "tmp", "resource"} {
-		if folder == "resource" {
+	for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
+		if folder == "resource" || folder == "scripts" {
 			option = ":ro"
+		} else {
+			option = ""
 		}
 		command = append(command, "-v", store+"/tasks/"+fmt.Sprint(task.TaskId)+"/"+folder+":/"+folder+option)
 	}
@@ -185,12 +226,22 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		options := strings.Fields(*task.ContainerOptions)
 		command = append(command, options...)
 	}
-	if task.Shell != nil {
-		command = append(command, task.Container, *task.Shell, "-c", task.Command)
-	} else {
-		args, err := shlex.Split(task.Command)
-		if err != nil {
-			message := fmt.Sprintf("Failed to analyze command %s: %v", task.Command, err)
+
+	// Check if command is too long and needs script file
+	// Only use script files when shell is explicitly defined to avoid compatibility issues
+	useScriptFile := len(task.Command) > utils.MaxCommandLength && task.Shell != nil
+
+	if useScriptFile {
+		// Create script file for long commands
+		scriptContent := task.Command
+		
+		// Determine appropriate file extension based on shell type
+		scriptExtension := getScriptExtension(*task.Shell)
+		scriptPath := filepath.Join(store, "tasks", fmt.Sprint(task.TaskId), "scripts", fmt.Sprintf("task_%d%s", task.TaskId, scriptExtension))
+		
+		// Ensure scripts directory exists
+		if err := os.MkdirAll(filepath.Dir(scriptPath), 0755); err != nil {
+			message := fmt.Sprintf("Failed to create scripts directory for task %d: %v", task.TaskId, err)
 			log.Printf("❌ %s", message)
 			reporter.Event("E", "task", message, map[string]any{
 				"task_id": task.TaskId,
@@ -200,8 +251,44 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
 			return
 		}
-		command = append(command, task.Container)
-		command = append(command, args...)
+		
+		// Write script file
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
+			message := fmt.Sprintf("Failed to write script file for task %d: %v", task.TaskId, err)
+			log.Printf("❌ %s", message)
+			reporter.Event("E", "task", message, map[string]any{
+				"task_id": task.TaskId,
+				"command": task.Command,
+			})
+			task.Status = "F"                              // Mark as failed
+			reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
+			return
+		}
+		
+		// Use script file in docker command with the explicitly defined shell
+		command = append(command, task.Container, *task.Shell, "/scripts/task_"+fmt.Sprint(task.TaskId)+scriptExtension)
+		
+		log.Printf("📝 Using script file for long command (length: %d) with shell: %s (extension: %s)", len(task.Command), *task.Shell, scriptExtension)
+	} else {
+		// Original logic for normal commands (including long ones without explicit shell)
+		if task.Shell != nil {
+			command = append(command, task.Container, *task.Shell, "-c", task.Command)
+		} else {
+			args, err := shlex.Split(task.Command)
+			if err != nil {
+				message := fmt.Sprintf("Failed to analyze command %s: %v", task.Command, err)
+				log.Printf("❌ %s", message)
+				reporter.Event("E", "task", message, map[string]any{
+					"task_id": task.TaskId,
+					"command": task.Command,
+				})
+				task.Status = "F"                              // Mark as failed
+				reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
+				return
+			}
+			command = append(command, task.Container)
+			command = append(command, args...)
+		}
 	}
 
 	log.Printf("🛠️  Running command: docker %s", strings.Join(command, " "))

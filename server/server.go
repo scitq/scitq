@@ -199,6 +199,13 @@ func (s *taskQueueServer) Shutdown() {
 }
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
+	// Validate command length - long commands require explicit shell definition
+	if len(req.Command) > utils.MaxCommandLength && req.Shell == nil {
+		return nil, fmt.Errorf("command too long (%d characters) without explicit shell definition. "+
+			"Either shorten the command or define an explicit shell using the 'shell' parameter",
+			len(req.Command))
+	}
+
 	var taskID int32
 	var workflowID sql.NullInt32
 	// Determine initial status: "W" if dependencies, otherwise "P"
