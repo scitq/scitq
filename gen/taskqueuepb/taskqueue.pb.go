@@ -2073,6 +2073,8 @@ type WorkerUpdateRequest struct {
 	StepId          *int32                 `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	IsPermanent     *bool                  `protobuf:"varint,8,opt,name=is_permanent,json=isPermanent,proto3,oneof" json:"is_permanent,omitempty"`
 	RecyclableScope *string                `protobuf:"bytes,9,opt,name=recyclable_scope,json=recyclableScope,proto3,oneof" json:"recyclable_scope,omitempty"`
+	WorkflowName    *string                `protobuf:"bytes,10,opt,name=workflow_name,json=workflowName,proto3,oneof" json:"workflow_name,omitempty"`
+	StepName        *string                `protobuf:"bytes,11,opt,name=step_name,json=stepName,proto3,oneof" json:"step_name,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2166,6 +2168,20 @@ func (x *WorkerUpdateRequest) GetIsPermanent() bool {
 func (x *WorkerUpdateRequest) GetRecyclableScope() string {
 	if x != nil && x.RecyclableScope != nil {
 		return *x.RecyclableScope
+	}
+	return ""
+}
+
+func (x *WorkerUpdateRequest) GetWorkflowName() string {
+	if x != nil && x.WorkflowName != nil {
+		return *x.WorkflowName
+	}
+	return ""
+}
+
+func (x *WorkerUpdateRequest) GetStepName() string {
+	if x != nil && x.StepName != nil {
+		return *x.StepName
 	}
 	return ""
 }
@@ -7432,7 +7448,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bprefetch\x18\x06 \x01(\x05R\bprefetch\x12\x1c\n" +
 	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
 	"\n" +
-	"\b_step_id\"\xd5\x03\n" +
+	"\b_step_id\"\xc1\x04\n" +
 	"\x13WorkerUpdateRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12$\n" +
 	"\vprovider_id\x18\x02 \x01(\x05H\x00R\n" +
@@ -7443,7 +7459,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bprefetch\x18\x06 \x01(\x05H\x04R\bprefetch\x88\x01\x01\x12\x1c\n" +
 	"\astep_id\x18\a \x01(\x05H\x05R\x06stepId\x88\x01\x01\x12&\n" +
 	"\fis_permanent\x18\b \x01(\bH\x06R\visPermanent\x88\x01\x01\x12.\n" +
-	"\x10recyclable_scope\x18\t \x01(\tH\aR\x0frecyclableScope\x88\x01\x01B\x0e\n" +
+	"\x10recyclable_scope\x18\t \x01(\tH\aR\x0frecyclableScope\x88\x01\x01\x12(\n" +
+	"\rworkflow_name\x18\n" +
+	" \x01(\tH\bR\fworkflowName\x88\x01\x01\x12 \n" +
+	"\tstep_name\x18\v \x01(\tH\tR\bstepName\x88\x01\x01B\x0e\n" +
 	"\f_provider_idB\f\n" +
 	"\n" +
 	"_flavor_idB\f\n" +
@@ -7454,7 +7473,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_step_idB\x0f\n" +
 	"\r_is_permanentB\x13\n" +
-	"\x11_recyclable_scope\"B\n" +
+	"\x11_recyclable_scopeB\x10\n" +
+	"\x0e_workflow_nameB\f\n" +
+	"\n" +
+	"_step_name\"B\n" +
 	"\x12ListFlavorsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xa9\x03\n" +
@@ -7958,7 +7980,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_has_gpuB\x12\n" +
 	"\x10_has_quick_disks\"'\n" +
 	"\bFlavorId\x12\x1b\n" +
-	"\tflavor_id\x18\x01 \x01(\x05R\bflavorId2\x9e\x1f\n" +
+	"\tflavor_id\x18\x01 \x01(\x05R\bflavorId2\xe2\x1f\n" +
 	"\tTaskQueue\x12=\n" +
 	"\n" +
 	"SubmitTask\x12\x16.taskqueue.TaskRequest\x1a\x17.taskqueue.TaskResponse\x12<\n" +
@@ -7975,7 +7997,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\fCreateWorker\x12\x18.taskqueue.WorkerRequest\x1a\x14.taskqueue.WorkerIds\x12=\n" +
 	"\x12UpdateWorkerStatus\x12\x17.taskqueue.WorkerStatus\x1a\x0e.taskqueue.Ack\x12;\n" +
 	"\fDeleteWorker\x12\x19.taskqueue.WorkerDeletion\x1a\x10.taskqueue.JobId\x12>\n" +
-	"\fUpdateWorker\x12\x1e.taskqueue.WorkerUpdateRequest\x1a\x0e.taskqueue.Ack\x12T\n" +
+	"\fUpdateWorker\x12\x1e.taskqueue.WorkerUpdateRequest\x1a\x0e.taskqueue.Ack\x12B\n" +
+	"\x10UserUpdateWorker\x12\x1e.taskqueue.WorkerUpdateRequest\x1a\x0e.taskqueue.Ack\x12T\n" +
 	"\x11GetWorkerStatuses\x12\x1e.taskqueue.WorkerStatusRequest\x1a\x1f.taskqueue.WorkerStatusResponse\x12;\n" +
 	"\bListJobs\x12\x1a.taskqueue.ListJobsRequest\x1a\x13.taskqueue.JobsList\x12K\n" +
 	"\x0eGetJobStatuses\x12\x1b.taskqueue.JobStatusRequest\x1a\x1c.taskqueue.JobStatusResponse\x12-\n" +
@@ -8210,113 +8233,115 @@ var file_taskqueue_proto_depIdxs = []int32{
 	22,  // 49: taskqueue.TaskQueue.UpdateWorkerStatus:input_type -> taskqueue.WorkerStatus
 	20,  // 50: taskqueue.TaskQueue.DeleteWorker:input_type -> taskqueue.WorkerDeletion
 	30,  // 51: taskqueue.TaskQueue.UpdateWorker:input_type -> taskqueue.WorkerUpdateRequest
-	21,  // 52: taskqueue.TaskQueue.GetWorkerStatuses:input_type -> taskqueue.WorkerStatusRequest
-	34,  // 53: taskqueue.TaskQueue.ListJobs:input_type -> taskqueue.ListJobsRequest
-	38,  // 54: taskqueue.TaskQueue.GetJobStatuses:input_type -> taskqueue.JobStatusRequest
-	36,  // 55: taskqueue.TaskQueue.DeleteJob:input_type -> taskqueue.JobId
-	41,  // 56: taskqueue.TaskQueue.UpdateJob:input_type -> taskqueue.JobUpdate
-	31,  // 57: taskqueue.TaskQueue.ListFlavors:input_type -> taskqueue.ListFlavorsRequest
-	114, // 58: taskqueue.TaskQueue.ListProviders:input_type -> google.protobuf.Empty
-	114, // 59: taskqueue.TaskQueue.ListRegions:input_type -> google.protobuf.Empty
-	108, // 60: taskqueue.TaskQueue.CreateFlavor:input_type -> taskqueue.FlavorCreateRequest
-	114, // 61: taskqueue.TaskQueue.GetRcloneConfig:input_type -> google.protobuf.Empty
-	114, // 62: taskqueue.TaskQueue.GetDockerCredentials:input_type -> google.protobuf.Empty
-	46,  // 63: taskqueue.TaskQueue.Login:input_type -> taskqueue.LoginRequest
-	114, // 64: taskqueue.TaskQueue.GetCertificate:input_type -> google.protobuf.Empty
-	49,  // 65: taskqueue.TaskQueue.Logout:input_type -> taskqueue.Token
-	50,  // 66: taskqueue.TaskQueue.CreateUser:input_type -> taskqueue.CreateUserRequest
-	114, // 67: taskqueue.TaskQueue.ListUsers:input_type -> google.protobuf.Empty
-	51,  // 68: taskqueue.TaskQueue.DeleteUser:input_type -> taskqueue.UserId
-	52,  // 69: taskqueue.TaskQueue.UpdateUser:input_type -> taskqueue.User
-	54,  // 70: taskqueue.TaskQueue.ChangePassword:input_type -> taskqueue.ChangePasswordRequest
-	55,  // 71: taskqueue.TaskQueue.ListRecruiters:input_type -> taskqueue.RecruiterFilter
-	57,  // 72: taskqueue.TaskQueue.CreateRecruiter:input_type -> taskqueue.Recruiter
-	58,  // 73: taskqueue.TaskQueue.UpdateRecruiter:input_type -> taskqueue.RecruiterUpdate
-	56,  // 74: taskqueue.TaskQueue.DeleteRecruiter:input_type -> taskqueue.RecruiterId
-	60,  // 75: taskqueue.TaskQueue.ListWorkflows:input_type -> taskqueue.WorkflowFilter
-	63,  // 76: taskqueue.TaskQueue.CreateWorkflow:input_type -> taskqueue.WorkflowRequest
-	61,  // 77: taskqueue.TaskQueue.DeleteWorkflow:input_type -> taskqueue.WorkflowId
-	65,  // 78: taskqueue.TaskQueue.ListSteps:input_type -> taskqueue.StepFilter
-	68,  // 79: taskqueue.TaskQueue.CreateStep:input_type -> taskqueue.StepRequest
-	66,  // 80: taskqueue.TaskQueue.DeleteStep:input_type -> taskqueue.StepId
-	70,  // 81: taskqueue.TaskQueue.GetStepStats:input_type -> taskqueue.StepStatsRequest
-	78,  // 82: taskqueue.TaskQueue.GetWorkerStats:input_type -> taskqueue.GetWorkerStatsRequest
-	80,  // 83: taskqueue.TaskQueue.FetchList:input_type -> taskqueue.FetchListRequest
-	80,  // 84: taskqueue.TaskQueue.FetchInfo:input_type -> taskqueue.FetchListRequest
-	83,  // 85: taskqueue.TaskQueue.UploadTemplate:input_type -> taskqueue.UploadTemplateRequest
-	85,  // 86: taskqueue.TaskQueue.RunTemplate:input_type -> taskqueue.RunTemplateRequest
-	86,  // 87: taskqueue.TaskQueue.ListTemplates:input_type -> taskqueue.TemplateFilter
-	91,  // 88: taskqueue.TaskQueue.ListTemplateRuns:input_type -> taskqueue.TemplateRunFilter
-	92,  // 89: taskqueue.TaskQueue.UpdateTemplateRun:input_type -> taskqueue.UpdateTemplateRunRequest
-	95,  // 90: taskqueue.TaskQueue.DeleteTemplateRun:input_type -> taskqueue.DeleteTemplateRunRequest
-	93,  // 91: taskqueue.TaskQueue.GetWorkspaceRoot:input_type -> taskqueue.WorkspaceRootRequest
-	96,  // 92: taskqueue.TaskQueue.RegisterSpecifications:input_type -> taskqueue.ResourceSpec
-	97,  // 93: taskqueue.TaskQueue.ReportWorkerEvent:input_type -> taskqueue.WorkerEvent
-	98,  // 94: taskqueue.TaskQueue.ListWorkerEvents:input_type -> taskqueue.WorkerEventFilter
-	101, // 95: taskqueue.TaskQueue.DeleteWorkerEvent:input_type -> taskqueue.WorkerEventId
-	102, // 96: taskqueue.TaskQueue.PruneWorkerEvents:input_type -> taskqueue.WorkerEventPruneFilter
-	0,   // 97: taskqueue.TaskQueue.SubmitTask:output_type -> taskqueue.TaskResponse
-	19,  // 98: taskqueue.TaskQueue.RegisterWorker:output_type -> taskqueue.WorkerId
-	11,  // 99: taskqueue.TaskQueue.PingAndTakeNewTasks:output_type -> taskqueue.TaskListAndOther
-	27,  // 100: taskqueue.TaskQueue.UpdateTaskStatus:output_type -> taskqueue.Ack
-	27,  // 101: taskqueue.TaskQueue.SendTaskLogs:output_type -> taskqueue.Ack
-	13,  // 102: taskqueue.TaskQueue.StreamTaskLogsOutput:output_type -> taskqueue.TaskLog
-	13,  // 103: taskqueue.TaskQueue.StreamTaskLogsErr:output_type -> taskqueue.TaskLog
-	16,  // 104: taskqueue.TaskQueue.GetLogsChunk:output_type -> taskqueue.LogChunkList
-	4,   // 105: taskqueue.TaskQueue.ListTasks:output_type -> taskqueue.TaskList
-	0,   // 106: taskqueue.TaskQueue.RetryTask:output_type -> taskqueue.TaskResponse
-	7,   // 107: taskqueue.TaskQueue.ListWorkers:output_type -> taskqueue.WorkersList
-	25,  // 108: taskqueue.TaskQueue.CreateWorker:output_type -> taskqueue.WorkerIds
-	27,  // 109: taskqueue.TaskQueue.UpdateWorkerStatus:output_type -> taskqueue.Ack
-	36,  // 110: taskqueue.TaskQueue.DeleteWorker:output_type -> taskqueue.JobId
-	27,  // 111: taskqueue.TaskQueue.UpdateWorker:output_type -> taskqueue.Ack
-	23,  // 112: taskqueue.TaskQueue.GetWorkerStatuses:output_type -> taskqueue.WorkerStatusResponse
-	37,  // 113: taskqueue.TaskQueue.ListJobs:output_type -> taskqueue.JobsList
-	40,  // 114: taskqueue.TaskQueue.GetJobStatuses:output_type -> taskqueue.JobStatusResponse
-	27,  // 115: taskqueue.TaskQueue.DeleteJob:output_type -> taskqueue.Ack
-	27,  // 116: taskqueue.TaskQueue.UpdateJob:output_type -> taskqueue.Ack
-	33,  // 117: taskqueue.TaskQueue.ListFlavors:output_type -> taskqueue.FlavorsList
-	105, // 118: taskqueue.TaskQueue.ListProviders:output_type -> taskqueue.ProviderList
-	107, // 119: taskqueue.TaskQueue.ListRegions:output_type -> taskqueue.RegionList
-	109, // 120: taskqueue.TaskQueue.CreateFlavor:output_type -> taskqueue.FlavorId
-	42,  // 121: taskqueue.TaskQueue.GetRcloneConfig:output_type -> taskqueue.RcloneRemotes
-	45,  // 122: taskqueue.TaskQueue.GetDockerCredentials:output_type -> taskqueue.DockerCredentials
-	47,  // 123: taskqueue.TaskQueue.Login:output_type -> taskqueue.LoginResponse
-	48,  // 124: taskqueue.TaskQueue.GetCertificate:output_type -> taskqueue.Certificate
-	27,  // 125: taskqueue.TaskQueue.Logout:output_type -> taskqueue.Ack
-	51,  // 126: taskqueue.TaskQueue.CreateUser:output_type -> taskqueue.UserId
-	53,  // 127: taskqueue.TaskQueue.ListUsers:output_type -> taskqueue.UsersList
-	27,  // 128: taskqueue.TaskQueue.DeleteUser:output_type -> taskqueue.Ack
-	27,  // 129: taskqueue.TaskQueue.UpdateUser:output_type -> taskqueue.Ack
-	27,  // 130: taskqueue.TaskQueue.ChangePassword:output_type -> taskqueue.Ack
-	59,  // 131: taskqueue.TaskQueue.ListRecruiters:output_type -> taskqueue.RecruiterList
-	27,  // 132: taskqueue.TaskQueue.CreateRecruiter:output_type -> taskqueue.Ack
-	27,  // 133: taskqueue.TaskQueue.UpdateRecruiter:output_type -> taskqueue.Ack
-	27,  // 134: taskqueue.TaskQueue.DeleteRecruiter:output_type -> taskqueue.Ack
-	64,  // 135: taskqueue.TaskQueue.ListWorkflows:output_type -> taskqueue.WorkflowList
-	61,  // 136: taskqueue.TaskQueue.CreateWorkflow:output_type -> taskqueue.WorkflowId
-	27,  // 137: taskqueue.TaskQueue.DeleteWorkflow:output_type -> taskqueue.Ack
-	69,  // 138: taskqueue.TaskQueue.ListSteps:output_type -> taskqueue.StepList
-	66,  // 139: taskqueue.TaskQueue.CreateStep:output_type -> taskqueue.StepId
-	27,  // 140: taskqueue.TaskQueue.DeleteStep:output_type -> taskqueue.Ack
-	73,  // 141: taskqueue.TaskQueue.GetStepStats:output_type -> taskqueue.StepStatsResponse
-	79,  // 142: taskqueue.TaskQueue.GetWorkerStats:output_type -> taskqueue.GetWorkerStatsResponse
-	81,  // 143: taskqueue.TaskQueue.FetchList:output_type -> taskqueue.FetchListResponse
-	82,  // 144: taskqueue.TaskQueue.FetchInfo:output_type -> taskqueue.FetchInfoResponse
-	84,  // 145: taskqueue.TaskQueue.UploadTemplate:output_type -> taskqueue.UploadTemplateResponse
-	89,  // 146: taskqueue.TaskQueue.RunTemplate:output_type -> taskqueue.TemplateRun
-	88,  // 147: taskqueue.TaskQueue.ListTemplates:output_type -> taskqueue.TemplateList
-	90,  // 148: taskqueue.TaskQueue.ListTemplateRuns:output_type -> taskqueue.TemplateRunList
-	27,  // 149: taskqueue.TaskQueue.UpdateTemplateRun:output_type -> taskqueue.Ack
-	27,  // 150: taskqueue.TaskQueue.DeleteTemplateRun:output_type -> taskqueue.Ack
-	94,  // 151: taskqueue.TaskQueue.GetWorkspaceRoot:output_type -> taskqueue.WorkspaceRootResponse
-	27,  // 152: taskqueue.TaskQueue.RegisterSpecifications:output_type -> taskqueue.Ack
-	27,  // 153: taskqueue.TaskQueue.ReportWorkerEvent:output_type -> taskqueue.Ack
-	100, // 154: taskqueue.TaskQueue.ListWorkerEvents:output_type -> taskqueue.WorkerEventList
-	27,  // 155: taskqueue.TaskQueue.DeleteWorkerEvent:output_type -> taskqueue.Ack
-	103, // 156: taskqueue.TaskQueue.PruneWorkerEvents:output_type -> taskqueue.WorkerEventPruneResult
-	97,  // [97:157] is the sub-list for method output_type
-	37,  // [37:97] is the sub-list for method input_type
+	30,  // 52: taskqueue.TaskQueue.UserUpdateWorker:input_type -> taskqueue.WorkerUpdateRequest
+	21,  // 53: taskqueue.TaskQueue.GetWorkerStatuses:input_type -> taskqueue.WorkerStatusRequest
+	34,  // 54: taskqueue.TaskQueue.ListJobs:input_type -> taskqueue.ListJobsRequest
+	38,  // 55: taskqueue.TaskQueue.GetJobStatuses:input_type -> taskqueue.JobStatusRequest
+	36,  // 56: taskqueue.TaskQueue.DeleteJob:input_type -> taskqueue.JobId
+	41,  // 57: taskqueue.TaskQueue.UpdateJob:input_type -> taskqueue.JobUpdate
+	31,  // 58: taskqueue.TaskQueue.ListFlavors:input_type -> taskqueue.ListFlavorsRequest
+	114, // 59: taskqueue.TaskQueue.ListProviders:input_type -> google.protobuf.Empty
+	114, // 60: taskqueue.TaskQueue.ListRegions:input_type -> google.protobuf.Empty
+	108, // 61: taskqueue.TaskQueue.CreateFlavor:input_type -> taskqueue.FlavorCreateRequest
+	114, // 62: taskqueue.TaskQueue.GetRcloneConfig:input_type -> google.protobuf.Empty
+	114, // 63: taskqueue.TaskQueue.GetDockerCredentials:input_type -> google.protobuf.Empty
+	46,  // 64: taskqueue.TaskQueue.Login:input_type -> taskqueue.LoginRequest
+	114, // 65: taskqueue.TaskQueue.GetCertificate:input_type -> google.protobuf.Empty
+	49,  // 66: taskqueue.TaskQueue.Logout:input_type -> taskqueue.Token
+	50,  // 67: taskqueue.TaskQueue.CreateUser:input_type -> taskqueue.CreateUserRequest
+	114, // 68: taskqueue.TaskQueue.ListUsers:input_type -> google.protobuf.Empty
+	51,  // 69: taskqueue.TaskQueue.DeleteUser:input_type -> taskqueue.UserId
+	52,  // 70: taskqueue.TaskQueue.UpdateUser:input_type -> taskqueue.User
+	54,  // 71: taskqueue.TaskQueue.ChangePassword:input_type -> taskqueue.ChangePasswordRequest
+	55,  // 72: taskqueue.TaskQueue.ListRecruiters:input_type -> taskqueue.RecruiterFilter
+	57,  // 73: taskqueue.TaskQueue.CreateRecruiter:input_type -> taskqueue.Recruiter
+	58,  // 74: taskqueue.TaskQueue.UpdateRecruiter:input_type -> taskqueue.RecruiterUpdate
+	56,  // 75: taskqueue.TaskQueue.DeleteRecruiter:input_type -> taskqueue.RecruiterId
+	60,  // 76: taskqueue.TaskQueue.ListWorkflows:input_type -> taskqueue.WorkflowFilter
+	63,  // 77: taskqueue.TaskQueue.CreateWorkflow:input_type -> taskqueue.WorkflowRequest
+	61,  // 78: taskqueue.TaskQueue.DeleteWorkflow:input_type -> taskqueue.WorkflowId
+	65,  // 79: taskqueue.TaskQueue.ListSteps:input_type -> taskqueue.StepFilter
+	68,  // 80: taskqueue.TaskQueue.CreateStep:input_type -> taskqueue.StepRequest
+	66,  // 81: taskqueue.TaskQueue.DeleteStep:input_type -> taskqueue.StepId
+	70,  // 82: taskqueue.TaskQueue.GetStepStats:input_type -> taskqueue.StepStatsRequest
+	78,  // 83: taskqueue.TaskQueue.GetWorkerStats:input_type -> taskqueue.GetWorkerStatsRequest
+	80,  // 84: taskqueue.TaskQueue.FetchList:input_type -> taskqueue.FetchListRequest
+	80,  // 85: taskqueue.TaskQueue.FetchInfo:input_type -> taskqueue.FetchListRequest
+	83,  // 86: taskqueue.TaskQueue.UploadTemplate:input_type -> taskqueue.UploadTemplateRequest
+	85,  // 87: taskqueue.TaskQueue.RunTemplate:input_type -> taskqueue.RunTemplateRequest
+	86,  // 88: taskqueue.TaskQueue.ListTemplates:input_type -> taskqueue.TemplateFilter
+	91,  // 89: taskqueue.TaskQueue.ListTemplateRuns:input_type -> taskqueue.TemplateRunFilter
+	92,  // 90: taskqueue.TaskQueue.UpdateTemplateRun:input_type -> taskqueue.UpdateTemplateRunRequest
+	95,  // 91: taskqueue.TaskQueue.DeleteTemplateRun:input_type -> taskqueue.DeleteTemplateRunRequest
+	93,  // 92: taskqueue.TaskQueue.GetWorkspaceRoot:input_type -> taskqueue.WorkspaceRootRequest
+	96,  // 93: taskqueue.TaskQueue.RegisterSpecifications:input_type -> taskqueue.ResourceSpec
+	97,  // 94: taskqueue.TaskQueue.ReportWorkerEvent:input_type -> taskqueue.WorkerEvent
+	98,  // 95: taskqueue.TaskQueue.ListWorkerEvents:input_type -> taskqueue.WorkerEventFilter
+	101, // 96: taskqueue.TaskQueue.DeleteWorkerEvent:input_type -> taskqueue.WorkerEventId
+	102, // 97: taskqueue.TaskQueue.PruneWorkerEvents:input_type -> taskqueue.WorkerEventPruneFilter
+	0,   // 98: taskqueue.TaskQueue.SubmitTask:output_type -> taskqueue.TaskResponse
+	19,  // 99: taskqueue.TaskQueue.RegisterWorker:output_type -> taskqueue.WorkerId
+	11,  // 100: taskqueue.TaskQueue.PingAndTakeNewTasks:output_type -> taskqueue.TaskListAndOther
+	27,  // 101: taskqueue.TaskQueue.UpdateTaskStatus:output_type -> taskqueue.Ack
+	27,  // 102: taskqueue.TaskQueue.SendTaskLogs:output_type -> taskqueue.Ack
+	13,  // 103: taskqueue.TaskQueue.StreamTaskLogsOutput:output_type -> taskqueue.TaskLog
+	13,  // 104: taskqueue.TaskQueue.StreamTaskLogsErr:output_type -> taskqueue.TaskLog
+	16,  // 105: taskqueue.TaskQueue.GetLogsChunk:output_type -> taskqueue.LogChunkList
+	4,   // 106: taskqueue.TaskQueue.ListTasks:output_type -> taskqueue.TaskList
+	0,   // 107: taskqueue.TaskQueue.RetryTask:output_type -> taskqueue.TaskResponse
+	7,   // 108: taskqueue.TaskQueue.ListWorkers:output_type -> taskqueue.WorkersList
+	25,  // 109: taskqueue.TaskQueue.CreateWorker:output_type -> taskqueue.WorkerIds
+	27,  // 110: taskqueue.TaskQueue.UpdateWorkerStatus:output_type -> taskqueue.Ack
+	36,  // 111: taskqueue.TaskQueue.DeleteWorker:output_type -> taskqueue.JobId
+	27,  // 112: taskqueue.TaskQueue.UpdateWorker:output_type -> taskqueue.Ack
+	27,  // 113: taskqueue.TaskQueue.UserUpdateWorker:output_type -> taskqueue.Ack
+	23,  // 114: taskqueue.TaskQueue.GetWorkerStatuses:output_type -> taskqueue.WorkerStatusResponse
+	37,  // 115: taskqueue.TaskQueue.ListJobs:output_type -> taskqueue.JobsList
+	40,  // 116: taskqueue.TaskQueue.GetJobStatuses:output_type -> taskqueue.JobStatusResponse
+	27,  // 117: taskqueue.TaskQueue.DeleteJob:output_type -> taskqueue.Ack
+	27,  // 118: taskqueue.TaskQueue.UpdateJob:output_type -> taskqueue.Ack
+	33,  // 119: taskqueue.TaskQueue.ListFlavors:output_type -> taskqueue.FlavorsList
+	105, // 120: taskqueue.TaskQueue.ListProviders:output_type -> taskqueue.ProviderList
+	107, // 121: taskqueue.TaskQueue.ListRegions:output_type -> taskqueue.RegionList
+	109, // 122: taskqueue.TaskQueue.CreateFlavor:output_type -> taskqueue.FlavorId
+	42,  // 123: taskqueue.TaskQueue.GetRcloneConfig:output_type -> taskqueue.RcloneRemotes
+	45,  // 124: taskqueue.TaskQueue.GetDockerCredentials:output_type -> taskqueue.DockerCredentials
+	47,  // 125: taskqueue.TaskQueue.Login:output_type -> taskqueue.LoginResponse
+	48,  // 126: taskqueue.TaskQueue.GetCertificate:output_type -> taskqueue.Certificate
+	27,  // 127: taskqueue.TaskQueue.Logout:output_type -> taskqueue.Ack
+	51,  // 128: taskqueue.TaskQueue.CreateUser:output_type -> taskqueue.UserId
+	53,  // 129: taskqueue.TaskQueue.ListUsers:output_type -> taskqueue.UsersList
+	27,  // 130: taskqueue.TaskQueue.DeleteUser:output_type -> taskqueue.Ack
+	27,  // 131: taskqueue.TaskQueue.UpdateUser:output_type -> taskqueue.Ack
+	27,  // 132: taskqueue.TaskQueue.ChangePassword:output_type -> taskqueue.Ack
+	59,  // 133: taskqueue.TaskQueue.ListRecruiters:output_type -> taskqueue.RecruiterList
+	27,  // 134: taskqueue.TaskQueue.CreateRecruiter:output_type -> taskqueue.Ack
+	27,  // 135: taskqueue.TaskQueue.UpdateRecruiter:output_type -> taskqueue.Ack
+	27,  // 136: taskqueue.TaskQueue.DeleteRecruiter:output_type -> taskqueue.Ack
+	64,  // 137: taskqueue.TaskQueue.ListWorkflows:output_type -> taskqueue.WorkflowList
+	61,  // 138: taskqueue.TaskQueue.CreateWorkflow:output_type -> taskqueue.WorkflowId
+	27,  // 139: taskqueue.TaskQueue.DeleteWorkflow:output_type -> taskqueue.Ack
+	69,  // 140: taskqueue.TaskQueue.ListSteps:output_type -> taskqueue.StepList
+	66,  // 141: taskqueue.TaskQueue.CreateStep:output_type -> taskqueue.StepId
+	27,  // 142: taskqueue.TaskQueue.DeleteStep:output_type -> taskqueue.Ack
+	73,  // 143: taskqueue.TaskQueue.GetStepStats:output_type -> taskqueue.StepStatsResponse
+	79,  // 144: taskqueue.TaskQueue.GetWorkerStats:output_type -> taskqueue.GetWorkerStatsResponse
+	81,  // 145: taskqueue.TaskQueue.FetchList:output_type -> taskqueue.FetchListResponse
+	82,  // 146: taskqueue.TaskQueue.FetchInfo:output_type -> taskqueue.FetchInfoResponse
+	84,  // 147: taskqueue.TaskQueue.UploadTemplate:output_type -> taskqueue.UploadTemplateResponse
+	89,  // 148: taskqueue.TaskQueue.RunTemplate:output_type -> taskqueue.TemplateRun
+	88,  // 149: taskqueue.TaskQueue.ListTemplates:output_type -> taskqueue.TemplateList
+	90,  // 150: taskqueue.TaskQueue.ListTemplateRuns:output_type -> taskqueue.TemplateRunList
+	27,  // 151: taskqueue.TaskQueue.UpdateTemplateRun:output_type -> taskqueue.Ack
+	27,  // 152: taskqueue.TaskQueue.DeleteTemplateRun:output_type -> taskqueue.Ack
+	94,  // 153: taskqueue.TaskQueue.GetWorkspaceRoot:output_type -> taskqueue.WorkspaceRootResponse
+	27,  // 154: taskqueue.TaskQueue.RegisterSpecifications:output_type -> taskqueue.Ack
+	27,  // 155: taskqueue.TaskQueue.ReportWorkerEvent:output_type -> taskqueue.Ack
+	100, // 156: taskqueue.TaskQueue.ListWorkerEvents:output_type -> taskqueue.WorkerEventList
+	27,  // 157: taskqueue.TaskQueue.DeleteWorkerEvent:output_type -> taskqueue.Ack
+	103, // 158: taskqueue.TaskQueue.PruneWorkerEvents:output_type -> taskqueue.WorkerEventPruneResult
+	98,  // [98:159] is the sub-list for method output_type
+	37,  // [37:98] is the sub-list for method input_type
 	37,  // [37:37] is the sub-list for extension type_name
 	37,  // [37:37] is the sub-list for extension extendee
 	0,   // [0:37] is the sub-list for field type_name

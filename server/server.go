@@ -1802,6 +1802,115 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 	return &pb.Ack{Success: true}, nil
 }
 
+func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUpdateRequest) (*pb.Ack, error) {
+	if GetUserFromContext(ctx) == nil {
+		return nil, status.Error(codes.PermissionDenied, "user authentication required")
+	}
+	if req.WorkerId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "worker_id is required")
+	}
+
+	if (req.WorkflowName != nil || req.StepName != nil) && req.StepId != nil {
+		return nil, status.Error(codes.InvalidArgument, "provide either step_id or workflow_name/step_name, not both")
+	}
+	if req.StepName != nil && req.WorkflowName == nil {
+		return nil, status.Error(codes.InvalidArgument, "workflow_name is required when step_name is provided")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("⚠️ Failed to start transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var resolvedStepID *int32
+	if req.WorkflowName != nil {
+		var stepID int32
+		if req.StepName != nil {
+			err = tx.QueryRow(`
+				SELECT s.step_id
+				FROM step s
+				JOIN workflow w ON w.workflow_id = s.workflow_id
+				WHERE w.workflow_name = $1 AND s.step_name = $2
+				ORDER BY s.step_id ASC
+				LIMIT 1
+			`, req.GetWorkflowName(), req.GetStepName()).Scan(&stepID)
+		} else {
+			err = tx.QueryRow(`
+				SELECT s.step_id
+				FROM step s
+				JOIN workflow w ON w.workflow_id = s.workflow_id
+				WHERE w.workflow_name = $1
+				ORDER BY s.step_id ASC
+				LIMIT 1
+			`, req.GetWorkflowName()).Scan(&stepID)
+		}
+		if err == sql.ErrNoRows {
+			return nil, status.Error(codes.NotFound, "step not found for workflow")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve step: %w", err)
+		}
+		resolvedStepID = &stepID
+	} else if req.StepId != nil {
+		stepID := req.GetStepId()
+		resolvedStepID = &stepID
+	}
+
+	query := "UPDATE worker SET "
+	args := []interface{}{}
+	sets := []string{}
+	i := 1
+
+	if req.Concurrency != nil {
+		sets = append(sets, fmt.Sprintf("concurrency=$%d", i))
+		args = append(args, req.GetConcurrency())
+		i++
+	}
+	if req.Prefetch != nil {
+		sets = append(sets, fmt.Sprintf("prefetch=$%d", i))
+		args = append(args, req.GetPrefetch())
+		i++
+	}
+	if resolvedStepID != nil {
+		sets = append(sets, fmt.Sprintf("step_id=$%d", i))
+		args = append(args, *resolvedStepID)
+		i++
+	}
+	if req.IsPermanent != nil {
+		sets = append(sets, fmt.Sprintf("is_permanent=$%d", i))
+		args = append(args, req.GetIsPermanent())
+		i++
+	}
+	if req.RecyclableScope != nil {
+		sets = append(sets, fmt.Sprintf("recyclable_scope=$%d", i))
+		args = append(args, req.GetRecyclableScope())
+		i++
+	}
+
+	if len(sets) == 0 {
+		return &pb.Ack{Success: false}, status.Error(codes.InvalidArgument, "no fields provided to update")
+	}
+
+	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d", i)
+	args = append(args, req.GetWorkerId())
+
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		log.Printf("⚠️ Failed to execute update: %v", err)
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("⚠️ Failed to commit transaction: %v", err)
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	s.triggerAssign()
+	return &pb.Ack{Success: true}, nil
+}
+
 func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeletion) (*pb.JobId, error) {
 	var job Job
 

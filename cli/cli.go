@@ -86,6 +86,17 @@ type Attr struct {
 		Delete *struct {
 			WorkerId int32 `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
 		} `arg:"subcommand:delete" help:"Delete a worker instance"`
+		Update *struct {
+			WorkerId        int32   `arg:"--worker-id,required" help:"The ID of the worker to update"`
+			StepId          *int32  `arg:"--step-id" help:"Step ID to assign the worker to"`
+			WorkflowName    *string `arg:"--workflow-name" help:"Workflow name to resolve step (lowest step_id if --step-name omitted)"`
+			StepName        *string `arg:"--step-name" help:"Step name to resolve step (requires --workflow-name)"`
+			Concurrency     *int32  `arg:"--concurrency" help:"Update worker concurrency"`
+			Prefetch        *int32  `arg:"--prefetch" help:"Update worker prefetch"`
+			Permanent       bool    `arg:"--permanent" help:"Set worker as permanent"`
+			NoPermanent     bool    `arg:"--no-permanent" help:"Unset permanent status"`
+			RecyclableScope *string `arg:"--recyclable-scope" help:"Update recyclable scope"`
+		} `arg:"subcommand:update" help:"Update worker settings"`
 		Stats *struct {
 			WorkerIds []int32 `arg:"--worker-id,separate,required" help:"Worker IDs to get stats for"`
 		} `arg:"subcommand:stats" help:"Fetch current stats for workers"`
@@ -610,6 +621,60 @@ func (c *CLI) WorkerDelete() error {
 		return fmt.Errorf("deletion order is in an unknown status for worker %d", c.Attr.Worker.Delete.WorkerId)
 	}
 
+}
+
+// WorkerUpdate updates worker settings (user-scoped).
+func (c *CLI) WorkerUpdate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.WorkerUpdateRequest{
+		WorkerId: c.Attr.Worker.Update.WorkerId,
+	}
+
+	if c.Attr.Worker.Update.StepId != nil && (c.Attr.Worker.Update.WorkflowName != nil || c.Attr.Worker.Update.StepName != nil) {
+		return fmt.Errorf("provide either --step-id or --workflow-name/--step-name, not both")
+	}
+	if c.Attr.Worker.Update.StepName != nil && c.Attr.Worker.Update.WorkflowName == nil {
+		return fmt.Errorf("--workflow-name is required when --step-name is provided")
+	}
+	if c.Attr.Worker.Update.Permanent && c.Attr.Worker.Update.NoPermanent {
+		return fmt.Errorf("provide only one of --permanent or --no-permanent")
+	}
+
+	if c.Attr.Worker.Update.StepId != nil {
+		req.StepId = c.Attr.Worker.Update.StepId
+	}
+	if c.Attr.Worker.Update.WorkflowName != nil {
+		req.WorkflowName = c.Attr.Worker.Update.WorkflowName
+	}
+	if c.Attr.Worker.Update.StepName != nil {
+		req.StepName = c.Attr.Worker.Update.StepName
+	}
+	if c.Attr.Worker.Update.Concurrency != nil {
+		req.Concurrency = c.Attr.Worker.Update.Concurrency
+	}
+	if c.Attr.Worker.Update.Prefetch != nil {
+		req.Prefetch = c.Attr.Worker.Update.Prefetch
+	}
+	if c.Attr.Worker.Update.Permanent {
+		val := true
+		req.IsPermanent = &val
+	} else if c.Attr.Worker.Update.NoPermanent {
+		val := false
+		req.IsPermanent = &val
+	}
+	if c.Attr.Worker.Update.RecyclableScope != nil {
+		req.RecyclableScope = c.Attr.Worker.Update.RecyclableScope
+	}
+
+	_, err := c.QC.Client.UserUpdateWorker(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error updating worker: %w", err)
+	}
+
+	fmt.Printf("✅ Worker %d updated\n", c.Attr.Worker.Update.WorkerId)
+	return nil
 }
 
 func ListUsers(client pb.TaskQueueClient) error {
@@ -1831,6 +1896,8 @@ func Run(c CLI) error {
 			err = c.WorkerDeploy()
 		case c.Attr.Worker.Delete != nil:
 			err = c.WorkerDelete()
+		case c.Attr.Worker.Update != nil:
+			err = c.WorkerUpdate()
 		case c.Attr.Worker.Stats != nil:
 			err = c.WorkerStats()
 		}

@@ -22,6 +22,7 @@ service TaskQueue {
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
     rpc DeleteWorker(WorkerDeletion) returns (JobId);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
+    rpc UserUpdateWorker(WorkerUpdateRequest) returns (Ack);
     rpc GetWorkerStatuses (WorkerStatusRequest) returns (WorkerStatusResponse);
     rpc ListJobs (ListJobsRequest) returns (JobsList);
     rpc GetJobStatuses (JobStatusRequest) returns (JobStatusResponse);
@@ -292,6 +293,8 @@ message WorkerUpdateRequest {
     optional int32 step_id = 7;
     optional bool is_permanent = 8;
     optional string recyclable_scope = 9;
+    optional string workflow_name = 10;
+    optional string step_name = 11;
 }
 
 message ListFlavorsRequest {
