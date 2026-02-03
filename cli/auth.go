@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/lib"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func promptCredentials() (string, string, error) {
@@ -99,4 +100,20 @@ func createToken(serverAddr string, user, userPassword *string) string {
 	}
 
 	return token
+}
+
+func fetchCertificate(serverAddr string) string {
+	qcclient, err := lib.CreateLoginClient(serverAddr)
+	if err != nil {
+		log.Fatal("failed to create client: %w", err)
+	}
+	defer qcclient.Close()
+
+	client := qcclient.Client
+	resp, err := client.GetCertificate(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		log.Fatalf("failed to fetch certificate: %v", err)
+	}
+
+	return resp.Pem
 }

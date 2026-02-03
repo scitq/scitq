@@ -246,6 +246,9 @@ type Attr struct {
 		Password *string `arg:"--password" help:"Password to log in"`
 	} `arg:"subcommand:login" help:"Login and provide a token, use with export SCITQ_TOKENs=$(scitq login)"`
 
+	// Certificate command
+	Cert *struct{} `arg:"subcommand:cert" help:"Print server TLS certificate (PEM)"`
+
 	// HashPassword command
 	HashPassword *struct {
 		Password string `arg:"positional,required" help:"Password to hash"`
@@ -1772,6 +1775,9 @@ func Run(c CLI) error {
 	switch {
 	case c.Attr.Login != nil:
 		fmt.Print(createToken(c.Attr.Server, c.Attr.Login.User, c.Attr.Login.Password))
+		return nil
+	case c.Attr.Cert != nil:
+		fmt.Print(fetchCertificate(c.Attr.Server))
 		return nil
 	case c.Attr.HashPassword != nil:
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(c.Attr.HashPassword.Password), bcrypt.DefaultCost)

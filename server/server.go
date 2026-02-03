@@ -2666,6 +2666,13 @@ func (s *taskQueueServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	return &pb.LoginResponse{Token: tokenStr}, nil
 }
 
+func (s *taskQueueServer) GetCertificate(ctx context.Context, _ *emptypb.Empty) (*pb.Certificate, error) {
+	if s.sslCertificatePEM == "" {
+		return nil, status.Error(codes.NotFound, "server certificate not available")
+	}
+	return &pb.Certificate{Pem: s.sslCertificatePEM}, nil
+}
+
 // NewLogin returns an HTTP handler function to process login requests.
 func NewLogin(s *taskQueueServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

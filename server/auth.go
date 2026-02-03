@@ -49,7 +49,9 @@ func workerAuthInterceptor(expectedToken string, db *sql.DB) grpc.UnaryServerInt
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
 		// ✅ Bypass auth for Login RPC
-		if info.FullMethod == "/taskqueue.TaskQueue/Login" || info.FullMethod == "/taskqueue.TaskQueue/ChangePassword" {
+		if info.FullMethod == "/taskqueue.TaskQueue/Login" ||
+			info.FullMethod == "/taskqueue.TaskQueue/ChangePassword" ||
+			info.FullMethod == "/taskqueue.TaskQueue/GetCertificate" {
 			return handler(ctx, req)
 		}
 

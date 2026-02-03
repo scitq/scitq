@@ -34,6 +34,7 @@ service TaskQueue {
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneRemotes);
     rpc GetDockerCredentials(google.protobuf.Empty) returns (DockerCredentials);
     rpc Login(LoginRequest) returns (LoginResponse);
+    rpc GetCertificate(google.protobuf.Empty) returns (Certificate);
     rpc Logout(Token) returns (Ack);
     rpc CreateUser(CreateUserRequest) returns (UserId);
     rpc ListUsers(google.protobuf.Empty) returns (UsersList);
@@ -395,11 +396,15 @@ message LoginRequest {
 }
 
 message LoginResponse {
-  string token = 1;
+    string token = 1;
+}
+
+message Certificate {
+    string pem = 1;
 }
 
 message Token {
-  string token = 1;
+    string token = 1;
 }
 
 message CreateUserRequest {
