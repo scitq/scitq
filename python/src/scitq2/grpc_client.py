@@ -281,6 +281,37 @@ class Scitq2Client:
             request.error_message = error_message
 
         return self.stub.UpdateTemplateRun(request)
+
+    def update_task_status(
+        self,
+        *,
+        task_id: int,
+        new_status: str,
+        duration: Optional[int] = None,
+        free_retry: Optional[bool] = None,
+    ) -> bool:
+        """
+        Updates the status of a task.
+
+        Parameters:
+        - task_id (int): Task ID
+        - new_status (str): New status value (e.g., "P")
+        - duration (int): Optional duration in seconds
+        - free_retry (bool): Optional retry flag for failure status
+
+        Returns:
+        - bool: Success flag from server
+        """
+        request = taskqueue_pb2.TaskStatusUpdate(
+            task_id=task_id,
+            new_status=new_status,
+        )
+        if duration is not None:
+            request.duration = duration
+        if free_retry is not None:
+            request.free_retry = free_retry
+        response = self.stub.UpdateTaskStatus(request)
+        return response.success
     
     def get_workspace_root(self, provider: str, region: str) -> str:
         """

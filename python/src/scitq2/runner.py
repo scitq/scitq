@@ -122,6 +122,7 @@ def run(func: Callable):
     parser.add_argument("--params", action="store_true", help="Print the parameter schema as JSON.")
     parser.add_argument("--values", type=str, help="JSON dictionary of parameter values.")
     parser.add_argument("--metadata", action="store_true", help="Print workflow metadata (name, version, description).")
+    parser.add_argument("--standalone", action="store_true", help="Activate leading tasks when running locally.")
     args = parser.parse_args()
 
     try:
@@ -199,7 +200,7 @@ def run(func: Callable):
                 f"and no Workflow instance was detected."
             ) 
             sys.exit(1)
-        workflow.compile(Scitq2Client())
+        workflow.compile(Scitq2Client(), activate_leading_tasks=args.standalone)
     else:
         print("❌ Either --metadata, --params or --values must be provided.", file=sys.stderr)
         sys.exit(1)

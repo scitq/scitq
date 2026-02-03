@@ -188,6 +188,7 @@ class Task:
         self.resources = resources or []
         self.language = language or Raw()
         self.retry = retry
+        self.dependency_task_ids: List[int] = []
     
     def compile(self, client: Scitq2Client):
         # Resolve command using the language's compile_command method
@@ -248,6 +249,7 @@ class Task:
         # check that there is no None in the dependencies
         if None in resolved_depends:
             raise ValueError("Task dependencies cannot contain None. Ensure all steps are compiled before compiling tasks.")
+        self.dependency_task_ids = sorted(resolved_depends)
 
         # Resolve inputs to Output objects
         resolved_inputs = []
@@ -534,7 +536,7 @@ class Workflow:
                       language=effective_language, depends=depends, retry=retry)
         return step
 
-    def compile(self, client: Scitq2Client) -> int:
+    def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False) -> int:
         if self.provider:
             self.workspace_root = client.get_workspace_root(
                 provider=self.provider,
@@ -565,6 +567,17 @@ class Workflow:
             client.update_template_run(template_run_id=int(template_run_id), workflow_id=self.workflow_id)
         for step in self._steps.values():
             step.compile(client)
+
+        if activate_leading_tasks:
+            leading_tasks = []
+            for step in self._steps.values():
+                for task in step.tasks:
+                    if not task.dependency_task_ids:
+                        leading_tasks.append(task)
+            for task in leading_tasks:
+                if task.task_id is None:
+                    raise RuntimeError(f"Task {task.full_name} has not been compiled yet")
+                client.update_task_status(task_id=task.task_id, new_status="P")
         return self.workflow_id
     
     @property
