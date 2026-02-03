@@ -73,7 +73,9 @@ type Attr struct {
 
 	// Worker Commands (Sub-Subcommands)
 	Worker *struct {
-		List   *struct{} `arg:"subcommand:list" help:"List all workers"`
+		List *struct {
+			Long bool `arg:"-l,--long" help:"Show extended worker details"`
+		} `arg:"subcommand:list" help:"List all workers"`
 		Deploy *struct {
 			Flavor      string `arg:"--flavor,required" help:"Worker flavor"`
 			Provider    string `arg:"--provider,required" help:"Worker provider in the form providerName.configName like azure.primary"`
@@ -449,17 +451,35 @@ func (c *CLI) WorkerList() error {
 
 	fmt.Println("👷 Worker List:")
 	for _, worker := range res.Workers {
-		fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | IPv4: %s | IPv6: %s | Flavor: %s | Provider: %s | Region: %s\n",
-			worker.WorkerId,
-			worker.Name,
-			worker.Concurrency,
-			worker.Prefetch,
-			worker.Status,
-			worker.Ipv4,
-			worker.Ipv6,
-			worker.Flavor,
-			worker.Provider,
-			worker.Region)
+		if c.Attr.Worker.List.Long {
+			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | Permanent: %t | IPv4: %s | IPv6: %s | Flavor: %s | Provider: %s | Region: %s | Workflow: %s | Step: %s\n",
+				worker.WorkerId,
+				worker.Name,
+				worker.Concurrency,
+				worker.Prefetch,
+				worker.Status,
+				worker.IsPermanent,
+				worker.Ipv4,
+				worker.Ipv6,
+				worker.Flavor,
+				worker.Provider,
+				worker.Region,
+				worker.GetWorkflowName(),
+				worker.GetStepName(),
+			)
+		} else {
+			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | IPv4: %s | IPv6: %s | Flavor: %s | Provider: %s | Region: %s\n",
+				worker.WorkerId,
+				worker.Name,
+				worker.Concurrency,
+				worker.Prefetch,
+				worker.Status,
+				worker.Ipv4,
+				worker.Ipv6,
+				worker.Flavor,
+				worker.Provider,
+				worker.Region)
+		}
 	}
 	return nil
 }
