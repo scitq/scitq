@@ -249,15 +249,22 @@ export function formatBytesPair(a: number | bigint, b: number | bigint, decimals
  */
 export async function updateWorkerConfig(
   workerId: number,
-  updates: Partial<{ concurrency: number; prefetch: number; isPermanent: boolean; recyclableScope: string }>
+  updates: Partial<{
+    stepId: number;
+    concurrency: number;
+    prefetch: number;
+    isPermanent: boolean;
+    recyclableScope: string;
+  }>
 ) {
   try {
     const req: any = { workerId };
 
+    if (updates.stepId !== undefined) req.stepId = updates.stepId;
     if (updates.concurrency !== undefined) req.concurrency = updates.concurrency;
     if (updates.prefetch !== undefined) req.prefetch = updates.prefetch;
-    if (updates.isPermanent !== undefined) req.is_permanent = updates.isPermanent;
-    if (updates.recyclableScope !== undefined) req.recyclable_scope = updates.recyclableScope;
+    if (updates.isPermanent !== undefined) req.isPermanent = updates.isPermanent;
+    if (updates.recyclableScope !== undefined) req.recyclableScope = updates.recyclableScope;
 
     await client.updateWorker(req, await callOptionsUserToken());
   } catch (error) {
@@ -617,6 +624,15 @@ export async function getWorkFlow(name?: string, limit?: number, offset?: number
   }
 }
 
+/**
+ * Compatibility wrapper used by WorkerCompo inline editor.
+ * Returns the protobuf-like envelope shape expected by the component.
+ */
+export async function listWorkflows(params?: { nameLike?: string; limit?: number; offset?: number }) {
+  const workflows = await getWorkFlow(params?.nameLike, params?.limit, params?.offset);
+  return { workflows };
+}
+
 
 /**
  * Deletes a workflow by their ID.
@@ -655,6 +671,15 @@ export async function getSteps(workflowId: number, limit?: number, offset?: numb
     console.error("Error while retrieving steps:", error);
     return [];
   }
+}
+
+/**
+ * Compatibility wrapper used by WorkerCompo inline editor.
+ * Returns the protobuf-like envelope shape expected by the component.
+ */
+export async function listSteps(params: { workflowId: number; limit?: number; offset?: number }) {
+  const steps = await getSteps(params.workflowId, params.limit, params.offset);
+  return { steps };
 }
 
 

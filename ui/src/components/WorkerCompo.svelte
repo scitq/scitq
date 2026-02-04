@@ -804,7 +804,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   {/if}
                 </a>
               </td>
-              <td class="workerCompo-actions">
+              <td class="workerCompo-wfstep">
   {#if editingWorkflowStepFor === worker.workerId}
     <!-- WORKFLOW SELECTOR -->
     <div class="step-edit-block">
@@ -812,11 +812,11 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
         Workflow:
         <select
           bind:value={selectedWorkflowId}
-          on:change={() => loadStepsForWorkflow(selectedWorkflowId)}
+          on:change={() => loadStepsForWorkflow(selectedWorkflowId !== null ? Number(selectedWorkflowId) : null)}
         >
           <option value={null}>-- select workflow --</option>
           {#each workflowOptions as wf}
-            <option value={wf.workflowId}>{wf.workflowName}</option>
+            <option value={wf.workflowId}>{wf.name}</option>
           {/each}
         </select>
       </label>
@@ -834,7 +834,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
         <select bind:value={selectedStepId}>
           <option value={null}>-- select step --</option>
           {#each stepOptions as st}
-            <option value={st.stepId}>{st.stepName}</option>
+            <option value={st.stepId}>{st.name}</option>
           {/each}
         </select>
       </label>
@@ -844,16 +844,18 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
         class="btn-action"
         title="Save"
         on:click={async () => {
-          if (selectedStepId !== null) {
-            await updateWorkerConfig(worker.workerId, { stepId: selectedStepId });
+          const stepIdNum = selectedStepId !== null ? Number(selectedStepId) : null;
+          const workflowIdNum = selectedWorkflowId !== null ? Number(selectedWorkflowId) : null;
+          if (stepIdNum !== null) {
+            await updateWorkerConfig(worker.workerId, { stepId: stepIdNum });
             internalWorkers = internalWorkers.map(w =>
               w.workerId === worker.workerId
                 ? {
                     ...w,
-                    stepId: selectedStepId,
-                    stepName: stepOptions.find(s => s.stepId === selectedStepId)?.stepName,
-                    workflowId: selectedWorkflowId,
-                    workflowName: workflowOptions.find(wf => wf.workflowId === selectedWorkflowId)?.workflowName
+                    stepId: stepIdNum,
+                    stepName: stepOptions.find(s => s.stepId === stepIdNum)?.name,
+                    workflowId: workflowIdNum,
+                    workflowName: workflowOptions.find(wf => wf.workflowId === workflowIdNum)?.name
                   }
                 : w
             );
@@ -872,30 +874,32 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       >✗</button>
     </div>
   {:else}
-    <span title="{worker.workflowName} › {worker.stepName}">
-      {#if worker.workflowName}
-        {worker.workflowName.length > 20
-          ? `${worker.workflowName.slice(0, 20)}…`
-          : worker.workflowName}
-        › {worker.stepName}
-      {:else}
-        {worker.stepName}
-      {/if}
-    </span>
+    <div class="wf-step-cell">
+      <span class="wf-step-text" title="{worker.workflowName} › {worker.stepName}">
+        {#if worker.workflowName}
+          {worker.workflowName.length > 20
+            ? `${worker.workflowName.slice(0, 20)}…`
+            : worker.workflowName}
+          › {worker.stepName}
+        {:else}
+          {worker.stepName}
+        {/if}
+      </span>
 
-    <button
-      class="btn-action"
-      title="Edit workflow/step"
-      on:click={() => {
-        editingWorkflowStepFor = worker.workerId;
-        selectedWorkflowId = worker.workflowId ?? null;
-        selectedStepId = worker.stepId ?? null;
-        workflowOptions = [];
-        workflowOffset = 0;
-        loadWorkflows();
-        if (selectedWorkflowId) loadStepsForWorkflow(selectedWorkflowId);
-      }}
-    ><Edit /></button>
+      <button
+        class="btn-action"
+        title="Edit workflow/step"
+        on:click={() => {
+          editingWorkflowStepFor = worker.workerId;
+          selectedWorkflowId = worker.workflowId ?? null;
+          selectedStepId = worker.stepId ?? null;
+          workflowOptions = [];
+          workflowOffset = 0;
+          loadWorkflows();
+          if (selectedWorkflowId) loadStepsForWorkflow(selectedWorkflowId);
+        }}
+      ><Edit /></button>
+    </div>
   {/if}
 </td>
               <td>{worker.recyclableScope}</td>

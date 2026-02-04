@@ -140,7 +140,7 @@
 }
 
 .workerCompo-table th:nth-child(1) { width: 90px; } /* Name */
-.workerCompo-table th:nth-child(2) { width: 90px; } /* Wf.Step */
+.workerCompo-table th:nth-child(2) { width: 180px; } /* Wf.Step */
 .workerCompo-table th:nth-child(3) { width: 30px; } /* Status */
 .workerCompo-table th:nth-child(4) { width: 40px; } /* Concurrency */
 .workerCompo-table th:nth-child(5) { width: 40px; } /* Prefetch */
@@ -173,6 +173,50 @@
 .workerCompo-clickable:hover {
   color: var(--link-hover);
   text-decoration: underline;
+}
+
+.workerCompo-table td.workerCompo-wfstep {
+  white-space: normal;
+}
+
+.wf-step-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px;
+}
+
+.wf-step-text {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.step-edit-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px;
+}
+
+.wf-step-cell .btn-action,
+.step-edit-block .btn-action {
+  flex: 0 0 auto;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.wf-step-cell .btn-action svg,
+.step-edit-block .btn-action svg {
+  width: 16px;
+  height: 16px;
 }
 
 .value-with-controls {
