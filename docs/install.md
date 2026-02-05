@@ -89,6 +89,20 @@ Most of the time worker are deployed automatically using a provider. It is howev
 - install docker on the worker : `apt install docker.io`
 - if you have private docker registry, copy `.docker/config.json` to worker `/root/.docker/config.json`
 
+### Prevent unattended systemd upgrades
+
+On **manually installed scitq worker nodes**, it is recommanded to prevent unattended upgrades from touching `systemd` (it can trigger `systemd daemon-reexec` and stop running workers). Create `/etc/apt/preferences.d/systemd` with:
+
+```
+Package: systemd systemd-sysv libsystemd0 libpam-systemd
+Pin: release o=Ubuntu
+Pin-Priority: 1
+```
+
+This blocks unattended-upgrades and `apt-daily` from upgrading `systemd`, while still allowing manual upgrades.
+
+This is not useful on automatically deployed workers where unattended upgrades are disabled entirely at install time.
+
 Launch it with :
 ```sh
 scitq-client --store /scratch --token MySecretToken  -permanent

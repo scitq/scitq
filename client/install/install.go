@@ -181,6 +181,14 @@ func checkSwap(swapProportion float32) error {
 	return err
 }
 
+func disableAptDaily() error {
+	log.Printf("Disabling apt daily services/timers")
+	return executeCommands(3,
+		"systemctl disable --now apt-daily.service apt-daily.timer",
+		"systemctl disable --now apt-daily-upgrade.service apt-daily-upgrade.timer",
+	)
+}
+
 func checkService(swapProportion float32, serverAddr string, concurrency int, token string) error {
 
 	if fileNotExist("/etc/systemd/system/scitq-client.service") {
@@ -191,6 +199,10 @@ After=multi-user.target
 [Service]
 Environment=PATH=/usr/bin:/usr/local/bin:/usr/sbin
 Type=simple
+KillSignal=SIGTERM
+TimeoutStopSec=1h
+Restart=always
+RestartSec=5
 ExecStart=/usr/local/bin/scitq-client -server %s -install -swap "%f" -concurrency %d -token %s
 
 [Install]
@@ -280,6 +292,10 @@ func Run(swapProportion float32, serverAddress string, concurrency int, token st
 	}
 	if err == nil {
 		report(50, "docker: ok")
+		err = disableAptDaily()
+	}
+	if err == nil {
+		report(60, "apt-daily: disabled")
 		if swapProportion > 0 {
 			err = checkSwap(swapProportion)
 		}
