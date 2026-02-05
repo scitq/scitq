@@ -122,7 +122,7 @@ def run(func: Callable):
     parser.add_argument("--params", action="store_true", help="Print the parameter schema as JSON.")
     parser.add_argument("--values", type=str, help="JSON dictionary of parameter values.")
     parser.add_argument("--metadata", action="store_true", help="Print workflow metadata (name, version, description).")
-    parser.add_argument("--standalone", action="store_true", help="Activate leading tasks when running locally.")
+    parser.add_argument("--standalone", action="store_true", help="Set workflow to Running after submission (local run).")
     args = parser.parse_args()
 
     try:

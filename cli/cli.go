@@ -171,7 +171,12 @@ type Attr struct {
 			Name           string `arg:"--name,required" help:"Workflow name"`
 			RunStrategy    string `arg:"--run-strategy" help:"Run strategy (one letter B/T/D or Z, defaulting to B): \n\t(B)atch wise, e.g. workers do all tasks of a certain step (default)\n\t(T)hread wise, e.g. workers focus on going as far as possible in the workflow for each entry point\n\t(D)ebug\n\t(Z)suspended"`
 			MaximumWorkers *int32 `arg:"--maximum-workers" help:"Maximum number of workers"`
+			Status         string `arg:"--status" help:"Initial workflow status (P/R/Z/D/F/S). Default is P."`
 		} `arg:"subcommand:create" help:"Create a new workflow"`
+		Update *struct {
+			WorkflowId int32  `arg:"--id,required" help:"Workflow ID to update"`
+			Status     string `arg:"--status,required" help:"New workflow status (P/R/Z/D/F/S)"`
+		} `arg:"subcommand:update" help:"Update workflow status"`
 		Delete *struct {
 			WorkflowId int32 `arg:"--id,required" help:"Workflow ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a workflow"`
@@ -929,11 +934,11 @@ func (c *CLI) WorkflowList() error {
 	fmt.Println("📘 Workflow List:")
 	for _, w := range res.Workflows {
 		if w.MaximumWorkers != nil {
-			fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: %d\n",
-				w.WorkflowId, w.Name, w.RunStrategy, *w.MaximumWorkers)
+			fmt.Printf("🔹 ID: %d | Name: %s | Status: %s | Strategy: %s | Max Workers: %d\n",
+				w.WorkflowId, w.Name, w.Status, w.RunStrategy, *w.MaximumWorkers)
 		} else {
-			fmt.Printf("🔹 ID: %d | Name: %s | Strategy: %s | Max Workers: unlimited\n",
-				w.WorkflowId, w.Name, w.RunStrategy)
+			fmt.Printf("🔹 ID: %d | Name: %s | Status: %s | Strategy: %s | Max Workers: unlimited\n",
+				w.WorkflowId, w.Name, w.Status, w.RunStrategy)
 		}
 	}
 	return nil
@@ -948,11 +953,32 @@ func (c *CLI) WorkflowCreate() error {
 		RunStrategy:    &c.Attr.Workflow.Create.RunStrategy,
 		MaximumWorkers: c.Attr.Workflow.Create.MaximumWorkers,
 	}
+	if c.Attr.Workflow.Create.Status != "" {
+		req.Status = &c.Attr.Workflow.Create.Status
+	}
 	res, err := c.QC.Client.CreateWorkflow(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to create workflow: %w", err)
 	}
 	fmt.Printf("✅ Created workflow with ID %d\n", res.WorkflowId)
+	if c.Attr.Workflow.Create.Status == "" {
+		fmt.Printf("⚠️ Workflow %d is Pending. Use `scitq workflow update --id %d --status R` to start it.\n", res.WorkflowId, res.WorkflowId)
+	}
+	return nil
+}
+
+func (c *CLI) WorkflowUpdateStatus() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.WorkflowStatusUpdate{
+		WorkflowId: c.Attr.Workflow.Update.WorkflowId,
+		Status:     c.Attr.Workflow.Update.Status,
+	}
+	if _, err := c.QC.Client.UpdateWorkflowStatus(ctx, req); err != nil {
+		return fmt.Errorf("failed to update workflow status: %w", err)
+	}
+	fmt.Printf("✅ Updated workflow %d status to %s\n", req.WorkflowId, req.Status)
 	return nil
 }
 
@@ -1980,6 +2006,8 @@ func Run(c CLI) error {
 			err = c.WorkflowList()
 		case c.Attr.Workflow.Create != nil:
 			err = c.WorkflowCreate()
+		case c.Attr.Workflow.Update != nil:
+			err = c.WorkflowUpdateStatus()
 		case c.Attr.Workflow.Delete != nil:
 			err = c.WorkflowDelete()
 		}

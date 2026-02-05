@@ -44,9 +44,16 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 	defer tx.Rollback()
 
-	// 1️⃣ Count pending tasks
+	// 1️⃣ Count pending tasks eligible for scheduling
 	var pendingTaskCount int
-	err = tx.QueryRow(`SELECT COUNT(*) FROM task WHERE status = 'P'`).Scan(&pendingTaskCount)
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM task t
+		LEFT JOIN step s ON s.step_id = t.step_id
+		LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
+		WHERE t.status = 'P'
+		  AND (t.step_id IS NULL OR t.step_id = 0 OR w.status = 'R')
+	`).Scan(&pendingTaskCount)
 	if err != nil {
 		log.Printf("⚠️ Failed to count pending tasks: %v", err)
 		return
@@ -105,10 +112,14 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 	for stepID, slots := range stepSlots {
 		part := fmt.Sprintf(`
-			(SELECT task_id, COALESCE(step_id,0)
-			FROM task
-			WHERE status = 'P' AND COALESCE(step_id,0) = $%d
-			ORDER BY created_at
+			(SELECT t.task_id, COALESCE(t.step_id,0)
+			FROM task t
+			LEFT JOIN step s ON s.step_id = t.step_id
+			LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
+			WHERE t.status = 'P'
+			  AND COALESCE(t.step_id,0) = $%d
+			  AND (t.step_id IS NULL OR t.step_id = 0 OR w.status = 'R')
+			ORDER BY t.created_at
 			LIMIT %d)
 		`, argIndex, slots)
 		queryParts = append(queryParts, part)

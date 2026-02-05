@@ -359,6 +359,56 @@ func shouldTriggerAssignFor(status string) bool {
 	}
 }
 
+func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowID int32) {
+	var newStatus string
+	err := s.db.QueryRowContext(ctx, `
+		WITH stats AS (
+			SELECT
+				COUNT(*) AS total,
+				COUNT(*) FILTER (WHERE t.status = 'S') AS succeeded,
+				COUNT(*) FILTER (WHERE t.status = 'F') AS failed,
+				COUNT(*) FILTER (WHERE t.status IN ('S','F','W')) AS terminal_or_wait
+			FROM task t
+			JOIN step s ON s.step_id = t.step_id
+			WHERE s.workflow_id = $1
+			  AND NOT t.hidden
+		),
+		desired AS (
+			SELECT
+				CASE
+					WHEN total > 0 AND succeeded = total THEN 'S'
+					WHEN total > 0 AND terminal_or_wait = total AND failed > 0 THEN 'F'
+					ELSE NULL
+				END AS new_status
+			FROM stats
+		),
+		updated AS (
+			UPDATE workflow w
+			SET status = d.new_status
+			FROM desired d
+			WHERE w.workflow_id = $1
+			  AND d.new_status IS NOT NULL
+			  AND w.status <> d.new_status
+			RETURNING d.new_status
+		)
+		SELECT new_status FROM updated
+	`, workflowID).Scan(&newStatus)
+	if err == sql.ErrNoRows {
+		return
+	}
+	if err != nil {
+		log.Printf("⚠️ failed to recompute workflow status for %d: %v", workflowID, err)
+		return
+	}
+	ws.EmitWS("workflow", workflowID, "status", struct {
+		WorkflowId int32  `json:"workflowId"`
+		Status     string `json:"status"`
+	}{
+		WorkflowId: workflowID,
+		Status:     newStatus,
+	})
+}
+
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
 	var workerID sql.NullInt32
 	var oldStatus string
@@ -372,6 +422,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	var wasHidden bool
 	var sameStatus bool
 	var didUpdate bool
+	var shouldRecomputeWorkflow bool
+	var promotedWaitingTasks bool
 
 	if req.Duration == nil {
 		log.Printf("🔔 Updating task %d status to %s (duration null)", req.TaskId, req.NewStatus)
@@ -733,6 +785,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					}
 
 					if updated {
+						promotedWaitingTasks = true
 						log.Printf("✅ task %d now pending (dependencies resolved)", depTaskID)
 						// Increment pending count in step stats aggregator
 						if workflowID.Valid && stepID.Valid {
@@ -930,6 +983,15 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 	}
 
+	if workflowID.Valid {
+		shouldRecomputeWorkflow = req.NewStatus == "S" || req.NewStatus == "F"
+		if shouldRecomputeWorkflow {
+			if !(req.NewStatus == "F" && effectiveRetry > 0) && !(req.NewStatus == "S" && promotedWaitingTasks) {
+				s.recomputeWorkflowStatus(ctx, workflowID.Int32)
+			}
+		}
+	}
+
 	var workerId int32
 	if workerID.Valid {
 		workerId = workerID.Int32
@@ -1100,6 +1162,22 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 		OldStatus:    "F",
 		Status:       "P",
 	})
+
+	if wfID.Valid {
+		var currentStatus string
+		err = s.db.QueryRowContext(ctx, `SELECT status FROM workflow WHERE workflow_id = $1`, wfID.Int32).Scan(&currentStatus)
+		if err == nil && currentStatus == "F" {
+			if _, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = 'R' WHERE workflow_id = $1`, wfID.Int32); err == nil {
+				ws.EmitWS("workflow", wfID.Int32, "status", struct {
+					WorkflowId int32  `json:"workflowId"`
+					Status     string `json:"status"`
+				}{
+					WorkflowId: wfID.Int32,
+					Status:     "R",
+				})
+			}
+		}
+	}
 
 	s.triggerAssign()
 
@@ -3340,7 +3418,7 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
 	// Base query to select workflow fields
 	query := `
-        SELECT workflow_id, workflow_name, run_strategy, maximum_workers 
+        SELECT workflow_id, workflow_name, status, run_strategy, maximum_workers 
         FROM workflow
     `
 	var args []interface{}
@@ -3387,7 +3465,7 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 	var workflows []*pb.Workflow
 	for rows.Next() {
 		var wf pb.Workflow
-		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
+		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
 			return nil, fmt.Errorf("failed to scan workflow: %w", err)
 		}
 		workflows = append(workflows, &wf)
@@ -3411,20 +3489,29 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 		req.RunStrategy = &defaultRunStrategy
 	}
 
+	statusVal := "P"
+	if req.Status != nil && strings.TrimSpace(*req.Status) != "" {
+		normalized, err := normalizeWorkflowStatus(*req.Status)
+		if err != nil {
+			return nil, err
+		}
+		statusVal = normalized
+	}
+
 	var workflowID int32
 	var err error
 	if req.MaximumWorkers == nil {
 		err = s.db.QueryRow(`
-			INSERT INTO workflow (workflow_name, run_strategy)
-			VALUES ($1, $2)
+			INSERT INTO workflow (workflow_name, run_strategy, status)
+			VALUES ($1, $2, $3)
 			RETURNING workflow_id
-		`, req.Name, req.RunStrategy).Scan(&workflowID)
+		`, req.Name, req.RunStrategy, statusVal).Scan(&workflowID)
 	} else {
 		err = s.db.QueryRow(`
-		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers)
-		VALUES ($1, $2, $3)
+		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers, status)
+		VALUES ($1, $2, $3, $4)
 		RETURNING workflow_id
-	`, req.Name, req.RunStrategy, *req.MaximumWorkers).Scan(&workflowID)
+	`, req.Name, req.RunStrategy, *req.MaximumWorkers, statusVal).Scan(&workflowID)
 	}
 
 	if err != nil {
@@ -3434,11 +3521,61 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 	ws.EmitWS("workflow", workflowID, "created", struct {
 		WorkflowId int32   `json:"workflowId"`
 		Name       *string `json:"name,omitempty"`
+		Status     *string `json:"status,omitempty"`
 	}{
 		WorkflowId: workflowID,
 		Name:       &req.Name,
+		Status:     &statusVal,
 	})
 	return &pb.WorkflowId{WorkflowId: workflowID}, nil
+}
+
+func normalizeWorkflowStatus(value string) (string, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	if len(normalized) != 1 {
+		return "", fmt.Errorf("invalid workflow status: %q", value)
+	}
+	switch normalized {
+	case "P", "R", "S", "F", "Z", "D":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid workflow status: %q", value)
+	}
+}
+
+func (s *taskQueueServer) UpdateWorkflowStatus(ctx context.Context, req *pb.WorkflowStatusUpdate) (*pb.Ack, error) {
+	if GetUserFromContext(ctx) == nil {
+		return nil, status.Error(codes.PermissionDenied, "user authentication required")
+	}
+	if req.WorkflowId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "workflow_id is required")
+	}
+
+	statusVal, err := normalizeWorkflowStatus(req.Status)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	res, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = $1 WHERE workflow_id = $2`, statusVal, req.WorkflowId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update workflow status: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return nil, status.Error(codes.NotFound, "workflow not found")
+	}
+
+	ws.EmitWS("workflow", req.WorkflowId, "status", struct {
+		WorkflowId int32  `json:"workflowId"`
+		Status     string `json:"status"`
+	}{
+		WorkflowId: req.WorkflowId,
+		Status:     statusVal,
+	})
+
+	if statusVal == "R" {
+		s.triggerAssign()
+	}
+	return &pb.Ack{Success: true}, nil
 }
 
 // emitDeletedTasksForWorkflow emits a WebSocket "task.deleted" event for every task belonging to a workflow.

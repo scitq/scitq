@@ -61,6 +61,7 @@ const (
 	TaskQueue_DeleteRecruiter_FullMethodName        = "/taskqueue.TaskQueue/DeleteRecruiter"
 	TaskQueue_ListWorkflows_FullMethodName          = "/taskqueue.TaskQueue/ListWorkflows"
 	TaskQueue_CreateWorkflow_FullMethodName         = "/taskqueue.TaskQueue/CreateWorkflow"
+	TaskQueue_UpdateWorkflowStatus_FullMethodName   = "/taskqueue.TaskQueue/UpdateWorkflowStatus"
 	TaskQueue_DeleteWorkflow_FullMethodName         = "/taskqueue.TaskQueue/DeleteWorkflow"
 	TaskQueue_ListSteps_FullMethodName              = "/taskqueue.TaskQueue/ListSteps"
 	TaskQueue_CreateStep_FullMethodName             = "/taskqueue.TaskQueue/CreateStep"
@@ -128,6 +129,7 @@ type TaskQueueClient interface {
 	DeleteRecruiter(ctx context.Context, in *RecruiterId, opts ...grpc.CallOption) (*Ack, error)
 	ListWorkflows(ctx context.Context, in *WorkflowFilter, opts ...grpc.CallOption) (*WorkflowList, error)
 	CreateWorkflow(ctx context.Context, in *WorkflowRequest, opts ...grpc.CallOption) (*WorkflowId, error)
+	UpdateWorkflowStatus(ctx context.Context, in *WorkflowStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
 	DeleteWorkflow(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*Ack, error)
 	ListSteps(ctx context.Context, in *StepFilter, opts ...grpc.CallOption) (*StepList, error)
 	CreateStep(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepId, error)
@@ -591,6 +593,16 @@ func (c *taskQueueClient) CreateWorkflow(ctx context.Context, in *WorkflowReques
 	return out, nil
 }
 
+func (c *taskQueueClient) UpdateWorkflowStatus(ctx context.Context, in *WorkflowStatusUpdate, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_UpdateWorkflowStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) DeleteWorkflow(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*Ack, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Ack)
@@ -836,6 +848,7 @@ type TaskQueueServer interface {
 	DeleteRecruiter(context.Context, *RecruiterId) (*Ack, error)
 	ListWorkflows(context.Context, *WorkflowFilter) (*WorkflowList, error)
 	CreateWorkflow(context.Context, *WorkflowRequest) (*WorkflowId, error)
+	UpdateWorkflowStatus(context.Context, *WorkflowStatusUpdate) (*Ack, error)
 	DeleteWorkflow(context.Context, *WorkflowId) (*Ack, error)
 	ListSteps(context.Context, *StepFilter) (*StepList, error)
 	CreateStep(context.Context, *StepRequest) (*StepId, error)
@@ -990,6 +1003,9 @@ func (UnimplementedTaskQueueServer) ListWorkflows(context.Context, *WorkflowFilt
 }
 func (UnimplementedTaskQueueServer) CreateWorkflow(context.Context, *WorkflowRequest) (*WorkflowId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateWorkflow not implemented")
+}
+func (UnimplementedTaskQueueServer) UpdateWorkflowStatus(context.Context, *WorkflowStatusUpdate) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateWorkflowStatus not implemented")
 }
 func (UnimplementedTaskQueueServer) DeleteWorkflow(context.Context, *WorkflowId) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorkflow not implemented")
@@ -1785,6 +1801,24 @@ func _TaskQueue_CreateWorkflow_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_UpdateWorkflowStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowStatusUpdate)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).UpdateWorkflowStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_UpdateWorkflowStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).UpdateWorkflowStatus(ctx, req.(*WorkflowStatusUpdate))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_DeleteWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WorkflowId)
 	if err := dec(in); err != nil {
@@ -2303,6 +2337,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateWorkflow",
 			Handler:    _TaskQueue_CreateWorkflow_Handler,
+		},
+		{
+			MethodName: "UpdateWorkflowStatus",
+			Handler:    _TaskQueue_UpdateWorkflowStatus_Handler,
 		},
 		{
 			MethodName: "DeleteWorkflow",

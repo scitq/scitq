@@ -256,6 +256,13 @@ func TestRecruitmentCycle(t *testing.T) {
 			t.Logf("✅ Created step 2 task %d: id=%d, depends on task %d", i, taskResp.TaskId, step1TaskIds[i])
 		}
 
+		// 3b. Start workflow execution (P -> R)
+		_, err = qc.UpdateWorkflowStatus(ctx, &pb.WorkflowStatusUpdate{
+			WorkflowId: wfId,
+			Status:     "R",
+		})
+		require.NoError(t, err)
+
 		// 4. Create recruiters for each step
 		//eight := int32(8)
 		four := int32(4)

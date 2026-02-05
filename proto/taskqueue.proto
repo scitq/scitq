@@ -48,6 +48,7 @@ service TaskQueue {
     rpc DeleteRecruiter(RecruiterId) returns (Ack);
     rpc ListWorkflows(WorkflowFilter) returns (WorkflowList);
     rpc CreateWorkflow(WorkflowRequest) returns (WorkflowId);
+    rpc UpdateWorkflowStatus(WorkflowStatusUpdate) returns (Ack);
     rpc DeleteWorkflow(WorkflowId) returns (Ack);
     rpc ListSteps(StepFilter) returns (StepList);
     rpc CreateStep(StepRequest) returns (StepId);
@@ -498,6 +499,7 @@ message WorkflowId {
 message Workflow {
     int32 workflow_id = 1;
     string name = 2;
+    string status = 3;
     string run_strategy = 4;
     optional int32 maximum_workers = 5;
 }
@@ -505,10 +507,16 @@ message WorkflowRequest {
     string name = 1;
     optional string run_strategy = 2;
     optional int32 maximum_workers = 3;
+    optional string status = 4;
 }
 
 message WorkflowList {
     repeated Workflow workflows = 1;
+}
+
+message WorkflowStatusUpdate {
+    int32 workflow_id = 1;
+    string status = 2;
 }
 
 message StepFilter {

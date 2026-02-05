@@ -274,6 +274,7 @@ class Task:
         # Resolve resources
         resolved_resources = list(map(str, self.resources))
 
+        status = "W" if resolved_depends else DEFAULT_TASK_STATUS
         self.task_id = client.submit_task(
                 step_id=self.step.step_id,
                 command=resolved_command,
@@ -283,7 +284,7 @@ class Task:
                 inputs=resolved_inputs,
                 output=resolved_output,
                 resources=resolved_resources,
-                status=DEFAULT_TASK_STATUS,
+                status=status,
                 task_name=self.full_name,
                 retry=self.retry,
             )
@@ -569,15 +570,7 @@ class Workflow:
             step.compile(client)
 
         if activate_leading_tasks:
-            leading_tasks = []
-            for step in self._steps.values():
-                for task in step.tasks:
-                    if not task.dependency_task_ids:
-                        leading_tasks.append(task)
-            for task in leading_tasks:
-                if task.task_id is None:
-                    raise RuntimeError(f"Task {task.full_name} has not been compiled yet")
-                client.update_task_status(task_id=task.task_id, new_status="P")
+            client.update_workflow_status(workflow_id=self.workflow_id, status="R")
         return self.workflow_id
     
     @property

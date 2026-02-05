@@ -89,7 +89,7 @@ class Scitq2Client:
         )
         self.stub = taskqueue_pb2_grpc.TaskQueueStub(self.channel)
 
-    def create_workflow(self, name: str, maximum_workers: Optional[int] = None) -> int:
+    def create_workflow(self, name: str, maximum_workers: Optional[int] = None, status: Optional[str] = None) -> int:
         """
         Creates a new workflow on the server.
 
@@ -103,8 +103,17 @@ class Scitq2Client:
         request = taskqueue_pb2.WorkflowRequest(name=name)
         if maximum_workers is not None:
             request.maximum_workers = maximum_workers
+        if status is not None:
+            request.status = status
         response = self.stub.CreateWorkflow(request)
         return response.workflow_id
+
+    def update_workflow_status(self, *, workflow_id: int, status: str) -> None:
+        """
+        Updates workflow status.
+        """
+        request = taskqueue_pb2.WorkflowStatusUpdate(workflow_id=workflow_id, status=status)
+        self.stub.UpdateWorkflowStatus(request)
 
     def create_step(self, workflow_id: int, name: str) -> int:
         """

@@ -292,26 +292,12 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 			log.Printf("⚠️ failed to update template_run status: %v", err)
 		}
 		var workflowID sql.NullInt32
-		var tasksActivated int32
-
 		err = s.db.QueryRowContext(ctx, `
-				WITH run_info AS (
-					SELECT workflow_id FROM template_run WHERE template_run_id = $1
-				),
-				updated AS (
-					UPDATE task
-					SET status = 'P'
-					WHERE status = 'I'
-						AND step_id IN (
-						SELECT step_id FROM step WHERE workflow_id = (SELECT workflow_id FROM run_info)
-						)
-					RETURNING 1
-				)
-				SELECT (SELECT workflow_id FROM run_info), COUNT(*) FROM updated
-			`, templateRunId).Scan(&workflowID, &tasksActivated)
+			SELECT workflow_id FROM template_run WHERE template_run_id = $1
+		`, templateRunId).Scan(&workflowID)
 
 		if err != nil {
-			msg := fmt.Sprintf("⚠️ failed to update task statuses: %v", err)
+			msg := fmt.Sprintf("⚠️ failed to load workflow_id for template_run: %v", err)
 			log.Println(msg)
 			_, _ = s.db.ExecContext(ctx, `
 				UPDATE template_run SET status = 'F', error_message = $1 WHERE template_run_id = $2
@@ -344,11 +330,32 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 			}, nil
 		}
 
-		if tasksActivated == 0 {
-			log.Printf("⚠️ No tasks activated for workflow_id=%d (template_run_id=%d)", workflowID.Int32, templateRunId)
-		} else {
-			log.Printf("✅ %d tasks activated for workflow_id=%d (template_run_id=%d)", tasksActivated, workflowID.Int32, templateRunId)
+		_, err = s.db.ExecContext(ctx, `
+			UPDATE workflow SET status = 'R' WHERE workflow_id = $1
+		`, workflowID.Int32)
+		if err != nil {
+			msg := fmt.Sprintf("⚠️ failed to update workflow status: %v", err)
+			log.Println(msg)
+			_, _ = s.db.ExecContext(ctx, `
+				UPDATE template_run SET status = 'F', error_message = $1 WHERE template_run_id = $2
+			`, msg, templateRunId)
+			return &pb.TemplateRun{
+				TemplateRunId:      templateRunId,
+				WorkflowTemplateId: req.WorkflowTemplateId,
+				CreatedAt:          createdAt.Format(time.RFC3339),
+				ParamValuesJson:    req.ParamValuesJson,
+				Status:             "F",
+				ErrorMessage:       proto.String(msg),
+			}, nil
 		}
+		ws.EmitWS("workflow", workflowID.Int32, "status", struct {
+			WorkflowId int32  `json:"workflowId"`
+			Status     string `json:"status"`
+		}{
+			WorkflowId: workflowID.Int32,
+			Status:     "R",
+		})
+		s.triggerAssign()
 	}
 
 	log.Printf("✅ RunTemplate script completed successfully: %s", stdout)
