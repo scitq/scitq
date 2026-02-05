@@ -155,7 +155,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
         JOIN
             step s ON s.step_id = r.step_id
         JOIN
-            workflow wf ON wf.workflow_id = s.workflow_id
+            workflow wf ON wf.workflow_id = s.workflow_id AND wf.status = 'R'
         JOIN
             pt_agg pa ON pa.step_id = r.step_id
         LEFT JOIN
