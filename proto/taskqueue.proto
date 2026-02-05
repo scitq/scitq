@@ -50,6 +50,10 @@ service TaskQueue {
     rpc CreateWorkflow(WorkflowRequest) returns (WorkflowId);
     rpc UpdateWorkflowStatus(WorkflowStatusUpdate) returns (Ack);
     rpc DeleteWorkflow(WorkflowId) returns (Ack);
+    rpc DebugAssignTask(DebugAssignRequest) returns (Ack);
+    rpc DebugRecruitStep(DebugRecruitRequest) returns (Ack);
+    rpc DebugRetryTask(RetryTaskRequest) returns (TaskResponse);
+    rpc ListDependentPendingTasks(TaskId) returns (TaskIds);
     rpc ListSteps(StepFilter) returns (StepList);
     rpc CreateStep(StepRequest) returns (StepId);
     rpc DeleteStep(StepId) returns (Ack);
@@ -517,6 +521,16 @@ message WorkflowList {
 message WorkflowStatusUpdate {
     int32 workflow_id = 1;
     string status = 2;
+}
+
+message DebugAssignRequest {
+    int32 workflow_id = 1;
+    int32 task_id = 2;
+}
+
+message DebugRecruitRequest {
+    int32 workflow_id = 1;
+    int32 step_id = 2;
 }
 
 message StepFilter {

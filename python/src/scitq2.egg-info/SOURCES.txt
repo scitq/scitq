@@ -5,6 +5,7 @@ src/scitq2/__main__.py
 src/scitq2/__version__.py
 src/scitq2/biology.py
 src/scitq2/constants.py
+src/scitq2/debugger.py
 src/scitq2/grpc_client.py
 src/scitq2/language.py
 src/scitq2/param.py

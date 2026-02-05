@@ -1019,12 +1019,13 @@ func getLogPath(taskID int32, logType string, logRoot string) string {
 	return filepath.Join(dir, fmt.Sprintf("%d_%s.log", taskID, logType))
 }
 
-func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
+func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTaskRequest, resumeStatus string, requireDebug bool) (*pb.TaskResponse, error) {
 	var (
-		oldID  = req.TaskId
-		newID  int32
-		wfID   sql.NullInt32
-		stepID sql.NullInt32
+		oldID    = req.TaskId
+		newID    int32
+		wfID     sql.NullInt32
+		stepID   sql.NullInt32
+		wfStatus sql.NullString
 	)
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1040,9 +1041,10 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 	err = tx.QueryRowContext(ctx, `
 		WITH validated AS (
 			SELECT 
-				t.task_id, t.retry, t.step_id, s.workflow_id
+				t.task_id, t.retry, t.step_id, s.workflow_id, w.status
 			FROM task t
 			LEFT JOIN step s ON t.step_id = s.step_id
+			LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
 			WHERE t.task_id = $1
 			  AND NOT t.hidden
 		),
@@ -1071,15 +1073,21 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 			WHERE task_id = (SELECT task_id FROM validated)
 			RETURNING TRUE
 		)
-		SELECT v.workflow_id, v.step_id, c.task_id
+		SELECT v.workflow_id, v.step_id, v.status, c.task_id
 		FROM validated v, cloned c;
-	`, oldID, req.Retry).Scan(&wfID, &stepID, &newID)
+	`, oldID, req.Retry).Scan(&wfID, &stepID, &wfStatus, &newID)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task %d not found, not failed, or not retryable", oldID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed during clone/hide transaction: %w", err)
+	}
+
+	if requireDebug {
+		if !wfStatus.Valid || (wfStatus.String != "D" && wfStatus.String != "F") {
+			return nil, status.Error(codes.FailedPrecondition, "workflow must be in Debug mode")
+		}
 	}
 
 	// Dependencies rewiring (same as before)
@@ -1167,13 +1175,13 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 		var currentStatus string
 		err = s.db.QueryRowContext(ctx, `SELECT status FROM workflow WHERE workflow_id = $1`, wfID.Int32).Scan(&currentStatus)
 		if err == nil && currentStatus == "F" {
-			if _, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = 'R' WHERE workflow_id = $1`, wfID.Int32); err == nil {
+			if _, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = $2 WHERE workflow_id = $1`, wfID.Int32, resumeStatus); err == nil {
 				ws.EmitWS("workflow", wfID.Int32, "status", struct {
 					WorkflowId int32  `json:"workflowId"`
 					Status     string `json:"status"`
 				}{
 					WorkflowId: wfID.Int32,
-					Status:     "R",
+					Status:     resumeStatus,
 				})
 			}
 		}
@@ -1182,6 +1190,10 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 	s.triggerAssign()
 
 	return &pb.TaskResponse{TaskId: newID}, nil
+}
+
+func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
+	return s.retryTaskInternal(ctx, req, "R", false)
 }
 
 func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) error {
@@ -3576,6 +3588,146 @@ func (s *taskQueueServer) UpdateWorkflowStatus(ctx context.Context, req *pb.Work
 		s.triggerAssign()
 	}
 	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) DebugAssignTask(ctx context.Context, req *pb.DebugAssignRequest) (*pb.Ack, error) {
+	if GetUserFromContext(ctx) == nil {
+		return nil, status.Error(codes.PermissionDenied, "user authentication required")
+	}
+	if req.WorkflowId == 0 || req.TaskId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "workflow_id and task_id are required")
+	}
+
+	var wfStatus string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM workflow WHERE workflow_id = $1`, req.WorkflowId).Scan(&wfStatus)
+	if err == sql.ErrNoRows {
+		return nil, status.Error(codes.NotFound, "workflow not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load workflow status: %w", err)
+	}
+	if wfStatus != "D" {
+		return nil, status.Error(codes.FailedPrecondition, "workflow must be in Debug mode")
+	}
+
+	var taskWorkflowID sql.NullInt32
+	var taskStatus string
+	var stepID sql.NullInt32
+	err = s.db.QueryRowContext(ctx, `
+		SELECT s.workflow_id, t.status, t.step_id
+		FROM task t
+		LEFT JOIN step s ON s.step_id = t.step_id
+		WHERE t.task_id = $1
+	`, req.TaskId).Scan(&taskWorkflowID, &taskStatus, &stepID)
+	if err == sql.ErrNoRows {
+		return nil, status.Error(codes.NotFound, "task not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load task: %w", err)
+	}
+	if !taskWorkflowID.Valid || taskWorkflowID.Int32 != req.WorkflowId {
+		return nil, status.Error(codes.InvalidArgument, "task does not belong to workflow")
+	}
+	if taskStatus != "P" {
+		return nil, status.Error(codes.FailedPrecondition, "task must be Pending")
+	}
+
+	var depsSatisfied bool
+	err = s.db.QueryRowContext(ctx, `
+		SELECT NOT EXISTS (
+			SELECT 1
+			FROM task_dependencies d
+			JOIN task t ON d.prerequisite_task_id = t.task_id
+			WHERE d.dependent_task_id = $1
+			  AND t.status != 'S'
+		)
+	`, req.TaskId).Scan(&depsSatisfied)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check task dependencies: %w", err)
+	}
+	if !depsSatisfied {
+		return nil, status.Error(codes.FailedPrecondition, "task dependencies not satisfied")
+	}
+
+	_, _, err = s.assignSingleTask(req.TaskId)
+	if err != nil {
+		if strings.Contains(err.Error(), "no compatible worker") {
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
+		}
+		return nil, err
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) DebugRecruitStep(ctx context.Context, req *pb.DebugRecruitRequest) (*pb.Ack, error) {
+	if GetUserFromContext(ctx) == nil {
+		return nil, status.Error(codes.PermissionDenied, "user authentication required")
+	}
+	if req.WorkflowId == 0 || req.StepId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "workflow_id and step_id are required")
+	}
+
+	var wfStatus string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM workflow WHERE workflow_id = $1`, req.WorkflowId).Scan(&wfStatus)
+	if err == sql.ErrNoRows {
+		return nil, status.Error(codes.NotFound, "workflow not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load workflow status: %w", err)
+	}
+	if wfStatus != "D" {
+		return nil, status.Error(codes.FailedPrecondition, "workflow must be in Debug mode")
+	}
+
+	var stepWorkflowID int32
+	err = s.db.QueryRowContext(ctx, `SELECT workflow_id FROM step WHERE step_id = $1`, req.StepId).Scan(&stepWorkflowID)
+	if err == sql.ErrNoRows {
+		return nil, status.Error(codes.NotFound, "step not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load step: %w", err)
+	}
+	if stepWorkflowID != req.WorkflowId {
+		return nil, status.Error(codes.InvalidArgument, "step does not belong to workflow")
+	}
+
+	if err := recruitment.DebugRecruitStep(ctx, s.db, &s.qm, s, req.StepId); err != nil {
+		return nil, fmt.Errorf("failed to run debug recruitment: %w", err)
+	}
+	return &pb.Ack{Success: true}, nil
+}
+
+func (s *taskQueueServer) DebugRetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
+	return s.retryTaskInternal(ctx, req, "D", true)
+}
+
+func (s *taskQueueServer) ListDependentPendingTasks(ctx context.Context, req *pb.TaskId) (*pb.TaskIds, error) {
+	var taskIDs []int32
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.task_id
+		FROM task_dependencies d
+		JOIN task t ON d.dependent_task_id = t.task_id
+		WHERE d.prerequisite_task_id = $1
+		  AND t.status = 'P'
+		ORDER BY t.task_id ASC
+	`, req.TaskId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dependent tasks: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int32
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan dependent task: %w", err)
+		}
+		taskIDs = append(taskIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read dependent tasks: %w", err)
+	}
+
+	return &pb.TaskIds{TaskIds: taskIDs}, nil
 }
 
 // emitDeletedTasksForWorkflow emits a WebSocket "task.deleted" event for every task belonging to a workflow.

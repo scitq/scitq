@@ -537,7 +537,7 @@ class Workflow:
                       language=effective_language, depends=depends, retry=retry)
         return step
 
-    def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False) -> int:
+    def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: Optional[str] = None) -> int:
         if self.provider:
             self.workspace_root = client.get_workspace_root(
                 provider=self.provider,
@@ -553,6 +553,7 @@ class Workflow:
                 self.workflow_id = client.create_workflow(
                     name=candidate_name,
                     maximum_workers=self.max_recruited,
+                    status=workflow_status,
                 )
                 self.full_name = candidate_name
                 break

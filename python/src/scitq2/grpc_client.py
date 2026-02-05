@@ -115,6 +115,54 @@ class Scitq2Client:
         request = taskqueue_pb2.WorkflowStatusUpdate(workflow_id=workflow_id, status=status)
         self.stub.UpdateWorkflowStatus(request)
 
+    def delete_workflow(self, workflow_id: int) -> None:
+        self.stub.DeleteWorkflow(taskqueue_pb2.WorkflowId(workflow_id=workflow_id))
+
+    def list_tasks(self, workflow_id: Optional[int] = None, show_hidden: bool = False, status: Optional[str] = None):
+        req = taskqueue_pb2.ListTasksRequest()
+        if workflow_id is not None:
+            req.workflow_id_filter = workflow_id
+        if show_hidden:
+            req.show_hidden = True
+        if status is not None:
+            req.status_filter = status
+        return self.stub.ListTasks(req).tasks
+
+    def list_workers(self, *, workflow_id: Optional[int] = None):
+        req = taskqueue_pb2.ListWorkersRequest()
+        if workflow_id is not None:
+            req.workflow_id = workflow_id
+        return self.stub.ListWorkers(req).workers
+
+    def update_worker(self, *, worker_id: int, step_id: Optional[int] = None) -> None:
+        req = taskqueue_pb2.WorkerUpdateRequest(worker_id=worker_id)
+        if step_id is not None:
+            req.step_id = step_id
+        self.stub.UserUpdateWorker(req)
+
+    def debug_assign_task(self, *, workflow_id: int, task_id: int) -> None:
+        req = taskqueue_pb2.DebugAssignRequest(workflow_id=workflow_id, task_id=task_id)
+        self.stub.DebugAssignTask(req)
+
+    def debug_recruit_step(self, *, workflow_id: int, step_id: int) -> None:
+        req = taskqueue_pb2.DebugRecruitRequest(workflow_id=workflow_id, step_id=step_id)
+        self.stub.DebugRecruitStep(req)
+
+    def debug_retry_task(self, *, task_id: int) -> int:
+        resp = self.stub.DebugRetryTask(taskqueue_pb2.RetryTaskRequest(task_id=task_id))
+        return resp.task_id
+
+    def list_dependent_pending_tasks(self, task_id: int) -> List[int]:
+        resp = self.stub.ListDependentPendingTasks(taskqueue_pb2.TaskId(task_id=task_id))
+        return list(resp.task_ids)
+
+    def stream_task_logs(self, *, task_id: int, log_type: str):
+        if log_type == "stdout":
+            return self.stub.StreamTaskLogsOutput(taskqueue_pb2.TaskId(task_id=task_id))
+        if log_type == "stderr":
+            return self.stub.StreamTaskLogsErr(taskqueue_pb2.TaskId(task_id=task_id))
+        raise ValueError("log_type must be 'stdout' or 'stderr'")
+
     def create_step(self, workflow_id: int, name: str) -> int:
         """
         Creates a new step associated with a given workflow.

@@ -209,3 +209,80 @@ func (s *taskQueueServer) assignPendingTasks() {
 		log.Printf("⚠️ Failed to commit task assignment: %v", err)
 	}
 }
+
+func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, sql.NullInt32{}, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var stepID sql.NullInt32
+	var workflowID sql.NullInt32
+	err = tx.QueryRow(`
+		SELECT t.step_id, s.workflow_id
+		FROM task t
+		LEFT JOIN step s ON s.step_id = t.step_id
+		WHERE t.task_id = $1 AND t.status = 'P'
+	`, taskID).Scan(&stepID, &workflowID)
+	if err == sql.ErrNoRows {
+		return 0, sql.NullInt32{}, fmt.Errorf("task %d not pending", taskID)
+	}
+	if err != nil {
+		return 0, sql.NullInt32{}, fmt.Errorf("failed to load task %d: %w", taskID, err)
+	}
+	if !stepID.Valid {
+		return 0, workflowID, fmt.Errorf("task %d has no step_id", taskID)
+	}
+
+	var workerID sql.NullInt32
+	err = tx.QueryRow(`
+		WITH candidate AS (
+			SELECT w.worker_id
+			FROM worker w
+			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+			WHERE w.status = 'R' AND w.step_id = $2
+			GROUP BY w.worker_id, w.concurrency, w.prefetch
+			HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
+			ORDER BY (w.concurrency + w.prefetch - COALESCE(SUM(t.weight),0)) DESC, w.worker_id
+			LIMIT 1
+		),
+		updated AS (
+			UPDATE task
+			SET status = 'A', worker_id = (SELECT worker_id FROM candidate)
+			WHERE task_id = $1 AND status = 'P'
+			  AND (SELECT worker_id FROM candidate) IS NOT NULL
+			RETURNING worker_id, step_id
+		)
+		SELECT worker_id FROM updated
+	`, taskID, stepID.Int32).Scan(&workerID)
+	if err == sql.ErrNoRows {
+		return 0, workflowID, fmt.Errorf("no compatible worker available for task %d", taskID)
+	}
+	if err != nil {
+		return 0, workflowID, fmt.Errorf("failed to assign task %d: %w", taskID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, workflowID, fmt.Errorf("failed to commit task assignment: %w", err)
+	}
+
+	if workflowID.Valid {
+		agg := s.stats.data[workflowID.Int32][stepID.Int32]
+		agg.Pending--
+		agg.Accepted++
+		ws.EmitWS("step-stats", workflowID.Int32, "delta", map[string]any{
+			"workflowId": workflowID.Int32,
+			"stepId":     stepID.Int32,
+			"taskId":     taskID,
+			"oldStatus":  "P",
+			"newStatus":  "A",
+		})
+	}
+	ws.EmitWS("task", taskID, "status", map[string]any{
+		"oldStatus": "P",
+		"status":    "A",
+		"workerId":  workerID.Int32,
+	})
+	return workerID.Int32, workflowID, nil
+}

@@ -25,9 +25,9 @@ BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 
 # Normalize version for Python (PEP 440 compliant)
-normalize_pep440 = git describe --tags --always --dirty | sed -E 's/-dirty/.dev0/; s/-/./g; /^[0-9a-z]{3,8}/s/^/0.0.0+/'
-PY_PEP440_TAG = $(shell $(normalize_pep440))
-
+normalize_pep440 = git describe --tags --always --dirty | \
+	sed -E 's/^v//' | \
+	sed -E 's/-dirty/.dev0/; s/-([0-9]+)-g([0-9a-f]+)/.dev\1+g\2/; s/-/./g; /^[0-9a-f]{3,40}$$/s/^/0.0.0+/'
 PY_PEP440_TAG = $(shell $(normalize_pep440))
 
 LDFLAGS    := -X 'github.com/scitq/scitq/internal/version.Version=$(GIT_TAG)' \
