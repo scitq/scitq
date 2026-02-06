@@ -134,6 +134,12 @@ class Scitq2Client:
             req.workflow_id = workflow_id
         return self.stub.ListWorkers(req).workers
 
+    def list_recruiters(self, *, step_id: Optional[int] = None):
+        req = taskqueue_pb2.RecruiterFilter()
+        if step_id is not None:
+            req.step_id = step_id
+        return self.stub.ListRecruiters(req).recruiters
+
     def update_worker(self, *, worker_id: int, step_id: Optional[int] = None) -> None:
         req = taskqueue_pb2.WorkerUpdateRequest(worker_id=worker_id)
         if step_id is not None:

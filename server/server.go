@@ -3206,14 +3206,14 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 	query := `SELECT step_id, rank, protofilter,
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
 		cpu_per_task, memory_per_task, disk_per_task, prefetch_percent, concurrency_min, concurrency_max
-		FROM recruiter
-		ORDER BY step_id, rank`
+		FROM recruiter`
 
 	args := []interface{}{}
 	if req.StepId != nil {
 		query += " WHERE step_id = $1"
 		args = append(args, *req.StepId)
 	}
+	query += " ORDER BY step_id, rank"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

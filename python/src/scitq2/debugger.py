@@ -43,14 +43,14 @@ def run_debug(client: Scitq2Client, workflow_id: int) -> None:
             else:
                 _run_task(client, workflow_id, task_id)
         elif choice == "3":
-            new_task = _retry_task(client, _latest_failed(failed))
+            new_task = _retry_task(client, workflow_id, _latest_failed(failed))
             if new_task is not None:
                 last_retry_task = new_task
                 _run_task(client, workflow_id, new_task)
         elif choice == "4":
             _run_task(client, workflow_id, _random_task(pending))
         elif choice == "5":
-            _retry_task(client, _random_task(failed))
+            _retry_task(client, workflow_id, _random_task(failed))
         elif choice == "6":
             task_id = _prompt_task_id()
             if task_id is None:
@@ -62,7 +62,7 @@ def run_debug(client: Scitq2Client, workflow_id: int) -> None:
             if task.status == "P":
                 _run_task(client, workflow_id, task_id)
             elif task.status == "F":
-                _retry_task(client, task_id)
+                _retry_task(client, workflow_id, task_id)
             else:
                 print(f"Task {task_id} is in status {task.status}, cannot run or retry.")
         elif choice == "7":
@@ -78,7 +78,7 @@ def run_debug(client: Scitq2Client, workflow_id: int) -> None:
             continue
 
         last_success, last_failed = _refresh_last_outcome(client, workflow_id, last_success, last_failed)
-        if last_retry_task is not None:
+        if last_retry_task is not None and not failed:
             last_failed = None
 
 
@@ -97,17 +97,27 @@ def _default_choice(last_success: Optional[int], last_failed: Optional[int], pen
 
 
 def _print_menu(default_choice: str, has_retried_failed: bool) -> None:
-    print("1) Run first pending task")
-    if has_retried_failed:
-        print("2) Run (retried) pending task dependent on latest success")
+    def line(idx: str, text: str) -> str:
+        entry = f"{idx}) {text}"
+        if default_choice == idx:
+            return f"\x1b[1m{entry}\x1b[0m"
+        return entry
+
+    if has_retried_failed and default_choice == "1":
+        first_label = "Run latest (retried) pending task"
     else:
-        print("2) Run pending task dependent on latest success")
-    print("3) Retry latest failed task")
-    print("4) Run random pending task")
-    print("5) Retry random failed task")
-    print("6) Select task explicitly")
-    print("7) Quit debug and delete workflow")
-    print("8) Quit debug and resume normal execution")
+        first_label = "Run latest pending task"
+    print(line("1", first_label))
+    if has_retried_failed and default_choice == "2":
+        print(line("2", "Run (retried) pending task dependent on latest success"))
+    else:
+        print(line("2", "Run pending task dependent on latest success"))
+    print(line("3", "Retry latest failed task"))
+    print(line("4", "Run random pending task"))
+    print(line("5", "Retry random failed task"))
+    print(line("6", "Select task explicitly"))
+    print(line("7", "Quit debug and delete workflow"))
+    print(line("8", "Quit debug and resume normal execution"))
     print(f"(default: {default_choice})")
 
 
@@ -115,7 +125,7 @@ def _first_pending(pending):
     if not pending:
         print("No pending tasks.")
         return None
-    return pending[0].task_id
+    return max(pending, key=lambda t: t.task_id).task_id
 
 
 def _latest_failed(failed):
@@ -162,6 +172,9 @@ def _find_task(tasks, task_id: int):
 def _run_task(client: Scitq2Client, workflow_id: int, task_id: Optional[int]) -> None:
     if task_id is None:
         return
+    task = _find_task(client.list_tasks(workflow_id=workflow_id, show_hidden=True), task_id)
+    if task is not None:
+        _print_task_summary(task)
     while True:
         try:
             client.debug_assign_task(workflow_id=workflow_id, task_id=task_id)
@@ -172,19 +185,22 @@ def _run_task(client: Scitq2Client, workflow_id: int, task_id: Optional[int]) ->
                 if not _handle_no_worker(client, workflow_id, task_id):
                     return
                 continue
-            print(f"Failed to assign task {task_id}: {msg}")
+            print(f"Failed to assign {_task_label(task_id, task)}: {msg}")
             return
 
-    print(f"Assigned task {task_id}. Streaming logs (Ctrl-C to return to menu).")
-    _stream_task_logs(client, task_id)
+    print(f"Assigned {_task_label(task_id, task)}. Streaming logs (Ctrl-C to return to menu).")
+    _stream_task_logs(client, workflow_id, task_id)
 
 
-def _retry_task(client: Scitq2Client, task_id: Optional[int]) -> Optional[int]:
+def _retry_task(client: Scitq2Client, workflow_id: int, task_id: Optional[int]) -> Optional[int]:
     if task_id is None:
         return None
     try:
         new_task = client.debug_retry_task(task_id=task_id)
-        print(f"Retried task {task_id}; new task {new_task} is pending.")
+        print(
+            f"Retried {_task_label(task_id, _find_task(client.list_tasks(workflow_id=workflow_id, show_hidden=True), task_id))}; "
+            f"new task {new_task} is pending."
+        )
         return new_task
     except grpc.RpcError as e:
         print(f"Failed to retry task {task_id}: {e.details() or str(e)}")
@@ -199,7 +215,7 @@ def _handle_no_worker(client: Scitq2Client, workflow_id: int, task_id: int) -> b
 
     while True:
         print("No compatible worker available.")
-        print("r) Trigger recruitment")
+        print(f"r) Trigger recruitment{_recruiter_hint(client, task.step_id)}")
         print("w) Assign a worker manually")
         print("c) Cancel")
         choice = input("Select option [r/w/c]: ").strip().lower()
@@ -260,7 +276,7 @@ def _wait_for_recruitment(client: Scitq2Client, workflow_id: int, task_id: int, 
                 time.sleep(0.25)
             else:
                 time.sleep(0.5)
-            task = _find_task(client.list_tasks(show_hidden=True), task_id)
+            task = _find_task(client.list_tasks(workflow_id=workflow_id, show_hidden=True), task_id)
             if task is None:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
@@ -269,12 +285,14 @@ def _wait_for_recruitment(client: Scitq2Client, workflow_id: int, task_id: int, 
             if task.status in ("A", "C", "D", "O", "R", "U", "V"):
                 sys.stdout.write("\rRecruitment succeeded waiting for task to start   \n")
                 sys.stdout.flush()
-                _stream_task_logs(client, task_id)
+                _stream_task_logs(client, workflow_id, task_id)
                 return True
             if task.status in ("S", "F"):
                 sys.stdout.write("\rRecruitment succeeded waiting for task to start   \n")
                 sys.stdout.flush()
-                print(f"Task {task_id} finished with status {task.status}.")
+                tasks = client.list_tasks(workflow_id=workflow_id, show_hidden=True)
+                refreshed = _find_task(tasks, task_id) or task
+                print(f"{_task_label(task_id, refreshed)} finished with status {_format_status(refreshed, tasks)}.")
                 return True
             if _has_worker_for_step(client, workflow_id, step_id):
                 sys.stdout.write("\rRecruitment succeeded waiting for task to start   \n")
@@ -305,11 +323,13 @@ def _has_worker_for_step(client: Scitq2Client, workflow_id: int, step_id: int) -
     return False
 
 
-def _stream_task_logs(client: Scitq2Client, task_id: int) -> None:
+def _stream_task_logs(client: Scitq2Client, workflow_id: int, task_id: int) -> None:
     saw_output = {"stdout": False, "stderr": False}
     stop_event = threading.Event()
     calls = {}
     canceled_by_user = {"value": False}
+    out_prefix = "\x1b[34m→\x1b[0m"
+    err_prefix = "\x1b[31m→\x1b[0m"
 
     def stream(kind: str):
         try:
@@ -318,9 +338,9 @@ def _stream_task_logs(client: Scitq2Client, task_id: int) -> None:
             for entry in call:
                 if stop_event.is_set():
                     break
-                prefix = "OUT" if kind == "stdout" else "ERR"
+                prefix = out_prefix if kind == "stdout" else err_prefix
                 saw_output[kind] = True
-                print(f"[{prefix}] {entry.log_text}")
+                print(f"{prefix} {entry.log_text}")
         except grpc.RpcError as e:
             if canceled_by_user["value"]:
                 return
@@ -352,14 +372,16 @@ def _stream_task_logs(client: Scitq2Client, task_id: int) -> None:
 
     if not saw_output["stdout"] and not saw_output["stderr"]:
         print("Log streams ended with no output.")
-    final = _find_task(client.list_tasks(show_hidden=True), task_id)
+    final = _find_task(client.list_tasks(workflow_id=workflow_id, show_hidden=True), task_id)
     if final is not None:
         if final.status == "R":
-            print(f"Letting task {task_id} run in the background.")
+            print(f"Letting {_task_label(task_id, final)} run in the background.")
         elif final.status in ("A", "C", "D", "O", "U", "V"):
-            print(f"Task {task_id} is still running (status {final.status}).")
+            print(f"{_task_label(task_id, final)} is still running (status {final.status}).")
         else:
-            print(f"Task {task_id} finished with status {final.status}.")
+            tasks = client.list_tasks(workflow_id=workflow_id, show_hidden=True)
+            refreshed = _find_task(tasks, task_id) or final
+            print(f"{_task_label(task_id, refreshed)} finished with status {_format_status(refreshed, tasks)}.")
 
 
 def _refresh_last_outcome(client: Scitq2Client, workflow_id: int, last_success: Optional[int], last_failed: Optional[int]) -> Tuple[Optional[int], Optional[int]]:
@@ -373,3 +395,87 @@ def _refresh_last_outcome(client: Scitq2Client, workflow_id: int, last_success: 
             last_failed = t.task_id
             break
     return last_success, last_failed
+
+
+def _task_label(task_id: int, task) -> str:
+    if task is not None and getattr(task, "task_name", None):
+        return f"task {task.task_name} [{task_id}]"
+    return f"task {task_id}"
+
+
+def _print_task_summary(task) -> None:
+    bar = "\x1b[34m" + "-" * 64 + "\x1b[0m"
+    title = f"Starting {_task_label(task.task_id, task)}"
+    print(bar)
+    print(title)
+    if getattr(task, "command", None):
+        lines = task.command.splitlines()
+        snippet = lines[:10]
+        for line in snippet:
+            print(f"  cmd: {line}")
+        if len(lines) > 10:
+            print("  cmd: ...")
+    if getattr(task, "container", None):
+        print(f"  container: {task.container}")
+    if getattr(task, "shell", None):
+        print(f"  shell: {task.shell}")
+    if getattr(task, "input", None):
+        for v in task.input[:10]:
+            print(f"  input: {v}")
+        if len(task.input) > 10:
+            print("  input: ...")
+    if getattr(task, "resource", None):
+        for v in task.resource[:10]:
+            print(f"  resource: {v}")
+        if len(task.resource) > 10:
+            print("  resource: ...")
+    if getattr(task, "output", None):
+        print(f"  output: {task.output}")
+    print(bar)
+
+
+def _find_retry_child(tasks, task_id: int):
+    for t in tasks:
+        if getattr(t, "previous_task_id", None) == task_id:
+            return t
+    return None
+
+
+def _format_status(task, tasks) -> str:
+    if task.status == "S":
+        return "\x1b[32mS (success)\x1b[0m"
+    if task.status == "F":
+        retry_child = _find_retry_child(tasks, task.task_id)
+        if retry_child is not None:
+            return (
+                "\x1b[31mF (failure)\x1b[0m "
+                f"but retried as {_task_label(retry_child.task_id, retry_child)}"
+            )
+        return "\x1b[31mF (failure)\x1b[0m"
+    return task.status
+
+
+def _recruiter_hint(client: Scitq2Client, step_id: int) -> str:
+    try:
+        recruiters = client.list_recruiters(step_id=step_id)
+    except grpc.RpcError:
+        return ""
+    if not recruiters:
+        return ""
+    r = recruiters[0]
+    parts = []
+    if r.protofilter:
+        parts.append(f"filter: {r.protofilter}")
+    if getattr(r, "concurrency", None) is not None:
+        parts.append(f"concurrency: {r.concurrency}")
+    if getattr(r, "prefetch", None) is not None:
+        parts.append(f"prefetch: {r.prefetch}")
+    if getattr(r, "cpu_per_task", None) is not None:
+        parts.append(f"CPU>{r.cpu_per_task}")
+    if getattr(r, "memory_per_task", None) is not None:
+        parts.append(f"mem>{r.memory_per_task}")
+    if getattr(r, "disk_per_task", None) is not None:
+        parts.append(f"disk>{r.disk_per_task}")
+    hint = ", ".join(parts) if parts else "recruiter configured"
+    suffix = " - and other options" if len(recruiters) > 1 else ""
+    return f" ({hint}{suffix})"
