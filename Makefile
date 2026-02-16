@@ -224,8 +224,8 @@ venv: add-py-version
 ifndef VENV
 	$(error Please specify a virtual environment name, e.g. `make venv VENV=~/venvs/scitq2`)
 endif
-	python3 -m venv $(VENV)
-	. $(VENV)/bin/activate && pip install -e ./python
+	python3 -m venv --clear $(VENV)
+	$(VENV)/bin/python -m pip install -e ./python
 
 dsl-doc: venv
 	@echo "Generating Python DSL..."

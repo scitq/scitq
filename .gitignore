@@ -36,8 +36,9 @@ scripts
 *.sw?
 
 # python
-pyproject.toml
-__version__.py
+python/pyproject.toml
+python/src/scitq2/__version__.py
+python/src/scitq2.egg-info/
 python-src.tgz
 
 # svelte
