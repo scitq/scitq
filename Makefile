@@ -220,11 +220,14 @@ fresh-integration-test: tgz-python-src
 config-doc:
 	go run tools/gen_config_doc.go > docs/reference/configuration.md
 
+PYTHON ?= python3
+
 venv: add-py-version
 ifndef VENV
 	$(error Please specify a virtual environment name, e.g. `make venv VENV=~/venvs/scitq2`)
 endif
-	python3 -m venv --clear $(VENV)
+	$(PYTHON) -m venv --clear $(VENV)
+	$(VENV)/bin/python -m pip install --upgrade pip
 	$(VENV)/bin/python -m pip install -e ./python
 
 dsl-doc: venv

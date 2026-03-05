@@ -13,11 +13,43 @@ Switch-like function to assign a value to a variable on the first True condition
 Args:
     *conditions: Tuples of (condition, value) where condition is a boolean
                  and value is the value to assign if the condition is True.
+                 If value is a callable (e.g. a lambda), it will be called
+                 only when its condition is the first True match, enabling
+                 lazy evaluation.
     default: Optional value to return if no conditions are True. If not provided,
              a ValueError will be raised if no conditions match.
+             Can also be a callable for lazy evaluation.
 
 Returns:
     A value based on the first True condition.
+
+#### Lazy evaluation with lambdas
+
+Because Python evaluates all function arguments before calling the function,
+all values in `cond()` tuples are evaluated eagerly, even if their condition
+is False. This can cause errors when a value references a variable that may
+not exist:
+
+```python
+# This will raise an error if seqtk is not defined, even though the
+# condition may be False:
+inputs=cond(
+    (params.depth is not None, seqtk.output("fastqs")),
+    default=humanfilter.output("fastqs")
+)
+```
+
+To avoid this, wrap values in lambdas. `cond()` will only call the lambda
+when its condition matches:
+
+```python
+inputs=cond(
+    (params.depth is not None, lambda: seqtk.output("fastqs")),
+    default=lambda: humanfilter.output("fastqs")
+)
+```
+
+Non-callable values still work as before, so this is fully backward-compatible.
 
 ### `run(func: Callable)`
 

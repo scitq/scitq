@@ -1,6 +1,7 @@
 import argparse
 import json
 import inspect
+import os
 import sys
 import ast
 from typing import Callable, Type, Optional, Dict, get_type_hints
@@ -9,6 +10,7 @@ from scitq2.workflow import Workflow
 from scitq2.grpc_client import Scitq2Client
 import re
 import traceback
+import grpc
 
 class WorkflowDefinitionError(Exception):
     pass
@@ -106,6 +108,22 @@ def check_triple_quoted_strings_for_issues(source_code: str, filename: str):
             print(f"⚠️ Warning: line {lineno} in {filename} uses triple-quoted string with backslashes. Use raw string (r\"\"\"...\") to avoid escape issues.", file=sys.stderr)
 
 
+def _handle_grpc_error(e: grpc.RpcError):
+    """Handle gRPC errors with user-friendly messages."""
+    details = e.details() if hasattr(e, 'details') else str(e)
+    if "CERTIFICATE_VERIFY_FAILED" in details or "Ssl handshake failed" in details:
+        print(
+            f"❌ SSL certificate verification failed when connecting to the scitq server.\n"
+            f"   Did you forget to set the SSL certificate? Run:\n\n"
+            f"     export SCITQ_SSL_CERTIFICATE=$(scitq cert)\n",
+            file=sys.stderr
+        )
+    else:
+        print(f"❌ gRPC connection error: {details}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+
+
 def run(func: Callable):
     """
     Run a workflow function that may optionally take a Params class instance.
@@ -176,6 +194,8 @@ def run(func: Callable):
             param_instance = param_class.parse(values)
             result = func(param_instance)
             has_run = True
+        except grpc.RpcError as e:
+            _handle_grpc_error(e)
         except Exception as e:
             print(f"❌ Failed to parse values or execute workflow: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
@@ -185,6 +205,8 @@ def run(func: Callable):
         try:
             result = func()
             has_run = True
+        except grpc.RpcError as e:
+            _handle_grpc_error(e)
         except Exception as e:
             print(f"❌ Failed to parse values or execute workflow: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
@@ -204,9 +226,12 @@ def run(func: Callable):
         if args.standalone and args.debug:
             print("❌ --standalone and --debug cannot be used together.", file=sys.stderr)
             sys.exit(1)
-        client = Scitq2Client()
-        workflow_status = "D" if args.debug else None
-        workflow.compile(client, activate_leading_tasks=args.standalone, workflow_status=workflow_status)
+        try:
+            client = Scitq2Client()
+            workflow_status = "D" if args.debug else None
+            workflow.compile(client, activate_leading_tasks=args.standalone, workflow_status=workflow_status)
+        except grpc.RpcError as e:
+            _handle_grpc_error(e)
         if args.debug:
             from scitq2 import debugger
             debugger.run_debug(client, workflow.workflow_id)

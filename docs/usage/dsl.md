@@ -439,8 +439,8 @@ def MetaPhlAnWorkflow(params: Params):
             name="metaphlan",
             tag=sample.sample_accession,
             inputs=cond(
-                (params.depth is not None, seqtk.output("fastqs")),
-                default=humanfilter.output("fastqs")
+                (params.depth is not None, lambda: seqtk.output("fastqs")),
+                default=lambda: humanfilter.output("fastqs")
             ),
             command=fr"""
             pigz -dc /input/*.fastq.gz | metaphlan \
@@ -671,6 +671,17 @@ This first step begins exactly like our previous example with a name and a tag. 
 #### `cond` keyword
 
 `command` bears a first specificity, it uses the `cond` keyword, which is very much like an if/then/else structure except it can be used in variable affectation. We could use the pythonic `command=x if y else z` but this is less readable, especially if x and z are large in size and y is very small. In the DSL, using the `cond()` keyword is recommanded for readability. `cond()` takes an arbitrary number of pairs (condition, value) and returns the value associated with the first condition that is true. It may take an optional default value which is returned if all conditions are false.
+
+**Lazy evaluation:** Because Python evaluates all function arguments eagerly, all values passed to `cond()` are evaluated even if their condition is False. This can be a problem when a value references a variable that may not be defined (e.g. an optional step). To avoid this, wrap the value in a lambda — `cond()` will only call it when its condition matches:
+
+```python
+inputs=cond(
+    (params.depth is not None, lambda: seqtk.output("fastqs")),
+    default=lambda: humanfilter.output("fastqs")
+)
+```
+
+Here, `seqtk.output("fastqs")` is only evaluated if `params.depth is not None` (i.e. when the `seqtk` step was actually created). Non-callable values still work as before.
 
 #### Using builtins
 
