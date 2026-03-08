@@ -4,6 +4,8 @@
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { TaskQueue } from "./taskqueue";
+import type { TaskStatusCountsResponse } from "./taskqueue";
+import type { TaskStatusCountsRequest } from "./taskqueue";
 import type { WorkerEventPruneResult } from "./taskqueue";
 import type { WorkerEventPruneFilter } from "./taskqueue";
 import type { WorkerEventId } from "./taskqueue";
@@ -339,6 +341,10 @@ export interface ITaskQueueClient {
      * @generated from protobuf rpc: PruneWorkerEvents
      */
     pruneWorkerEvents(input: WorkerEventPruneFilter, options?: RpcOptions): UnaryCall<WorkerEventPruneFilter, WorkerEventPruneResult>;
+    /**
+     * @generated from protobuf rpc: GetTaskStatusCounts
+     */
+    getTaskStatusCounts(input: TaskStatusCountsRequest, options?: RpcOptions): UnaryCall<TaskStatusCountsRequest, TaskStatusCountsResponse>;
 }
 /**
  * @generated from protobuf service taskqueue.TaskQueue
@@ -765,5 +771,12 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
     pruneWorkerEvents(input: WorkerEventPruneFilter, options?: RpcOptions): UnaryCall<WorkerEventPruneFilter, WorkerEventPruneResult> {
         const method = this.methods[58], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkerEventPruneFilter, WorkerEventPruneResult>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: GetTaskStatusCounts
+     */
+    getTaskStatusCounts(input: TaskStatusCountsRequest, options?: RpcOptions): UnaryCall<TaskStatusCountsRequest, TaskStatusCountsResponse> {
+        const method = this.methods[59], opt = this._transport.mergeOptions(options);
+        return stackIntercept<TaskStatusCountsRequest, TaskStatusCountsResponse>("unary", this._transport, method, opt, input);
     }
 }

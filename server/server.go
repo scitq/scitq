@@ -1210,8 +1210,8 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %w", err)
 		}
-		defer file.Close()
 		fmt.Fprintln(file, logEntry.LogText)
+		file.Close()
 	}
 }
 
@@ -1322,18 +1322,25 @@ func tailLines(path string, totalLines int, skipFromEnd int) ([]string, error) {
 	}
 	defer file.Close()
 
-	// Read all lines (needed to know the end)
-	var lines []string
+	// Use a ring buffer to keep only the last (totalLines + skipFromEnd) lines
+	need := totalLines + skipFromEnd
+	ring := make([]string, 0, need+1)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		if len(ring) < need {
+			ring = append(ring, scanner.Text())
+		} else {
+			// Shift left and append (ring buffer)
+			copy(ring, ring[1:])
+			ring[need-1] = scanner.Text()
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
 	// Calculate the range to return
-	end := len(lines) - skipFromEnd
+	end := len(ring) - skipFromEnd
 	start := end - totalLines
 	if start < 0 {
 		start = 0
@@ -1341,11 +1348,11 @@ func tailLines(path string, totalLines int, skipFromEnd int) ([]string, error) {
 	if end < 0 {
 		end = 0
 	}
-	if end > len(lines) {
-		end = len(lines)
+	if end > len(ring) {
+		end = len(ring)
 	}
 
-	return lines[start:end], nil
+	return ring[start:end], nil
 }
 
 func (s *taskQueueServer) GetLogsChunk(ctx context.Context, req *pb.GetLogsRequest) (*pb.LogChunkList, error) {
@@ -2091,6 +2098,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 			defer func(region, prov string, c int32, m float32, id int32) {
 				s.qm.RegisterDelete(region, prov, c, m)
 				s.watchdog.WorkerDeleted(id)
+				s.workerStats.Delete(id)
 			}(regionName, provider, cpu, mem, req.WorkerId)
 		}
 	} else {
@@ -2531,6 +2539,75 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	}
 
 	return &pb.TaskList{Tasks: tasks}, nil
+}
+
+func (s *taskQueueServer) GetTaskStatusCounts(ctx context.Context, req *pb.TaskStatusCountsRequest) (*pb.TaskStatusCountsResponse, error) {
+	showHidden := req.ShowHidden != nil && *req.ShowHidden
+
+	// Global counts: SELECT status, COUNT(*) FROM task GROUP BY status
+	hiddenClause := ""
+	if !showHidden {
+		hiddenClause = " WHERE hidden = FALSE"
+	}
+	globalQuery := `SELECT status, COUNT(*)::int FROM task` + hiddenClause + ` GROUP BY status`
+	rows, err := s.db.QueryContext(ctx, globalQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query global task status counts: %w", err)
+	}
+	defer rows.Close()
+
+	var globalCounts []*pb.StatusCountEntry
+	totalCount := int32(0)
+	for rows.Next() {
+		var status string
+		var count int32
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan global count row: %w", err)
+		}
+		globalCounts = append(globalCounts, &pb.StatusCountEntry{
+			Status: status,
+			Count:  count,
+		})
+		totalCount += count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading global counts: %w", err)
+	}
+
+	// Per-worker counts: SELECT status, worker_id, COUNT(*) FROM task WHERE worker_id IS NOT NULL GROUP BY status, worker_id
+	perWorkerQuery := `SELECT status, worker_id, COUNT(*)::int FROM task WHERE worker_id IS NOT NULL`
+	if !showHidden {
+		perWorkerQuery += ` AND hidden = FALSE`
+	}
+	perWorkerQuery += ` GROUP BY status, worker_id`
+	rows2, err := s.db.QueryContext(ctx, perWorkerQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query per-worker task status counts: %w", err)
+	}
+	defer rows2.Close()
+
+	var perWorkerCounts []*pb.StatusCountEntry
+	for rows2.Next() {
+		var status string
+		var count, workerID int32
+		if err := rows2.Scan(&status, &workerID, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan per-worker count row: %w", err)
+		}
+		perWorkerCounts = append(perWorkerCounts, &pb.StatusCountEntry{
+			Status:   status,
+			Count:    count,
+			WorkerId: &workerID,
+		})
+	}
+	if err := rows2.Err(); err != nil {
+		return nil, fmt.Errorf("error reading per-worker counts: %w", err)
+	}
+
+	return &pb.TaskStatusCountsResponse{
+		GlobalCounts:   globalCounts,
+		PerWorkerCounts: perWorkerCounts,
+		TotalCount:     totalCount,
+	}, nil
 }
 
 func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingAndGetNewTasksRequest) (*pb.TaskListAndOther, error) {

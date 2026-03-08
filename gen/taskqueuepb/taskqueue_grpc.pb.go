@@ -86,6 +86,7 @@ const (
 	TaskQueue_ListWorkerEvents_FullMethodName          = "/taskqueue.TaskQueue/ListWorkerEvents"
 	TaskQueue_DeleteWorkerEvent_FullMethodName         = "/taskqueue.TaskQueue/DeleteWorkerEvent"
 	TaskQueue_PruneWorkerEvents_FullMethodName         = "/taskqueue.TaskQueue/PruneWorkerEvents"
+	TaskQueue_GetTaskStatusCounts_FullMethodName       = "/taskqueue.TaskQueue/GetTaskStatusCounts"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -160,6 +161,7 @@ type TaskQueueClient interface {
 	ListWorkerEvents(ctx context.Context, in *WorkerEventFilter, opts ...grpc.CallOption) (*WorkerEventList, error)
 	DeleteWorkerEvent(ctx context.Context, in *WorkerEventId, opts ...grpc.CallOption) (*Ack, error)
 	PruneWorkerEvents(ctx context.Context, in *WorkerEventPruneFilter, opts ...grpc.CallOption) (*WorkerEventPruneResult, error)
+	GetTaskStatusCounts(ctx context.Context, in *TaskStatusCountsRequest, opts ...grpc.CallOption) (*TaskStatusCountsResponse, error)
 }
 
 type taskQueueClient struct {
@@ -851,6 +853,16 @@ func (c *taskQueueClient) PruneWorkerEvents(ctx context.Context, in *WorkerEvent
 	return out, nil
 }
 
+func (c *taskQueueClient) GetTaskStatusCounts(ctx context.Context, in *TaskStatusCountsRequest, opts ...grpc.CallOption) (*TaskStatusCountsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskStatusCountsResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_GetTaskStatusCounts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -923,6 +935,7 @@ type TaskQueueServer interface {
 	ListWorkerEvents(context.Context, *WorkerEventFilter) (*WorkerEventList, error)
 	DeleteWorkerEvent(context.Context, *WorkerEventId) (*Ack, error)
 	PruneWorkerEvents(context.Context, *WorkerEventPruneFilter) (*WorkerEventPruneResult, error)
+	GetTaskStatusCounts(context.Context, *TaskStatusCountsRequest) (*TaskStatusCountsResponse, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -1130,6 +1143,9 @@ func (UnimplementedTaskQueueServer) DeleteWorkerEvent(context.Context, *WorkerEv
 }
 func (UnimplementedTaskQueueServer) PruneWorkerEvents(context.Context, *WorkerEventPruneFilter) (*WorkerEventPruneResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PruneWorkerEvents not implemented")
+}
+func (UnimplementedTaskQueueServer) GetTaskStatusCounts(context.Context, *TaskStatusCountsRequest) (*TaskStatusCountsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTaskStatusCounts not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -2315,6 +2331,24 @@ func _TaskQueue_PruneWorkerEvents_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_GetTaskStatusCounts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskStatusCountsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetTaskStatusCounts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetTaskStatusCounts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetTaskStatusCounts(ctx, req.(*TaskStatusCountsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2573,6 +2607,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PruneWorkerEvents",
 			Handler:    _TaskQueue_PruneWorkerEvents_Handler,
+		},
+		{
+			MethodName: "GetTaskStatusCounts",
+			Handler:    _TaskQueue_GetTaskStatusCounts_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

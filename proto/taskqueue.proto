@@ -75,6 +75,7 @@ service TaskQueue {
     rpc ListWorkerEvents(WorkerEventFilter) returns (WorkerEventList);
     rpc DeleteWorkerEvent(WorkerEventId) returns (Ack);
     rpc PruneWorkerEvents(WorkerEventPruneFilter) returns (WorkerEventPruneResult);
+    rpc GetTaskStatusCounts(TaskStatusCountsRequest) returns (TaskStatusCountsResponse);
 }   
 
 message TaskResponse {
@@ -833,4 +834,20 @@ message FlavorCreateRequest {
 
 message FlavorId {
  int32 flavor_id = 1;
+}
+
+message TaskStatusCountsRequest {
+    optional bool show_hidden = 1;
+}
+
+message StatusCountEntry {
+    string status = 1;
+    int32 count = 2;
+    optional int32 worker_id = 3;
+}
+
+message TaskStatusCountsResponse {
+    repeated StatusCountEntry global_counts = 1;
+    repeated StatusCountEntry per_worker_counts = 2;
+    int32 total_count = 3;
 }

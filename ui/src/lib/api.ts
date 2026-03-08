@@ -389,34 +389,12 @@ export async function delWorker(workerId: { workerId: any }) {
  */
 export async function getTasksCount(workerId?: number): Promise<Record<string, number>> {
   try {
-    const request: taskqueue.ListTasksRequest = {};
-
-    if (workerId) {
-      request.workerIdFilter = workerId;
-    }
-
-    const taskUnary = await client.listTasks(request, await callOptionsUserToken());
-    const workerTasks = taskUnary.response?.tasks || [];
-
-    // Initialize counts for each status to zero
-    const counts: Record<string, number> = {
-      pending: 0,
-      assigned: 0,
-      accepted: 0,
-      downloading: 0,
-      running: 0,
-      uploadingSuccess: 0,
-      uploadingFailure: 0,
-      succeeded: 0,
-      failed: 0,
-      suspended: 0,
-      canceled: 0,
-      waiting: 0,
-      all: 0,
-    };
+    const request: taskqueue.TaskStatusCountsRequest = {};
+    const result = await client.getTaskStatusCounts(request, await callOptionsUserToken());
+    const resp = result.response;
 
     // Map status codes to keys in counts object
-    const statusMap: Record<string, keyof typeof counts> = {
+    const statusMap: Record<string, string> = {
       P: 'pending',
       A: 'assigned',
       C: 'accepted',
@@ -431,12 +409,33 @@ export async function getTasksCount(workerId?: number): Promise<Record<string, n
       W: 'waiting',
     };
 
-    // Count tasks per status
-    for (const task of workerTasks) {
-      const key = statusMap[task.status];
-      if (key) {
-        counts[key]++;
-        counts.all++;
+    // Initialize counts for each status to zero
+    const counts: Record<string, number> = {
+      pending: 0, assigned: 0, accepted: 0, downloading: 0,
+      running: 0, uploadingSuccess: 0, uploadingFailure: 0,
+      succeeded: 0, failed: 0, suspended: 0, canceled: 0,
+      waiting: 0, all: 0,
+    };
+
+    if (workerId) {
+      // Use per-worker counts
+      for (const entry of resp.perWorkerCounts) {
+        if (entry.workerId === workerId) {
+          const key = statusMap[entry.status];
+          if (key) {
+            counts[key] = entry.count;
+            counts.all += entry.count;
+          }
+        }
+      }
+    } else {
+      // Use global counts
+      for (const entry of resp.globalCounts) {
+        const key = statusMap[entry.status];
+        if (key) {
+          counts[key] = entry.count;
+          counts.all += entry.count;
+        }
       }
     }
 
@@ -836,8 +835,7 @@ export async function getWorkerTasks(): Promise<Record<number, Record<number, st
 }
 
 /**
- * Retrieves global and per-worker task status counts.
- * Performs a single listTasks({ showHidden: true }) request.
+ * Retrieves global and per-worker task status counts using a server-side COUNT query.
  * @returns An object with globalStatusCounts and perWorkerStatusCounts.
  */
 export async function getAllTaskStats(): Promise<{
@@ -846,35 +844,29 @@ export async function getAllTaskStats(): Promise<{
   totalCount : number,
 }> {
   try {
-    const request: taskqueue.ListTasksRequest = { showHidden: true };
-    const taskUnary = await client.listTasks(request, await callOptionsUserToken());
-    const allTasks = taskUnary.response?.tasks || [];
+    const request: taskqueue.TaskStatusCountsRequest = { showHidden: true };
+    const result = await client.getTaskStatusCounts(request, await callOptionsUserToken());
+    const resp = result.response;
 
     const globalStatusCounts: Record<string, number> = {};
-    const perWorkerStatusCounts: Record<number, Record<string, number>> = {};
-    var totalCount: number = 0;
+    for (const entry of resp.globalCounts) {
+      globalStatusCounts[entry.status] = entry.count;
+    }
 
-    for (const task of allTasks) {
-      const status = task.status;
-      totalCount++;
-      // Increment global status count
-      if (status) {
-        globalStatusCounts[status] = (globalStatusCounts[status] || 0) + 1;
-      }
-      // Increment per-worker status count if workerId exists
-      if (task.workerId !== undefined && status) {
-        if (!perWorkerStatusCounts[task.workerId]) {
-          perWorkerStatusCounts[task.workerId] = {};
+    const perWorkerStatusCounts: Record<number, Record<string, number>> = {};
+    for (const entry of resp.perWorkerCounts) {
+      if (entry.workerId !== undefined) {
+        if (!perWorkerStatusCounts[entry.workerId]) {
+          perWorkerStatusCounts[entry.workerId] = {};
         }
-        perWorkerStatusCounts[task.workerId][status] =
-          (perWorkerStatusCounts[task.workerId][status] || 0) + 1;
+        perWorkerStatusCounts[entry.workerId][entry.status] = entry.count;
       }
     }
 
     return {
       globalStatusCounts,
       perWorkerStatusCounts,
-      totalCount
+      totalCount: resp.totalCount
     };
   } catch (error) {
     console.error("Error while retrieving all task stats:", error);
