@@ -6,6 +6,7 @@ from scitq2.recruit import WorkerPool
 from scitq2.uri import Resource
 from scitq2.constants import DEFAULT_TASK_STATUS, ACTIONS
 import os
+from itertools import count
 import sys
 from collections.abc import Iterable
 from abc import ABC, abstractmethod
@@ -547,7 +548,7 @@ class Workflow:
             self.workspace_root = None
 
         base_name = self.naming_strategy(self.name, self.tag) if self.tag else self.name
-        for i in range(10):
+        for i in count():
             candidate_name = base_name if i == 0 else self.naming_strategy(base_name,str(i))
             try:
                 self.workflow_id = client.create_workflow(
@@ -561,8 +562,6 @@ class Workflow:
                 if 'unique constraint "unique_workflow_name"' in str(e):
                     continue
                 raise  # re-raise non-duplicate errors
-        else:
-            raise RuntimeError(f"Failed to create workflow after 10 attempts due to name conflict")
 
         template_run_id = os.environ.get("SCITQ_TEMPLATE_RUN_ID")
         if template_run_id:
