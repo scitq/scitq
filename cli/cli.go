@@ -61,9 +61,17 @@ type Attr struct {
 			Offset     int32  `arg:"--offset" help:"Offset for pagination of tasks"`
 		} `arg:"subcommand:list" help:"List all tasks"`
 
-		Output *struct {
+		Stdout *struct {
 			ID int32 `arg:"--id,required" help:"Task ID"`
-		} `arg:"subcommand:output" help:"Fetch task output logs"`
+		} `arg:"subcommand:stdout" help:"Stream task stdout"`
+
+		Stderr *struct {
+			ID int32 `arg:"--id,required" help:"Task ID"`
+		} `arg:"subcommand:stderr" help:"Stream task stderr"`
+
+		Logs *struct {
+			ID int32 `arg:"--id,required" help:"Task ID"`
+		} `arg:"subcommand:logs" help:"Stream task stdout and stderr (colored)"`
 
 		Retry *struct {
 			ID    int32  `arg:"--id,required" help:"Task ID to retry"`
@@ -400,25 +408,84 @@ func (c *CLI) TaskList() error {
 	return nil
 }
 
-// fetchTaskLogs fetches and prints logs of a task by ID.
-func (c *CLI) TaskOutput() error {
+// TaskStdout streams stdout of a task by ID.
+func (c *CLI) TaskStdout() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	req := &pb.TaskId{TaskId: c.Attr.Task.Output.ID}
-	stream, err := c.QC.Client.StreamTaskLogsOutput(ctx, req)
+	stream, err := c.QC.Client.StreamTaskLogsOutput(ctx, &pb.TaskId{TaskId: c.Attr.Task.Stdout.ID})
 	if err != nil {
-		return fmt.Errorf("error fetching task logs: %v", err)
+		return fmt.Errorf("error fetching task stdout: %v", err)
 	}
 
-	fmt.Printf("📜 Logs for Task %d:\n", c.Attr.Task.Output.ID)
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			break // Stream finished
+			break
 		}
-		fmt.Printf("[%s] %s\n", msg.LogType, msg.LogText)
+		fmt.Println(msg.LogText)
 	}
+	return nil
+}
+
+// TaskStderr streams stderr of a task by ID.
+func (c *CLI) TaskStderr() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	stream, err := c.QC.Client.StreamTaskLogsErr(ctx, &pb.TaskId{TaskId: c.Attr.Task.Stderr.ID})
+	if err != nil {
+		return fmt.Errorf("error fetching task stderr: %v", err)
+	}
+
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			break
+		}
+		fmt.Println(msg.LogText)
+	}
+	return nil
+}
+
+// TaskLogs streams both stdout and stderr of a task, with colors (blue for stdout, red for stderr).
+func (c *CLI) TaskLogs() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	taskID := c.Attr.Task.Logs.ID
+	outStream, err := c.QC.Client.StreamTaskLogsOutput(ctx, &pb.TaskId{TaskId: taskID})
+	if err != nil {
+		return fmt.Errorf("error fetching task stdout: %v", err)
+	}
+	errStream, err := c.QC.Client.StreamTaskLogsErr(ctx, &pb.TaskId{TaskId: taskID})
+	if err != nil {
+		return fmt.Errorf("error fetching task stderr: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		for {
+			msg, err := outStream.Recv()
+			if err != nil {
+				break
+			}
+			fmt.Printf("\033[34m%s\033[0m\n", msg.LogText)
+		}
+		done <- struct{}{}
+	}()
+	go func() {
+		for {
+			msg, err := errStream.Recv()
+			if err != nil {
+				break
+			}
+			fmt.Printf("\033[31m%s\033[0m\n", msg.LogText)
+		}
+		done <- struct{}{}
+	}()
+	<-done
+	<-done
 	return nil
 }
 
@@ -1928,8 +1995,12 @@ func Run(c CLI) error {
 			err = c.TaskCreate()
 		case c.Attr.Task.List != nil:
 			err = c.TaskList()
-		case c.Attr.Task.Output != nil:
-			err = c.TaskOutput()
+		case c.Attr.Task.Stdout != nil:
+			err = c.TaskStdout()
+		case c.Attr.Task.Stderr != nil:
+			err = c.TaskStderr()
+		case c.Attr.Task.Logs != nil:
+			err = c.TaskLogs()
 		case c.Attr.Task.Retry != nil:
 			err = c.TaskRetry()
 		}

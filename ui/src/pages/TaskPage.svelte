@@ -961,13 +961,13 @@ async function handleWebSocketMessage(message) {
         {#if logsToShowOut.length > 0}
           <div class="tasks-log-block tasks-stdout-block">
             <h3 class="tasks-output-header">
-              🟢 Output
+              🟢 Stdout
               {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedTaskStatus) && hasMoreStdout}
                 <button
                   class="tasks-load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stdout'); scrollToTop('stdout');; }}
-                  title="Load more Output"
-                  data-testid={`load-more-output-${selectedTaskId}`}
+                  title="Load more Stdout"
+                  data-testid={`load-more-stdout-${selectedTaskId}`}
                   aria-label="Load more logs"
                 >
                   <ArrowBigUp />
@@ -996,13 +996,13 @@ async function handleWebSocketMessage(message) {
         {#if logsToShowErr.length > 0}
           <div class="tasks-log-block tasks-stderr-block">
             <h3 class="tasks-error-header">
-              🔴 Error
+              🔴 Stderr
               {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedTaskStatus) && hasMoreStderr}
                 <button
                   class="tasks-load-more-arrow"
                   on:click={() => { loadMoreLogs(selectedTaskId, 'stderr'); scrollToTop('stderr');; }}
-                  title="Load more Error"
-                  aria-label="Load more error logs"
+                  title="Load more Stderr"
+                  aria-label="Load more stderr logs"
                 >
                   <ArrowBigUp />
                 </button>

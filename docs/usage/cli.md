@@ -184,12 +184,28 @@ The action optionally permits placing an auto-retry on the task, so to retry the
 scitq task retry --id <task id> --retry 3
 ```
 
-#### `task output`
+#### `task stdout`
 
-This action enables one to see the printed output of the task (stdout/stderr).
+Streams the standard output (stdout) of a task.
 
 ```sh
-scitq task output --id <task id>
+scitq task stdout --id <task id>
+```
+
+#### `task stderr`
+
+Streams the standard error (stderr) of a task.
+
+```sh
+scitq task stderr --id <task id>
+```
+
+#### `task logs`
+
+Streams both stdout and stderr of a task, with colors (blue for stdout, red for stderr).
+
+```sh
+scitq task logs --id <task id>
 ```
 
 ### `flavor`
