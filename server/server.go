@@ -3647,12 +3647,22 @@ func (s *taskQueueServer) UpdateWorkflowStatus(ctx context.Context, req *pb.Work
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	res, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = $1 WHERE workflow_id = $2`, statusVal, req.WorkflowId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update workflow status: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return nil, status.Error(codes.NotFound, "workflow not found")
+	if req.MaximumWorkers != nil {
+		res, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = $1, maximum_workers = $3 WHERE workflow_id = $2`, statusVal, req.WorkflowId, *req.MaximumWorkers)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update workflow: %w", err)
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			return nil, status.Error(codes.NotFound, "workflow not found")
+		}
+	} else {
+		res, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = $1 WHERE workflow_id = $2`, statusVal, req.WorkflowId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update workflow status: %w", err)
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			return nil, status.Error(codes.NotFound, "workflow not found")
+		}
 	}
 
 	ws.EmitWS("workflow", req.WorkflowId, "status", struct {

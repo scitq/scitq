@@ -522,6 +522,7 @@ message WorkflowList {
 message WorkflowStatusUpdate {
     int32 workflow_id = 1;
     string status = 2;
+    optional int32 maximum_workers = 3;
 }
 
 message DebugAssignRequest {

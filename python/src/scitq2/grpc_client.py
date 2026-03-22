@@ -108,11 +108,13 @@ class Scitq2Client:
         response = self.stub.CreateWorkflow(request)
         return response.workflow_id
 
-    def update_workflow_status(self, *, workflow_id: int, status: str) -> None:
+    def update_workflow_status(self, *, workflow_id: int, status: str, maximum_workers: Optional[int] = None) -> None:
         """
-        Updates workflow status.
+        Updates workflow status and optionally maximum_workers.
         """
         request = taskqueue_pb2.WorkflowStatusUpdate(workflow_id=workflow_id, status=status)
+        if maximum_workers is not None:
+            request.maximum_workers = maximum_workers
         self.stub.UpdateWorkflowStatus(request)
 
     def delete_workflow(self, workflow_id: int) -> None:

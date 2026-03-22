@@ -4301,11 +4301,12 @@ func (x *WorkflowList) GetWorkflows() []*Workflow {
 }
 
 type WorkflowStatusUpdate struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkflowId    int32                  `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkflowId     int32                  `protobuf:"varint,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Status         string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	MaximumWorkers *int32                 `protobuf:"varint,3,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkflowStatusUpdate) Reset() {
@@ -4350,6 +4351,13 @@ func (x *WorkflowStatusUpdate) GetStatus() string {
 		return x.Status
 	}
 	return ""
+}
+
+func (x *WorkflowStatusUpdate) GetMaximumWorkers() int32 {
+	if x != nil && x.MaximumWorkers != nil {
+		return *x.MaximumWorkers
+	}
+	return 0
 }
 
 type DebugAssignRequest struct {
@@ -8022,11 +8030,13 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10_maximum_workersB\t\n" +
 	"\a_status\"A\n" +
 	"\fWorkflowList\x121\n" +
-	"\tworkflows\x18\x01 \x03(\v2\x13.taskqueue.WorkflowR\tworkflows\"O\n" +
+	"\tworkflows\x18\x01 \x03(\v2\x13.taskqueue.WorkflowR\tworkflows\"\x91\x01\n" +
 	"\x14WorkflowStatusUpdate\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
 	"workflowId\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\"N\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12,\n" +
+	"\x0fmaximum_workers\x18\x03 \x01(\x05H\x00R\x0emaximumWorkers\x88\x01\x01B\x12\n" +
+	"\x10_maximum_workers\"N\n" +
 	"\x12DebugAssignRequest\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
 	"workflowId\x12\x17\n" +
@@ -8765,6 +8775,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[60].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[62].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[63].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[65].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[68].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[71].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[73].OneofWrappers = []any{}

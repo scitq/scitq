@@ -4,9 +4,9 @@ import grpc
 import warnings
 
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
-from . import taskqueue_pb2 as taskqueue__pb2
+import taskqueue_pb2 as taskqueue__pb2
 
-GRPC_GENERATED_VERSION = '1.74.0'
+GRPC_GENERATED_VERSION = '1.78.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -19,7 +19,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in taskqueue_pb2_grpc.py depends on'
+        + ' but the generated code in taskqueue_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -364,6 +364,11 @@ class TaskQueueStub(object):
                 '/taskqueue.TaskQueue/PruneWorkerEvents',
                 request_serializer=taskqueue__pb2.WorkerEventPruneFilter.SerializeToString,
                 response_deserializer=taskqueue__pb2.WorkerEventPruneResult.FromString,
+                _registered_method=True)
+        self.GetTaskStatusCounts = channel.unary_unary(
+                '/taskqueue.TaskQueue/GetTaskStatusCounts',
+                request_serializer=taskqueue__pb2.TaskStatusCountsRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.TaskStatusCountsResponse.FromString,
                 _registered_method=True)
 
 
@@ -768,6 +773,12 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetTaskStatusCounts(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TaskQueueServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1100,6 +1111,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.PruneWorkerEvents,
                     request_deserializer=taskqueue__pb2.WorkerEventPruneFilter.FromString,
                     response_serializer=taskqueue__pb2.WorkerEventPruneResult.SerializeToString,
+            ),
+            'GetTaskStatusCounts': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetTaskStatusCounts,
+                    request_deserializer=taskqueue__pb2.TaskStatusCountsRequest.FromString,
+                    response_serializer=taskqueue__pb2.TaskStatusCountsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -2884,6 +2900,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/PruneWorkerEvents',
             taskqueue__pb2.WorkerEventPruneFilter.SerializeToString,
             taskqueue__pb2.WorkerEventPruneResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetTaskStatusCounts(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/GetTaskStatusCounts',
+            taskqueue__pb2.TaskStatusCountsRequest.SerializeToString,
+            taskqueue__pb2.TaskStatusCountsResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -9,7 +9,7 @@ import grpc
 from scitq2.grpc_client import Scitq2Client
 
 
-def run_debug(client: Scitq2Client, workflow_id: int) -> None:
+def run_debug(client: Scitq2Client, workflow_id: int, maximum_workers: Optional[int] = None) -> None:
     print(f"🪲 Debug mode enabled for workflow {workflow_id}")
     last_success: Optional[int] = None
     last_failed: Optional[int] = None
@@ -70,7 +70,7 @@ def run_debug(client: Scitq2Client, workflow_id: int) -> None:
             print("Workflow deleted. Exiting debug mode.")
             return
         elif choice == "8":
-            client.update_workflow_status(workflow_id=workflow_id, status="R")
+            client.update_workflow_status(workflow_id=workflow_id, status="R", maximum_workers=maximum_workers)
             print("Workflow resumed. Exiting debug mode.")
             return
         else:

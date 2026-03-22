@@ -245,7 +245,7 @@ def run(func: Callable):
             return
         if args.debug:
             from scitq2 import debugger
-            debugger.run_debug(client, workflow.workflow_id)
+            debugger.run_debug(client, workflow.workflow_id, maximum_workers=workflow.max_recruited)
     else:
         print("❌ Either --metadata, --params or --values must be provided.", file=sys.stderr)
         sys.exit(1)
