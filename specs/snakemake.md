@@ -26,7 +26,7 @@ The converter must **resolve** Snakemake's implicit DAG into explicit scitq loop
 | `resources: mem_mb=` | `TaskSpec(mem=)` | Easy | Convert MB to GB |
 | `resources: disk_mb=` | `TaskSpec(disk=)` | Easy | Convert MB to GB |
 | `container:` / `singularity:` | `container=` | Easy | Singularity → Docker equivalent |
-| `conda:` | `container=` | Medium | Need to find or build a Docker equivalent |
+| `conda:` | `container=` | Easy | Auto-generate Dockerfile via mkdocker (`othersources/mkdocker/`) |
 | `shell:` | `command=fr"..."` | Easy | Variable translation needed |
 | `run:` (Python block) | `command=` with `language=Python()` | Medium | Or refactor into shell |
 | `script:` | Resource + command | Medium | Upload script as resource |
@@ -308,7 +308,7 @@ Snakefile
 - `lambda wildcards:` in input — generate skeleton with TODO
 - Complex `run:` blocks with Python logic — emit as commented Python
 - `scatter`/`gather` patterns — generate skeleton
-- `conda:` environments — suggest Docker alternative with TODO
+- `conda:` environments — auto-generate mkdocker Dockerfile from conda YAML
 
 ### Out of scope
 - Snakemake profiles and cluster configs
@@ -337,7 +337,35 @@ Integrated into the scitq CLI alongside the Nextflow converter:
 scitq template convert --from-snakemake Snakefile
 ```
 
-The converter shares the same intermediate representation as the Nextflow converter:
+### Converter configuration
+
+Same config as the Nextflow converter (shared `convert.yaml`):
+
+```yaml
+registry: gmtscience                  # Docker registry for generated images
+base_image: gmtscience/mamba:1.5.8    # Base image for mkdocker-generated Dockerfiles
+output_dir: ./converted               # Where to write the generated scitq template
+docker_dir: ./dockers                  # Where to write generated mkdocker Dockerfiles
+```
+
+The `registry` and `base_image` are especially important for Snakemake since many rules use `conda:` instead of `container:`. When the converter encounters a conda env:
+
+1. Parses the conda YAML (e.g. `envs/fastp.yaml`) to extract packages and versions
+2. Generates a mkdocker Dockerfile in `docker_dir/`:
+   ```docker
+   FROM {base_image}
+   RUN _conda install fastp=0.23.4
+   #tag 0.23.4
+   #registry {registry}
+   ```
+3. Emits `container="{registry}/fastp:0.23.4"` in the scitq DSL
+4. Prints build instructions: `mkdocker dockers/fastp`
+
+See [mkdocker](https://github.com/gmtsciencedev/mkdocker) for the Docker image generation tool.
+
+### Shared intermediate representation
+
+The converter shares the same IR as the Nextflow converter:
 
 ```
 IR = list of StepSpec:

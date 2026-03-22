@@ -21,6 +21,8 @@ For an overview of design philosophy, see [Motivation](motivation.md).
 - [Writing real world workflows (Python DSL usage)](usage/dsl.md)
 - [Understanding scitq model (db schema and memory representation of the workload)](model.md)
 
+- [Converting from Nextflow](usage/convert-nextflow.md)
+
 - [Troubleshooting](troubleshooting.md)
 
 ## For developers

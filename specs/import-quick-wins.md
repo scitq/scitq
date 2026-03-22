@@ -101,20 +101,25 @@ samples = URI.glob_groups("azure://bucket/data/{sample}/*.fastq.gz")
 
 ## 8. Container name normalization helper
 
-**Current state:** Snakemake often uses `conda:` environments instead of containers. The converter needs to suggest Docker equivalents.
+**Current state:** Snakemake often uses `conda:` environments instead of containers. The converter needs to produce Docker equivalents.
 
-**Problem:** There's no automated way to find a Docker image for a conda environment. BioContainers covers many bioinformatics tools.
+**Problem:** There's no automated way to find a Docker image for a conda environment.
 
-**Change:** Add a lookup helper (or just a best-effort mapping in the converter):
-```python
-# In the converter, not in scitq core
-def suggest_container(conda_env: str) -> str:
-    """Try to find a BioContainers image for the tool."""
-    # Parse conda yaml, extract main package
-    # Query quay.io/biocontainers/{package}:{version}
+**Solution:** Use [mkdocker](https://github.com/gmtsciencedev/mkdocker) (open-source, in `othersources/mkdocker/`). mkdocker makes creating Docker images from conda packages trivial — a 3-line Dockerfile:
+
+```docker
+FROM gmtscience/mamba
+RUN _conda install fastp=0.23.4
+#tag 0.23.4
 ```
 
-**Effort:** ~50 lines in the converter tool (not in scitq core).
+**Change:** When the converter encounters a `conda:` directive in a Snakemake rule, it:
+1. Parses the conda YAML to extract package names and versions
+2. Generates a mkdocker Dockerfile (e.g. `dockers/fastp`)
+3. Emits a `container="{registry}/{tool}:{version}"` in the scitq DSL
+4. Prints instructions to build with `mkdocker dockers/fastp`
+
+**Effort:** ~30 lines in the converter tool. mkdocker handles all the Docker complexity.
 
 ---
 
@@ -129,4 +134,4 @@ def suggest_container(conda_env: str) -> str:
 | 5 | `URI.glob()` shorthand | `python/.../uri.py` | Small | Medium — simpler file discovery |
 | 6 | Mixed inputs from multiple steps | `python/.../workflow.py` | Verify | High — required for multi-input steps |
 | 7 | Workflow-level resources | `python/.../workflow.py` | Small | Medium — reduces repetition |
-| 8 | Container name lookup | converter tool | Medium | Low — nice-to-have for conda users |
+| 8 | Conda → Docker via mkdocker | converter tool | Small | Medium — auto-generates Dockerfiles from conda envs |

@@ -287,17 +287,35 @@ Nextflow variables in `script:` blocks must be converted:
 
 ## Tool design
 
-The converter should be a Python CLI tool:
-
-```sh
-scitq convert-nf --input pipeline.nf --output pipeline.py
-```
-
-Or integrated into the scitq CLI:
+Integrated into the scitq CLI:
 
 ```sh
 scitq template convert --from-nextflow pipeline.nf
 ```
+
+### Converter configuration
+
+The converter accepts its own configuration, either via CLI flags or a config file:
+
+```sh
+# CLI flags
+scitq template convert --from-nextflow pipeline.nf --registry gmtscience --output-dir ./converted
+
+# Config file
+scitq template convert --from-nextflow pipeline.nf --config convert.yaml
+```
+
+Config file (`convert.yaml`):
+```yaml
+registry: gmtscience                  # Docker registry for generated images (Docker Hub namespace or private registry URL)
+base_image: gmtscience/mamba:1.5.8    # Base image for mkdocker-generated Dockerfiles
+output_dir: ./converted               # Where to write the generated scitq template
+docker_dir: ./dockers                  # Where to write generated mkdocker Dockerfiles (when conda envs need conversion)
+```
+
+- `registry` flows into mkdocker files (`#registry`) and the generated DSL (`container="{registry}/{tool}:{version}"`)
+- When a Nextflow process uses a container that already exists (e.g. `staphb/fastp:1.0.1`), it's used as-is
+- When a process has no container (rare in Nextflow DSL2, common in DSL1), a TODO is emitted
 
 ### Output format
 - A complete, runnable scitq Python DSL template
