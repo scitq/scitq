@@ -30,7 +30,23 @@ scitq DSL uses python (normal python, version 3.8 or above). It is possible to i
 make venv VENV=/path/to/my/venv
 ```
 
-This is useful to get coloration and feedback from IDE environment such as VSC, or to make some explorations of the objects, but you should not run template scripts outside scitq engine, the recommanded way to run them is to upload them in scitq using the [UI](ui.md#template-page) or the [CLI](cli.md#template-upload), and run them through scitq.
+This is useful to get coloration and feedback from IDE environment such as VSC, or to make some explorations of the objects. The recommanded way to run templates is to upload them in scitq using the [UI](ui.md#template-page) or the [CLI](cli.md#template-upload), and run them through scitq. However, you can also run them directly from the command line:
+
+```sh
+export SCITQ_TOKEN=$(scitq login)
+export SCITQ_SSL_CERTIFICATE=$(scitq cert)
+source /path/to/my/venv/bin/activate
+python my_template.py --values '{"param1": "value1"}'
+```
+
+When run directly (outside the template engine), the workflow automatically starts in Running state so tasks get assigned immediately. The following flags are available:
+
+- `--values '{"key": "val"}'` : provide parameters as JSON,
+- `--standalone` : explicitly set the workflow to Running (this is the default when running outside the template engine),
+- `--debug` : run in Debug mode with interactive task selection (limits recruitment to 1 worker, see below),
+- `--dry-run` : create the workflow, verify it compiles correctly, then delete it without launching anything,
+- `--params` : print the parameter schema as JSON (useful for tooling),
+- `--metadata` : print workflow metadata (name, version, description).
 
 Albeit being in python, it is recommended to write template script in standardize way to maximize readability and reusability.
 

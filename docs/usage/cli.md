@@ -342,7 +342,7 @@ Options:
 - `--run-strategy`: controls how tasks are distributed between workers.  
   - `B`: **Batch-wise** (default) — workers focus on completing one step before moving to the next.  
   - `T`: **Thread-wise** — workers advance tasks as far as possible across steps.  
-  - `D`: **Debug** mode.  
+  - `D`: **Debug** mode — tasks are not assigned automatically; use the DSL `--debug` flag to enter interactive task selection. Recruitment is limited to 1 worker. When exiting debug to normal execution, the original maximum workers setting is restored.
   - `Z`: **Suspended** — workflow is created but not yet launched.  
 - `--maximum-workers`: caps the total number of workers the workflow can use.
 

@@ -68,7 +68,14 @@ While in the [DSL](usage/dsl.md), there are several constraints applied to Step 
 
 This is what makes a step consistent: **the different tasks in a step must share the same CPU/memory/disk requirements**. If not, it will not be possible to design an efficient recruiter. 
 
-`workflow` are just groups of steps. They are used to graphically regroup steps in the UI. They also serve as a common ground for workers, e.g., worker recruited for a certain step in a workflow are by default available to other steps in the same workflow when they become underused. This is called "recycling" and is prohibited by default across workflows (to avoid that some user (involuntarily) steals workers from another).
+`workflow` are just groups of steps. They are used to graphically regroup steps in the UI. They also serve as a common ground for workers, e.g., worker recruited for a certain step in a workflow are by default available to other steps in the same workflow when they become underused. This is called "recycling" and is controlled by the worker's `recyclable_scope`:
+
+- **W** (Workflow): the worker can only be recycled within its current workflow (default for recruited workers),
+- **G** (Global): the worker can be recycled by any workflow,
+- **T** (Temporarily blocked): the worker is temporarily unable to be recycled,
+- **N** (Never): the worker can never be recycled.
+
+When a workflow completes (all tasks succeeded or failed) or is deleted, its workers are automatically promoted from scope W to G, making them available for recruitment by other workflows. This avoids stranding idle workers that would otherwise wait for the watchdog to kill them.
 
 ### template_run, workflow_template, scitq_user and scitq_user_session
 

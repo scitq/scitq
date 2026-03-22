@@ -56,9 +56,12 @@ Non-callable values still work as before, so this is fully backward-compatible.
 Run a workflow function that may optionally take a Params class instance.
 
 Behavior:
-- --params: Outputs the parameter schema as JSON.
-- --values: Parses values and runs the workflow.
-- --metadata: Extracts workflow metadata (static AST inspection).
+- `--params`: Outputs the parameter schema as JSON.
+- `--values`: Parses values as JSON and runs the workflow.
+- `--metadata`: Extracts workflow metadata (name, version, description) via static AST inspection.
+- `--standalone`: Explicitly set the workflow to Running after creation. This is the default when running outside the template engine (i.e. when `SCITQ_TEMPLATE_RUN_ID` is not set).
+- `--debug`: Run in Debug mode with interactive task selection. Limits recruitment to 1 worker; original maximum workers is restored when exiting debug to normal execution.
+- `--dry-run`: Create the workflow, verify it compiles correctly, then delete it without launching anything.
 - No args:
     - If function takes no parameter, calls directly.
     - Otherwise, prints usage error.
