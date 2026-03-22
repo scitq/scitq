@@ -31,6 +31,15 @@ def parser(typ: type, value: Any) -> Any:
     """Parse a value to the specified type, handling custom types."""
     return getattr(typ,"parse",typ)(value)
 
+class Path(str):
+    """Marker type for URI paths that should be validated with check_if_file."""
+    __type_name__ = "path"
+
+    @staticmethod
+    def parse(value: str) -> "Path":
+        return Path(value)
+
+
 class Param:
     def __init__(
         self,
@@ -77,6 +86,10 @@ class Param:
         return Param(typ=inferred_type, choices=choices, **kwargs)
     
     @staticmethod
+    def path(**kwargs):
+        return Param(typ=Path, **kwargs)
+
+    @staticmethod
     def provider_region(**kwargs):
         return Param(typ=ProviderRegion, **kwargs)
 
@@ -111,6 +124,12 @@ class ParamSpec(type):
                 parsed[name] = param.default
             elif param.required:
                 raise ValueError(f"Missing required parameter: '{name}'")
+
+        # Auto-validate Path-typed params
+        path_values = [v for name, v in parsed.items() if isinstance(cls._declared_params[name].typ(), Path)]
+        if path_values:
+            from scitq2.uri import check_if_file
+            check_if_file(*path_values)
 
         obj = cls.__new__(cls)
         obj._values = parsed
