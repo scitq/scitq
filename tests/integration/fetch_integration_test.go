@@ -79,7 +79,7 @@ func TestFetchIntegration(t *testing.T) {
 	log.Printf("Task %d succeeded", pbTask.TaskId)
 
 	// 3. Fetch result checksum from /output/md5.txt
-	serverMD5output, err := runCLICommand(c, []string{"task", "output", "--id", fmt.Sprintf("%d", pbTask.TaskId)})
+	serverMD5output, err := runCLICommand(c, []string{"task", "stdout", "--id", fmt.Sprintf("%d", pbTask.TaskId)})
 	require.NoError(t, err, "failed to read task output")
 	reMD5 := regexp.MustCompile("([0-9a-f]{32})")
 	matches := reMD5.FindStringSubmatch(serverMD5output)

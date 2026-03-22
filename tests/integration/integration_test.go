@@ -419,7 +419,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// look for task output
-	output, err = runCLICommand(c, []string{"task", "output", "--id", "1"})
+	output, err = runCLICommand(c, []string{"task", "stdout", "--id", "1"})
 	assert.NoError(t, err)
 	assert.Contains(t, output, "sbin -> usr/sbin")
 
