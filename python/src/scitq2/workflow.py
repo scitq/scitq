@@ -13,15 +13,20 @@ from abc import ABC, abstractmethod
 
 class Outputs:
     """Represents the declarative outputs of a Step, which can be used in other Steps.
-    Note that the publish attribute is attached to Task so it may vary within a Step, 
-    but not globs (e.g. named output), which should remain consistent for a given Step"""
-    def __init__(self, publish: Optional[str]=None, **kwargs):
+    Note that the publish attribute is attached to Task so it may vary within a Step,
+    but not globs (e.g. named output), which should remain consistent for a given Step.
+
+    publish can be:
+    - a full URI string (e.g. "azure://rnd/results/project/") — used as-is
+    - True — uses the workflow's publish_root with auto-generated subpath
+    - a relative path (no "://") — appended to the workflow's publish_root
+    """
+    def __init__(self, publish: Optional[Union[str, bool]]=None, **kwargs):
         self.globs: Dict[str, str] = kwargs
         self.publish = publish
 
-        if publish:
-            if not isinstance(publish, str):
-                raise ValueError("publish must be a string (for now)")
+        if publish is not None and publish is not True and not isinstance(publish, str):
+            raise ValueError("publish must be a string, True, or None")
 
 
 class OutputBase(ABC):
@@ -391,10 +396,33 @@ class Step:
         else:
             raise ValueError(f"""Depends not of the right kind, should be a Step or list of Step""")
 
+        # Resolve publish path
+        raw_publish = outputs.publish if outputs else None
+        publish = self._resolve_publish(raw_publish, tag)
+
         task = Task(tag=tag, step=self, command=command, container=container,
-                    inputs=inputs, resources=resources_list, language=language, 
-                    depends=resolved_depends, publish=outputs.publish if outputs else None, retry=retry)
+                    inputs=inputs, resources=resources_list, language=language,
+                    depends=resolved_depends, publish=publish, retry=retry)
         self.tasks.append(task)
+
+    def _resolve_publish(self, raw_publish, tag: Optional[str]) -> Optional[str]:
+        """Resolve publish value using workflow's publish_root if needed."""
+        if raw_publish is None:
+            return None
+        root = self.workflow.publish_root
+        if raw_publish is True:
+            if root is None:
+                raise ValueError(f"Step '{self.name}' uses publish=True but no publish_root is set on the Workflow.")
+            parts = [root, self.name]
+            if tag:
+                parts.append(tag)
+            return "/".join(parts) + "/"
+        # String publish: absolute URI (contains "://") is used as-is, otherwise relative to publish_root
+        if "://" in raw_publish:
+            return raw_publish
+        if root is None:
+            raise ValueError(f"Step '{self.name}' uses a relative publish path '{raw_publish}' but no publish_root is set on the Workflow.")
+        return f"{root}/{raw_publish.strip('/')}/"
 
     def output(self, name: Optional[str] = None, grouped: bool = False, move: Optional[str] = None, action: Optional[str] = "", task: Optional[Task] = None):
         """Create an Output object for this step last task (or the whole step if grouped is True or a specific task if task is specified)."""
@@ -455,13 +483,14 @@ class Workflow:
     - naming_strategy: function to define how workflow and step names are constructed (default to dot_join),
     - task_naming_strategy: function to define how task names are constructed (default to dot_join),
     - container: (default step value) Docker container image for steps (can be overridden at step level),
+    - publish_root: base URI for publishing outputs (e.g. "azure://rnd/results/project/"). Steps can then use Outputs(publish=True) or Outputs(publish="subdir/"),
     - retry: default number of retry for each task in the workflow (can be overridden at step level)
     """
     last_created = None
 
     def __init__(self, name: str, version:str, description: str = "", worker_pool: Optional[WorkerPool] = None, language: Optional[Language] = None, tag: Optional[str] = None,
                  naming_strategy: callable = dot_join, task_naming_strategy: callable = dot_join, provider: Optional[str] = None, region: Optional[str] = None,
-                 container: Optional[str] = None, retry: Optional[int] = None):
+                 container: Optional[str] = None, publish_root: Optional[str] = None, retry: Optional[int] = None):
         self.name = name
         self.tag = tag
         self.description = description
@@ -478,6 +507,7 @@ class Workflow:
         self.workspace_root: Optional[str] = None
         self.version = version
         self.container = container
+        self.publish_root = publish_root.rstrip("/") if publish_root else None
         self.retry = retry
         if Workflow.last_created is not None:
             print(f"⚠️ Warning: it is highly recommended to avoid declaring several Workflow in a code, you have previously declared {Workflow.last_created.name} and you redeclare {self.name}", file=sys.stderr)
