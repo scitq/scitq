@@ -142,6 +142,7 @@ def run(func: Callable):
     parser.add_argument("--metadata", action="store_true", help="Print workflow metadata (name, version, description).")
     parser.add_argument("--standalone", action="store_true", help="Set workflow to Running after submission (local run).")
     parser.add_argument("--debug", action="store_true", help="Run in Debug mode with interactive task selection.")
+    parser.add_argument("--dry-run", action="store_true", dest="dry_run", help="Create the workflow, verify it, then delete it without launching.")
     args = parser.parse_args()
 
     try:
@@ -226,12 +227,22 @@ def run(func: Callable):
         if args.standalone and args.debug:
             print("❌ --standalone and --debug cannot be used together.", file=sys.stderr)
             sys.exit(1)
+        if args.dry_run and args.debug:
+            print("❌ --dry-run and --debug cannot be used together.", file=sys.stderr)
+            sys.exit(1)
+        # Default to standalone when running outside the template engine
+        standalone = args.standalone or not os.environ.get("SCITQ_TEMPLATE_RUN_ID")
         try:
             client = Scitq2Client()
             workflow_status = "D" if args.debug else None
-            workflow.compile(client, activate_leading_tasks=args.standalone, workflow_status=workflow_status)
+            activate = standalone and not args.debug and not args.dry_run
+            workflow.compile(client, activate_leading_tasks=activate, workflow_status=workflow_status)
         except grpc.RpcError as e:
             _handle_grpc_error(e)
+        if args.dry_run:
+            client.delete_workflow(workflow.workflow_id)
+            print(f"✅ Dry run successful: workflow '{workflow.full_name}' created and deleted.")
+            return
         if args.debug:
             from scitq2 import debugger
             debugger.run_debug(client, workflow.workflow_id)
