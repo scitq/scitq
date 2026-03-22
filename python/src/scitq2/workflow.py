@@ -375,7 +375,9 @@ class Step:
         if isinstance(resources, Resource) or isinstance(resources, str):
             resources_list = [resources]
         else:
-            resources_list = resources or []
+            resources_list = list(resources) if resources else []
+        # Prepend workflow-level resources
+        resources_list = self.workflow.resources + resources_list
 
         if depends is None:
             resolved_depends = None
@@ -484,13 +486,15 @@ class Workflow:
     - task_naming_strategy: function to define how task names are constructed (default to dot_join),
     - container: (default step value) Docker container image for steps (can be overridden at step level),
     - publish_root: base URI for publishing outputs (e.g. "azure://rnd/results/project/"). Steps can then use Outputs(publish=True) or Outputs(publish="subdir/"),
+    - resources: default resources for all steps (can be overridden at step level),
     - retry: default number of retry for each task in the workflow (can be overridden at step level)
     """
     last_created = None
 
     def __init__(self, name: str, version:str, description: str = "", worker_pool: Optional[WorkerPool] = None, language: Optional[Language] = None, tag: Optional[str] = None,
                  naming_strategy: callable = dot_join, task_naming_strategy: callable = dot_join, provider: Optional[str] = None, region: Optional[str] = None,
-                 container: Optional[str] = None, publish_root: Optional[str] = None, retry: Optional[int] = None):
+                 container: Optional[str] = None, publish_root: Optional[str] = None,
+                 resources: Optional[Union[Resource, str, List[Resource], List[str]]] = None, retry: Optional[int] = None):
         self.name = name
         self.tag = tag
         self.description = description
@@ -508,6 +512,12 @@ class Workflow:
         self.version = version
         self.container = container
         self.publish_root = publish_root.rstrip("/") if publish_root else None
+        if resources is None:
+            self.resources = []
+        elif isinstance(resources, (Resource, str)):
+            self.resources = [resources]
+        else:
+            self.resources = list(resources)
         self.retry = retry
         if Workflow.last_created is not None:
             print(f"⚠️ Warning: it is highly recommended to avoid declaring several Workflow in a code, you have previously declared {Workflow.last_created.name} and you redeclare {self.name}", file=sys.stderr)
