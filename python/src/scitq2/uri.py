@@ -174,6 +174,50 @@ class URI:
 
         return result
 
+    @staticmethod
+    def glob(uri_pattern: str) -> List[str]:
+        """Return a flat list of URIs matching a glob pattern.
+
+        Example:
+            files = URI.glob("azure://bucket/data/*.bam")
+        """
+        # Split into base and glob filter
+        parts = uri_pattern.rsplit("/", 1)
+        if len(parts) == 2 and ("*" in parts[1] or "?" in parts[1]):
+            uri_base, glob_filter = parts
+        else:
+            uri_base, glob_filter = uri_pattern, None
+
+        client = Scitq2Client()
+        uri = f"{uri_base.rstrip('/')}/{glob_filter}" if glob_filter else uri_base
+        return client.fetch_list(uri)
+
+    @staticmethod
+    def glob_groups(uri_pattern: str) -> List[URIObject]:
+        """Discover files and group them by folder.
+
+        Returns a list of URIObject with 'name' (folder name) and 'uris' (list of matching URIs).
+
+        Example:
+            samples = URI.glob_groups("azure://bucket/data/*/*.fastq.gz")
+        """
+        parts = uri_pattern.rsplit("/", 1)
+        if len(parts) == 2 and ("*" in parts[1] or "?" in parts[1]):
+            uri_base, glob_filter = parts
+        else:
+            uri_base, glob_filter = uri_pattern, None
+
+        return URI.find(
+            uri_base,
+            group_by="folder",
+            filter=glob_filter,
+            field_map={
+                "name": "folder.name",
+                "uris": "file.uris",
+            }
+        )
+
+
 class CheckFileError(RuntimeError):
     pass
 
