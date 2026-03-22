@@ -454,12 +454,14 @@ class Workflow:
     - region: instance region (e.g. 'swedencentral' for Microsoft or 'GRA11' for OVH)
     - naming_strategy: function to define how workflow and step names are constructed (default to dot_join),
     - task_naming_strategy: function to define how task names are constructed (default to dot_join),
+    - container: (default step value) Docker container image for steps (can be overridden at step level),
     - retry: default number of retry for each task in the workflow (can be overridden at step level)
     """
     last_created = None
 
     def __init__(self, name: str, version:str, description: str = "", worker_pool: Optional[WorkerPool] = None, language: Optional[Language] = None, tag: Optional[str] = None,
-                 naming_strategy: callable = dot_join, task_naming_strategy: callable = dot_join, provider: Optional[str] = None, region: Optional[str] = None, retry: Optional[int] = None):
+                 naming_strategy: callable = dot_join, task_naming_strategy: callable = dot_join, provider: Optional[str] = None, region: Optional[str] = None,
+                 container: Optional[str] = None, retry: Optional[int] = None):
         self.name = name
         self.tag = tag
         self.description = description
@@ -475,6 +477,7 @@ class Workflow:
         self.full_name: Optional[str] = None
         self.workspace_root: Optional[str] = None
         self.version = version
+        self.container = container
         self.retry = retry
         if Workflow.last_created is not None:
             print(f"⚠️ Warning: it is highly recommended to avoid declaring several Workflow in a code, you have previously declared {Workflow.last_created.name} and you redeclare {self.name}", file=sys.stderr)
@@ -485,7 +488,7 @@ class Workflow:
         *,
         name: str,
         command: str,
-        container: str,
+        container: Optional[str] = None,
         tag: Optional[str] = None,
         inputs: Optional[Union[str, OutputBase, List[str], List[OutputBase]]] = None,
         outputs: Optional[Outputs] = None,
@@ -512,6 +515,10 @@ class Workflow:
         - naming_strategy: optional naming strategy for the step (overrides workflow default),
         - depends: optional dependencies for the task (can be Step or list of Steps),
         - retry: optional number of retries for the task (overrides workflow default)"""
+        if container is None:
+            container = self.container
+        if container is None:
+            raise ValueError(f"Step '{name}' has no container specified and no default container is set on the Workflow.")
         if naming_strategy is None:
             naming_strategy = self.task_naming_strategy
         if retry is None:

@@ -177,7 +177,7 @@ func getScriptExtension(shell string) string {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -210,7 +210,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	// Add scripts folder for long commands
-	command := []string{"run", "--rm", "-e", fmt.Sprintf("CPU=%d", cpu)}
+	command := []string{"run", "--rm", "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
 	option := ""
 	for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
 		if folder == "resource" || folder == "scripts" {
@@ -670,10 +670,13 @@ func excuterThread(
 			log.Printf("✅ Acquired semaphore for task %d (weight=%.3f)", t.TaskId, w)
 
 			cpu := max(int32(float64(runtime.NumCPU())/sem.Size()), 1)
-			//memory, err := mem.VirtualMemory()
-			log.Printf("Available CPU threads estimated to %d", cpu)
-			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu})
-			executeTask(client, reporter, t, &wg, store, dm, cpu)
+			var memGB int32
+			if vmem, err := mem.VirtualMemory(); err == nil {
+				memGB = max(int32(float64(vmem.Total)/(1024*1024*1024)/sem.Size()), 1)
+			}
+			log.Printf("Available CPU threads estimated to %d, memory to %d GB", cpu, memGB)
+			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu, "mem_gb": memGB})
+			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB)
 
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)

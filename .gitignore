@@ -46,3 +46,5 @@ python/build/
 # svelte
 server/public/
 version.ts
+
+/workflow
