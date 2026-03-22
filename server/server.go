@@ -400,6 +400,8 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 		log.Printf("⚠️ failed to recompute workflow status for %d: %v", workflowID, err)
 		return
 	}
+	// Free workers: promote workflow-scoped workers to global when workflow completes
+	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, workflowID)
 	ws.EmitWS("workflow", workflowID, "status", struct {
 		WorkflowId int32  `json:"workflowId"`
 		Status     string `json:"status"`
@@ -3845,6 +3847,8 @@ func (s *taskQueueServer) emitDeletedTasksForWorkflow(workflowID int32) {
 
 func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId) (*pb.Ack, error) {
 	s.emitDeletedTasksForWorkflow(req.WorkflowId)
+	// Free workers: promote workflow-scoped workers to global before cascade nullifies step_id
+	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, req.WorkflowId)
 	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)

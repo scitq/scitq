@@ -161,6 +161,70 @@ func getTask(t *testing.T, ctx context.Context, qc pb.TaskQueueClient, taskID in
 	return nil
 }
 
+func TestFreeWorkersOnWorkflowCompletion(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
+	defer cleanup()
+
+	var c cli.CLI
+	c.Attr.Server = serverAddr
+	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
+	require.NoError(t, err)
+	c.Attr.Token = strings.TrimSpace(out)
+
+	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
+	require.NoError(t, err)
+	defer qclient.Close()
+	qc := qclient.Client
+
+	// Create workflow + step, register a worker on the step
+	wfID := createWorkflowViaCLI(t, c, "wf-free-workers")
+	stepID := createStepViaCLI(t, c, wfID, "step1")
+	workerID := registerWorkerForTest(t, ctx, qc, "free-worker", 1)
+	_, err = runCLICommand(c, []string{"worker", "update", "--worker-id", fmt.Sprintf("%d", workerID), "--step-id", fmt.Sprintf("%d", stepID)})
+	require.NoError(t, err)
+
+	// Worker should have scope 'W' (default)
+	w := getWorker(t, ctx, qc, workerID)
+	require.Equal(t, "W", w.RecyclableScope, "new worker should have workflow scope")
+
+	// Submit task, start workflow, succeed the task
+	taskID := submitTaskForStep(t, ctx, qc, stepID, "echo ok", "alpine", 0)
+	_, err = runCLICommand(c, []string{"workflow", "update", "--id", fmt.Sprintf("%d", wfID), "--status", "R"})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return getTask(t, ctx, qc, taskID).Status == "A"
+	}, 6*time.Second, 200*time.Millisecond)
+
+	_, err = qc.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: taskID, NewStatus: "S"})
+	require.NoError(t, err)
+
+	// Workflow should complete and worker should be freed to global scope
+	require.Eventually(t, func() bool {
+		return getWorkflowStatus(t, ctx, qc, wfID) == "S"
+	}, 6*time.Second, 200*time.Millisecond, "workflow should reach S")
+
+	require.Eventually(t, func() bool {
+		return getWorker(t, ctx, qc, workerID).RecyclableScope == "G"
+	}, 6*time.Second, 200*time.Millisecond, "worker should be freed to global scope after workflow completion")
+}
+
+func getWorker(t *testing.T, ctx context.Context, qc pb.TaskQueueClient, workerID int32) *pb.Worker {
+	t.Helper()
+	res, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
+	require.NoError(t, err)
+	for _, w := range res.Workers {
+		if w.WorkerId == workerID {
+			return w
+		}
+	}
+	t.Fatalf("worker %d not found", workerID)
+	return nil
+}
+
 func getWorkflowStatus(t *testing.T, ctx context.Context, qc pb.TaskQueueClient, workflowID int32) string {
 	t.Helper()
 	res, err := qc.ListWorkflows(ctx, &pb.WorkflowFilter{})
