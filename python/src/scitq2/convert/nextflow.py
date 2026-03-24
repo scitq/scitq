@@ -34,6 +34,7 @@ class NfProcess:
     outputs: List[NfOutput] = field(default_factory=list)
     script: str = ""
     publish_dir: Optional[str] = None
+    label: Optional[str] = None
     when: Optional[str] = None
 
     @property
@@ -127,14 +128,33 @@ def _find_named_block(text: str, keyword: str, start: int = 0) -> Optional[Tuple
     return None
 
 
+def _resolve_container_ternary(val: str) -> str:
+    """Extract the Docker image from a Nextflow container ternary expression.
+    e.g. "${ workflow.containerEngine == 'singularity' ? 'singularity_url' : 'docker_url' }"
+    """
+    # Try to extract the Docker branch (after the ':' in the ternary)
+    m = re.search(r":\s*'([^']+)'", val)
+    if m:
+        return m.group(1)
+    m = re.search(r':\s*"([^"]+)"', val)
+    if m:
+        return m.group(1)
+    # Fallback: strip Groovy interpolation markers
+    val = val.strip("${ }")
+    return val
+
+
 def _parse_directive(line: str) -> Optional[Tuple[str, str]]:
     """Parse a process directive like  cpus 4  or  container 'img'."""
     line = line.strip()
-    for directive in ('container', 'conda', 'cpus', 'memory', 'publishDir', 'when'):
+    for directive in ('container', 'conda', 'cpus', 'memory', 'publishDir', 'when', 'label'):
         if line.startswith(directive):
             val = line[len(directive):].strip()
             # strip quotes
             val = val.strip("'\"")
+            # Handle container ternary expressions
+            if directive == 'container' and ('?' in val or 'workflow.containerEngine' in val):
+                val = _resolve_container_ternary(val)
             return (directive, val)
     return None
 
@@ -186,7 +206,20 @@ def _parse_inputs(block_body: str) -> List[NfInput]:
 
 
 def _extract_script(body: str) -> str:
-    """Extract the script: triple-quoted block."""
+    """Extract the script: triple-quoted block.
+    Handles Groovy if/else with multiple triple-quoted blocks by taking the last one
+    (usually the paired-end / main branch). Stops before stub: section.
+    """
+    # Find the script: section, stopping at stub: if present
+    script_section = re.search(r'script:\s*\n(.*?)(?=\n\s*stub:|$)', body, re.DOTALL)
+    if script_section:
+        script_body = script_section.group(1)
+        # Find all """...""" blocks within the script section only
+        blocks = re.findall(r'"""(.*?)"""', script_body, re.DOTALL)
+        if blocks:
+            # Take the last block (usually the main/paired-end branch)
+            return textwrap.dedent(blocks[-1]).strip()
+
     m = re.search(r'script:\s*\n\s*"""(.*?)"""', body, re.DOTALL)
     if m:
         return textwrap.dedent(m.group(1)).strip()
@@ -223,8 +256,21 @@ def _parse_process(name: str, body: str) -> NfProcess:
             section_lines[current_section] = []
         section_lines[current_section].append(line)
 
-    # Directives
-    for line in section_lines.get("directives", []):
+    # Directives — join multi-line values (e.g. container ternary spanning 3 lines)
+    raw_directives = section_lines.get("directives", [])
+    joined_directives = []
+    for line in raw_directives:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if joined_directives and (joined_directives[-1].count('"') % 2 == 1 or
+                                   joined_directives[-1].count("'") % 2 == 1 or
+                                   joined_directives[-1].rstrip().endswith(('?', ':',  '\\'))):
+            joined_directives[-1] += " " + stripped
+        else:
+            joined_directives.append(stripped)
+
+    for line in joined_directives:
         d = _parse_directive(line)
         if d:
             key, val = d
@@ -241,6 +287,13 @@ def _parse_process(name: str, body: str) -> NfProcess:
                 proc.conda = val
             elif key == 'publishDir':
                 proc.publish_dir = val
+            elif key == 'label':
+                proc.label = val
+                # Infer resources from nf-core labels
+                if 'high' in val and proc.cpus is None:
+                    proc.cpus = 12
+                elif 'medium' in val and proc.cpus is None:
+                    proc.cpus = 6
 
     # Input
     if "input" in section_lines:
@@ -634,7 +687,13 @@ def _emit_step(lines: List[str], indent: str, var_name: str, proc: NfProcess,
     else:
         input_refs = _resolve_call_inputs(call, {})
         if len(input_refs) == 1:
-            lines.append(f'{indent}    inputs={input_refs[0]},')
+            ref = input_refs[0]
+            if '#' in ref:
+                comment = ref.split('#', 1)[1].strip()
+                ref_clean = ref.split('#', 1)[0].strip()
+                lines.append(f'{indent}    inputs={ref_clean},  # {comment}')
+            else:
+                lines.append(f'{indent}    inputs={ref},')
         else:
             # Extract TODO comments to place after the list
             todos = [ref.split('#')[1].strip() for ref in input_refs if '#' in ref]

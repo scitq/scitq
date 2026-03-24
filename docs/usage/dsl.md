@@ -1033,6 +1033,79 @@ inputs=metaphlan.grouped().output("metaphlan"),
 
 Use whatever suits you best.
 
+## Using modules
+
+scitq ships with `scitq2_modules`, a collection of reusable step definitions for common bioinformatics tools. Instead of writing inline `workflow.Step()` calls with long shell commands, you can import pre-built modules:
+
+```python
+from scitq2 import *
+from scitq2_modules.fastp import fastp
+from scitq2_modules.bowtie2 import bowtie2_host_removal
+from scitq2_modules.seqtk import seqtk_sample
+from scitq2_modules.kraken2 import kraken2
+
+class Params(metaclass=ParamSpec):
+    input_dir = Param.string(required=True)
+    kraken_db = Param.path(required=True)
+    depth = Param.string(default="10M")
+    location = Param.provider_region(required=True)
+
+def pipeline(params: Params):
+    workflow = Workflow(
+        name="metagenomics",
+        version="1.0.0",
+        description="Metagenomic classification with modules",
+        language=Shell("bash"),
+        worker_pool=WorkerPool(W.cpu >= 8, W.mem >= 60),
+        provider=params.location.provider,
+        region=params.location.region,
+    )
+
+    samples = URI.find(params.input_dir, group_by="folder", filter="*.f*q.gz",
+        field_map={"sample_accession": "folder.name", "fastqs": "file.uris"})
+
+    for sample in samples:
+        qc = fastp(workflow, sample)
+        clean = bowtie2_host_removal(workflow, sample, inputs=qc.output("fastqs"))
+        sub = seqtk_sample(workflow, sample, inputs=clean.output("fastqs"), depth=params.depth)
+        kraken2(workflow, sample, inputs=sub.output("fastqs"), db_resource=params.kraken_db)
+
+run(pipeline)
+```
+
+This is the recommended pattern for new workflows. Each module is a plain Python function that calls `workflow.Step()` internally, so you get all the same features (outputs, dependencies, task_spec) with a clean one-liner per step.
+
+### Available modules
+
+| Module | Import | Function | Purpose |
+|---|---|---|---|
+| `scitq2_modules.fastp` | `from scitq2_modules.fastp import fastp` | `fastp(workflow, sample)` | Quality trimming |
+| `scitq2_modules.bowtie2` | `from scitq2_modules.bowtie2 import bowtie2_host_removal` | `bowtie2_host_removal(workflow, sample)` | Host read removal |
+| `scitq2_modules.seqtk` | `from scitq2_modules.seqtk import seqtk_sample` | `seqtk_sample(workflow, sample, depth=...)` | Read subsampling |
+| `scitq2_modules.kraken2` | `from scitq2_modules.kraken2 import kraken2` | `kraken2(workflow, sample, db_resource=...)` | Taxonomic classification |
+| `scitq2_modules.multiqc` | `from scitq2_modules.multiqc import multiqc` | `multiqc(workflow, inputs=...)` | Report aggregation (fan-in) |
+
+All modules accept `paired=True/False`, `worker_pool=`, and `container=` overrides.
+
+### Writing your own modules
+
+A module is a Python function following this convention:
+
+```python
+def my_tool(workflow, sample, *, inputs=None, worker_pool=None, **kwargs) -> Step:
+    return workflow.Step(
+        name="my_tool",
+        tag=sample.sample_accession,
+        container="myimage:1.0",
+        command=fr"...",
+        inputs=inputs or sample.fastqs,
+        outputs=Outputs(results="*.txt"),
+        worker_pool=worker_pool,
+    )
+```
+
+Place it in any Python file and import it in your workflow template.
+
 ## Reference
 
 see [DSL Reference](../reference/python_dsl.md)
