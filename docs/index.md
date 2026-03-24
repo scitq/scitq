@@ -22,6 +22,7 @@ For an overview of design philosophy, see [Motivation](motivation.md).
 - [Understanding scitq model (db schema and memory representation of the workload)](model.md)
 
 - [Converting from Nextflow](usage/convert-nextflow.md)
+- [Converting from Snakemake](usage/convert-snakemake.md)
 
 - [Troubleshooting](troubleshooting.md)
 
