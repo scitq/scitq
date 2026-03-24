@@ -222,13 +222,13 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              command, shell, container, container_options, step_id,
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
-             status, task_name, created_at
+             status, task_name, skip_if_exists, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
-             $15, $16, NOW()
+             $15, $16, $17, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -238,7 +238,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
-		initialStatus, req.TaskName,
+		initialStatus, req.TaskName, req.SkipIfExists,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)

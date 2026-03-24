@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/scitq/scitq/fetch"
 	ws "github.com/scitq/scitq/server/websocket"
 )
 
@@ -62,6 +63,9 @@ func (s *taskQueueServer) assignPendingTasks() {
 		return
 	}
 
+	// Skip-if-exists: check all pending tasks with the flag before worker assignment
+	s.skipExistingTasks(tx)
+
 	// 2️⃣ Fetch workers and their capacities
 	workerCapacityRows, err := tx.Query(`
 		SELECT w.worker_id, COALESCE(w.step_id,0), w.concurrency+w.prefetch-COALESCE(SUM(t.weight),0) AS capacity
@@ -101,6 +105,10 @@ func (s *taskQueueServer) assignPendingTasks() {
 	workerCapacityRows.Close()
 
 	if len(stepWorkerMap) == 0 {
+		// Commit any skip-if-exists changes before returning
+		if err := tx.Commit(); err != nil {
+			log.Printf("⚠️ Failed to commit skip-if-exists changes: %v", err)
+		}
 		log.Printf("No steps with worker with capacity to take new tasks")
 		return
 	}
@@ -207,6 +215,106 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit task assignment: %v", err)
+	}
+}
+
+// skipExistingTasks checks all pending tasks with skip_if_exists=true and promotes
+// them to S if their output already contains files.
+func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
+	// Find pending tasks with skip_if_exists=true and a non-empty output path
+	rows, err := tx.Query(`
+		SELECT task_id, output, step_id
+		FROM task
+		WHERE status = 'P'
+		  AND skip_if_exists = TRUE
+		  AND output IS NOT NULL AND output <> ''
+	`)
+	if err != nil {
+		log.Printf("⚠️ skip-if-exists: failed to query: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		taskID int32
+		output string
+		stepID sql.NullInt32
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.taskID, &c.output, &c.stepID); err != nil {
+			continue
+		}
+		candidates = append(candidates, c)
+	}
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	skipped := map[int32]bool{}
+	for _, c := range candidates {
+		files, err := fetch.List(s.rcloneRemotes, c.output)
+		if err != nil || len(files) == 0 {
+			continue // output doesn't exist, run normally
+		}
+		// Output exists — skip to S
+		_, err = tx.Exec(`UPDATE task SET status = 'S' WHERE task_id = $1`, c.taskID)
+		if err != nil {
+			log.Printf("⚠️ skip-if-exists: failed to update task %d: %v", c.taskID, err)
+			continue
+		}
+		log.Printf("⏭️ Task %d skipped (output exists at %s)", c.taskID, c.output)
+		skipped[c.taskID] = true
+
+		// Emit WS event
+		ws.EmitWS("task", c.taskID, "status", struct {
+			TaskId int32  `json:"taskId"`
+			Status string `json:"status"`
+		}{TaskId: c.taskID, Status: "S"})
+	}
+
+	// Promote W→P for dependents whose prerequisites are now all S
+	if len(skipped) > 0 {
+		for taskID := range skipped {
+			rows, err := tx.Query(`
+				SELECT d.dependent_task_id
+				FROM task_dependencies d
+				JOIN task t ON d.dependent_task_id = t.task_id
+				WHERE d.prerequisite_task_id = $1
+				  AND t.status = 'W'
+			`, taskID)
+			if err != nil {
+				continue
+			}
+			var depIDs []int32
+			for rows.Next() {
+				var depID int32
+				if rows.Scan(&depID) == nil {
+					depIDs = append(depIDs, depID)
+				}
+			}
+			rows.Close()
+
+			for _, depID := range depIDs {
+				var allDone bool
+				tx.QueryRow(`
+					SELECT NOT EXISTS (
+						SELECT 1
+						FROM task_dependencies d
+						JOIN task t ON d.prerequisite_task_id = t.task_id
+						WHERE d.dependent_task_id = $1
+						  AND t.status != 'S'
+					)
+				`, depID).Scan(&allDone)
+				if allDone {
+					tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, depID)
+					log.Printf("✅ skip-if-exists: promoted task %d to P (dependencies resolved)", depID)
+				}
+			}
+		}
+		s.triggerAssign()
 	}
 }
 

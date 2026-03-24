@@ -108,6 +108,7 @@ message TaskRequest {
     string status = 15;
     repeated int32 dependency = 16; // IDs of tasks that this task depends on
     optional string task_name = 17;
+    bool skip_if_exists = 18;
 }
 
 message Task {
@@ -135,6 +136,7 @@ message Task {
     optional int32 previous_task_id = 22;
     optional double weight = 23; // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
     optional int64 run_start_time = 24; // epoch timestamp of the first task start time
+    bool skip_if_exists = 25;
 }
 
 message TaskList {

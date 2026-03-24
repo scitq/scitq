@@ -174,6 +174,7 @@ class Task:
                  language: Optional[Language] = None,
                  depends: Optional[Union[List["Task"],"GroupedStep"]] = None,
                  publish: Optional[str]=None,
+                 skip_if_exists: bool = False,
                  retry: Optional[int]=None):
         self.tag = tag
         self.command = command
@@ -182,6 +183,7 @@ class Task:
         self.full_name = self.step.naming_strategy(self.step.name, self.tag) if self.tag else self.step.name
         self.depends = depends
         self.publish = publish
+        self.skip_if_exists = skip_if_exists
         if inputs is None:
             self.inputs = []
         elif isinstance(inputs, list):
@@ -292,6 +294,7 @@ class Task:
                 resources=resolved_resources,
                 status=status,
                 task_name=self.full_name,
+                skip_if_exists=self.skip_if_exists,
                 retry=self.retry,
             )
 
@@ -364,6 +367,7 @@ class Step:
         resources: Optional[Union[Resource, str, List[Resource], List[str]]] = None,
         language: Optional[Language] = None,
         depends: Optional[Union["Step",List["Step"]]] = None,
+        skip_if_exists: bool = False,
         retry: Optional[int]=None
     ):
         """Complete an existing Step object with a new Task."""
@@ -404,7 +408,7 @@ class Step:
 
         task = Task(tag=tag, step=self, command=command, container=container,
                     inputs=inputs, resources=resources_list, language=language,
-                    depends=resolved_depends, publish=publish, retry=retry)
+                    depends=resolved_depends, publish=publish, skip_if_exists=skip_if_exists, retry=retry)
         self.tasks.append(task)
 
     def _resolve_publish(self, raw_publish, tag: Optional[str]) -> Optional[str]:
@@ -494,7 +498,8 @@ class Workflow:
     def __init__(self, name: str, version:str, description: str = "", worker_pool: Optional[WorkerPool] = None, language: Optional[Language] = None, tag: Optional[str] = None,
                  naming_strategy: callable = dot_join, task_naming_strategy: callable = dot_join, provider: Optional[str] = None, region: Optional[str] = None,
                  container: Optional[str] = None, publish_root: Optional[str] = None,
-                 resources: Optional[Union[Resource, str, List[Resource], List[str]]] = None, retry: Optional[int] = None):
+                 resources: Optional[Union[Resource, str, List[Resource], List[str]]] = None,
+                 skip_if_exists: bool = False, retry: Optional[int] = None):
         self.name = name
         self.tag = tag
         self.description = description
@@ -518,6 +523,7 @@ class Workflow:
             self.resources = [resources]
         else:
             self.resources = list(resources)
+        self.skip_if_exists = skip_if_exists
         self.retry = retry
         if Workflow.last_created is not None:
             print(f"⚠️ Warning: it is highly recommended to avoid declaring several Workflow in a code, you have previously declared {Workflow.last_created.name} and you redeclare {self.name}", file=sys.stderr)
@@ -538,6 +544,7 @@ class Workflow:
         task_spec: Optional[TaskSpec] = None,
         naming_strategy: Optional[callable] = None,
         depends: Optional[Union["Step", List["Step"]]] = None,
+        skip_if_exists: Optional[bool] = None,
         retry: Optional[int] = None
     ) -> Step:
         """Add a Step to the Workflow with a single Task.
@@ -561,6 +568,8 @@ class Workflow:
             raise ValueError(f"Step '{name}' has no container specified and no default container is set on the Workflow.")
         if naming_strategy is None:
             naming_strategy = self.task_naming_strategy
+        if skip_if_exists is None:
+            skip_if_exists = self.skip_if_exists
         if retry is None:
             retry = self.retry
         new_step = Step(name=name, workflow=self, worker_pool=worker_pool, task_spec=task_spec, naming_strategy=naming_strategy)
@@ -581,8 +590,8 @@ class Workflow:
         effective_language = language or self.language
         if tag is None and step.tasks:
             raise RuntimeError(f"Step '{name}' has no tag specified and has several iterations which is forbidden")
-        step.add_task(tag=tag, command=command, container=container, outputs=outputs, inputs=inputs, resources=resources, 
-                      language=effective_language, depends=depends, retry=retry)
+        step.add_task(tag=tag, command=command, container=container, outputs=outputs, inputs=inputs, resources=resources,
+                      language=effective_language, depends=depends, skip_if_exists=skip_if_exists, retry=retry)
         return step
 
     def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: Optional[str] = None) -> int:
