@@ -1,0 +1,39 @@
+name: test-cond
+version: 1.0.0
+description: Test cond and YAML module import
+
+params:
+  paired:
+    type: boolean
+    default: true
+  location:
+    type: provider_region
+    required: true
+
+iterate:
+  name: sample
+  source: list
+  values: [sample_A, sample_B, sample_C]
+
+worker_pool:
+  provider: "{params.location}"
+  cpu: ">= 1"
+  mem: ">= 1"
+
+workspace: "{params.location}"
+
+steps:
+  - import: modules/hello.yaml
+    paired: "{params.paired}"
+
+  - name: goodbye
+    container: alpine
+    command:
+      cond: "{params.paired}"
+      true: |
+        echo "Goodbye paired ${SAMPLE}" > /output/bye.txt
+      false: |
+        echo "Goodbye single ${SAMPLE}" > /output/bye.txt
+    inputs: hello.greeting
+    outputs:
+      bye: "*.txt"

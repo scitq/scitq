@@ -1,0 +1,56 @@
+name: metagenomics
+version: 1.0.0
+description: Metagenomic classification pipeline
+
+params:
+  input_dir:
+    type: string
+    required: true
+    help: Input data directory with FASTQ files
+  paired:
+    type: boolean
+    default: true
+    help: Whether data is paired-end
+  depth:
+    type: string
+    default: "10M"
+    help: Subsampling depth
+  location:
+    type: provider_region
+    required: true
+    help: Provider and region
+
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.input_dir}"
+  group_by: folder
+  filter: "*.f*q.gz"
+
+worker_pool:
+  provider: "{params.location}"
+  cpu: ">= 8"
+  mem: ">= 60"
+  max_recruited: 10
+
+workspace: "{params.location}"
+
+steps:
+  - module: fastp
+    paired: "{params.paired}"
+
+  - module: bowtie2_align.bowtie2_host_removal
+    inputs: fastp.fastqs
+    paired: "{params.paired}"
+
+  - module: seqtk_sample
+    inputs: humanfilter.fastqs
+    paired: "{params.paired}"
+    depth: "{params.depth}"
+
+  - module: kraken2_kraken2.kraken2
+    inputs: seqtk_sample.fastqs
+
+  - module: multiqc
+    inputs: fastp.json
+    grouped: true

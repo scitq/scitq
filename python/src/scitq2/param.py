@@ -126,7 +126,7 @@ class ParamSpec(type):
                 raise ValueError(f"Missing required parameter: '{name}'")
 
         # Auto-validate Path-typed params
-        path_values = [v for name, v in parsed.items() if isinstance(cls._declared_params[name].typ(), Path)]
+        path_values = [v for name, v in parsed.items() if cls._declared_params[name].typ is Path]
         if path_values:
             from scitq2.uri import check_if_file
             check_if_file(*path_values)

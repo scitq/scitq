@@ -1,0 +1,10 @@
+name: hello
+container: alpine
+command:
+  cond: paired
+  true: |
+    echo "Hello paired ${SAMPLE}"
+  false: |
+    echo "Hello unpaired ${SAMPLE}"
+outputs:
+  greeting: "*.txt"
