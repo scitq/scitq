@@ -628,6 +628,14 @@ class User(_message.Message):
     is_admin: bool
     def __init__(self, user_id: _Optional[int] = ..., username: _Optional[str] = ..., email: _Optional[str] = ..., is_admin: bool = ...) -> None: ...
 
+class AdminResetPasswordRequest(_message.Message):
+    __slots__ = ("user_id", "new_password")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    NEW_PASSWORD_FIELD_NUMBER: _ClassVar[int]
+    user_id: int
+    new_password: str
+    def __init__(self, user_id: _Optional[int] = ..., new_password: _Optional[str] = ...) -> None: ...
+
 class UsersList(_message.Message):
     __slots__ = ("users",)
     USERS_FIELD_NUMBER: _ClassVar[int]
@@ -1012,12 +1020,14 @@ class FetchInfoResponse(_message.Message):
     def __init__(self, uri: _Optional[str] = ..., filename: _Optional[str] = ..., description: _Optional[str] = ..., size: _Optional[int] = ..., is_file: bool = ..., is_dir: bool = ...) -> None: ...
 
 class UploadTemplateRequest(_message.Message):
-    __slots__ = ("script", "force")
+    __slots__ = ("script", "force", "filename")
     SCRIPT_FIELD_NUMBER: _ClassVar[int]
     FORCE_FIELD_NUMBER: _ClassVar[int]
+    FILENAME_FIELD_NUMBER: _ClassVar[int]
     script: bytes
     force: bool
-    def __init__(self, script: _Optional[bytes] = ..., force: bool = ...) -> None: ...
+    filename: str
+    def __init__(self, script: _Optional[bytes] = ..., force: bool = ..., filename: _Optional[str] = ...) -> None: ...
 
 class UploadTemplateResponse(_message.Message):
     __slots__ = ("success", "message", "workflow_template_id", "name", "version", "description", "param_json")
@@ -1038,12 +1048,14 @@ class UploadTemplateResponse(_message.Message):
     def __init__(self, success: bool = ..., message: _Optional[str] = ..., workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ...) -> None: ...
 
 class RunTemplateRequest(_message.Message):
-    __slots__ = ("workflow_template_id", "param_values_json")
+    __slots__ = ("workflow_template_id", "param_values_json", "no_recruiters")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     PARAM_VALUES_JSON_FIELD_NUMBER: _ClassVar[int]
+    NO_RECRUITERS_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     param_values_json: str
-    def __init__(self, workflow_template_id: _Optional[int] = ..., param_values_json: _Optional[str] = ...) -> None: ...
+    no_recruiters: bool
+    def __init__(self, workflow_template_id: _Optional[int] = ..., param_values_json: _Optional[str] = ..., no_recruiters: bool = ...) -> None: ...
 
 class TemplateFilter(_message.Message):
     __slots__ = ("workflow_template_id", "name", "version")

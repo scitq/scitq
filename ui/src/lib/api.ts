@@ -135,14 +135,14 @@ export async function changepswd(username: string, oldPassword: string,newPasswo
  */
 export async function forgotPassword(UserId: number, username: string, password: string, email: string, isAdmin: boolean) {
   try {
-    await client.deleteUser({ userId: UserId }, await callOptionsUserToken());
-    await client.createUser(
-      { username, password, email, isAdmin },
+    await client.adminResetPassword(
+      { userId: UserId, newPassword: password },
       await callOptionsUserToken()
     );
     console.log("Password changed successfully!");
   } catch (error) {
     console.error("Error changing password: ", error);
+    throw error;
   }
 }
 

@@ -210,6 +210,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.ChangePasswordRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
+        self.AdminResetPassword = channel.unary_unary(
+                '/taskqueue.TaskQueue/AdminResetPassword',
+                request_serializer=taskqueue__pb2.AdminResetPasswordRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
         self.ListRecruiters = channel.unary_unary(
                 '/taskqueue.TaskQueue/ListRecruiters',
                 request_serializer=taskqueue__pb2.RecruiterFilter.SerializeToString,
@@ -337,6 +342,11 @@ class TaskQueueStub(object):
                 _registered_method=True)
         self.GetWorkspaceRoot = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetWorkspaceRoot',
+                request_serializer=taskqueue__pb2.WorkspaceRootRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.WorkspaceRootResponse.FromString,
+                _registered_method=True)
+        self.GetResourceRoot = channel.unary_unary(
+                '/taskqueue.TaskQueue/GetResourceRoot',
                 request_serializer=taskqueue__pb2.WorkspaceRootRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.WorkspaceRootResponse.FromString,
                 _registered_method=True)
@@ -585,6 +595,12 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AdminResetPassword(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListRecruiters(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -737,6 +753,12 @@ class TaskQueueServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetWorkspaceRoot(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetResourceRoot(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -957,6 +979,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     request_deserializer=taskqueue__pb2.ChangePasswordRequest.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
+            'AdminResetPassword': grpc.unary_unary_rpc_method_handler(
+                    servicer.AdminResetPassword,
+                    request_deserializer=taskqueue__pb2.AdminResetPasswordRequest.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
             'ListRecruiters': grpc.unary_unary_rpc_method_handler(
                     servicer.ListRecruiters,
                     request_deserializer=taskqueue__pb2.RecruiterFilter.FromString,
@@ -1084,6 +1111,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
             ),
             'GetWorkspaceRoot': grpc.unary_unary_rpc_method_handler(
                     servicer.GetWorkspaceRoot,
+                    request_deserializer=taskqueue__pb2.WorkspaceRootRequest.FromString,
+                    response_serializer=taskqueue__pb2.WorkspaceRootResponse.SerializeToString,
+            ),
+            'GetResourceRoot': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetResourceRoot,
                     request_deserializer=taskqueue__pb2.WorkspaceRootRequest.FromString,
                     response_serializer=taskqueue__pb2.WorkspaceRootResponse.SerializeToString,
             ),
@@ -2074,6 +2106,33 @@ class TaskQueue(object):
             _registered_method=True)
 
     @staticmethod
+    def AdminResetPassword(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/AdminResetPassword',
+            taskqueue__pb2.AdminResetPasswordRequest.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def ListRecruiters(request,
             target,
             options=(),
@@ -2763,6 +2822,33 @@ class TaskQueue(object):
             request,
             target,
             '/taskqueue.TaskQueue/GetWorkspaceRoot',
+            taskqueue__pb2.WorkspaceRootRequest.SerializeToString,
+            taskqueue__pb2.WorkspaceRootResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetResourceRoot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/GetResourceRoot',
             taskqueue__pb2.WorkspaceRootRequest.SerializeToString,
             taskqueue__pb2.WorkspaceRootResponse.FromString,
             options,

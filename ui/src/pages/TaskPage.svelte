@@ -954,6 +954,24 @@ async function handleWebSocketMessage(message) {
             <code>{displayedTasks.find(t => t.taskId === selectedTaskId).shell}</code>
           </div>
         {/if}
+        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.input?.length}
+          <div>
+            <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Inputs:</span>
+            <code style="font-size:0.85em;word-break:break-all;">{displayedTasks.find(t => t.taskId === selectedTaskId).input.join(', ')}</code>
+          </div>
+        {/if}
+        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.resource?.length}
+          <div>
+            <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Resources:</span>
+            <code style="font-size:0.85em;word-break:break-all;">{displayedTasks.find(t => t.taskId === selectedTaskId).resource.join(', ')}</code>
+          </div>
+        {/if}
+        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.output}
+          <div>
+            <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Output:</span>
+            <code style="font-size:0.85em;word-break:break-all;">{displayedTasks.find(t => t.taskId === selectedTaskId).output}</code>
+          </div>
+        {/if}
       </div>
       <p class="tasks-command-preview"> {selectedTaskCommand}</p>
       <div class="tasks-log-columns">

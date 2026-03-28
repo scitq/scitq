@@ -1,0 +1,19 @@
+name: seqtk
+container: gmtscience/seqtk:1.4
+command:
+  cond: PAIRED
+  true: |
+    . /builtin/std.sh
+
+    _para seqtk sample -s{SEED} /input/{SAMPLE}.1.fastq.gz {DEPTH} | pigz > /output/{SAMPLE}.1.fastq.gz
+    _para seqtk sample -s{SEED} /input/{SAMPLE}.2.fastq.gz {DEPTH} | pigz > /output/{SAMPLE}.2.fastq.gz
+    _wait
+  false: |
+    . /builtin/std.sh
+
+    seqtk sample -s{SEED} /input/{SAMPLE}.fastq.gz {DEPTH} | pigz > /output/{SAMPLE}.fastq.gz
+outputs:
+  fastqs: "*.fastq.gz"
+task_spec:
+  mem: 30
+  cpu: 2

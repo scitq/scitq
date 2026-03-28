@@ -1,0 +1,29 @@
+name: metaphlan
+vars:
+  METAPHLAN_VERSION: "4.1"
+  METAPHLAN_DB_FLAG:
+    cond: METAPHLAN_VERSION
+    "4.2": "--db_dir"
+    "4.1": "--bowtie2db"
+    "4.0": "--bowtie2db"
+    "4.0-chocophlan2021": "--bowtie2db"
+container:
+  cond: METAPHLAN_VERSION
+  "4.0": "gmtscience/metaphlan4:4.0.6.1"
+  "4.0-chocophlan2021": "gmtscience/metaphlan4:4.0.6.1"
+  "4.1": "gmtscience/metaphlan4:4.1"
+  "4.2": "gmtscience/metaphlan:4.2.4"
+command: |
+  . /builtin/std.sh
+
+  pigz -dc /input/*.fastq.gz | metaphlan \
+      --input_type fastq --no_map --offline \
+      {METAPHLAN_DB_FLAG} /resource/metaphlan/bowtie2 \
+      --nproc $CPU \
+      -o /output/{SAMPLE}.metaphlan4_profile.txt \
+      2>&1 > /output/{SAMPLE}.metaphlan4.log
+outputs:
+  metaphlan: "*.txt"
+  logs: "*.log"
+task_spec:
+  cpu: 8

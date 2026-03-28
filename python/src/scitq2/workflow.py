@@ -615,7 +615,7 @@ class Workflow:
                 self.full_name = candidate_name
                 break
             except Exception as e:
-                if 'unique constraint "unique_workflow_name"' in str(e):
+                if 'unique constraint' in str(e).lower() or 'duplicate key' in str(e).lower():
                     continue
                 raise  # re-raise non-duplicate errors
 

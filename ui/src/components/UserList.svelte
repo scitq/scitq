@@ -290,8 +290,25 @@
    * @param {number} userId - ID of user to delete
    */
   async function handleDeleteUser(userId: number) {
+    // Find the user to get their name for the confirmation
+    const targetUser = users.find(u => u.userId === userId);
+    const username = targetUser?.username || `ID ${userId}`;
+
+    // Prevent deleting the last admin
+    const adminCount = users.filter(u => u.isAdmin).length;
+    if (targetUser?.isAdmin && adminCount <= 1) {
+      alert("Cannot delete the last admin user.");
+      return;
+    }
+
+    // Require explicit confirmation
+    if (!confirm(`Are you sure you want to delete user "${username}"? This cannot be undone.`)) {
+      return;
+    }
+
     try {
       await delUser(userId);
+      users = users.filter(u => u.userId !== userId);
       successMessage = "User Deleted";
       clearTimeout(alertTimeout);
       alertTimeout = setTimeout(() => successMessage = '', 5000);

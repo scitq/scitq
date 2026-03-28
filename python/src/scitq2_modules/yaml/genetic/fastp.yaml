@@ -1,0 +1,37 @@
+name: fastp
+container: staphb/fastp:1.0.1
+command:
+  cond: PAIRED
+  true: |
+    . /builtin/std.sh
+    . /builtin/bio.sh
+
+    _find_pairs /input/*.f*q.gz
+    _para zcat $READS1 > /tmp/read1.fastq
+    _para zcat $READS2 > /tmp/read2.fastq
+    _wait
+    fastp \
+        --adapter_sequence AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
+        --adapter_sequence_r2 AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT \
+        --trim_poly_g --detect_adapter_for_pe \
+        --cut_front --cut_tail --n_base_limit 0 --length_required 60 \
+        --in1 /tmp/read1.fastq --in2 /tmp/read2.fastq \
+        --json /output/{SAMPLE}_fastp.json \
+        -z 1 --out1 /output/{SAMPLE}.1.fastq.gz \
+        --out2 /output/{SAMPLE}.2.fastq.gz
+  false: |
+    . /builtin/std.sh
+
+    zcat /input/*.f*q.gz > /tmp/read.fastq
+    fastp \
+        --trim_poly_g \
+        --cut_front --cut_tail --n_base_limit 0 --length_required 60 \
+        -i /tmp/read.fastq \
+        --json /output/{SAMPLE}_fastp.json \
+        -z 1 -o /output/{SAMPLE}.fastq.gz
+outputs:
+  fastqs: "*.fastq.gz"
+  json: "*.json"
+task_spec:
+  cpu: 5
+  mem: 10

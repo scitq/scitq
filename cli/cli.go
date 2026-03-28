@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -236,10 +237,11 @@ type Attr struct {
 		} `arg:"subcommand:upload" help:"Upload a new workflow template"`
 
 		Run *struct {
-			TemplateId *int32  `arg:"--id" help:"ID of the template to run (either name or id is required)"`
-			Name       *string `arg:"--name" help:"Name of the template to run (either name or id is required)"`
-			Version    *string `arg:"--version" help:"Optional version (default to latest if omitted)"`
-			ParamPairs *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
+			TemplateId    *int32  `arg:"--id" help:"ID of the template to run (either name or id is required)"`
+			Name          *string `arg:"--name" help:"Name of the template to run (either name or id is required)"`
+			Version       *string `arg:"--version" help:"Optional version (default to latest if omitted)"`
+			ParamPairs    *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
+			NoRecruiters  bool    `arg:"--no-recruiters" help:"Create workflow without recruiters"`
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
 		List *struct {
@@ -1140,9 +1142,11 @@ func (c *CLI) TemplateUpload() error {
 	}
 
 	// Call UploadTemplate RPC
+	filename := filepath.Base(path)
 	resp, err := c.QC.Client.UploadTemplate(ctx, &pb.UploadTemplateRequest{
-		Script: data,
-		Force:  force,
+		Script:   data,
+		Force:    force,
+		Filename: &filename,
 	})
 	if err != nil {
 		return fmt.Errorf("❌ UploadTemplate RPC failed: %w", err)
@@ -1355,6 +1359,7 @@ func (c *CLI) TemplateRun() error {
 	req := &pb.RunTemplateRequest{
 		WorkflowTemplateId: *c.Attr.Template.Run.TemplateId,
 		ParamValuesJson:    paramJSON,
+		NoRecruiters:       c.Attr.Template.Run.NoRecruiters,
 	}
 	res, err := c.QC.Client.RunTemplate(ctx, req)
 	if err != nil {

@@ -1,0 +1,35 @@
+name: test-vars
+version: 1.0.0
+description: Test vars and filters
+
+params:
+  catalog:
+    type: string
+    default: "azure://rnd/resource/igc2.tgz"
+  location:
+    type: provider_region
+    required: true
+
+iterate:
+  name: sample
+  source: list
+  values: [sample_A, sample_B]
+
+worker_pool:
+  provider: "{params.location}"
+  cpu: ">= 4"
+
+workspace: "{params.location}"
+
+steps:
+  - name: align
+    container: alpine
+    vars:
+      CATALOG_NAME: "{params.catalog|name}"
+      CATALOG_TARGET: "/resource/{params.catalog|name}/{params.catalog|name}"
+    command: |
+      echo "Catalog name: ${CATALOG_NAME}"
+      echo "Catalog target: ${CATALOG_TARGET}"
+      echo "Sample: ${SAMPLE}"
+    outputs:
+      result: "*.txt"

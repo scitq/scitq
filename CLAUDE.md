@@ -11,6 +11,10 @@ cd python && ./venv/bin/python -m grpc_tools.protoc ... && sed -i '' 's/^import 
 
 After regenerating Python stubs, update `python/pyproject.toml` to match the `GRPC_GENERATED_VERSION` in `python/src/scitq2/pb/taskqueue_pb2_grpc.py`. The generated stubs enforce a minimum grpcio version at runtime.
 
+## Operating procedures
+
+See `AISOPs/` for standard operating procedures that govern AI behavior.
+
 ## Coding style
 
 See `MANTRA.md` for the project's coding principles.

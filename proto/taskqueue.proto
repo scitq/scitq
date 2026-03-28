@@ -42,6 +42,7 @@ service TaskQueue {
     rpc DeleteUser(UserId) returns (Ack);
     rpc UpdateUser(User) returns (Ack);
     rpc ChangePassword(ChangePasswordRequest) returns (Ack);
+    rpc AdminResetPassword(AdminResetPasswordRequest) returns (Ack);
     rpc ListRecruiters(RecruiterFilter) returns (RecruiterList);
     rpc CreateRecruiter(Recruiter) returns (Ack);
     rpc UpdateRecruiter(RecruiterUpdate) returns (Ack);
@@ -69,6 +70,7 @@ service TaskQueue {
     rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
     rpc DeleteTemplateRun(DeleteTemplateRunRequest) returns (Ack);
     rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
+    rpc GetResourceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
     rpc RegisterSpecifications(ResourceSpec) returns (Ack);
     // Worker events
     rpc ReportWorkerEvent(WorkerEvent) returns (Ack);
@@ -436,6 +438,11 @@ message User {
   optional bool is_admin = 4;
 }
 
+message AdminResetPasswordRequest {
+  int32 user_id = 1;
+  string new_password = 2;
+}
+
 message UsersList {
   repeated User users = 1;
 }
@@ -661,6 +668,7 @@ message FetchInfoResponse {
 message UploadTemplateRequest {
   bytes script = 1;
   bool force = 2;
+  optional string filename = 3;
 }
 
 message UploadTemplateResponse {
@@ -677,6 +685,7 @@ message UploadTemplateResponse {
 message RunTemplateRequest {
   int32 workflow_template_id = 1;
   string param_values_json = 2;
+  bool no_recruiters = 3;
 }
 
 message TemplateFilter {

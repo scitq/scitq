@@ -723,8 +723,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 	}
 
-	// Push logic: on success, check dependent "W" tasks
-	if req.NewStatus == "S" {
+	// Push logic: on terminal state, check dependent "W" tasks
+	if req.NewStatus == "S" || req.NewStatus == "F" {
 		// Find candidate dependent tasks
 		rows, err := s.db.QueryContext(ctx, `
             SELECT DISTINCT d.dependent_task_id
@@ -744,7 +744,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					continue
 				}
 
-				// Check if all prerequisites are now 'S'
+				// Check if all prerequisites are terminal (S or F)
 				var allDone bool
 				err = s.db.QueryRowContext(ctx, `
                     SELECT NOT EXISTS (
@@ -752,7 +752,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
                         FROM task_dependencies d
                         JOIN task t ON d.prerequisite_task_id = t.task_id
                         WHERE d.dependent_task_id = $1
-                          AND t.status != 'S'
+                          AND t.status NOT IN ('S', 'F')
                     )
                 `, depTaskID).Scan(&allDone)
 				if err != nil {
@@ -3281,6 +3281,30 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 	return &pb.Ack{Success: true}, nil
 }
 
+func (s *taskQueueServer) AdminResetPassword(ctx context.Context, req *pb.AdminResetPasswordRequest) (*pb.Ack, error) {
+	if !IsAdmin(ctx) {
+		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
+	}
+	if req.UserId == 0 || req.NewPassword == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id and new_password are required")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	res, err := s.db.Exec("UPDATE scitq_user SET password=$1 WHERE user_id=$2", hash, req.UserId)
+	if err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to reset password: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return nil, status.Error(codes.NotFound, "user not found")
+	}
+
+	return &pb.Ack{Success: true}, nil
+}
+
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
 	query := `SELECT step_id, rank, protofilter,
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
@@ -4062,6 +4086,25 @@ func (s *taskQueueServer) GetWorkspaceRoot(ctx context.Context, req *taskqueuepb
 	root, ok := provider.GetWorkspaceRoot(region)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "no workspace root for region %q in provider %q", region, providerName)
+	}
+
+	return &taskqueuepb.WorkspaceRootResponse{
+		RootUri: root,
+	}, nil
+}
+
+func (s *taskQueueServer) GetResourceRoot(ctx context.Context, req *taskqueuepb.WorkspaceRootRequest) (*taskqueuepb.WorkspaceRootResponse, error) {
+	providerName := req.GetProvider()
+	region := req.GetRegion()
+
+	provider, ok := s.providerConfig[providerName]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "unknown provider: %q", providerName)
+	}
+
+	root, ok := provider.GetResourceRoot(region)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "no resource root for region %q in provider %q", region, providerName)
 	}
 
 	return &taskqueuepb.WorkspaceRootResponse{

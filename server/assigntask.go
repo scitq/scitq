@@ -305,7 +305,7 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 						FROM task_dependencies d
 						JOIN task t ON d.prerequisite_task_id = t.task_id
 						WHERE d.dependent_task_id = $1
-						  AND t.status != 'S'
+						  AND t.status NOT IN ('S', 'F')
 					)
 				`, depID).Scan(&allDone)
 				if allDone {

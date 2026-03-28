@@ -1,0 +1,10 @@
+name: multiqc
+container: ewels/multiqc:latest
+command: |
+  cd /input
+  multiqc . -o /output/
+outputs:
+  report: "multiqc_report.html"
+task_spec:
+  cpu: 2
+  mem: 4

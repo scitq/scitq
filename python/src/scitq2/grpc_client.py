@@ -395,3 +395,9 @@ class Scitq2Client:
         request = taskqueue_pb2.WorkspaceRootRequest(provider=provider, region=region)
         response = self.stub.GetWorkspaceRoot(request)
         return response.root_uri
+
+    def get_resource_root(self, provider: str, region: str) -> str:
+        """Fetches the local resource root URI for a given provider and region."""
+        request = taskqueue_pb2.WorkspaceRootRequest(provider=provider, region=region)
+        response = self.stub.GetResourceRoot(request)
+        return response.root_uri

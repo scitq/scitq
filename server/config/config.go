@@ -180,7 +180,8 @@ type AzureConfig struct {
 	Quotas              map[string]Quota  `yaml:"quotas"` // key: region
 	Regions             []string          `yaml:"regions"`
 	UpdatePeriodicity   string            `yaml:"update_periodicity"` // Update periodicity in minutes
-	LocalWorkspaceRoots map[string]string `yaml:"local_workspaces"`
+	LocalWorkspaceRoots  map[string]string `yaml:"local_workspaces"`
+	LocalResourceRoots   map[string]string `yaml:"local_resources"`
 }
 
 type AzureImage struct {
@@ -226,15 +227,17 @@ type OpenstackConfig struct {
 	Regions             []string               `yaml:"regions"`
 	Custom              map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
 	UpdatePeriodicity   string                 `yaml:"update_periodicity"` // Update periodicity in minutes
-	LocalWorkspaceRoots map[string]string      `yaml:"local_workspaces"`
-	Keypair             string                 `yaml:"keypair"` // Name of the keypair to use for SSH access
+	LocalWorkspaceRoots  map[string]string      `yaml:"local_workspaces"`
+	LocalResourceRoots   map[string]string      `yaml:"local_resources"`
+	Keypair              string                 `yaml:"keypair"` // Name of the keypair to use for SSH access
 }
 
 type LocalConfig struct {
-	Name                string            `yaml:"-"`
-	DefaultRegion       string            `yaml:"default_region"`
-	Regions             []string          `yaml:"regions"`
-	LocalWorkspaceRoots map[string]string `yaml:"local_workspaces"`
+	Name                 string            `yaml:"-"`
+	DefaultRegion        string            `yaml:"default_region"`
+	Regions              []string          `yaml:"regions"`
+	LocalWorkspaceRoots  map[string]string `yaml:"local_workspaces"`
+	LocalResourceRoots   map[string]string `yaml:"local_resources"`
 }
 
 func (c *Config) Validate() error {
@@ -266,6 +269,7 @@ type ProviderConfig interface {
 	SetName(string)
 	GetDefaultRegion() string
 	GetWorkspaceRoot(region string) (string, bool)
+	GetResourceRoot(region string) (string, bool)
 }
 
 // GetDockerCredentials returns all configured docker registry credentials.
@@ -340,6 +344,19 @@ func (a *AzureConfig) GetWorkspaceRoot(region string) (string, bool) {
 	return "", false
 }
 
+func (a *AzureConfig) GetResourceRoot(region string) (string, bool) {
+	if a.LocalResourceRoots == nil {
+		return "", false
+	}
+	if root, ok := a.LocalResourceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := a.LocalResourceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
+}
+
 func (o *OpenstackConfig) GetRegions() []string {
 	return o.Regions
 }
@@ -376,6 +393,19 @@ func (o *OpenstackConfig) GetWorkspaceRoot(region string) (string, bool) {
 		return root, true
 	}
 	if root, ok := o.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
+}
+
+func (o *OpenstackConfig) GetResourceRoot(region string) (string, bool) {
+	if o.LocalResourceRoots == nil {
+		return "", false
+	}
+	if root, ok := o.LocalResourceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := o.LocalResourceRoots["*"]; ok {
 		return root, true
 	}
 	return "", false
@@ -430,6 +460,19 @@ func (l *LocalConfig) GetWorkspaceRoot(region string) (string, bool) {
 		return root, true
 	}
 	if root, ok := l.LocalWorkspaceRoots["*"]; ok {
+		return root, true
+	}
+	return "", false
+}
+
+func (l *LocalConfig) GetResourceRoot(region string) (string, bool) {
+	if l.LocalResourceRoots == nil {
+		return "", false
+	}
+	if root, ok := l.LocalResourceRoots[region]; ok {
+		return root, true
+	}
+	if root, ok := l.LocalResourceRoots["*"]; ok {
 		return root, true
 	}
 	return "", false

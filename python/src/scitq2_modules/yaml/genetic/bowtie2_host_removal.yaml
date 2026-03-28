@@ -1,0 +1,39 @@
+name: humanfilter
+container: gmtscience/bowtie2:2.5.4
+language: bash
+resource: "{RESOURCE_ROOT}/chm13v2.0.tgz|untar"
+command:
+  cond: PAIRED
+  true: |
+    . /builtin/std.sh
+
+    bowtie2 -p $CPU --mm -x /resource/chm13v2.0/chm13v2.0 \
+        -1 /input/{SAMPLE}.1.fastq.gz \
+        -2 /input/{SAMPLE}.2.fastq.gz --reorder \
+        --met-file /output/{SAMPLE}_human_bowtie_stats.txt \
+        2> >(tee /output/{SAMPLE}_human_bowtie.txt >&2) \
+    | samtools fastq -@ 2 -f 12 -F 256 \
+        -1 /output/{SAMPLE}.1.fastq \
+        -2 /output/{SAMPLE}.2.fastq \
+        -0 /dev/null -s /dev/null
+    for fastq in /output/*.fastq
+    do
+        _para pigz -p 4 $fastq
+    done
+    _wait
+  false: |
+    . /builtin/std.sh
+
+    bowtie2 -p ${CPU} --mm -x /resource/chm13v2.0/chm13v2.0 \
+        -U /input/{SAMPLE}.fastq.gz --reorder \
+        --met-file /output/{SAMPLE}_human_bowtie_stats.txt \
+        2> >(tee /output/{SAMPLE}_human_bowtie.txt >&2) \
+    | samtools fastq -@ 2 -f 4 -F 256 \
+        -0 /output/{SAMPLE}.fastq -s /dev/null
+    pigz /output/*.fastq
+outputs:
+  fastqs: "*.fastq.gz"
+  txt: "*.txt"
+task_spec:
+  cpu: 8
+  mem: 30

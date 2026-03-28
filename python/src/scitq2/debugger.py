@@ -10,6 +10,9 @@ from scitq2.grpc_client import Scitq2Client
 
 
 def run_debug(client: Scitq2Client, workflow_id: int, maximum_workers: Optional[int] = None) -> None:
+    # Force line-buffered stdout for non-TTY environments (e.g. VSCode remote shell)
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(line_buffering=True)
     print(f"🪲 Debug mode enabled for workflow {workflow_id}")
     last_success: Optional[int] = None
     last_failed: Optional[int] = None
@@ -29,6 +32,7 @@ def run_debug(client: Scitq2Client, workflow_id: int, maximum_workers: Optional[
 
         default_choice = _default_choice(last_success, last_failed, pending, failed, client)
         _print_menu(default_choice, has_retried_failed=bool(retried_failed))
+        sys.stdout.flush()
         choice = input(f"Select action [{default_choice}]: ").strip()
         if choice == "":
             choice = default_choice

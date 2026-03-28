@@ -49,6 +49,9 @@ func (f *FakeProviderConfig) GetDefaultRegion() string {
 }
 
 func (f *FakeProviderConfig) GetWorkspaceRoot(region string) (string, bool) {
-	// Fake provider has no local workspace root mapping
+	return "", false
+}
+
+func (f *FakeProviderConfig) GetResourceRoot(region string) (string, bool) {
 	return "", false
 }

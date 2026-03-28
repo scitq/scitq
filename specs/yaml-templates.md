@@ -1,35 +1,42 @@
-# YAML Pipeline Definitions
+# YAML Templates
 
 ## Goal
 
-A declarative YAML format for defining scitq pipelines. Targets the 80% common case (linear per-sample pipelines) with near-zero syntax errors. Designed for AI agents and users who want simplicity over flexibility.
+A declarative YAML format for defining scitq templates. A YAML template creates a workflow, just like a Python DSL template, but with a simpler, more constrained syntax. Targets the 80% common case (linear per-sample workflows) with near-zero syntax errors. Designed for AI agents and users who want simplicity over flexibility.
 
-The Python DSL remains available for complex workflows (multi-dimensional product sweeps, dynamic logic).
+Python DSL templates remain available for complex workflows (multi-dimensional product sweeps, dynamic logic). Both types coexist under the unified `scitq template` CLI.
 
 ## Execution model
 
-YAML pipelines are **executed by the server**. The user interacts through the CLI only:
+YAML templates are **executed by the server**. The user interacts through the CLI:
 
 ```sh
-# Run a local YAML file — CLI reads it and sends content to the server
-scitq pipeline run pipeline.yaml --param input_dir=azure://data,location=azure.primary:swedencentral
+# Power user: run a local YAML file directly
+scitq template run --path biomscope.yaml --param bioproject=PRJEB6070,location=azure.primary:swedencentral
 
-# Dry run — server creates and deletes the workflow
-scitq pipeline run pipeline.yaml --param ... --dry-run
+# Standard user: run an uploaded template by name
+scitq template run --name biomscope --param bioproject=PRJEB6070,location=azure.primary:swedencentral
 
-# Print parameter schema
-scitq pipeline params pipeline.yaml
+# Dry run
+scitq template run --path biomscope.yaml --param ... --dry-run
 
-# Upload a YAML module to the server for reuse
-scitq module upload modules/classify.yaml
+# Upload a template for reuse
+scitq template upload --path biomscope.yaml
+
+# Upload a YAML module to the server
+scitq module upload --path modules/classify.yaml
 ```
 
-The flow:
-1. User writes `pipeline.yaml` on their machine
+The flow for `--path` (power user):
+1. User writes `biomscope.yaml` on their machine
 2. CLI reads the file, sends its content to the server
-3. Server resolves `import:` references from its module library
+3. Server resolves `import:` and `module:` references from its module library
 4. Server builds the Workflow, compiles it, starts execution
-5. The pipeline YAML content is **not stored** on the server (transient) unless uploaded as a template
+5. The template content is **not stored** on the server (transient)
+
+The flow for `--name` (standard user):
+1. Template was previously uploaded with `scitq template upload`
+2. Server runs it from `{script_root}/`
 
 No Python needed on the client side. The CLI is a Go binary.
 
@@ -264,6 +271,132 @@ workspace: "{params.location}"      # explicit — determines where intermediate
 
 The `workspace:` field resolves to the workspace root configured for that provider/region in `scitq.yaml` (the `local_workspaces` setting). This controls where intermediate task outputs live.
 
+## Resource root
+
+### Problem
+
+Reference data (genome indexes, catalogs, databases) must live near the compute to avoid egress fees. Currently templates hardcode URIs like `azure://rnd/resource/igc2.tgz`, but if the workflow runs in a different region or provider, the data must be fetched cross-region (costly).
+
+### Solution: `local_resources` in provider config
+
+Add `local_resources` alongside `local_workspaces` in `scitq.yaml`:
+
+```yaml
+providers:
+  azure:
+    primary:
+      local_workspaces:
+        swedencentral: "azswed://rnd/workspace"
+        westeurope: "azwest://rnd/workspace"
+        northeurope: "aznorth://rnd/workspace"
+      local_resources:
+        swedencentral: "azswed://rnd/resource"
+        westeurope: "azwest://rnd/resource"
+        northeurope: "aznorth://rnd/resource"
+  openstack:
+    ovh:
+      local_workspaces:
+        GRA11: "s3://rnd/workspace"
+      local_resources:
+        GRA11: "s3://rnd/resource"
+```
+
+### `{RESOURCE_ROOT}` auto-variable
+
+Like `workspace:`, the `RESOURCE_ROOT` is resolved from the provider/region and injected as a workflow-level variable:
+
+```yaml
+workspace: "{params.location}"    # resolves to azswed://rnd/workspace
+# RESOURCE_ROOT is auto-resolved to azswed://rnd/resource (same provider/region)
+```
+
+Modules then reference resources relative to `{RESOURCE_ROOT}`:
+
+```yaml
+# In a module:
+resource: "{RESOURCE_ROOT}/igc2.tgz|untar"
+```
+
+The template never hardcodes `azure://` or `s3://` — it's all resolved from the provider.
+
+### Simplified modules
+
+With `{RESOURCE_ROOT}`, modules can have sensible defaults:
+
+```yaml
+# genetic/bowtie2_host_removal.yaml — host reference defaults to chm13v2.0
+name: humanfilter
+container: gmtscience/bowtie2:2.5.4
+language: bash
+resource: "{RESOURCE_ROOT}/chm13v2.0.tgz|untar"    # default, overridable
+command:
+  cond: paired
+  true: |
+    . /builtin/std.sh
+    bowtie2 -p $CPU --mm -x /resource/chm13v2.0/chm13v2.0 ...
+  false: |
+    ...
+```
+
+The template doesn't need to specify the resource at all — the default works:
+
+```yaml
+steps:
+  - import: genetic/bowtie2_host_removal    # uses default chm13v2.0 from RESOURCE_ROOT
+    inputs: fastp.fastqs
+    paired: "{PAIRED}"
+```
+
+### Biomscope simplification
+
+With `{RESOURCE_ROOT}` and catalog-name-based convention, the biomscope pipeline collapses from separate align/species/function/oral modules to a single parameterized module:
+
+```yaml
+# genetic/biomscope_align.yaml — works for both igc2 and oral
+name: biomscope
+container: 3jfz1gy8.gra7.container-registry.ovh.net/library/metagen_rust:1.0.0
+language: bash
+resource: "{RESOURCE_ROOT}/{CATALOG}.tgz|untar"
+command: |
+  . /builtin/std.sh
+  cd /output && \
+  bowtie2 --seed {SEED} --end-to-end --sensitive -p 6 \
+      -x /resource/{CATALOG}/{CATALOG} \
+      -U $(echo /input/*.fastq.gz | tr ' ' ',') \
+      -k 100 --no-unal --no-sq --no-head --trim-to 80 --mm \
+      --met-file /output/{SAMPLE}_{CATALOG_LABEL}_bowtie_stats.txt \
+      2> >(tee /output/{SAMPLE}_{CATALOG_LABEL}_bowtie.txt >&2) \
+  | metagen-counter -c 1 -a dist1 -s {SAMPLE} 1> {SAMPLE}_counter.tsv
+```
+
+The template uses it twice — once for gut, once for oral:
+
+```yaml
+steps:
+  - import: genetic/biomscope_align
+    inputs: seqtk.fastqs
+    vars:
+      CATALOG: "igc2"
+      CATALOG_LABEL: "catalog"
+
+  - import: genetic/biomscope_align
+    when: "{params.oral}"
+    inputs: seqtk.fastqs
+    vars:
+      CATALOG: "hs84oral"
+      CATALOG_LABEL: "oral_catalog"
+```
+
+Same module, different catalog name. No code duplication. The resource `{RESOURCE_ROOT}/igc2.tgz` or `{RESOURCE_ROOT}/hs84oral.tgz` resolves to the right storage region automatically.
+
+### Implementation
+
+1. **Server config** (`server/config/config.go`): add `LocalResources map[string]string` to provider configs (same structure as `LocalWorkspaces`)
+2. **Server API**: add `get_resource_root(provider, region)` alongside `get_workspace_root`
+3. **Python DSL** (`grpc_client.py`): expose `get_resource_root`
+4. **YAML runner**: resolve `RESOURCE_ROOT` at workflow level from provider/region, inject as auto-variable
+5. **Modules**: update defaults to use `{RESOURCE_ROOT}/...`
+
 ## Steps
 
 ### Step types
@@ -468,9 +601,9 @@ These are container environment variables. They require a shell to expand (`lang
 ## Top-level options
 
 ```yaml
-name: pipeline-name
+name: template-name
 version: 1.0.0
-description: What this pipeline does
+description: What this template does
 tag: "{params.input_dir}"              # workflow name suffix
 language: sh                            # default: sh (shell). Options: sh, bash, python, none
 container: alpine                       # default container for custom steps
@@ -512,9 +645,9 @@ task_spec:
 
 A module defines: `name`, `command` (plain or with `cond:`), `container` or `conda`/`apt`/`binary`/`pip`, `outputs`, `task_spec`.
 
-A module may declare **variables** it expects — in the `cond:` construct, the condition variable (e.g. `paired`) must be provided by the importing pipeline as a step field.
+A module may declare **variables** it expects — in the `cond:` construct, the condition variable (e.g. `paired`) must be provided by the importing template as a step field.
 
-A module does **not** define: `inputs`, `grouped`, `resource` — those come from the importing pipeline.
+A module does **not** define: `inputs`, `grouped`, `resource` — those come from the importing template.
 
 ### Uploading
 
@@ -537,15 +670,15 @@ steps:
     paired: "{params.paired}"
 ```
 
-The pipeline provides what the module doesn't: inputs, resource, paired flag, grouped mode. Any field from the module can be overridden.
+The template provides what the module doesn't: inputs, resource, paired flag, grouped mode. Any field from the module can be overridden.
 
 ### Merge semantics
 
 | Source | Fields |
 |---|---|
 | **From module** | `name`, `command`, `container`/`conda`, `outputs`, `task_spec` |
-| **From pipeline** (always) | `inputs`, `grouped`, `resource`, `paired` |
-| **From pipeline** (override) | `container`, `task_spec`, `worker_pool`, `name` |
+| **From template** (always) | `inputs`, `grouped`, `resource`, `paired` |
+| **From template** (override) | `container`, `task_spec`, `worker_pool`, `name` |
 
 ## Comparison with Python DSL
 
@@ -556,7 +689,7 @@ The pipeline provides what the module doesn't: inputs, resource, paired flag, gr
 | Conditionals | `cond:` on any param (boolean, enum, string) | Full Python (`cond()`, `if/else`) |
 | Loops | `iterate:` (single, product, range, list, lines) | Any Python loop |
 | Modules | YAML files + Python modules | Python functions |
-| Execution | Via CLI (`scitq pipeline run`) | Direct (`python template.py`) or via CLI |
+| Execution | Via CLI (`scitq template run`) | Direct (`python template.py`) or via CLI |
 | Server dependency | Always (CLI sends to server) | Optional (can `--dry-run` locally) |
 
 ## Complete example: parameter sweep with product iterator
@@ -642,11 +775,247 @@ steps:
     publish: true
 ```
 
+## Advanced features
+
+### Module-level vars
+
+Modules can define their own `vars:` block with defaults and conditionals. This allows modules to encapsulate their internal logic — the template only needs to pass a minimal set of parameters.
+
+```yaml
+# biomscope_align.yaml — module knows its own catalog logic
+vars:
+  ORAL: "false"
+  CATALOG:
+    cond: ORAL
+    true: "hs84oral"
+    false: "igc2"
+  CATALOG_LABEL:
+    cond: ORAL
+    true: "oral_catalog"
+    false: "catalog"
+resource: "{RESOURCE_ROOT}/{CATALOG}.tgz|untar"
+command: |
+  bowtie2 ... -x /resource/{CATALOG}/{CATALOG} ...
+```
+
+The template just passes `ORAL: "true"` and the module figures out the rest:
+
+```yaml
+  - module: biomscope_align.yaml
+    inputs: seqtk.fastqs
+
+  - module: biomscope_align.yaml
+    when: "{params.oral_catalog}"
+    name: oralbiomscope
+    inputs: seqtk.fastqs
+    vars:
+      ORAL: "true"
+```
+
+Merge order: **workflow vars → module vars → step vars**. Each level can reference and override the previous. Vars are resolved sequentially within each level, so later vars can use `cond:` referencing earlier vars.
+
+### Nested imports
+
+A private module can import a public module and extend it with installation-specific knowledge (e.g. resource locations):
+
+```yaml
+# workflow/modules/metaphlan.yaml (private — knows where resources live)
+import: genetic/metaphlan
+vars:
+  METAPHLAN_RESOURCE:
+    cond: METAPHLAN_VERSION
+    "4.0": "{RESOURCE_ROOT}/metaphlan4.0.5.tgz|untar"
+    "4.1": "{RESOURCE_ROOT}/metaphlan/metaphlan4.1.tgz|untar"
+    "4.2": "{RESOURCE_ROOT}/metaphlan/metaphlan4.2.tgz|untar"
+resource: "{METAPHLAN_RESOURCE}"
+```
+
+The public module (`genetic/metaphlan`) defines the command, container, and version-specific flags. The private module adds which resources to use for this particular installation. The template just says:
+
+```yaml
+  - module: metaphlan.yaml
+    vars:
+      METAPHLAN_VERSION: "{params.metaphlan}"
+```
+
+This separates tool knowledge (public, shareable) from deployment knowledge (private, installation-specific).
+
+### Strict variable resolution
+
+Unresolved YAML variables in commands cause a hard error at compile time:
+
+```
+ValueError: Step 'biomscope': unresolved YAML variables in command: ['MISSING_VAR']
+```
+
+This catches typos and missing configuration before any task is created.
+
+To declare an optional variable with a fallback, use the default syntax:
+
+```yaml
+command: |
+  tool --option {SOME_VAR:default_value}
+```
+
+If `SOME_VAR` is not defined in any vars scope, `default_value` is used instead. Without a default, an unresolved var is an error.
+
+Note: this only applies to YAML variables (`{VAR}`). Shell variables (`${VAR}`) are left for the shell and never checked at compile time.
+
+### Variable interpolation rules summary
+
+| Syntax | Resolution | When |
+|---|---|---|
+| `{VAR}` | YAML variable — resolved at compile time | Must be defined in workflow/module/step vars |
+| `{VAR:default}` | YAML variable with fallback | Uses default if VAR not defined |
+| `{params.name}` | Parameter reference | From template params |
+| `{params.name\|filter}` | Parameter with filter | `\|name`, `\|reads`, `\|is_paired`, etc. |
+| `${VAR}` | Shell variable — left for runtime | `CPU`, `THREADS`, `MEM`, etc. |
+
+## Template integration
+
+YAML templates are unified with Python DSL templates under the existing `scitq template` CLI commands. The server detects the type from the file extension.
+
+### Two modes of execution
+
+YAML and Python templates support two usage modes:
+
+**Standard users** — upload a template to the server, then run it by name:
+
+```sh
+scitq template upload --path biomscope.yaml
+scitq template run --name biomscope --param bioproject=PRJEB6070,location=azure.primary:swedencentral
+```
+
+**Power users** — run a local file directly without uploading:
+
+```sh
+scitq template run --path biomscope.yaml --param bioproject=PRJEB6070,location=azure.primary:swedencentral
+```
+
+The distinction is `--name` (server-side lookup) vs `--path` (local file). With `--path`, the CLI reads the file and sends its content to the server for transient execution — the file is not stored permanently.
+
+### Upload
+
+```sh
+# Upload a YAML template
+scitq template upload --path biomscope.yaml
+
+# Upload a Python template (unchanged)
+scitq template upload --path biomscope.py
+```
+
+The server detects `.yaml`/`.yml` vs `.py`:
+- **Python**: runs `python script.py --metadata` and `--params` to extract name/version/params
+- **YAML**: reads `name:`, `version:`, `description:`, `params:` directly from the YAML (no execution needed)
+
+Both are stored in `{script_root}/` and in the `template` DB table with a `type` field (`yaml` or `python`).
+
+### Run
+
+```sh
+# Run an uploaded template by name (type-agnostic)
+scitq template run --name biomscope --param bioproject=PRJEB6070,location=azure.primary:swedencentral
+
+# Run a local file directly (power user, file is sent to server transiently)
+scitq template run --path ./biomscope.yaml --param bioproject=PRJEB6070,location=azure.primary:swedencentral
+
+# Both modes support --dry-run
+scitq template run --path ./biomscope.yaml --param ... --dry-run
+```
+
+With `--name`, the server looks up the template in its DB and runs it from `{script_root}/`.
+With `--path`, the CLI reads the local file and sends the content to the server via a `RunTransientTemplate` RPC. The server writes it to a temp file, executes it, and deletes the temp file.
+
+### Download
+
+```sh
+# Download template source code
+scitq template download --name biomscope --version 1.0.2 --output biomscope.yaml
+
+# Or by ID
+scitq template download --id 42 --output biomscope.yaml
+```
+
+New `DownloadTemplate` RPC that returns the script content from `{script_root}/`.
+
+### List and detail
+
+```sh
+# Lists both YAML and Python templates
+scitq template list
+scitq template detail --name biomscope
+```
+
+The UI shows both types in the same list. The template type (`yaml`/`python`) can be shown as a badge but doesn't change the user interaction.
+
+### Module upload
+
+YAML modules are uploaded separately from templates:
+
+```sh
+scitq module upload --path modules/biomscope_align.yaml
+scitq module list
+scitq module download --name biomscope_align.yaml --output modules/biomscope_align.yaml
+```
+
+Modules are stored in `{script_root}/modules/` and are available to all YAML templates on the server.
+
+### Server changes for YAML templates
+
+In `scriptRunner()` (`workflow_templates.go`):
+
+```go
+func (s *taskQueueServer) scriptRunner(ctx context.Context, scriptPath string, mode string, ...) {
+    var args []string
+
+    if strings.HasSuffix(scriptPath, ".yaml") || strings.HasSuffix(scriptPath, ".yml") {
+        // YAML template: run via yaml_runner module
+        switch mode {
+        case "metadata":
+            // Read directly from YAML — no execution needed
+            return readYAMLMetadata(scriptPath)
+        case "params":
+            args = []string{"-m", "scitq2.yaml_runner", scriptPath, "--params"}
+        case "run":
+            args = []string{"-m", "scitq2.yaml_runner", scriptPath, "--values", paramJSON}
+        }
+    } else {
+        // Python template: run script directly (existing logic)
+        switch mode {
+        case "metadata":
+            args = []string{scriptPath, "--metadata"}
+        case "params":
+            args = []string{scriptPath, "--params"}
+        case "run":
+            args = []string{scriptPath, "--values", paramJSON}
+        }
+    }
+
+    cmd := exec.CommandContext(ctx, venvPython, args...)
+    // ... rest unchanged
+}
+```
+
+For metadata extraction from YAML, no Python execution is needed — just parse the YAML file:
+
+```go
+func readYAMLMetadata(path string) (string, string, int, error) {
+    // Read YAML, extract name/version/description, return as JSON
+    data, _ := os.ReadFile(path)
+    // Parse YAML header fields...
+    metadata := map[string]string{"name": name, "version": version, "description": desc}
+    json, _ := json.Marshal(metadata)
+    return string(json), "", 0, nil
+}
+```
+
 ## Implementation plan
 
-1. **CLI**: `scitq pipeline run`, `scitq pipeline params`, `scitq module upload/list/detail`
-2. **Server**: YAML runner integrated into the template execution engine (recognizes `.yaml`)
+1. **Server**: detect `.yaml` extension in `scriptRunner`, dispatch to `yaml_runner`
+2. **Server**: `readYAMLMetadata()` for fast metadata extraction without execution
 3. **Server**: `{script_root}/modules/` directory for YAML modules
-4. **Server**: iterator variables injected as container environment variables
-5. **YAML runner**: resolve imports, `cond:` evaluation, ad-hoc containers, product iterators
-6. **Server config**: `extra_packages` for private Python module packages
+4. **CLI**: `scitq template download` command (new)
+5. **CLI**: `scitq module upload/list/download` commands (new)
+6. **Proto**: `DownloadTemplate` RPC (returns script content)
+7. **DB**: add `type` column to template table (`yaml`/`python`)
+8. **UI**: show both types in template list

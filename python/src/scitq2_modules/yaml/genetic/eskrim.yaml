@@ -1,0 +1,13 @@
+name: eskrim
+container: quay.io/biocontainers/eskrim:1.0.9--pyhdfd78af_1
+command: |
+  cd /output && eskrim -i /input/*.f*q.gz \
+      -n {SAMPLE} \
+      -l 80 \
+      -k 21 \
+      -t ${CPU} \
+      --seed {SEED} \
+      --tmp-dir /tmp \
+      -s /output/{SAMPLE}.eskrim
+outputs:
+  eskrim: "*.eskrim"

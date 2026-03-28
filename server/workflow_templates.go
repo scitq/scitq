@@ -67,20 +67,36 @@ func (s *taskQueueServer) scriptRunner(
 	templateRunID int32, // only used for "run"
 	authToken string, // extracted from context
 ) (stdout string, stderr string, exitCode int, err error) {
+	// Extract --no-recruiters suffix if present
+	noRecruiters := strings.HasSuffix(mode, "_no_recruiters")
+	if noRecruiters {
+		mode = strings.TrimSuffix(mode, "_no_recruiters")
+	}
+
 	var args []string
 	switch mode {
 	case "metadata":
-		args = []string{"--metadata"}
+		args = []string{scriptPath, "--metadata"}
 	case "params":
-		args = []string{"--params"}
+		args = []string{scriptPath, "--params"}
 	case "run":
-		args = []string{"--values", paramJSON}
+		args = []string{scriptPath, "--values", paramJSON}
+		if noRecruiters {
+			args = append(args, "--no-recruiters")
+		}
+	case "yaml_params":
+		args = []string{"-m", "scitq2.yaml_runner", scriptPath, "--params"}
+	case "yaml_run":
+		args = []string{"-m", "scitq2.yaml_runner", scriptPath, "--values", paramJSON}
+		if noRecruiters {
+			args = append(args, "--no-recruiters")
+		}
 	default:
 		return "", "", -1, fmt.Errorf("unknown mode: %q", mode)
 	}
 
 	venvPython := filepath.Join(s.cfg.Scitq.ScriptVenv, "bin", "python")
-	cmd := exec.CommandContext(ctx, venvPython, append([]string{scriptPath}, args...)...)
+	cmd := exec.CommandContext(ctx, venvPython, args...)
 
 	// 🌍 Inject environment variables
 	serverName := s.cfg.Scitq.ServerFQDN
@@ -255,12 +271,28 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 	timeout := time.Duration(s.cfg.Scitq.GRPCDSLTimeout) * time.Second
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// Detect script type from stored path
+	var scriptPath string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT script_path FROM workflow_template WHERE workflow_template_id = $1`,
+		req.WorkflowTemplateId,
+	).Scan(&scriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("template not found: %w", err)
+	}
+	runMode := "run"
+	if strings.HasSuffix(scriptPath, ".yaml") || strings.HasSuffix(scriptPath, ".yml") {
+		runMode = "yaml_run"
+	}
+	if req.NoRecruiters {
+		runMode += "_no_recruiters"
+	}
 	stdout, stderr, exitCode, runErr := s.scriptRunner(
 		runCtx,
-		filepath.Join(s.cfg.Scitq.ScriptRoot, fmt.Sprintf("%d.py", req.WorkflowTemplateId)),
-		"run",               // mode
-		req.ParamValuesJson, // paramJSON
-		templateRunId,       // templateRunID
+		scriptPath,
+		runMode,
+		req.ParamValuesJson,
+		templateRunId,
 		authToken,
 	)
 
@@ -383,9 +415,52 @@ type ParamSpec struct {
 	Choices  []string `json:"choices,omitempty"`
 }
 
+// extractYAMLMetadata parses a YAML template and returns JSON metadata
+// (name, version, description) without executing any code.
+func extractYAMLMetadata(content []byte) (string, error) {
+	// Parse only top-level fields (no leading whitespace)
+	meta := map[string]string{}
+	for _, line := range strings.Split(string(content), "\n") {
+		// Top-level fields start at column 0 (no indentation)
+		if len(line) == 0 || line[0] == ' ' || line[0] == '\t' || line[0] == '#' || line[0] == '-' {
+			continue
+		}
+		for _, key := range []string{"name", "version", "description"} {
+			if strings.HasPrefix(line, key+":") {
+				val := strings.TrimSpace(strings.TrimPrefix(line, key+":"))
+				val = strings.Trim(val, `"'`)
+				meta[key] = val
+				break
+			}
+		}
+	}
+	if meta["name"] == "" {
+		return "", fmt.Errorf("YAML template missing 'name' field")
+	}
+	if meta["version"] == "" {
+		meta["version"] = "0.0.0"
+	}
+	jsonBytes, err := json.Marshal(meta)
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
+}
+
 func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemplateRequest) (*pb.UploadTemplateResponse, error) {
+	// Detect file type from filename
+	isYAML := false
+	if req.Filename != nil {
+		ext := strings.ToLower(filepath.Ext(*req.Filename))
+		isYAML = ext == ".yaml" || ext == ".yml"
+	}
+
 	// 1️⃣ Write script to temp file
-	tempScript, err := os.CreateTemp("", "scitq_template_*.py")
+	pattern := "scitq_template_*.py"
+	if isYAML {
+		pattern = "scitq_template_*.yaml"
+	}
+	tempScript, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp script file: %w", err)
 	}
@@ -396,16 +471,32 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 	}
 	tempScript.Close()
 
-	// 2️⃣ Run with --metadata
+	// 2️⃣ Extract metadata
+	var stdoutMeta, stderrMeta string
+	var exitCodeMeta int
 	authToken := extractTokenFromContext(ctx)
-	stdoutMeta, stderrMeta, exitCodeMeta, err := s.scriptRunner(
-		ctx,
-		tempScript.Name(),
-		"metadata", // mode
-		"",         // paramJSON not used for metadata
-		0,          // script ID not used when path is explicit
-		authToken,
-	)
+
+	if isYAML {
+		// YAML: extract metadata directly from the file content
+		meta, err := extractYAMLMetadata(req.Script)
+		if err != nil {
+			return &pb.UploadTemplateResponse{
+				Success: false,
+				Message: fmt.Sprintf("Failed to parse YAML metadata: %v", err),
+			}, nil
+		}
+		stdoutMeta = meta
+	} else {
+		// Python: run with --metadata
+		stdoutMeta, stderrMeta, exitCodeMeta, err = s.scriptRunner(
+			ctx,
+			tempScript.Name(),
+			"metadata",
+			"",
+			0,
+			authToken,
+		)
+	}
 	if err != nil || exitCodeMeta != 0 {
 		return &pb.UploadTemplateResponse{
 			Success: false,
@@ -450,19 +541,32 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		return nil, fmt.Errorf("failed to check existing template: %w", err)
 	}
 
-	// 5️⃣ Run with --params
-	stdoutParams, stderrParams, exitCodeParams, err := s.scriptRunner(
-		ctx,
-		tempScript.Name(),
-		"params", // mode
-		"",       // paramJSON not used for params
-		0,        // script ID not used when path is explicit
-		authToken,
-	)
-	if err != nil || exitCodeParams != 0 {
+	// 5️⃣ Extract params
+	var stdoutParams, stderrParams string
+	if isYAML {
+		// YAML: use yaml_runner --params
+		stdoutParams, stderrParams, exitCodeMeta, err = s.scriptRunner(
+			ctx,
+			tempScript.Name(),
+			"yaml_params",
+			"",
+			0,
+			authToken,
+		)
+	} else {
+		stdoutParams, stderrParams, _, err = s.scriptRunner(
+			ctx,
+			tempScript.Name(),
+			"params",
+			"",
+			0,
+			authToken,
+		)
+	}
+	if err != nil {
 		return &pb.UploadTemplateResponse{
 			Success: false,
-			Message: fmt.Sprintf("script params execution failed: %v\n%s", err, stderrMeta),
+			Message: fmt.Sprintf("params extraction failed: %v\n%s", err, stderrParams),
 		}, nil
 	}
 
@@ -547,7 +651,11 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		}
 
 		// 7️⃣ Move file to final location
-		finalPath := filepath.Join(s.cfg.Scitq.ScriptRoot, fmt.Sprintf("%d.py", templateID))
+		ext := ".py"
+		if isYAML {
+			ext = ".yaml"
+		}
+		finalPath := filepath.Join(s.cfg.Scitq.ScriptRoot, fmt.Sprintf("%d%s", templateID, ext))
 		if err := os.MkdirAll(s.cfg.Scitq.ScriptRoot, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create script_root dir: %w", err)
 		}
