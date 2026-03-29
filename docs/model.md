@@ -62,7 +62,7 @@ The only way to add a provider is by modifying the configuration and restarting 
 
 `step`s are classes for `task`s: each task belongs to a step (which can be the NULL step if its step_id is NULL). Only a worker belonging to the same step as the task can be assigned to this task (once again even if the worker is attached to the NULL step).
 
-While in the [DSL](usage/dsl.md), there are several constraints applied to Step and the Task they contain, in the model design, there are few. The different tasks of a step can be very different. The real constraints come from the next object, the `recruiter` which is attached to the step. You cannot attach a recruiter to the NULL step.
+While in [YAML templates](usage/yaml-templates.md) and the [Python DSL](usage/dsl.md), there are several constraints applied to Step and the Task they contain, in the model design, there are few. The different tasks of a step can be very different. The real constraints come from the next object, the `recruiter` which is attached to the step. You cannot attach a recruiter to the NULL step.
 
 `recruiter`s are objects that automatize worker deployment for a given step. See [CLI](usage/cli.md#recruiter-create) for details. They define the rules which command how many workers must be obtained (either by recycling idle workers or deploying new workers from some provider), and what `flavor` is to be used, using a filter expression - explained in the CLI also - something like `cpu>=32:mem>=64`, and also how many tasks of this kind these workers will be able to handle simultaneously (e.g., the concurrency setting, ideally defined using dynamic concurrency, something explained in CLI as well).
 
@@ -79,7 +79,7 @@ When a workflow completes (all tasks succeeded or failed) or is deleted, its wor
 
 ### template_run, workflow_template, scitq_user and scitq_user_session
 
-`workflow_template`s represent the [DSL](usage/dsl.md) scripts, e.g., python script designed to create `workflow`s. The code itself is stored in a file in the folder defined in the `scitq.script_root` setting of the configuration, so the `workflow_template` object is shallow and used mostly for display in [CLI](usage/cli.md#template) and [UI](usage/ui.md#template-page).
+`workflow_template`s represent the template scripts — either [YAML templates](usage/yaml-templates.md) or [Python DSL](usage/dsl.md) scripts — designed to create `workflow`s. The code itself is stored in a file in the folder defined in the `scitq.script_root` setting of the configuration, so the `workflow_template` object is shallow and used mostly for display in [CLI](usage/cli.md#template) and [UI](usage/ui.md#template-page).
 
 `template_run`s represent the different runs of each `workflow_template` which may be launched lots of times. They also make the relation between the `workflow_template`s and the `workflow` they created. They are also linked to users, a.k.a. `scitq_user`s.
 

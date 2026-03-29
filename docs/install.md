@@ -23,7 +23,7 @@ What follows is required for production but not for build.
 ## What you get
 
 Build will give you three binaries installed in `/usr/local/bin/`:
-- `scitq-server` : the server binary, including the go engine, the Svelte UI and the python DSL, see below for configuration details,
+- `scitq-server` : the server binary, including the Go engine, the Svelte UI and the YAML/Python template engine, see below for configuration details,
 - `scitq-client` : the client binary, e.g. what runs on a worker, usually deployed automatically, but you can install it manually also, see below,
 - `scitq` : the CLI binary, ready to use, see usage.
 
@@ -176,4 +176,4 @@ to this:
 To backup a scitq install, backup:
 - PostgreSQL (using pg_dump) : it contains all history
 - `/etc/scitq.yaml` : your configuration (it contains passwords for your providers so be careful)
-- `/var/lib/scitq` : it contains your scripts, task logs and python DSL environment (this is the default location, the location may be changed in `/etc/scitq.yaml`)
+- `/var/lib/scitq` : it contains your templates, modules, task logs and the Python environment (this is the default location, the location may be changed in `/etc/scitq.yaml`)

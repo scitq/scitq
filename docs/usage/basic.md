@@ -33,7 +33,7 @@ NB: manually deployed workers, also called permanent workers, are never deleted.
 
 ## Complex setups
 
-There is no limit to what you can do with the CLI. However, it can become tedious when there are lots of different tasks with numerous dependencies. For this reason, scitq provides you with a [DSL](dsl.md) that will help you define complex workflows using Python. These workflow templates will then become available as standard commands in scitq so that end-level users can trigger complex distributed analyses with the tip of their fingers.
+There is no limit to what you can do with the CLI. However, it can become tedious when there are lots of different tasks with numerous dependencies. For this reason, scitq provides you with [YAML templates](yaml-templates.md) (declarative, no programming required) and a [Python DSL](dsl.md) (for complex logic). These workflow templates become available as standard commands in scitq so that end-level users can trigger complex distributed analyses with the tip of their fingers.
 
 
 ## Using the UI

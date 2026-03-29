@@ -1,4 +1,6 @@
-# scitq DSL
+# scitq Python DSL
+
+> For most workflows, [YAML templates](yaml-templates.md) are the recommended approach — they are simpler, declarative, and produce identical workflows. The Python DSL is useful when you need arbitrary logic beyond what `cond:` branching can express.
 
 ## Hello world
 

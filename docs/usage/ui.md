@@ -131,7 +131,7 @@ For both workflows and steps, the icon ![rubber icon](imgs/rubber-icon.png) trig
 
 ![template page](imgs/template-page.png)
 
-The template page allows you to run a workflow template or upload a new one. A workflow template or more simply template is a script written in scitq DSL (see [DSL](dsl.md) for details) that create a workflow with its steps and all the tasks. Workflows contain active tasks and are unique. Templates are programs that create complex networks of tasks organized in steps in a single workflow, and thus can be launched a lot of time. 
+The template page allows you to run a workflow template or upload a new one. A workflow template is a [YAML template](yaml-templates.md) or a [Python DSL](dsl.md) script that creates a workflow with its steps and all the tasks. Workflows contain active tasks and are unique. Templates are programs that create complex networks of tasks organized in steps in a single workflow, and thus can be launched a lot of time.
 
 So for instance, a template might be a program that copies all the part of a website, but copying the https://github.com/scitq/scitq website is a workflow created by this "copy web site" template for the https://github.com/scitq/scitq website, provided as a template parameter.
 
@@ -151,7 +151,7 @@ The template page upper form enables you to upload new/updated templates:
 
 ![template upper form](imgs/template-upper-form.png)
 
-Clicking on the `+` button will give you a file selector to select a new DSL file, which upload will be validated by the green check button.
+Clicking on the `+` button will give you a file selector to select a new template file (`.yaml` or `.py`), which upload will be validated by the green check button.
 
 
 ## Settings page
