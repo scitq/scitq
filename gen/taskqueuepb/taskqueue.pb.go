@@ -6596,6 +6596,268 @@ func (x *DeleteTemplateRunRequest) GetTemplateRunId() int32 {
 	return 0
 }
 
+// Template download
+type DownloadTemplateRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	WorkflowTemplateId *int32                 `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
+	Name               *string                `protobuf:"bytes,2,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	Version            *string                `protobuf:"bytes,3,opt,name=version,proto3,oneof" json:"version,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *DownloadTemplateRequest) Reset() {
+	*x = DownloadTemplateRequest{}
+	mi := &file_taskqueue_proto_msgTypes[101]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadTemplateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadTemplateRequest) ProtoMessage() {}
+
+func (x *DownloadTemplateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[101]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadTemplateRequest.ProtoReflect.Descriptor instead.
+func (*DownloadTemplateRequest) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{101}
+}
+
+func (x *DownloadTemplateRequest) GetWorkflowTemplateId() int32 {
+	if x != nil && x.WorkflowTemplateId != nil {
+		return *x.WorkflowTemplateId
+	}
+	return 0
+}
+
+func (x *DownloadTemplateRequest) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *DownloadTemplateRequest) GetVersion() string {
+	if x != nil && x.Version != nil {
+		return *x.Version
+	}
+	return ""
+}
+
+// Module management
+type UploadModuleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`
+	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	Force         bool                   `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadModuleRequest) Reset() {
+	*x = UploadModuleRequest{}
+	mi := &file_taskqueue_proto_msgTypes[102]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadModuleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadModuleRequest) ProtoMessage() {}
+
+func (x *UploadModuleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[102]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadModuleRequest.ProtoReflect.Descriptor instead.
+func (*UploadModuleRequest) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{102}
+}
+
+func (x *UploadModuleRequest) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *UploadModuleRequest) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *UploadModuleRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+type ModuleList struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Modules       []string               `protobuf:"bytes,1,rep,name=modules,proto3" json:"modules,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModuleList) Reset() {
+	*x = ModuleList{}
+	mi := &file_taskqueue_proto_msgTypes[103]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModuleList) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModuleList) ProtoMessage() {}
+
+func (x *ModuleList) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[103]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModuleList.ProtoReflect.Descriptor instead.
+func (*ModuleList) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{103}
+}
+
+func (x *ModuleList) GetModules() []string {
+	if x != nil {
+		return x.Modules
+	}
+	return nil
+}
+
+type DownloadModuleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadModuleRequest) Reset() {
+	*x = DownloadModuleRequest{}
+	mi := &file_taskqueue_proto_msgTypes[104]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadModuleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadModuleRequest) ProtoMessage() {}
+
+func (x *DownloadModuleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[104]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadModuleRequest.ProtoReflect.Descriptor instead.
+func (*DownloadModuleRequest) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{104}
+}
+
+func (x *DownloadModuleRequest) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+type FileContent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`
+	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileContent) Reset() {
+	*x = FileContent{}
+	mi := &file_taskqueue_proto_msgTypes[105]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileContent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileContent) ProtoMessage() {}
+
+func (x *FileContent) ProtoReflect() protoreflect.Message {
+	mi := &file_taskqueue_proto_msgTypes[105]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileContent.ProtoReflect.Descriptor instead.
+func (*FileContent) Descriptor() ([]byte, []int) {
+	return file_taskqueue_proto_rawDescGZIP(), []int{105}
+}
+
+func (x *FileContent) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *FileContent) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
 type ResourceSpec struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkerId      string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
@@ -6608,7 +6870,7 @@ type ResourceSpec struct {
 
 func (x *ResourceSpec) Reset() {
 	*x = ResourceSpec{}
-	mi := &file_taskqueue_proto_msgTypes[101]
+	mi := &file_taskqueue_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6620,7 +6882,7 @@ func (x *ResourceSpec) String() string {
 func (*ResourceSpec) ProtoMessage() {}
 
 func (x *ResourceSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[101]
+	mi := &file_taskqueue_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6633,7 +6895,7 @@ func (x *ResourceSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceSpec.ProtoReflect.Descriptor instead.
 func (*ResourceSpec) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{101}
+	return file_taskqueue_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *ResourceSpec) GetWorkerId() string {
@@ -6679,7 +6941,7 @@ type WorkerEvent struct {
 
 func (x *WorkerEvent) Reset() {
 	*x = WorkerEvent{}
-	mi := &file_taskqueue_proto_msgTypes[102]
+	mi := &file_taskqueue_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6691,7 +6953,7 @@ func (x *WorkerEvent) String() string {
 func (*WorkerEvent) ProtoMessage() {}
 
 func (x *WorkerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[102]
+	mi := &file_taskqueue_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6704,7 +6966,7 @@ func (x *WorkerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerEvent.ProtoReflect.Descriptor instead.
 func (*WorkerEvent) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{102}
+	return file_taskqueue_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *WorkerEvent) GetWorkerId() int32 {
@@ -6761,7 +7023,7 @@ type WorkerEventFilter struct {
 
 func (x *WorkerEventFilter) Reset() {
 	*x = WorkerEventFilter{}
-	mi := &file_taskqueue_proto_msgTypes[103]
+	mi := &file_taskqueue_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6773,7 +7035,7 @@ func (x *WorkerEventFilter) String() string {
 func (*WorkerEventFilter) ProtoMessage() {}
 
 func (x *WorkerEventFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[103]
+	mi := &file_taskqueue_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6786,7 +7048,7 @@ func (x *WorkerEventFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerEventFilter.ProtoReflect.Descriptor instead.
 func (*WorkerEventFilter) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{103}
+	return file_taskqueue_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *WorkerEventFilter) GetWorkerId() int32 {
@@ -6833,7 +7095,7 @@ type WorkerEventRecord struct {
 
 func (x *WorkerEventRecord) Reset() {
 	*x = WorkerEventRecord{}
-	mi := &file_taskqueue_proto_msgTypes[104]
+	mi := &file_taskqueue_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6845,7 +7107,7 @@ func (x *WorkerEventRecord) String() string {
 func (*WorkerEventRecord) ProtoMessage() {}
 
 func (x *WorkerEventRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[104]
+	mi := &file_taskqueue_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6858,7 +7120,7 @@ func (x *WorkerEventRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerEventRecord.ProtoReflect.Descriptor instead.
 func (*WorkerEventRecord) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{104}
+	return file_taskqueue_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *WorkerEventRecord) GetEventId() int32 {
@@ -6926,7 +7188,7 @@ type WorkerEventList struct {
 
 func (x *WorkerEventList) Reset() {
 	*x = WorkerEventList{}
-	mi := &file_taskqueue_proto_msgTypes[105]
+	mi := &file_taskqueue_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6938,7 +7200,7 @@ func (x *WorkerEventList) String() string {
 func (*WorkerEventList) ProtoMessage() {}
 
 func (x *WorkerEventList) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[105]
+	mi := &file_taskqueue_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6951,7 +7213,7 @@ func (x *WorkerEventList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerEventList.ProtoReflect.Descriptor instead.
 func (*WorkerEventList) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{105}
+	return file_taskqueue_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *WorkerEventList) GetEvents() []*WorkerEventRecord {
@@ -6970,7 +7232,7 @@ type WorkerEventId struct {
 
 func (x *WorkerEventId) Reset() {
 	*x = WorkerEventId{}
-	mi := &file_taskqueue_proto_msgTypes[106]
+	mi := &file_taskqueue_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6982,7 +7244,7 @@ func (x *WorkerEventId) String() string {
 func (*WorkerEventId) ProtoMessage() {}
 
 func (x *WorkerEventId) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[106]
+	mi := &file_taskqueue_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6995,7 +7257,7 @@ func (x *WorkerEventId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerEventId.ProtoReflect.Descriptor instead.
 func (*WorkerEventId) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{106}
+	return file_taskqueue_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *WorkerEventId) GetEventId() int32 {
@@ -7018,7 +7280,7 @@ type WorkerEventPruneFilter struct {
 
 func (x *WorkerEventPruneFilter) Reset() {
 	*x = WorkerEventPruneFilter{}
-	mi := &file_taskqueue_proto_msgTypes[107]
+	mi := &file_taskqueue_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7030,7 +7292,7 @@ func (x *WorkerEventPruneFilter) String() string {
 func (*WorkerEventPruneFilter) ProtoMessage() {}
 
 func (x *WorkerEventPruneFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[107]
+	mi := &file_taskqueue_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7043,7 +7305,7 @@ func (x *WorkerEventPruneFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerEventPruneFilter.ProtoReflect.Descriptor instead.
 func (*WorkerEventPruneFilter) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{107}
+	return file_taskqueue_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *WorkerEventPruneFilter) GetBefore() string {
@@ -7091,7 +7353,7 @@ type WorkerEventPruneResult struct {
 
 func (x *WorkerEventPruneResult) Reset() {
 	*x = WorkerEventPruneResult{}
-	mi := &file_taskqueue_proto_msgTypes[108]
+	mi := &file_taskqueue_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7103,7 +7365,7 @@ func (x *WorkerEventPruneResult) String() string {
 func (*WorkerEventPruneResult) ProtoMessage() {}
 
 func (x *WorkerEventPruneResult) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[108]
+	mi := &file_taskqueue_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7116,7 +7378,7 @@ func (x *WorkerEventPruneResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerEventPruneResult.ProtoReflect.Descriptor instead.
 func (*WorkerEventPruneResult) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{108}
+	return file_taskqueue_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *WorkerEventPruneResult) GetMatched() int32 {
@@ -7144,7 +7406,7 @@ type Provider struct {
 
 func (x *Provider) Reset() {
 	*x = Provider{}
-	mi := &file_taskqueue_proto_msgTypes[109]
+	mi := &file_taskqueue_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7156,7 +7418,7 @@ func (x *Provider) String() string {
 func (*Provider) ProtoMessage() {}
 
 func (x *Provider) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[109]
+	mi := &file_taskqueue_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7169,7 +7431,7 @@ func (x *Provider) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Provider.ProtoReflect.Descriptor instead.
 func (*Provider) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{109}
+	return file_taskqueue_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *Provider) GetProviderId() int32 {
@@ -7202,7 +7464,7 @@ type ProviderList struct {
 
 func (x *ProviderList) Reset() {
 	*x = ProviderList{}
-	mi := &file_taskqueue_proto_msgTypes[110]
+	mi := &file_taskqueue_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7214,7 +7476,7 @@ func (x *ProviderList) String() string {
 func (*ProviderList) ProtoMessage() {}
 
 func (x *ProviderList) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[110]
+	mi := &file_taskqueue_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7227,7 +7489,7 @@ func (x *ProviderList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProviderList.ProtoReflect.Descriptor instead.
 func (*ProviderList) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{110}
+	return file_taskqueue_proto_rawDescGZIP(), []int{115}
 }
 
 func (x *ProviderList) GetProviders() []*Provider {
@@ -7249,7 +7511,7 @@ type Region struct {
 
 func (x *Region) Reset() {
 	*x = Region{}
-	mi := &file_taskqueue_proto_msgTypes[111]
+	mi := &file_taskqueue_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7261,7 +7523,7 @@ func (x *Region) String() string {
 func (*Region) ProtoMessage() {}
 
 func (x *Region) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[111]
+	mi := &file_taskqueue_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7274,7 +7536,7 @@ func (x *Region) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Region.ProtoReflect.Descriptor instead.
 func (*Region) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{111}
+	return file_taskqueue_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *Region) GetRegionId() int32 {
@@ -7314,7 +7576,7 @@ type RegionList struct {
 
 func (x *RegionList) Reset() {
 	*x = RegionList{}
-	mi := &file_taskqueue_proto_msgTypes[112]
+	mi := &file_taskqueue_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7326,7 +7588,7 @@ func (x *RegionList) String() string {
 func (*RegionList) ProtoMessage() {}
 
 func (x *RegionList) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[112]
+	mi := &file_taskqueue_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7339,7 +7601,7 @@ func (x *RegionList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegionList.ProtoReflect.Descriptor instead.
 func (*RegionList) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{112}
+	return file_taskqueue_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *RegionList) GetRegions() []*Region {
@@ -7371,7 +7633,7 @@ type FlavorCreateRequest struct {
 
 func (x *FlavorCreateRequest) Reset() {
 	*x = FlavorCreateRequest{}
-	mi := &file_taskqueue_proto_msgTypes[113]
+	mi := &file_taskqueue_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7383,7 +7645,7 @@ func (x *FlavorCreateRequest) String() string {
 func (*FlavorCreateRequest) ProtoMessage() {}
 
 func (x *FlavorCreateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[113]
+	mi := &file_taskqueue_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7396,7 +7658,7 @@ func (x *FlavorCreateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlavorCreateRequest.ProtoReflect.Descriptor instead.
 func (*FlavorCreateRequest) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{113}
+	return file_taskqueue_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *FlavorCreateRequest) GetProviderName() string {
@@ -7506,7 +7768,7 @@ type FlavorId struct {
 
 func (x *FlavorId) Reset() {
 	*x = FlavorId{}
-	mi := &file_taskqueue_proto_msgTypes[114]
+	mi := &file_taskqueue_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7518,7 +7780,7 @@ func (x *FlavorId) String() string {
 func (*FlavorId) ProtoMessage() {}
 
 func (x *FlavorId) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[114]
+	mi := &file_taskqueue_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7531,7 +7793,7 @@ func (x *FlavorId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlavorId.ProtoReflect.Descriptor instead.
 func (*FlavorId) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{114}
+	return file_taskqueue_proto_rawDescGZIP(), []int{119}
 }
 
 func (x *FlavorId) GetFlavorId() int32 {
@@ -7550,7 +7812,7 @@ type TaskStatusCountsRequest struct {
 
 func (x *TaskStatusCountsRequest) Reset() {
 	*x = TaskStatusCountsRequest{}
-	mi := &file_taskqueue_proto_msgTypes[115]
+	mi := &file_taskqueue_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7562,7 +7824,7 @@ func (x *TaskStatusCountsRequest) String() string {
 func (*TaskStatusCountsRequest) ProtoMessage() {}
 
 func (x *TaskStatusCountsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[115]
+	mi := &file_taskqueue_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7575,7 +7837,7 @@ func (x *TaskStatusCountsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskStatusCountsRequest.ProtoReflect.Descriptor instead.
 func (*TaskStatusCountsRequest) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{115}
+	return file_taskqueue_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *TaskStatusCountsRequest) GetShowHidden() bool {
@@ -7596,7 +7858,7 @@ type StatusCountEntry struct {
 
 func (x *StatusCountEntry) Reset() {
 	*x = StatusCountEntry{}
-	mi := &file_taskqueue_proto_msgTypes[116]
+	mi := &file_taskqueue_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7608,7 +7870,7 @@ func (x *StatusCountEntry) String() string {
 func (*StatusCountEntry) ProtoMessage() {}
 
 func (x *StatusCountEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[116]
+	mi := &file_taskqueue_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7621,7 +7883,7 @@ func (x *StatusCountEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusCountEntry.ProtoReflect.Descriptor instead.
 func (*StatusCountEntry) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{116}
+	return file_taskqueue_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *StatusCountEntry) GetStatus() string {
@@ -7656,7 +7918,7 @@ type TaskStatusCountsResponse struct {
 
 func (x *TaskStatusCountsResponse) Reset() {
 	*x = TaskStatusCountsResponse{}
-	mi := &file_taskqueue_proto_msgTypes[117]
+	mi := &file_taskqueue_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7668,7 +7930,7 @@ func (x *TaskStatusCountsResponse) String() string {
 func (*TaskStatusCountsResponse) ProtoMessage() {}
 
 func (x *TaskStatusCountsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_taskqueue_proto_msgTypes[117]
+	mi := &file_taskqueue_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7681,7 +7943,7 @@ func (x *TaskStatusCountsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskStatusCountsResponse.ProtoReflect.Descriptor instead.
 func (*TaskStatusCountsResponse) Descriptor() ([]byte, []int) {
-	return file_taskqueue_proto_rawDescGZIP(), []int{117}
+	return file_taskqueue_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *TaskStatusCountsResponse) GetGlobalCounts() []*StatusCountEntry {
@@ -8406,7 +8668,27 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x15WorkspaceRootResponse\x12\x19\n" +
 	"\broot_uri\x18\x01 \x01(\tR\arootUri\"B\n" +
 	"\x18DeleteTemplateRunRequest\x12&\n" +
-	"\x0ftemplate_run_id\x18\x01 \x01(\x05R\rtemplateRunId\"c\n" +
+	"\x0ftemplate_run_id\x18\x01 \x01(\x05R\rtemplateRunId\"\xb6\x01\n" +
+	"\x17DownloadTemplateRequest\x125\n" +
+	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
+	"\x04name\x18\x02 \x01(\tH\x01R\x04name\x88\x01\x01\x12\x1d\n" +
+	"\aversion\x18\x03 \x01(\tH\x02R\aversion\x88\x01\x01B\x17\n" +
+	"\x15_workflow_template_idB\a\n" +
+	"\x05_nameB\n" +
+	"\n" +
+	"\b_version\"a\n" +
+	"\x13UploadModuleRequest\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\"&\n" +
+	"\n" +
+	"ModuleList\x12\x18\n" +
+	"\amodules\x18\x01 \x03(\tR\amodules\"3\n" +
+	"\x15DownloadModuleRequest\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\"C\n" +
+	"\vFileContent\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\"c\n" +
 	"\fResourceSpec\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x10\n" +
 	"\x03cpu\x18\x02 \x01(\x05R\x03cpu\x12\x10\n" +
@@ -8525,7 +8807,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\rglobal_counts\x18\x01 \x03(\v2\x1b.taskqueue.StatusCountEntryR\fglobalCounts\x12G\n" +
 	"\x11per_worker_counts\x18\x02 \x03(\v2\x1b.taskqueue.StatusCountEntryR\x0fperWorkerCounts\x12\x1f\n" +
 	"\vtotal_count\x18\x03 \x01(\x05R\n" +
-	"totalCount2\xff$\n" +
+	"totalCount2\x99'\n" +
 	"\tTaskQueue\x12=\n" +
 	"\n" +
 	"SubmitTask\x12\x16.taskqueue.TaskRequest\x1a\x17.taskqueue.TaskResponse\x12<\n" +
@@ -8589,12 +8871,16 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0eGetWorkerStats\x12 .taskqueue.GetWorkerStatsRequest\x1a!.taskqueue.GetWorkerStatsResponse\x12F\n" +
 	"\tFetchList\x12\x1b.taskqueue.FetchListRequest\x1a\x1c.taskqueue.FetchListResponse\x12F\n" +
 	"\tFetchInfo\x12\x1b.taskqueue.FetchListRequest\x1a\x1c.taskqueue.FetchInfoResponse\x12U\n" +
-	"\x0eUploadTemplate\x12 .taskqueue.UploadTemplateRequest\x1a!.taskqueue.UploadTemplateResponse\x12D\n" +
+	"\x0eUploadTemplate\x12 .taskqueue.UploadTemplateRequest\x1a!.taskqueue.UploadTemplateResponse\x12N\n" +
+	"\x10DownloadTemplate\x12\".taskqueue.DownloadTemplateRequest\x1a\x16.taskqueue.FileContent\x12D\n" +
 	"\vRunTemplate\x12\x1d.taskqueue.RunTemplateRequest\x1a\x16.taskqueue.TemplateRun\x12C\n" +
 	"\rListTemplates\x12\x19.taskqueue.TemplateFilter\x1a\x17.taskqueue.TemplateList\x12L\n" +
 	"\x10ListTemplateRuns\x12\x1c.taskqueue.TemplateRunFilter\x1a\x1a.taskqueue.TemplateRunList\x12H\n" +
 	"\x11UpdateTemplateRun\x12#.taskqueue.UpdateTemplateRunRequest\x1a\x0e.taskqueue.Ack\x12H\n" +
-	"\x11DeleteTemplateRun\x12#.taskqueue.DeleteTemplateRunRequest\x1a\x0e.taskqueue.Ack\x12U\n" +
+	"\x11DeleteTemplateRun\x12#.taskqueue.DeleteTemplateRunRequest\x1a\x0e.taskqueue.Ack\x12>\n" +
+	"\fUploadModule\x12\x1e.taskqueue.UploadModuleRequest\x1a\x0e.taskqueue.Ack\x12<\n" +
+	"\vListModules\x12\x16.google.protobuf.Empty\x1a\x15.taskqueue.ModuleList\x12J\n" +
+	"\x0eDownloadModule\x12 .taskqueue.DownloadModuleRequest\x1a\x16.taskqueue.FileContent\x12U\n" +
 	"\x10GetWorkspaceRoot\x12\x1f.taskqueue.WorkspaceRootRequest\x1a .taskqueue.WorkspaceRootResponse\x12T\n" +
 	"\x0fGetResourceRoot\x12\x1f.taskqueue.WorkspaceRootRequest\x1a .taskqueue.WorkspaceRootResponse\x12A\n" +
 	"\x16RegisterSpecifications\x12\x17.taskqueue.ResourceSpec\x1a\x0e.taskqueue.Ack\x12;\n" +
@@ -8616,7 +8902,7 @@ func file_taskqueue_proto_rawDescGZIP() []byte {
 	return file_taskqueue_proto_rawDescData
 }
 
-var file_taskqueue_proto_msgTypes = make([]protoimpl.MessageInfo, 122)
+var file_taskqueue_proto_msgTypes = make([]protoimpl.MessageInfo, 127)
 var file_taskqueue_proto_goTypes = []any{
 	(*TaskResponse)(nil),              // 0: taskqueue.TaskResponse
 	(*WorkerInfo)(nil),                // 1: taskqueue.WorkerInfo
@@ -8719,33 +9005,38 @@ var file_taskqueue_proto_goTypes = []any{
 	(*WorkspaceRootRequest)(nil),      // 98: taskqueue.WorkspaceRootRequest
 	(*WorkspaceRootResponse)(nil),     // 99: taskqueue.WorkspaceRootResponse
 	(*DeleteTemplateRunRequest)(nil),  // 100: taskqueue.DeleteTemplateRunRequest
-	(*ResourceSpec)(nil),              // 101: taskqueue.ResourceSpec
-	(*WorkerEvent)(nil),               // 102: taskqueue.WorkerEvent
-	(*WorkerEventFilter)(nil),         // 103: taskqueue.WorkerEventFilter
-	(*WorkerEventRecord)(nil),         // 104: taskqueue.WorkerEventRecord
-	(*WorkerEventList)(nil),           // 105: taskqueue.WorkerEventList
-	(*WorkerEventId)(nil),             // 106: taskqueue.WorkerEventId
-	(*WorkerEventPruneFilter)(nil),    // 107: taskqueue.WorkerEventPruneFilter
-	(*WorkerEventPruneResult)(nil),    // 108: taskqueue.WorkerEventPruneResult
-	(*Provider)(nil),                  // 109: taskqueue.Provider
-	(*ProviderList)(nil),              // 110: taskqueue.ProviderList
-	(*Region)(nil),                    // 111: taskqueue.Region
-	(*RegionList)(nil),                // 112: taskqueue.RegionList
-	(*FlavorCreateRequest)(nil),       // 113: taskqueue.FlavorCreateRequest
-	(*FlavorId)(nil),                  // 114: taskqueue.FlavorId
-	(*TaskStatusCountsRequest)(nil),   // 115: taskqueue.TaskStatusCountsRequest
-	(*StatusCountEntry)(nil),          // 116: taskqueue.StatusCountEntry
-	(*TaskStatusCountsResponse)(nil),  // 117: taskqueue.TaskStatusCountsResponse
-	nil,                               // 118: taskqueue.TaskUpdateList.UpdatesEntry
-	nil,                               // 119: taskqueue.RcloneRemotes.RemotesEntry
-	nil,                               // 120: taskqueue.RcloneRemote.OptionsEntry
-	nil,                               // 121: taskqueue.GetWorkerStatsResponse.WorkerStatsEntry
-	(*emptypb.Empty)(nil),             // 122: google.protobuf.Empty
+	(*DownloadTemplateRequest)(nil),   // 101: taskqueue.DownloadTemplateRequest
+	(*UploadModuleRequest)(nil),       // 102: taskqueue.UploadModuleRequest
+	(*ModuleList)(nil),                // 103: taskqueue.ModuleList
+	(*DownloadModuleRequest)(nil),     // 104: taskqueue.DownloadModuleRequest
+	(*FileContent)(nil),               // 105: taskqueue.FileContent
+	(*ResourceSpec)(nil),              // 106: taskqueue.ResourceSpec
+	(*WorkerEvent)(nil),               // 107: taskqueue.WorkerEvent
+	(*WorkerEventFilter)(nil),         // 108: taskqueue.WorkerEventFilter
+	(*WorkerEventRecord)(nil),         // 109: taskqueue.WorkerEventRecord
+	(*WorkerEventList)(nil),           // 110: taskqueue.WorkerEventList
+	(*WorkerEventId)(nil),             // 111: taskqueue.WorkerEventId
+	(*WorkerEventPruneFilter)(nil),    // 112: taskqueue.WorkerEventPruneFilter
+	(*WorkerEventPruneResult)(nil),    // 113: taskqueue.WorkerEventPruneResult
+	(*Provider)(nil),                  // 114: taskqueue.Provider
+	(*ProviderList)(nil),              // 115: taskqueue.ProviderList
+	(*Region)(nil),                    // 116: taskqueue.Region
+	(*RegionList)(nil),                // 117: taskqueue.RegionList
+	(*FlavorCreateRequest)(nil),       // 118: taskqueue.FlavorCreateRequest
+	(*FlavorId)(nil),                  // 119: taskqueue.FlavorId
+	(*TaskStatusCountsRequest)(nil),   // 120: taskqueue.TaskStatusCountsRequest
+	(*StatusCountEntry)(nil),          // 121: taskqueue.StatusCountEntry
+	(*TaskStatusCountsResponse)(nil),  // 122: taskqueue.TaskStatusCountsResponse
+	nil,                               // 123: taskqueue.TaskUpdateList.UpdatesEntry
+	nil,                               // 124: taskqueue.RcloneRemotes.RemotesEntry
+	nil,                               // 125: taskqueue.RcloneRemote.OptionsEntry
+	nil,                               // 126: taskqueue.GetWorkerStatsResponse.WorkerStatsEntry
+	(*emptypb.Empty)(nil),             // 127: google.protobuf.Empty
 }
 var file_taskqueue_proto_depIdxs = []int32{
 	3,   // 0: taskqueue.TaskList.tasks:type_name -> taskqueue.Task
 	7,   // 1: taskqueue.WorkersList.workers:type_name -> taskqueue.Worker
-	118, // 2: taskqueue.TaskUpdateList.updates:type_name -> taskqueue.TaskUpdateList.UpdatesEntry
+	123, // 2: taskqueue.TaskUpdateList.updates:type_name -> taskqueue.TaskUpdateList.UpdatesEntry
 	3,   // 3: taskqueue.TaskListAndOther.tasks:type_name -> taskqueue.Task
 	11,  // 4: taskqueue.TaskListAndOther.updates:type_name -> taskqueue.TaskUpdateList
 	16,  // 5: taskqueue.LogChunkList.logs:type_name -> taskqueue.LogChunk
@@ -8755,8 +9046,8 @@ var file_taskqueue_proto_depIdxs = []int32{
 	33,  // 9: taskqueue.FlavorsList.flavors:type_name -> taskqueue.Flavor
 	36,  // 10: taskqueue.JobsList.jobs:type_name -> taskqueue.Job
 	40,  // 11: taskqueue.JobStatusResponse.statuses:type_name -> taskqueue.JobStatus
-	119, // 12: taskqueue.RcloneRemotes.remotes:type_name -> taskqueue.RcloneRemotes.RemotesEntry
-	120, // 13: taskqueue.RcloneRemote.options:type_name -> taskqueue.RcloneRemote.OptionsEntry
+	124, // 12: taskqueue.RcloneRemotes.remotes:type_name -> taskqueue.RcloneRemotes.RemotesEntry
+	125, // 13: taskqueue.RcloneRemote.options:type_name -> taskqueue.RcloneRemote.OptionsEntry
 	45,  // 14: taskqueue.DockerCredentials.credentials:type_name -> taskqueue.DockerCredential
 	53,  // 15: taskqueue.UsersList.users:type_name -> taskqueue.User
 	59,  // 16: taskqueue.RecruiterList.recruiters:type_name -> taskqueue.Recruiter
@@ -8771,14 +9062,14 @@ var file_taskqueue_proto_depIdxs = []int32{
 	80,  // 25: taskqueue.WorkerStats.disks:type_name -> taskqueue.DiskUsage
 	81,  // 26: taskqueue.WorkerStats.disk_io:type_name -> taskqueue.DiskIOStats
 	82,  // 27: taskqueue.WorkerStats.net_io:type_name -> taskqueue.NetIOStats
-	121, // 28: taskqueue.GetWorkerStatsResponse.worker_stats:type_name -> taskqueue.GetWorkerStatsResponse.WorkerStatsEntry
+	126, // 28: taskqueue.GetWorkerStatsResponse.worker_stats:type_name -> taskqueue.GetWorkerStatsResponse.WorkerStatsEntry
 	92,  // 29: taskqueue.TemplateList.templates:type_name -> taskqueue.Template
 	94,  // 30: taskqueue.TemplateRunList.runs:type_name -> taskqueue.TemplateRun
-	104, // 31: taskqueue.WorkerEventList.events:type_name -> taskqueue.WorkerEventRecord
-	109, // 32: taskqueue.ProviderList.providers:type_name -> taskqueue.Provider
-	111, // 33: taskqueue.RegionList.regions:type_name -> taskqueue.Region
-	116, // 34: taskqueue.TaskStatusCountsResponse.global_counts:type_name -> taskqueue.StatusCountEntry
-	116, // 35: taskqueue.TaskStatusCountsResponse.per_worker_counts:type_name -> taskqueue.StatusCountEntry
+	109, // 31: taskqueue.WorkerEventList.events:type_name -> taskqueue.WorkerEventRecord
+	114, // 32: taskqueue.ProviderList.providers:type_name -> taskqueue.Provider
+	116, // 33: taskqueue.RegionList.regions:type_name -> taskqueue.Region
+	121, // 34: taskqueue.TaskStatusCountsResponse.global_counts:type_name -> taskqueue.StatusCountEntry
+	121, // 35: taskqueue.TaskStatusCountsResponse.per_worker_counts:type_name -> taskqueue.StatusCountEntry
 	10,  // 36: taskqueue.TaskUpdateList.UpdatesEntry.value:type_name -> taskqueue.TaskUpdate
 	44,  // 37: taskqueue.RcloneRemotes.RemotesEntry.value:type_name -> taskqueue.RcloneRemote
 	79,  // 38: taskqueue.GetWorkerStatsResponse.WorkerStatsEntry.value:type_name -> taskqueue.WorkerStats
@@ -8805,16 +9096,16 @@ var file_taskqueue_proto_depIdxs = []int32{
 	37,  // 59: taskqueue.TaskQueue.DeleteJob:input_type -> taskqueue.JobId
 	42,  // 60: taskqueue.TaskQueue.UpdateJob:input_type -> taskqueue.JobUpdate
 	32,  // 61: taskqueue.TaskQueue.ListFlavors:input_type -> taskqueue.ListFlavorsRequest
-	122, // 62: taskqueue.TaskQueue.ListProviders:input_type -> google.protobuf.Empty
-	122, // 63: taskqueue.TaskQueue.ListRegions:input_type -> google.protobuf.Empty
-	113, // 64: taskqueue.TaskQueue.CreateFlavor:input_type -> taskqueue.FlavorCreateRequest
-	122, // 65: taskqueue.TaskQueue.GetRcloneConfig:input_type -> google.protobuf.Empty
-	122, // 66: taskqueue.TaskQueue.GetDockerCredentials:input_type -> google.protobuf.Empty
+	127, // 62: taskqueue.TaskQueue.ListProviders:input_type -> google.protobuf.Empty
+	127, // 63: taskqueue.TaskQueue.ListRegions:input_type -> google.protobuf.Empty
+	118, // 64: taskqueue.TaskQueue.CreateFlavor:input_type -> taskqueue.FlavorCreateRequest
+	127, // 65: taskqueue.TaskQueue.GetRcloneConfig:input_type -> google.protobuf.Empty
+	127, // 66: taskqueue.TaskQueue.GetDockerCredentials:input_type -> google.protobuf.Empty
 	47,  // 67: taskqueue.TaskQueue.Login:input_type -> taskqueue.LoginRequest
-	122, // 68: taskqueue.TaskQueue.GetCertificate:input_type -> google.protobuf.Empty
+	127, // 68: taskqueue.TaskQueue.GetCertificate:input_type -> google.protobuf.Empty
 	50,  // 69: taskqueue.TaskQueue.Logout:input_type -> taskqueue.Token
 	51,  // 70: taskqueue.TaskQueue.CreateUser:input_type -> taskqueue.CreateUserRequest
-	122, // 71: taskqueue.TaskQueue.ListUsers:input_type -> google.protobuf.Empty
+	127, // 71: taskqueue.TaskQueue.ListUsers:input_type -> google.protobuf.Empty
 	52,  // 72: taskqueue.TaskQueue.DeleteUser:input_type -> taskqueue.UserId
 	53,  // 73: taskqueue.TaskQueue.UpdateUser:input_type -> taskqueue.User
 	56,  // 74: taskqueue.TaskQueue.ChangePassword:input_type -> taskqueue.ChangePasswordRequest
@@ -8839,91 +9130,99 @@ var file_taskqueue_proto_depIdxs = []int32{
 	85,  // 93: taskqueue.TaskQueue.FetchList:input_type -> taskqueue.FetchListRequest
 	85,  // 94: taskqueue.TaskQueue.FetchInfo:input_type -> taskqueue.FetchListRequest
 	88,  // 95: taskqueue.TaskQueue.UploadTemplate:input_type -> taskqueue.UploadTemplateRequest
-	90,  // 96: taskqueue.TaskQueue.RunTemplate:input_type -> taskqueue.RunTemplateRequest
-	91,  // 97: taskqueue.TaskQueue.ListTemplates:input_type -> taskqueue.TemplateFilter
-	96,  // 98: taskqueue.TaskQueue.ListTemplateRuns:input_type -> taskqueue.TemplateRunFilter
-	97,  // 99: taskqueue.TaskQueue.UpdateTemplateRun:input_type -> taskqueue.UpdateTemplateRunRequest
-	100, // 100: taskqueue.TaskQueue.DeleteTemplateRun:input_type -> taskqueue.DeleteTemplateRunRequest
-	98,  // 101: taskqueue.TaskQueue.GetWorkspaceRoot:input_type -> taskqueue.WorkspaceRootRequest
-	98,  // 102: taskqueue.TaskQueue.GetResourceRoot:input_type -> taskqueue.WorkspaceRootRequest
-	101, // 103: taskqueue.TaskQueue.RegisterSpecifications:input_type -> taskqueue.ResourceSpec
-	102, // 104: taskqueue.TaskQueue.ReportWorkerEvent:input_type -> taskqueue.WorkerEvent
-	103, // 105: taskqueue.TaskQueue.ListWorkerEvents:input_type -> taskqueue.WorkerEventFilter
-	106, // 106: taskqueue.TaskQueue.DeleteWorkerEvent:input_type -> taskqueue.WorkerEventId
-	107, // 107: taskqueue.TaskQueue.PruneWorkerEvents:input_type -> taskqueue.WorkerEventPruneFilter
-	115, // 108: taskqueue.TaskQueue.GetTaskStatusCounts:input_type -> taskqueue.TaskStatusCountsRequest
-	0,   // 109: taskqueue.TaskQueue.SubmitTask:output_type -> taskqueue.TaskResponse
-	20,  // 110: taskqueue.TaskQueue.RegisterWorker:output_type -> taskqueue.WorkerId
-	12,  // 111: taskqueue.TaskQueue.PingAndTakeNewTasks:output_type -> taskqueue.TaskListAndOther
-	28,  // 112: taskqueue.TaskQueue.UpdateTaskStatus:output_type -> taskqueue.Ack
-	28,  // 113: taskqueue.TaskQueue.SendTaskLogs:output_type -> taskqueue.Ack
-	14,  // 114: taskqueue.TaskQueue.StreamTaskLogsOutput:output_type -> taskqueue.TaskLog
-	14,  // 115: taskqueue.TaskQueue.StreamTaskLogsErr:output_type -> taskqueue.TaskLog
-	17,  // 116: taskqueue.TaskQueue.GetLogsChunk:output_type -> taskqueue.LogChunkList
-	4,   // 117: taskqueue.TaskQueue.ListTasks:output_type -> taskqueue.TaskList
-	0,   // 118: taskqueue.TaskQueue.RetryTask:output_type -> taskqueue.TaskResponse
-	28,  // 119: taskqueue.TaskQueue.ForceRunTask:output_type -> taskqueue.Ack
-	8,   // 120: taskqueue.TaskQueue.ListWorkers:output_type -> taskqueue.WorkersList
-	26,  // 121: taskqueue.TaskQueue.CreateWorker:output_type -> taskqueue.WorkerIds
-	28,  // 122: taskqueue.TaskQueue.UpdateWorkerStatus:output_type -> taskqueue.Ack
-	37,  // 123: taskqueue.TaskQueue.DeleteWorker:output_type -> taskqueue.JobId
-	28,  // 124: taskqueue.TaskQueue.UpdateWorker:output_type -> taskqueue.Ack
-	28,  // 125: taskqueue.TaskQueue.UserUpdateWorker:output_type -> taskqueue.Ack
-	24,  // 126: taskqueue.TaskQueue.GetWorkerStatuses:output_type -> taskqueue.WorkerStatusResponse
-	38,  // 127: taskqueue.TaskQueue.ListJobs:output_type -> taskqueue.JobsList
-	41,  // 128: taskqueue.TaskQueue.GetJobStatuses:output_type -> taskqueue.JobStatusResponse
-	28,  // 129: taskqueue.TaskQueue.DeleteJob:output_type -> taskqueue.Ack
-	28,  // 130: taskqueue.TaskQueue.UpdateJob:output_type -> taskqueue.Ack
-	34,  // 131: taskqueue.TaskQueue.ListFlavors:output_type -> taskqueue.FlavorsList
-	110, // 132: taskqueue.TaskQueue.ListProviders:output_type -> taskqueue.ProviderList
-	112, // 133: taskqueue.TaskQueue.ListRegions:output_type -> taskqueue.RegionList
-	114, // 134: taskqueue.TaskQueue.CreateFlavor:output_type -> taskqueue.FlavorId
-	43,  // 135: taskqueue.TaskQueue.GetRcloneConfig:output_type -> taskqueue.RcloneRemotes
-	46,  // 136: taskqueue.TaskQueue.GetDockerCredentials:output_type -> taskqueue.DockerCredentials
-	48,  // 137: taskqueue.TaskQueue.Login:output_type -> taskqueue.LoginResponse
-	49,  // 138: taskqueue.TaskQueue.GetCertificate:output_type -> taskqueue.Certificate
-	28,  // 139: taskqueue.TaskQueue.Logout:output_type -> taskqueue.Ack
-	52,  // 140: taskqueue.TaskQueue.CreateUser:output_type -> taskqueue.UserId
-	55,  // 141: taskqueue.TaskQueue.ListUsers:output_type -> taskqueue.UsersList
-	28,  // 142: taskqueue.TaskQueue.DeleteUser:output_type -> taskqueue.Ack
-	28,  // 143: taskqueue.TaskQueue.UpdateUser:output_type -> taskqueue.Ack
-	28,  // 144: taskqueue.TaskQueue.ChangePassword:output_type -> taskqueue.Ack
-	28,  // 145: taskqueue.TaskQueue.AdminResetPassword:output_type -> taskqueue.Ack
-	61,  // 146: taskqueue.TaskQueue.ListRecruiters:output_type -> taskqueue.RecruiterList
-	28,  // 147: taskqueue.TaskQueue.CreateRecruiter:output_type -> taskqueue.Ack
-	28,  // 148: taskqueue.TaskQueue.UpdateRecruiter:output_type -> taskqueue.Ack
-	28,  // 149: taskqueue.TaskQueue.DeleteRecruiter:output_type -> taskqueue.Ack
-	66,  // 150: taskqueue.TaskQueue.ListWorkflows:output_type -> taskqueue.WorkflowList
-	63,  // 151: taskqueue.TaskQueue.CreateWorkflow:output_type -> taskqueue.WorkflowId
-	28,  // 152: taskqueue.TaskQueue.UpdateWorkflowStatus:output_type -> taskqueue.Ack
-	28,  // 153: taskqueue.TaskQueue.DeleteWorkflow:output_type -> taskqueue.Ack
-	28,  // 154: taskqueue.TaskQueue.DebugAssignTask:output_type -> taskqueue.Ack
-	28,  // 155: taskqueue.TaskQueue.DebugRecruitStep:output_type -> taskqueue.Ack
-	0,   // 156: taskqueue.TaskQueue.DebugRetryTask:output_type -> taskqueue.TaskResponse
-	18,  // 157: taskqueue.TaskQueue.ListDependentPendingTasks:output_type -> taskqueue.TaskIds
-	74,  // 158: taskqueue.TaskQueue.ListSteps:output_type -> taskqueue.StepList
-	71,  // 159: taskqueue.TaskQueue.CreateStep:output_type -> taskqueue.StepId
-	28,  // 160: taskqueue.TaskQueue.DeleteStep:output_type -> taskqueue.Ack
-	78,  // 161: taskqueue.TaskQueue.GetStepStats:output_type -> taskqueue.StepStatsResponse
-	84,  // 162: taskqueue.TaskQueue.GetWorkerStats:output_type -> taskqueue.GetWorkerStatsResponse
-	86,  // 163: taskqueue.TaskQueue.FetchList:output_type -> taskqueue.FetchListResponse
-	87,  // 164: taskqueue.TaskQueue.FetchInfo:output_type -> taskqueue.FetchInfoResponse
-	89,  // 165: taskqueue.TaskQueue.UploadTemplate:output_type -> taskqueue.UploadTemplateResponse
-	94,  // 166: taskqueue.TaskQueue.RunTemplate:output_type -> taskqueue.TemplateRun
-	93,  // 167: taskqueue.TaskQueue.ListTemplates:output_type -> taskqueue.TemplateList
-	95,  // 168: taskqueue.TaskQueue.ListTemplateRuns:output_type -> taskqueue.TemplateRunList
-	28,  // 169: taskqueue.TaskQueue.UpdateTemplateRun:output_type -> taskqueue.Ack
-	28,  // 170: taskqueue.TaskQueue.DeleteTemplateRun:output_type -> taskqueue.Ack
-	99,  // 171: taskqueue.TaskQueue.GetWorkspaceRoot:output_type -> taskqueue.WorkspaceRootResponse
-	99,  // 172: taskqueue.TaskQueue.GetResourceRoot:output_type -> taskqueue.WorkspaceRootResponse
-	28,  // 173: taskqueue.TaskQueue.RegisterSpecifications:output_type -> taskqueue.Ack
-	28,  // 174: taskqueue.TaskQueue.ReportWorkerEvent:output_type -> taskqueue.Ack
-	105, // 175: taskqueue.TaskQueue.ListWorkerEvents:output_type -> taskqueue.WorkerEventList
-	28,  // 176: taskqueue.TaskQueue.DeleteWorkerEvent:output_type -> taskqueue.Ack
-	108, // 177: taskqueue.TaskQueue.PruneWorkerEvents:output_type -> taskqueue.WorkerEventPruneResult
-	117, // 178: taskqueue.TaskQueue.GetTaskStatusCounts:output_type -> taskqueue.TaskStatusCountsResponse
-	109, // [109:179] is the sub-list for method output_type
-	39,  // [39:109] is the sub-list for method input_type
+	101, // 96: taskqueue.TaskQueue.DownloadTemplate:input_type -> taskqueue.DownloadTemplateRequest
+	90,  // 97: taskqueue.TaskQueue.RunTemplate:input_type -> taskqueue.RunTemplateRequest
+	91,  // 98: taskqueue.TaskQueue.ListTemplates:input_type -> taskqueue.TemplateFilter
+	96,  // 99: taskqueue.TaskQueue.ListTemplateRuns:input_type -> taskqueue.TemplateRunFilter
+	97,  // 100: taskqueue.TaskQueue.UpdateTemplateRun:input_type -> taskqueue.UpdateTemplateRunRequest
+	100, // 101: taskqueue.TaskQueue.DeleteTemplateRun:input_type -> taskqueue.DeleteTemplateRunRequest
+	102, // 102: taskqueue.TaskQueue.UploadModule:input_type -> taskqueue.UploadModuleRequest
+	127, // 103: taskqueue.TaskQueue.ListModules:input_type -> google.protobuf.Empty
+	104, // 104: taskqueue.TaskQueue.DownloadModule:input_type -> taskqueue.DownloadModuleRequest
+	98,  // 105: taskqueue.TaskQueue.GetWorkspaceRoot:input_type -> taskqueue.WorkspaceRootRequest
+	98,  // 106: taskqueue.TaskQueue.GetResourceRoot:input_type -> taskqueue.WorkspaceRootRequest
+	106, // 107: taskqueue.TaskQueue.RegisterSpecifications:input_type -> taskqueue.ResourceSpec
+	107, // 108: taskqueue.TaskQueue.ReportWorkerEvent:input_type -> taskqueue.WorkerEvent
+	108, // 109: taskqueue.TaskQueue.ListWorkerEvents:input_type -> taskqueue.WorkerEventFilter
+	111, // 110: taskqueue.TaskQueue.DeleteWorkerEvent:input_type -> taskqueue.WorkerEventId
+	112, // 111: taskqueue.TaskQueue.PruneWorkerEvents:input_type -> taskqueue.WorkerEventPruneFilter
+	120, // 112: taskqueue.TaskQueue.GetTaskStatusCounts:input_type -> taskqueue.TaskStatusCountsRequest
+	0,   // 113: taskqueue.TaskQueue.SubmitTask:output_type -> taskqueue.TaskResponse
+	20,  // 114: taskqueue.TaskQueue.RegisterWorker:output_type -> taskqueue.WorkerId
+	12,  // 115: taskqueue.TaskQueue.PingAndTakeNewTasks:output_type -> taskqueue.TaskListAndOther
+	28,  // 116: taskqueue.TaskQueue.UpdateTaskStatus:output_type -> taskqueue.Ack
+	28,  // 117: taskqueue.TaskQueue.SendTaskLogs:output_type -> taskqueue.Ack
+	14,  // 118: taskqueue.TaskQueue.StreamTaskLogsOutput:output_type -> taskqueue.TaskLog
+	14,  // 119: taskqueue.TaskQueue.StreamTaskLogsErr:output_type -> taskqueue.TaskLog
+	17,  // 120: taskqueue.TaskQueue.GetLogsChunk:output_type -> taskqueue.LogChunkList
+	4,   // 121: taskqueue.TaskQueue.ListTasks:output_type -> taskqueue.TaskList
+	0,   // 122: taskqueue.TaskQueue.RetryTask:output_type -> taskqueue.TaskResponse
+	28,  // 123: taskqueue.TaskQueue.ForceRunTask:output_type -> taskqueue.Ack
+	8,   // 124: taskqueue.TaskQueue.ListWorkers:output_type -> taskqueue.WorkersList
+	26,  // 125: taskqueue.TaskQueue.CreateWorker:output_type -> taskqueue.WorkerIds
+	28,  // 126: taskqueue.TaskQueue.UpdateWorkerStatus:output_type -> taskqueue.Ack
+	37,  // 127: taskqueue.TaskQueue.DeleteWorker:output_type -> taskqueue.JobId
+	28,  // 128: taskqueue.TaskQueue.UpdateWorker:output_type -> taskqueue.Ack
+	28,  // 129: taskqueue.TaskQueue.UserUpdateWorker:output_type -> taskqueue.Ack
+	24,  // 130: taskqueue.TaskQueue.GetWorkerStatuses:output_type -> taskqueue.WorkerStatusResponse
+	38,  // 131: taskqueue.TaskQueue.ListJobs:output_type -> taskqueue.JobsList
+	41,  // 132: taskqueue.TaskQueue.GetJobStatuses:output_type -> taskqueue.JobStatusResponse
+	28,  // 133: taskqueue.TaskQueue.DeleteJob:output_type -> taskqueue.Ack
+	28,  // 134: taskqueue.TaskQueue.UpdateJob:output_type -> taskqueue.Ack
+	34,  // 135: taskqueue.TaskQueue.ListFlavors:output_type -> taskqueue.FlavorsList
+	115, // 136: taskqueue.TaskQueue.ListProviders:output_type -> taskqueue.ProviderList
+	117, // 137: taskqueue.TaskQueue.ListRegions:output_type -> taskqueue.RegionList
+	119, // 138: taskqueue.TaskQueue.CreateFlavor:output_type -> taskqueue.FlavorId
+	43,  // 139: taskqueue.TaskQueue.GetRcloneConfig:output_type -> taskqueue.RcloneRemotes
+	46,  // 140: taskqueue.TaskQueue.GetDockerCredentials:output_type -> taskqueue.DockerCredentials
+	48,  // 141: taskqueue.TaskQueue.Login:output_type -> taskqueue.LoginResponse
+	49,  // 142: taskqueue.TaskQueue.GetCertificate:output_type -> taskqueue.Certificate
+	28,  // 143: taskqueue.TaskQueue.Logout:output_type -> taskqueue.Ack
+	52,  // 144: taskqueue.TaskQueue.CreateUser:output_type -> taskqueue.UserId
+	55,  // 145: taskqueue.TaskQueue.ListUsers:output_type -> taskqueue.UsersList
+	28,  // 146: taskqueue.TaskQueue.DeleteUser:output_type -> taskqueue.Ack
+	28,  // 147: taskqueue.TaskQueue.UpdateUser:output_type -> taskqueue.Ack
+	28,  // 148: taskqueue.TaskQueue.ChangePassword:output_type -> taskqueue.Ack
+	28,  // 149: taskqueue.TaskQueue.AdminResetPassword:output_type -> taskqueue.Ack
+	61,  // 150: taskqueue.TaskQueue.ListRecruiters:output_type -> taskqueue.RecruiterList
+	28,  // 151: taskqueue.TaskQueue.CreateRecruiter:output_type -> taskqueue.Ack
+	28,  // 152: taskqueue.TaskQueue.UpdateRecruiter:output_type -> taskqueue.Ack
+	28,  // 153: taskqueue.TaskQueue.DeleteRecruiter:output_type -> taskqueue.Ack
+	66,  // 154: taskqueue.TaskQueue.ListWorkflows:output_type -> taskqueue.WorkflowList
+	63,  // 155: taskqueue.TaskQueue.CreateWorkflow:output_type -> taskqueue.WorkflowId
+	28,  // 156: taskqueue.TaskQueue.UpdateWorkflowStatus:output_type -> taskqueue.Ack
+	28,  // 157: taskqueue.TaskQueue.DeleteWorkflow:output_type -> taskqueue.Ack
+	28,  // 158: taskqueue.TaskQueue.DebugAssignTask:output_type -> taskqueue.Ack
+	28,  // 159: taskqueue.TaskQueue.DebugRecruitStep:output_type -> taskqueue.Ack
+	0,   // 160: taskqueue.TaskQueue.DebugRetryTask:output_type -> taskqueue.TaskResponse
+	18,  // 161: taskqueue.TaskQueue.ListDependentPendingTasks:output_type -> taskqueue.TaskIds
+	74,  // 162: taskqueue.TaskQueue.ListSteps:output_type -> taskqueue.StepList
+	71,  // 163: taskqueue.TaskQueue.CreateStep:output_type -> taskqueue.StepId
+	28,  // 164: taskqueue.TaskQueue.DeleteStep:output_type -> taskqueue.Ack
+	78,  // 165: taskqueue.TaskQueue.GetStepStats:output_type -> taskqueue.StepStatsResponse
+	84,  // 166: taskqueue.TaskQueue.GetWorkerStats:output_type -> taskqueue.GetWorkerStatsResponse
+	86,  // 167: taskqueue.TaskQueue.FetchList:output_type -> taskqueue.FetchListResponse
+	87,  // 168: taskqueue.TaskQueue.FetchInfo:output_type -> taskqueue.FetchInfoResponse
+	89,  // 169: taskqueue.TaskQueue.UploadTemplate:output_type -> taskqueue.UploadTemplateResponse
+	105, // 170: taskqueue.TaskQueue.DownloadTemplate:output_type -> taskqueue.FileContent
+	94,  // 171: taskqueue.TaskQueue.RunTemplate:output_type -> taskqueue.TemplateRun
+	93,  // 172: taskqueue.TaskQueue.ListTemplates:output_type -> taskqueue.TemplateList
+	95,  // 173: taskqueue.TaskQueue.ListTemplateRuns:output_type -> taskqueue.TemplateRunList
+	28,  // 174: taskqueue.TaskQueue.UpdateTemplateRun:output_type -> taskqueue.Ack
+	28,  // 175: taskqueue.TaskQueue.DeleteTemplateRun:output_type -> taskqueue.Ack
+	28,  // 176: taskqueue.TaskQueue.UploadModule:output_type -> taskqueue.Ack
+	103, // 177: taskqueue.TaskQueue.ListModules:output_type -> taskqueue.ModuleList
+	105, // 178: taskqueue.TaskQueue.DownloadModule:output_type -> taskqueue.FileContent
+	99,  // 179: taskqueue.TaskQueue.GetWorkspaceRoot:output_type -> taskqueue.WorkspaceRootResponse
+	99,  // 180: taskqueue.TaskQueue.GetResourceRoot:output_type -> taskqueue.WorkspaceRootResponse
+	28,  // 181: taskqueue.TaskQueue.RegisterSpecifications:output_type -> taskqueue.Ack
+	28,  // 182: taskqueue.TaskQueue.ReportWorkerEvent:output_type -> taskqueue.Ack
+	110, // 183: taskqueue.TaskQueue.ListWorkerEvents:output_type -> taskqueue.WorkerEventList
+	28,  // 184: taskqueue.TaskQueue.DeleteWorkerEvent:output_type -> taskqueue.Ack
+	113, // 185: taskqueue.TaskQueue.PruneWorkerEvents:output_type -> taskqueue.WorkerEventPruneResult
+	122, // 186: taskqueue.TaskQueue.GetTaskStatusCounts:output_type -> taskqueue.TaskStatusCountsResponse
+	113, // [113:187] is the sub-list for method output_type
+	39,  // [39:113] is the sub-list for method input_type
 	39,  // [39:39] is the sub-list for extension type_name
 	39,  // [39:39] is the sub-list for extension extendee
 	0,   // [0:39] is the sub-list for field type_name
@@ -8967,20 +9266,21 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[94].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[96].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[97].OneofWrappers = []any{}
-	file_taskqueue_proto_msgTypes[102].OneofWrappers = []any{}
-	file_taskqueue_proto_msgTypes[103].OneofWrappers = []any{}
-	file_taskqueue_proto_msgTypes[104].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[101].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[107].OneofWrappers = []any{}
-	file_taskqueue_proto_msgTypes[113].OneofWrappers = []any{}
-	file_taskqueue_proto_msgTypes[115].OneofWrappers = []any{}
-	file_taskqueue_proto_msgTypes[116].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[108].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[109].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[112].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[118].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[120].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[121].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taskqueue_proto_rawDesc), len(file_taskqueue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   122,
+			NumMessages:   127,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

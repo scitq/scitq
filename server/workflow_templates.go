@@ -21,6 +21,7 @@ import (
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/server/config"
 	"google.golang.org/protobuf/proto"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 func (s *taskQueueServer) UpdateTemplateRun(ctx context.Context, req *pb.UpdateTemplateRunRequest) (*pb.Ack, error) {
@@ -869,4 +870,110 @@ func (s *taskQueueServer) DeleteTemplateRun(ctx context.Context, req *pb.DeleteT
 	}
 
 	return &pb.Ack{Success: true}, nil
+}
+
+// DownloadTemplate returns the script content of a template.
+func (s *taskQueueServer) DownloadTemplate(ctx context.Context, req *pb.DownloadTemplateRequest) (*pb.FileContent, error) {
+	var scriptPath string
+
+	if req.WorkflowTemplateId != nil && *req.WorkflowTemplateId != 0 {
+		err := s.db.QueryRowContext(ctx,
+			`SELECT script_path FROM workflow_template WHERE workflow_template_id = $1`,
+			*req.WorkflowTemplateId).Scan(&scriptPath)
+		if err != nil {
+			return nil, fmt.Errorf("template not found: %w", err)
+		}
+	} else if req.Name != nil {
+		query := `SELECT script_path FROM workflow_template WHERE name = $1`
+		args := []any{*req.Name}
+		if req.Version != nil && *req.Version != "latest" {
+			query += ` AND version = $2`
+			args = append(args, *req.Version)
+		} else {
+			query += ` ORDER BY uploaded_at DESC LIMIT 1`
+		}
+		err := s.db.QueryRowContext(ctx, query, args...).Scan(&scriptPath)
+		if err != nil {
+			return nil, fmt.Errorf("template not found: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("either workflow_template_id or name is required")
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read template file: %w", err)
+	}
+	return &pb.FileContent{
+		Filename: filepath.Base(scriptPath),
+		Content:  content,
+	}, nil
+}
+
+// UploadModule stores a private module YAML file in the modules directory.
+func (s *taskQueueServer) UploadModule(ctx context.Context, req *pb.UploadModuleRequest) (*pb.Ack, error) {
+	if req.Filename == "" {
+		return nil, fmt.Errorf("filename is required")
+	}
+	if filepath.Base(req.Filename) != req.Filename {
+		return nil, fmt.Errorf("filename must not contain directory separators")
+	}
+
+	modulesDir := filepath.Join(s.cfg.Scitq.ScriptRoot, "modules")
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create modules directory: %w", err)
+	}
+
+	targetPath := filepath.Join(modulesDir, req.Filename)
+	if !req.Force {
+		if _, err := os.Stat(targetPath); err == nil {
+			return nil, fmt.Errorf("module '%s' already exists (use --force to overwrite)", req.Filename)
+		}
+	}
+
+	if err := os.WriteFile(targetPath, req.Content, 0o644); err != nil {
+		return nil, fmt.Errorf("failed to write module file: %w", err)
+	}
+
+	log.Printf("📦 Module uploaded: %s (%d bytes)", req.Filename, len(req.Content))
+	return &pb.Ack{Success: true}, nil
+}
+
+// ListModules returns the filenames of all private modules on the server.
+func (s *taskQueueServer) ListModules(ctx context.Context, _ *emptypb.Empty) (*pb.ModuleList, error) {
+	modulesDir := filepath.Join(s.cfg.Scitq.ScriptRoot, "modules")
+	entries, err := os.ReadDir(modulesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &pb.ModuleList{}, nil
+		}
+		return nil, fmt.Errorf("failed to list modules: %w", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return &pb.ModuleList{Modules: names}, nil
+}
+
+// DownloadModule returns the content of a private module file.
+func (s *taskQueueServer) DownloadModule(ctx context.Context, req *pb.DownloadModuleRequest) (*pb.FileContent, error) {
+	if req.Filename == "" {
+		return nil, fmt.Errorf("filename is required")
+	}
+	if filepath.Base(req.Filename) != req.Filename {
+		return nil, fmt.Errorf("filename must not contain directory separators")
+	}
+
+	modulePath := filepath.Join(s.cfg.Scitq.ScriptRoot, "modules", req.Filename)
+	content, err := os.ReadFile(modulePath)
+	if err != nil {
+		return nil, fmt.Errorf("module '%s' not found: %w", req.Filename, err)
+	}
+	return &pb.FileContent{
+		Filename: req.Filename,
+		Content:  content,
+	}, nil
 }

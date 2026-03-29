@@ -65,11 +65,16 @@ service TaskQueue {
     rpc FetchInfo (FetchListRequest) returns (FetchInfoResponse);
     // Template system
     rpc UploadTemplate(UploadTemplateRequest) returns (UploadTemplateResponse);
+    rpc DownloadTemplate(DownloadTemplateRequest) returns (FileContent);
     rpc RunTemplate(RunTemplateRequest) returns (TemplateRun);
     rpc ListTemplates(TemplateFilter) returns (TemplateList);
     rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
     rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
     rpc DeleteTemplateRun(DeleteTemplateRunRequest) returns (Ack);
+    // Module system
+    rpc UploadModule(UploadModuleRequest) returns (Ack);
+    rpc ListModules(google.protobuf.Empty) returns (ModuleList);
+    rpc DownloadModule(DownloadModuleRequest) returns (FileContent);
     rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
     rpc GetResourceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
     rpc RegisterSpecifications(ResourceSpec) returns (Ack);
@@ -756,6 +761,33 @@ message WorkspaceRootResponse {
 
 message DeleteTemplateRunRequest {
   int32 template_run_id = 1;
+}
+
+// Template download
+message DownloadTemplateRequest {
+  optional int32 workflow_template_id = 1;
+  optional string name = 2;
+  optional string version = 3;
+}
+
+// Module management
+message UploadModuleRequest {
+  string filename = 1;
+  bytes content = 2;
+  bool force = 3;
+}
+
+message ModuleList {
+  repeated string modules = 1;
+}
+
+message DownloadModuleRequest {
+  string filename = 1;
+}
+
+message FileContent {
+  string filename = 1;
+  bytes content = 2;
 }
 
 message ResourceSpec {

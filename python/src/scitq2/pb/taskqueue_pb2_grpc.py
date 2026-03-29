@@ -320,6 +320,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.UploadTemplateRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.UploadTemplateResponse.FromString,
                 _registered_method=True)
+        self.DownloadTemplate = channel.unary_unary(
+                '/taskqueue.TaskQueue/DownloadTemplate',
+                request_serializer=taskqueue__pb2.DownloadTemplateRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.FileContent.FromString,
+                _registered_method=True)
         self.RunTemplate = channel.unary_unary(
                 '/taskqueue.TaskQueue/RunTemplate',
                 request_serializer=taskqueue__pb2.RunTemplateRequest.SerializeToString,
@@ -344,6 +349,21 @@ class TaskQueueStub(object):
                 '/taskqueue.TaskQueue/DeleteTemplateRun',
                 request_serializer=taskqueue__pb2.DeleteTemplateRunRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
+        self.UploadModule = channel.unary_unary(
+                '/taskqueue.TaskQueue/UploadModule',
+                request_serializer=taskqueue__pb2.UploadModuleRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
+        self.ListModules = channel.unary_unary(
+                '/taskqueue.TaskQueue/ListModules',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=taskqueue__pb2.ModuleList.FromString,
+                _registered_method=True)
+        self.DownloadModule = channel.unary_unary(
+                '/taskqueue.TaskQueue/DownloadModule',
+                request_serializer=taskqueue__pb2.DownloadModuleRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.FileContent.FromString,
                 _registered_method=True)
         self.GetWorkspaceRoot = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetWorkspaceRoot',
@@ -734,6 +754,12 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DownloadTemplate(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RunTemplate(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -759,6 +785,25 @@ class TaskQueueServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def DeleteTemplateRun(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UploadModule(self, request, context):
+        """Module system
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListModules(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DownloadModule(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1101,6 +1146,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     request_deserializer=taskqueue__pb2.UploadTemplateRequest.FromString,
                     response_serializer=taskqueue__pb2.UploadTemplateResponse.SerializeToString,
             ),
+            'DownloadTemplate': grpc.unary_unary_rpc_method_handler(
+                    servicer.DownloadTemplate,
+                    request_deserializer=taskqueue__pb2.DownloadTemplateRequest.FromString,
+                    response_serializer=taskqueue__pb2.FileContent.SerializeToString,
+            ),
             'RunTemplate': grpc.unary_unary_rpc_method_handler(
                     servicer.RunTemplate,
                     request_deserializer=taskqueue__pb2.RunTemplateRequest.FromString,
@@ -1125,6 +1175,21 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.DeleteTemplateRun,
                     request_deserializer=taskqueue__pb2.DeleteTemplateRunRequest.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'UploadModule': grpc.unary_unary_rpc_method_handler(
+                    servicer.UploadModule,
+                    request_deserializer=taskqueue__pb2.UploadModuleRequest.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'ListModules': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListModules,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=taskqueue__pb2.ModuleList.SerializeToString,
+            ),
+            'DownloadModule': grpc.unary_unary_rpc_method_handler(
+                    servicer.DownloadModule,
+                    request_deserializer=taskqueue__pb2.DownloadModuleRequest.FromString,
+                    response_serializer=taskqueue__pb2.FileContent.SerializeToString,
             ),
             'GetWorkspaceRoot': grpc.unary_unary_rpc_method_handler(
                     servicer.GetWorkspaceRoot,
@@ -2717,6 +2782,33 @@ class TaskQueue(object):
             _registered_method=True)
 
     @staticmethod
+    def DownloadTemplate(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/DownloadTemplate',
+            taskqueue__pb2.DownloadTemplateRequest.SerializeToString,
+            taskqueue__pb2.FileContent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def RunTemplate(request,
             target,
             options=(),
@@ -2841,6 +2933,87 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/DeleteTemplateRun',
             taskqueue__pb2.DeleteTemplateRunRequest.SerializeToString,
             taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UploadModule(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/UploadModule',
+            taskqueue__pb2.UploadModuleRequest.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListModules(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ListModules',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            taskqueue__pb2.ModuleList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DownloadModule(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/DownloadModule',
+            taskqueue__pb2.DownloadModuleRequest.SerializeToString,
+            taskqueue__pb2.FileContent.FromString,
             options,
             channel_credentials,
             insecure,

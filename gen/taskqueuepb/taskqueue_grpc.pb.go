@@ -77,11 +77,15 @@ const (
 	TaskQueue_FetchList_FullMethodName                 = "/taskqueue.TaskQueue/FetchList"
 	TaskQueue_FetchInfo_FullMethodName                 = "/taskqueue.TaskQueue/FetchInfo"
 	TaskQueue_UploadTemplate_FullMethodName            = "/taskqueue.TaskQueue/UploadTemplate"
+	TaskQueue_DownloadTemplate_FullMethodName          = "/taskqueue.TaskQueue/DownloadTemplate"
 	TaskQueue_RunTemplate_FullMethodName               = "/taskqueue.TaskQueue/RunTemplate"
 	TaskQueue_ListTemplates_FullMethodName             = "/taskqueue.TaskQueue/ListTemplates"
 	TaskQueue_ListTemplateRuns_FullMethodName          = "/taskqueue.TaskQueue/ListTemplateRuns"
 	TaskQueue_UpdateTemplateRun_FullMethodName         = "/taskqueue.TaskQueue/UpdateTemplateRun"
 	TaskQueue_DeleteTemplateRun_FullMethodName         = "/taskqueue.TaskQueue/DeleteTemplateRun"
+	TaskQueue_UploadModule_FullMethodName              = "/taskqueue.TaskQueue/UploadModule"
+	TaskQueue_ListModules_FullMethodName               = "/taskqueue.TaskQueue/ListModules"
+	TaskQueue_DownloadModule_FullMethodName            = "/taskqueue.TaskQueue/DownloadModule"
 	TaskQueue_GetWorkspaceRoot_FullMethodName          = "/taskqueue.TaskQueue/GetWorkspaceRoot"
 	TaskQueue_GetResourceRoot_FullMethodName           = "/taskqueue.TaskQueue/GetResourceRoot"
 	TaskQueue_RegisterSpecifications_FullMethodName    = "/taskqueue.TaskQueue/RegisterSpecifications"
@@ -154,11 +158,16 @@ type TaskQueueClient interface {
 	FetchInfo(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchInfoResponse, error)
 	// Template system
 	UploadTemplate(ctx context.Context, in *UploadTemplateRequest, opts ...grpc.CallOption) (*UploadTemplateResponse, error)
+	DownloadTemplate(ctx context.Context, in *DownloadTemplateRequest, opts ...grpc.CallOption) (*FileContent, error)
 	RunTemplate(ctx context.Context, in *RunTemplateRequest, opts ...grpc.CallOption) (*TemplateRun, error)
 	ListTemplates(ctx context.Context, in *TemplateFilter, opts ...grpc.CallOption) (*TemplateList, error)
 	ListTemplateRuns(ctx context.Context, in *TemplateRunFilter, opts ...grpc.CallOption) (*TemplateRunList, error)
 	UpdateTemplateRun(ctx context.Context, in *UpdateTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
 	DeleteTemplateRun(ctx context.Context, in *DeleteTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
+	// Module system
+	UploadModule(ctx context.Context, in *UploadModuleRequest, opts ...grpc.CallOption) (*Ack, error)
+	ListModules(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ModuleList, error)
+	DownloadModule(ctx context.Context, in *DownloadModuleRequest, opts ...grpc.CallOption) (*FileContent, error)
 	GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
 	GetResourceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
 	RegisterSpecifications(ctx context.Context, in *ResourceSpec, opts ...grpc.CallOption) (*Ack, error)
@@ -769,6 +778,16 @@ func (c *taskQueueClient) UploadTemplate(ctx context.Context, in *UploadTemplate
 	return out, nil
 }
 
+func (c *taskQueueClient) DownloadTemplate(ctx context.Context, in *DownloadTemplateRequest, opts ...grpc.CallOption) (*FileContent, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FileContent)
+	err := c.cc.Invoke(ctx, TaskQueue_DownloadTemplate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) RunTemplate(ctx context.Context, in *RunTemplateRequest, opts ...grpc.CallOption) (*TemplateRun, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TemplateRun)
@@ -813,6 +832,36 @@ func (c *taskQueueClient) DeleteTemplateRun(ctx context.Context, in *DeleteTempl
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Ack)
 	err := c.cc.Invoke(ctx, TaskQueue_DeleteTemplateRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) UploadModule(ctx context.Context, in *UploadModuleRequest, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_UploadModule_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ListModules(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ModuleList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ModuleList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListModules_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) DownloadModule(ctx context.Context, in *DownloadModuleRequest, opts ...grpc.CallOption) (*FileContent, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FileContent)
+	err := c.cc.Invoke(ctx, TaskQueue_DownloadModule_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -961,11 +1010,16 @@ type TaskQueueServer interface {
 	FetchInfo(context.Context, *FetchListRequest) (*FetchInfoResponse, error)
 	// Template system
 	UploadTemplate(context.Context, *UploadTemplateRequest) (*UploadTemplateResponse, error)
+	DownloadTemplate(context.Context, *DownloadTemplateRequest) (*FileContent, error)
 	RunTemplate(context.Context, *RunTemplateRequest) (*TemplateRun, error)
 	ListTemplates(context.Context, *TemplateFilter) (*TemplateList, error)
 	ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error)
 	UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error)
 	DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error)
+	// Module system
+	UploadModule(context.Context, *UploadModuleRequest) (*Ack, error)
+	ListModules(context.Context, *emptypb.Empty) (*ModuleList, error)
+	DownloadModule(context.Context, *DownloadModuleRequest) (*FileContent, error)
 	GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
 	GetResourceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
 	RegisterSpecifications(context.Context, *ResourceSpec) (*Ack, error)
@@ -1156,6 +1210,9 @@ func (UnimplementedTaskQueueServer) FetchInfo(context.Context, *FetchListRequest
 func (UnimplementedTaskQueueServer) UploadTemplate(context.Context, *UploadTemplateRequest) (*UploadTemplateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UploadTemplate not implemented")
 }
+func (UnimplementedTaskQueueServer) DownloadTemplate(context.Context, *DownloadTemplateRequest) (*FileContent, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DownloadTemplate not implemented")
+}
 func (UnimplementedTaskQueueServer) RunTemplate(context.Context, *RunTemplateRequest) (*TemplateRun, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunTemplate not implemented")
 }
@@ -1170,6 +1227,15 @@ func (UnimplementedTaskQueueServer) UpdateTemplateRun(context.Context, *UpdateTe
 }
 func (UnimplementedTaskQueueServer) DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTemplateRun not implemented")
+}
+func (UnimplementedTaskQueueServer) UploadModule(context.Context, *UploadModuleRequest) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UploadModule not implemented")
+}
+func (UnimplementedTaskQueueServer) ListModules(context.Context, *emptypb.Empty) (*ModuleList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListModules not implemented")
+}
+func (UnimplementedTaskQueueServer) DownloadModule(context.Context, *DownloadModuleRequest) (*FileContent, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DownloadModule not implemented")
 }
 func (UnimplementedTaskQueueServer) GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceRoot not implemented")
@@ -2217,6 +2283,24 @@ func _TaskQueue_UploadTemplate_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_DownloadTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DownloadTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DownloadTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DownloadTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DownloadTemplate(ctx, req.(*DownloadTemplateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_RunTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RunTemplateRequest)
 	if err := dec(in); err != nil {
@@ -2303,6 +2387,60 @@ func _TaskQueue_DeleteTemplateRun_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).DeleteTemplateRun(ctx, req.(*DeleteTemplateRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_UploadModule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UploadModuleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).UploadModule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_UploadModule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).UploadModule(ctx, req.(*UploadModuleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ListModules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListModules(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListModules_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListModules(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_DownloadModule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DownloadModuleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DownloadModule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DownloadModule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DownloadModule(ctx, req.(*DownloadModuleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2675,6 +2813,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TaskQueue_UploadTemplate_Handler,
 		},
 		{
+			MethodName: "DownloadTemplate",
+			Handler:    _TaskQueue_DownloadTemplate_Handler,
+		},
+		{
 			MethodName: "RunTemplate",
 			Handler:    _TaskQueue_RunTemplate_Handler,
 		},
@@ -2693,6 +2835,18 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteTemplateRun",
 			Handler:    _TaskQueue_DeleteTemplateRun_Handler,
+		},
+		{
+			MethodName: "UploadModule",
+			Handler:    _TaskQueue_UploadModule_Handler,
+		},
+		{
+			MethodName: "ListModules",
+			Handler:    _TaskQueue_ListModules_Handler,
+		},
+		{
+			MethodName: "DownloadModule",
+			Handler:    _TaskQueue_DownloadModule_Handler,
 		},
 		{
 			MethodName: "GetWorkspaceRoot",

@@ -255,7 +255,29 @@ type Attr struct {
 			Name       *string `arg:"--name" help:"Name of the template to show (either name or id is required)"`
 			Version    *string `arg:"--version" help:"Optional version (default to latest if omitted)"`
 		} `arg:"subcommand:detail" help:"Show a template's param JSON and metadata"`
+
+		Download *struct {
+			TemplateId *int32  `arg:"--id" help:"Template ID to download"`
+			Name       *string `arg:"--name" help:"Name of the template to download"`
+			Version    *string `arg:"--version" help:"Optional version (default to latest)"`
+			Output     *string `arg:"--output,-o" help:"Output file path (default: stdout)"`
+		} `arg:"subcommand:download" help:"Download a template script"`
 	} `arg:"subcommand:template" help:"Manage workflow templates"`
+
+	// Module commands
+	Module *struct {
+		Upload *struct {
+			Path  string `arg:"--path,required" help:"Path to the module YAML file"`
+			Force bool   `arg:"--force" help:"Overwrite existing module"`
+		} `arg:"subcommand:upload" help:"Upload a private module to the server"`
+
+		List *struct{} `arg:"subcommand:list" help:"List private modules on the server"`
+
+		Download *struct {
+			Name   string  `arg:"--name,required" help:"Module filename to download"`
+			Output *string `arg:"--output,-o" help:"Output file path (default: stdout)"`
+		} `arg:"subcommand:download" help:"Download a private module"`
+	} `arg:"subcommand:module" help:"Manage private YAML modules"`
 
 	// (Workflow) Template run commands
 	Run *struct {
@@ -1448,6 +1470,98 @@ func (c *CLI) RunDelete() error {
 	return nil
 }
 
+func (c *CLI) TemplateDownload() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.DownloadTemplateRequest{
+		WorkflowTemplateId: c.Attr.Template.Download.TemplateId,
+		Name:               c.Attr.Template.Download.Name,
+		Version:            c.Attr.Template.Download.Version,
+	}
+
+	resp, err := c.QC.Client.DownloadTemplate(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to download template: %w", err)
+	}
+
+	if c.Attr.Template.Download.Output != nil {
+		if err := os.WriteFile(*c.Attr.Template.Download.Output, resp.Content, 0644); err != nil {
+			return fmt.Errorf("failed to write file: %w", err)
+		}
+		fmt.Printf("📥 Template saved to %s\n", *c.Attr.Template.Download.Output)
+	} else {
+		os.Stdout.Write(resp.Content)
+	}
+	return nil
+}
+
+func (c *CLI) ModuleUpload() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	content, err := os.ReadFile(c.Attr.Module.Upload.Path)
+	if err != nil {
+		return fmt.Errorf("failed to read module file: %w", err)
+	}
+	filename := filepath.Base(c.Attr.Module.Upload.Path)
+
+	_, err = c.QC.Client.UploadModule(ctx, &pb.UploadModuleRequest{
+		Filename: filename,
+		Content:  content,
+		Force:    c.Attr.Module.Upload.Force,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload module: %w", err)
+	}
+
+	fmt.Printf("📦 Module '%s' uploaded (%d bytes)\n", filename, len(content))
+	return nil
+}
+
+func (c *CLI) ModuleList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	resp, err := c.QC.Client.ListModules(ctx, &emptypb.Empty{})
+	if err != nil {
+		return fmt.Errorf("failed to list modules: %w", err)
+	}
+
+	if len(resp.Modules) == 0 {
+		fmt.Println("No modules found.")
+		return nil
+	}
+
+	fmt.Println("📦 Modules:")
+	for _, name := range resp.Modules {
+		fmt.Printf("  - %s\n", name)
+	}
+	return nil
+}
+
+func (c *CLI) ModuleDownload() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	resp, err := c.QC.Client.DownloadModule(ctx, &pb.DownloadModuleRequest{
+		Filename: c.Attr.Module.Download.Name,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to download module: %w", err)
+	}
+
+	if c.Attr.Module.Download.Output != nil {
+		if err := os.WriteFile(*c.Attr.Module.Download.Output, resp.Content, 0644); err != nil {
+			return fmt.Errorf("failed to write file: %w", err)
+		}
+		fmt.Printf("📥 Module saved to %s\n", *c.Attr.Module.Download.Output)
+	} else {
+		os.Stdout.Write(resp.Content)
+	}
+	return nil
+}
+
 func (c *CLI) WorkerEventList() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
@@ -2117,6 +2231,17 @@ func Run(c CLI) error {
 			err = c.TemplateDetail()
 		case c.Attr.Template.Run != nil:
 			err = c.TemplateRun()
+		case c.Attr.Template.Download != nil:
+			err = c.TemplateDownload()
+		}
+	case c.Attr.Module != nil:
+		switch {
+		case c.Attr.Module.Upload != nil:
+			err = c.ModuleUpload()
+		case c.Attr.Module.List != nil:
+			err = c.ModuleList()
+		case c.Attr.Module.Download != nil:
+			err = c.ModuleDownload()
 		}
 	case c.Attr.Run != nil:
 		switch {
