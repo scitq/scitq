@@ -95,8 +95,41 @@ All list and detail commands support `--json`. The output is structured JSON pri
 
 For the full CLI reference, see the [CLI documentation](cli.md). For details on the `--server`, `--token`, and `--json` flags, see [Global flags](cli.md#global-flags).
 
-## Roadmap: MCP server
+## MCP server
 
-A dedicated [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for scitq is planned. This will expose scitq operations as native tools that AI agents can call directly — no shell commands, no JSON parsing, no token management. The MCP server will hold the connection state internally and present typed operations like `list_templates`, `run_template`, `get_task_status`, and `download_results`.
+scitq includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server, accessible at `https://<server>/mcp`. This exposes scitq operations as native tools that AI agents (Claude, etc.) can call directly via the Streamable HTTP transport — no shell commands, no JSON parsing.
 
-Until then, the CLI with `--json` provides a fully functional integration path.
+### Endpoint
+
+```
+POST https://<server>/mcp
+```
+
+The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specification.
+
+### Available tools
+
+| Tool | Description |
+|---|---|
+| `login` | Authenticate with username/password. Must be called first. |
+| `list_templates` | List available workflow templates |
+| `template_detail` | Get template metadata and parameter schema |
+| `run_template` | Run a template with parameters |
+| `list_workflows` | List workflows |
+| `list_tasks` | List tasks with filters (workflow_id, status, limit) |
+| `task_logs` | Get stdout and stderr for a task |
+| `list_modules` | List private YAML modules |
+
+### Session flow
+
+1. Send `initialize` request → server returns `Mcp-Session-Id`
+2. Call `login` tool with credentials → session is authenticated
+3. Call other tools — session token is reused automatically
+
+### Configuration
+
+The MCP endpoint is enabled automatically on the HTTPS server. No additional configuration is needed. Connect your MCP client to `https://<server_fqdn>:<port>/mcp`.
+
+### CLI alternative
+
+For environments where MCP is not available, the CLI with `--json` provides equivalent functionality. See sections above.

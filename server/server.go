@@ -4635,6 +4635,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	mux.HandleFunc("/logout", LogoutHandler)
 	mux.HandleFunc("/WorkerToken", fetchWorkerTokenHandler(s))
 	mux.HandleFunc("/ws", ws.Handler)
+	mux.Handle("/mcp", newMCPHandler(s))
 
 	// 🧲 Static files and binary client
 	mux.Handle("/scitq-client", staticHandler)
@@ -4684,10 +4685,20 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 			log.Fatalf("HTTPS server failed: %v", err)
 		}
 	} else {
-		log.Printf("🌙 HTTPS disabled by config (scitq.disable_https=true)")
-		// Keep Serve() alive even when only gRPC is enabled.
-		// select {}
+		log.Printf("🌙 HTTPS disabled — starting plain HTTP for MCP and API endpoints")
+		httpPort := cfg.Scitq.Port + 1
+		httpServer := &http.Server{
+			Addr:    fmt.Sprintf(":%d", httpPort),
+			Handler: corsMiddleware(finalHandler),
+		}
+		go func() {
+			log.Printf("🌐 HTTP server listening on :%d (MCP at /mcp)", httpPort)
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("⚠️ HTTP server error: %v", err)
+			}
+		}()
 		<-ctx.Done()
+		httpServer.Close()
 		log.Println("🛑 Serve() context cancelled, shutting down")
 		return ctx.Err()
 	}
