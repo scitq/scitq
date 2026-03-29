@@ -524,7 +524,15 @@ Public modules provide sensible defaults for container, command, outputs, and ta
 
 ### Private modules (`module:`)
 
-Project-specific modules stored alongside your template:
+Project-specific modules stored on the server. Upload and manage them with the CLI:
+
+```sh
+scitq module upload --path modules/my_alignment.yaml
+scitq module list
+scitq module download --name my_alignment.yaml -o local_copy.yaml
+```
+
+Reference them in your template:
 
 ```yaml
   - module: my_alignment.yaml
@@ -603,9 +611,23 @@ steps:
     ...
 ```
 
+When a task has a `publish` path, the skip check uses the **publish path** (not the workspace path). Since failed tasks never publish (see [Publishing results](#publishing-results)), this guarantees that files at the publish path represent genuinely successful output.
+
+The output path supports **glob patterns** for more precise checks. Instead of skipping whenever any file exists, you can require specific file types:
+
+```yaml
+  - name: align
+    skip_if_exists: true
+    outputs:
+      sam: "*.sam"
+    publish: "azure://results/project/sample_A/*.sam"
+```
+
+This only skips if `.sam` files exist at the publish path — partial output (e.g. log files from a failed run) won't trigger a false skip.
+
 ## Publishing results
 
-The `publish` field copies task outputs to permanent storage:
+The `publish` field copies task outputs to permanent storage **on success only**. If a task fails, its output is uploaded to the workspace path (for debugging) but never to the publish path. This ensures that `skip_if_exists` checks against the publish path are reliable — if files exist there, the task genuinely succeeded.
 
 ```yaml
   - name: compile

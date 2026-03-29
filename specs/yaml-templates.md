@@ -732,13 +732,18 @@ A module may declare **variables** it expects — in the `cond:` construct, the 
 
 A module does **not** define: `inputs`, `grouped`, `resource` — those come from the importing template.
 
-### Uploading
+### Uploading and managing modules
 
 ```sh
-scitq module upload modules/classify.yaml
-scitq module upload modules/align.yaml
+# Upload a module (fails if already exists; use --force to overwrite)
+scitq module upload --path modules/classify.yaml
+scitq module upload --path modules/align.yaml --force
+
+# List all modules on the server
 scitq module list
-scitq module detail --name classify
+
+# Download a module for local editing
+scitq module download --name classify.yaml -o modules/classify.yaml
 ```
 
 Modules are stored in `{script_root}/modules/` on the server.
@@ -1013,13 +1018,16 @@ With `--path`, the CLI reads the local file and sends the content to the server 
 
 ```sh
 # Download template source code
-scitq template download --name biomscope --version 1.0.2 --output biomscope.yaml
+scitq template download --name biomscope --version 1.0.2 -o biomscope.yaml
 
-# Or by ID
-scitq template download --id 42 --output biomscope.yaml
+# Or by ID (prints to stdout without -o)
+scitq template download --id 42
+
+# Download a private module
+scitq module download --name biomscope_align.yaml -o modules/biomscope_align.yaml
 ```
 
-New `DownloadTemplate` RPC that returns the script content from `{script_root}/`.
+`DownloadTemplate` and `DownloadModule` RPCs return file content from `{script_root}/` and `{script_root}/modules/` respectively.
 
 ### List and detail
 

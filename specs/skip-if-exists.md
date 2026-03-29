@@ -14,7 +14,19 @@ Allow tasks to be skipped when their output already exists. This enables:
 
 A task with `skip_if_exists=True` and a defined output path is checked before execution. If the output path already contains files, the task is immediately marked as succeeded (`S`) without being assigned to a worker.
 
-The check is a single `fetch_list` call on the task's output path — the same infrastructure already used by rclone integration.
+The check uses `fetch_list` on the task's path — preferring the **publish path** over the workspace path when both are set. This works hand-in-hand with "publish only on success": since failed tasks never publish their output, files at the publish path are guaranteed to represent genuinely successful output.
+
+### Glob patterns
+
+The output path can contain glob patterns (e.g. `azure://results/sample_A/*.tgz`). When a glob is detected, the server lists the parent directory and matches files against the pattern. This prevents false positives from partial output (e.g. log files left by a failed run).
+
+### Publish only on success
+
+Tasks with a `publish` path have two upload targets:
+- **Workspace path** (`output`): always receives the task's output (success or failure) — useful for debugging
+- **Publish path** (`publish`): only receives output on success (`S`)
+
+This separation makes `skip_if_exists` reliable: checking the publish path means you only skip when the previous run genuinely succeeded.
 
 ### What doesn't change
 

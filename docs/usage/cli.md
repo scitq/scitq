@@ -520,7 +520,7 @@ Existing workers remain active, but no new workers will be recruited for that st
 
 ### `template`
 
-Templates, also called workflow templates, provide reusable workflow definitions, which can be uploaded once and executed with different parameter sets. They use the [python DSL language](dsl.md).
+Templates, also called workflow templates, provide reusable workflow definitions, which can be uploaded once and executed with different parameter sets. They can be written in the [Python DSL](dsl.md) or as [YAML templates](yaml-templates.md).
 
 #### `template upload`
 
@@ -533,13 +533,14 @@ scitq template upload --path <file> [--force]
 Registers a template script and makes it available for later runs.
 
 Options:
-- `--path` (required): path to the local template script (e.g. `qc.py`).
-- `--force`: overwrite an existing template that has the same name/version (if applicable).
+- `--path` (required): path to the local template script (`.py` or `.yaml`).
+- `--force`: overwrite an existing template that has the same name/version.
 
-Example:
+Examples:
 
 ```sh
 scitq template upload --path qc.py --force
+scitq template upload --path biomscope.yaml
 ```
 
 #### `template run`
@@ -547,7 +548,7 @@ scitq template upload --path qc.py --force
 Runs a previously uploaded template. You can select it by name+version or by ID. Parameters are passed as comma‑separated `key=value` pairs.
 
 ```sh
-scitq template run [--id <template_id> | --name <template_name>] [--version <ver>] [--param "k1=v1,k2=v2,..."]
+scitq template run [--id <template_id> | --name <template_name>] [--version <ver>] [--param "k1=v1,k2=v2,..."] [--no-recruiters]
 ```
 
 Options:
@@ -555,12 +556,13 @@ Options:
 - `--name`: template name (alternative to `--id`).
 - `--version`: optional version (defaults to latest when omitted with `--name`).
 - `--param`: comma‑separated key=value pairs (client converts them to JSON for the server).
+- `--no-recruiters`: create the workflow without deploying any workers (useful for testing or manual worker assignment).
 
 Examples:
 
 ```sh
 scitq template run --name qc_step --version 1.2.0 --param "sample=A12,threads=8"
-scitq template run --id 42 --param "input_uri=s3://bucket/x.fastq.gz"
+scitq template run --name biomscope --param "bioproject=PRJEB6070,location=openstack.ovh:GRA11" --no-recruiters
 ```
 
 #### `template list`
@@ -580,6 +582,77 @@ Shows a template’s metadata and parameters (including names, types, defaults, 
 
 ```sh
 scitq template detail [--id <template_id> | --name <template_name>] [--version <ver>]
+```
+
+#### `template download`
+
+Downloads a template script from the server.
+
+```sh
+scitq template download [--id <template_id> | --name <template_name>] [--version <ver>] [-o <output_file>]
+```
+
+Options:
+- `--id`: template ID to download.
+- `--name`: template name (alternative to `--id`).
+- `--version`: optional version (defaults to latest).
+- `-o` / `--output`: save to file instead of printing to stdout.
+
+Examples:
+
+```sh
+scitq template download --name biomscope -o biomscope.yaml
+scitq template download --id 42
+```
+
+### `module`
+
+Modules are reusable YAML step definitions used by [YAML templates](yaml-templates.md). Private modules are stored on the server and resolved automatically when a template references them with `module: my_module.yaml`.
+
+#### `module upload`
+
+Uploads a private module YAML file to the server.
+
+```sh
+scitq module upload --path <file> [--force]
+```
+
+Options:
+- `--path` (required): path to the module YAML file.
+- `--force`: overwrite an existing module with the same filename.
+
+Example:
+
+```sh
+scitq module upload --path modules/biomscope_align.yaml
+scitq module upload --path modules/biomscope_align.yaml --force
+```
+
+#### `module list`
+
+Lists all private modules available on the server.
+
+```sh
+scitq module list
+```
+
+#### `module download`
+
+Downloads a private module from the server.
+
+```sh
+scitq module download --name <filename> [-o <output_file>]
+```
+
+Options:
+- `--name` (required): the module filename.
+- `-o` / `--output`: save to file instead of printing to stdout.
+
+Examples:
+
+```sh
+scitq module download --name biomscope_align.yaml
+scitq module download --name biomscope_align.yaml -o modules/biomscope_align.yaml
 ```
 
 
