@@ -92,7 +92,32 @@ def _eval_arithmetic(expr: str) -> str:
         return expr
 
 
-def _resolve_refs(val, params, itervar=None, extra_vars=None):
+def _typed_literal(val: str, true_kw: str = 'True', false_kw: str = 'False') -> str:
+    """Convert a resolved string value to a typed literal for a programming language."""
+    if val.lower() in ('true', 'false'):
+        return true_kw if val.lower() == 'true' else false_kw
+    try:
+        int(val)
+        return val
+    except ValueError:
+        pass
+    try:
+        float(val)
+        return val
+    except ValueError:
+        pass
+    escaped = val.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped}'"
+
+
+# Language-specific literal formatters: {VAR} → typed literal
+_LITERAL_FORMATTERS = {
+    'python': lambda val: _typed_literal(val, 'True', 'False'),
+    'r':      lambda val: _typed_literal(val, 'TRUE', 'FALSE'),
+}
+
+
+def _resolve_refs(val, params, itervar=None, extra_vars=None, literal_format=None):
     """Resolve {params.x}, {ITER_VAR}, and {var|filter} references in a string."""
     if not isinstance(val, str):
         return val
@@ -130,9 +155,12 @@ def _resolve_refs(val, params, itervar=None, extra_vars=None):
         # Apply filters
         for f in filters:
             resolved = _apply_filter(resolved, f.strip())
+        if literal_format:
+            resolved = literal_format(resolved)
         return resolved
     # Only match {NAME} not preceded by $ (shell variables ${VAR} are left for the shell)
-    return re.sub(r'(?<!\$)\{([^}]+)\}', repl, val)
+    # Restrict capture to identifier-like chars to avoid matching Python/JSON dict literals
+    return re.sub(r'(?<!\$)\{([^\s\'"{},]+)\}', repl, val)
 
 
 def _resolve_cond(val, params, itervar=None, step_fields=None, extra_vars=None):
@@ -181,12 +209,12 @@ def _resolve_cond(val, params, itervar=None, step_fields=None, extra_vars=None):
     raise ValueError(f"cond: no match for '{resolved}' in {list(k for k in val if k != 'cond')}")
 
 
-def _resolve_field(val, params, itervar=None, step_fields=None, extra_vars=None):
+def _resolve_field(val, params, itervar=None, step_fields=None, extra_vars=None, literal_format=None):
     """Resolve a field value: handles cond: blocks, param references, filters, and arithmetic."""
     if isinstance(val, dict) and 'cond' in val:
         val = _resolve_cond(val, params, itervar, step_fields, extra_vars)
     if isinstance(val, str):
-        val = _resolve_refs(val, params, itervar, extra_vars)
+        val = _resolve_refs(val, params, itervar, extra_vars, literal_format=literal_format)
     # If result looks like arithmetic (contains operators and only numbers/operators/builtins), evaluate
     if isinstance(val, str) and any(op in val for op in ('*', '/', '+', '-')) and not val.startswith('/'):
         val = _eval_arithmetic(val)
@@ -209,6 +237,8 @@ def _build_params_class(params_def: Dict[str, dict]) -> type:
             kwargs['default'] = spec['default']
         if 'help' in spec:
             kwargs['help'] = spec['help']
+        if 'requires' in spec:
+            kwargs['requires'] = spec['requires']
         if typ == 'enum':
             kwargs['choices'] = spec.get('choices', [])
             namespace[name] = Param.enum(**kwargs)
@@ -308,6 +338,8 @@ def _discover_samples(iter_def: dict, params) -> list:
         uri = _resolve_refs(iter_def.get('uri', ''), params)
         group_by = iter_def.get('group_by', 'folder')
         filter_glob = iter_def.get('filter')
+        if filter_glob:
+            filter_glob = _resolve_refs(filter_glob, params)
         return URI.find(uri, group_by=group_by, filter=filter_glob,
                         field_map={"sample_accession": "folder.name", "fastqs": "file.uris"})
     elif source == 'ena':
@@ -380,6 +412,8 @@ def _resolve_language(lang_str: Optional[str]):
         return Shell('bash')
     elif lang_str == 'python':
         return Python()
+    elif lang_str == 'r':
+        return Shell('Rscript')
     elif lang_str == 'none':
         return Raw()
     else:
@@ -521,7 +555,8 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
             return step_map[step_name].output(output_name, grouped=grouped)
     elif len(parts) == 1 and parts[0] in step_map:
         return step_map[parts[0]].output(grouped=grouped)
-    raise ValueError(f"Cannot resolve input: {input_ref}")
+    available = ', '.join(sorted(step_map.keys())) if step_map else '(none)'
+    raise ValueError(f"Cannot resolve input: {input_ref} (available steps: {available})")
 
 
 def _merge_module_step(module_data: dict, step_def: dict, exclude_key: str) -> dict:
@@ -548,15 +583,21 @@ def _merge_module_step(module_data: dict, step_def: dict, exclude_key: str) -> d
 def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
                 params, itervar: Optional[Dict] = None, is_fan_in: bool = False,
                 default_language: str = 'sh', script_root: Optional[str] = None,
-                pipeline_dir: Optional[str] = None, workflow_vars: Optional[Dict] = None) -> Step:
+                pipeline_dir: Optional[str] = None, workflow_vars: Optional[Dict] = None,
+                verbose: bool = False) -> Step:
     """Build a single step from a YAML definition."""
 
     # when: conditional — skip step if falsy
     when = step_def.get('when')
     if when is not None:
         resolved = _resolve_field(when, params, itervar, extra_vars=workflow_vars)
+        step_label = step_def.get('name', step_def.get('module', step_def.get('import', '?')))
         if not resolved or resolved in ('false', 'False', 'No', 'no', 'none', 'None', ''):
+            if verbose:
+                print(f"⏭️ Step '{step_label}' skipped (when: {when!r} → {resolved!r})", file=sys.stderr)
             return None
+        if verbose:
+            print(f"✅ Step '{step_label}' when: {when!r} → {resolved!r}", file=sys.stderr)
 
     # Resolve imports: public (import:) or private (module:) YAML modules
     # Supports nesting: a private module can import: a public module
@@ -608,12 +649,15 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
 
     # Custom / inline / YAML-module step
     name = step_def.get('name', 'unnamed')
-    command = _resolve_field(step_def.get('command', ''), params, itervar, step_fields=step_def, extra_vars=extra_vars)
-    container = adhoc_image or _resolve_field(step_def.get('container'), params, itervar, step_fields=step_def, extra_vars=extra_vars)
     language_str = step_def.get('language', default_language)
+    literal_fmt = _LITERAL_FORMATTERS.get(language_str)
+    command = _resolve_field(step_def.get('command', ''), params, itervar, step_fields=step_def, extra_vars=extra_vars,
+                             literal_format=literal_fmt)
+    container = adhoc_image or _resolve_field(step_def.get('container'), params, itervar, step_fields=step_def, extra_vars=extra_vars)
 
-    # Fail on unresolved YAML variables in command (not shell ${VAR})
-    if command:
+    # Fail on unresolved YAML variables in shell commands (not shell ${VAR}).
+    # Skip for typed languages (python, r) where {NAME} can be valid syntax.
+    if command and not literal_fmt:
         unresolved = re.findall(r'(?<!\$)\{([A-Z_][A-Z0-9_]*)\}', command)
         if unresolved:
             raise ValueError(f"Step '{name}': unresolved YAML variables in command: {unresolved}")
@@ -687,6 +731,10 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     if 'skip_if_exists' in step_def:
         step_kwargs['skip_if_exists'] = step_def['skip_if_exists']
 
+    # accept_failure: allow dependencies to be satisfied even if prerequisite failed
+    if 'accept_failure' in step_def:
+        step_kwargs['accept_failure'] = step_def['accept_failure']
+
     # Depends on prep step for adhoc containers
     if prep_step:
         step_kwargs['depends'] = prep_step
@@ -701,7 +749,8 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
 def run_yaml(data: dict, params_values: Optional[dict] = None,
              dry_run: bool = False, standalone: bool = True,
              pipeline_dir: Optional[str] = None,
-             no_recruiters: bool = False) -> Optional[int]:
+             no_recruiters: bool = False,
+             verbose: bool = False) -> Optional[int]:
     """Run a YAML pipeline definition."""
     # Validate
     if 'name' not in data:
@@ -804,7 +853,8 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     for step_def in oneoff_steps:
         step = _build_step(workflow, step_def, step_map, params,
                            default_language=default_language, script_root=script_root,
-                           pipeline_dir=pipeline_dir, workflow_vars=workflow_vars)
+                           pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
+                           verbose=verbose)
         if step is not None:
             step_map[step.name] = step
 
@@ -813,29 +863,56 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         per_iter_steps[0]['_is_first_step'] = True
 
     # Iteration loop
+    if per_iter_steps and not iterations:
+        print("❌ No iterations found — the iterator produced 0 samples. Check your params (bioproject, filter, etc.).", file=sys.stderr)
+        sys.exit(1)
     for i, itervar in enumerate(iterations):
         for step_def in per_iter_steps:
             step = _build_step(workflow, step_def, step_map, params, itervar=itervar,
                                default_language=default_language, script_root=script_root,
-                               pipeline_dir=pipeline_dir, workflow_vars=workflow_vars)
+                               pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
+                               verbose=verbose)
             if step is not None:
                 step_map[step.name] = step
-            elif i == 0:
-                n = step_def.get('name', step_def.get('module', step_def.get('import', '?')))
-                print(f"SKIPPED on first iter: {n}", file=sys.stderr)
 
     # Fan-in steps
+    if verbose:
+        print(f"📊 step_map before fan-in: {sorted(step_map.keys())}", file=sys.stderr)
     for step_def in fanin_steps:
         step = _build_step(workflow, step_def, step_map, params, is_fan_in=True,
                            default_language=default_language, script_root=script_root,
-                           pipeline_dir=pipeline_dir, workflow_vars=workflow_vars)
+                           pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
+                           verbose=verbose)
         if step is not None:
             step_map[step.name] = step
 
     # Strip recruiters if requested
     if no_recruiters:
+        workflow.worker_pool = None
         for step in workflow.steps:
             step.worker_pool = None
+
+    # Pre-flight: validate that all resources exist
+    seen_resources = set()
+    missing = []
+    for step in workflow.steps:
+        for task in step.tasks:
+            for res in task.resources:
+                uri = str(res).split('|')[0]  # strip |untar, |gunzip, etc.
+                if uri in seen_resources:
+                    continue
+                seen_resources.add(uri)
+                try:
+                    info = client.fetch_info(uri)
+                    if not info.is_file and not info.is_dir:
+                        missing.append(uri)
+                except Exception:
+                    missing.append(uri)
+    if missing:
+        print("❌ Missing resources (pre-flight check failed):", file=sys.stderr)
+        for m in missing:
+            print(f"   - {m}", file=sys.stderr)
+        sys.exit(1)
 
     # Compile (client already created above for RESOURCE_ROOT)
     activate = standalone and not dry_run
@@ -862,6 +939,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters")
     parser.add_argument("--standalone", action="store_true", default=True)
+    parser.add_argument("--verbose", action="store_true", help="Print step decisions to stderr")
     args = parser.parse_args()
 
     with open(args.input) as f:
@@ -877,7 +955,8 @@ def main():
     standalone = args.standalone or not os.environ.get("SCITQ_TEMPLATE_RUN_ID")
     pipeline_dir = os.path.dirname(os.path.abspath(args.input))
     run_yaml(data, params_values=values, dry_run=args.dry_run, standalone=standalone,
-             pipeline_dir=pipeline_dir, no_recruiters=args.no_recruiters)
+             pipeline_dir=pipeline_dir, no_recruiters=args.no_recruiters,
+             verbose=args.verbose)
 
 
 if __name__ == "__main__":

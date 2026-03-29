@@ -107,7 +107,7 @@ func (s *taskQueueServer) scriptRunner(
 		fmt.Sprintf("SCITQ_SERVER=%s:%d", serverName, s.cfg.Scitq.Port),
 		fmt.Sprintf("SCITQ_TOKEN=%s", authToken),
 	}
-	if mode == "run" && templateRunID != 0 {
+	if templateRunID != 0 {
 		env = append(env, fmt.Sprintf("SCITQ_TEMPLATE_RUN_ID=%d", templateRunID))
 	}
 	if len(s.sslCertificatePEM) > 0 {

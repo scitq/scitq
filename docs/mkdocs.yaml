@@ -38,6 +38,7 @@ nav:
       - Web UI: usage/ui.md
       - CLI: usage/cli.md
       - Python DSL: usage/dsl.md
+      - YAML Templates: usage/yaml-templates.md
       - API Reference: usage/api.md
   - Reference:
       - DB Schema: reference/db-schema.md

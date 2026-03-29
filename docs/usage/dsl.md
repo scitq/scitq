@@ -284,6 +284,24 @@ step4 = workflow.Step(
 
 And for the second condition we see here the call to `step3.grouped()` to define the dependencies. The `grouped()` method of a Step provide a GroupedStep object that is equivalent to a list of all the Tasks belonging to the step. If the .grouped() has been omitted (`depends=step3`) it would have mean: depends on the latest step3 (the last since it is out of the loop). With the GroupedTask is like if we had collected all the steps during the loop and provided this list as depends: it depends on all step3.
 
+### Accepting failures in dependencies
+
+By default, a task only runs when all its prerequisites have succeeded. If any prerequisite fails (even after exhausting all retries), the dependent task stays blocked forever.
+
+For aggregation steps that should produce partial results even if some upstream samples failed, use `accept_failure=True`:
+
+```python
+compile_step = workflow.Step(
+    name="compile",
+    command=fr"python /scripts/merge.py",
+    container="pandas",
+    inputs=analysis_step.output("results", grouped=True),
+    accept_failure=True,
+)
+```
+
+A prerequisite is considered terminally failed only when its `retry` count has reached 0 (all retries exhausted). A failed task with retries remaining will be retried first — `accept_failure` does not short-circuit retries.
+
 ## A real life example
 
 scitq can be used in lots of different contexts, but it was invented for Bioinformatics. Most bioinformatics tools are autonomous commands you typically run from the Unix command line. So here we propose the use of a famous aligner command to identify the different species in a metagenomic samples, MetaPhlAn. It is recommanded to prepare the sequences before passing it to MetaPhlAn:

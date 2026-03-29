@@ -168,6 +168,11 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		log.Printf("⚠️ Failed to rebuild watchdog memory: %v", err)
 	}
 	s.watchdog.RebuildFromWorkers(workers)
+	// Re-sync active task counts to close the race window between the initial
+	// DB query and RebuildFromWorkers. Any TaskFinished calls that arrived
+	// during that gap would have been lost; re-querying the DB now picks up
+	// the current state.
+	s.watchdog.ResyncActiveTasks(context.Background(), s.db)
 
 	go s.watchdog.Run(s.stopWatchdog)
 
@@ -249,8 +254,8 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	// Insert dependencies if any
 	if len(req.Dependency) > 0 {
 		stmt, err := s.db.PrepareContext(ctx, `
-			INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
-			VALUES ($1, $2)
+			INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id, accept_failure)
+			VALUES ($1, $2, $3)
 		`)
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare dependency insert: %w", err)
@@ -258,7 +263,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		defer stmt.Close()
 
 		for _, depID := range req.Dependency {
-			if _, err := stmt.ExecContext(ctx, taskID, depID); err != nil {
+			if _, err := stmt.ExecContext(ctx, taskID, depID, req.AcceptFailure); err != nil {
 				return nil, fmt.Errorf("failed to insert dependency (%d -> %d): %w", depID, taskID, err)
 			}
 		}
@@ -752,7 +757,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
                         FROM task_dependencies d
                         JOIN task t ON d.prerequisite_task_id = t.task_id
                         WHERE d.dependent_task_id = $1
-                          AND t.status NOT IN ('S', 'F')
+                          AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
                     )
                 `, depTaskID).Scan(&allDone)
 				if err != nil {
@@ -899,8 +904,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			if txErr == nil {
 				// Copy prerequisites: failed (dep=parent) -> new (dep=newID)
 				_, txErr = tx.ExecContext(ctx, `
-					INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
-					SELECT $2, td.prerequisite_task_id
+					INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id, accept_failure)
+					SELECT $2, td.prerequisite_task_id, td.accept_failure
 					FROM task_dependencies td
 					WHERE td.dependent_task_id = $1
 					ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
@@ -918,8 +923,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			if txErr == nil {
 				// Repoint dependents that required the failed parent to now require the new task
 				_, txErr = tx.ExecContext(ctx, `
-					INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
-					SELECT td.dependent_task_id, $2
+					INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id, accept_failure)
+					SELECT td.dependent_task_id, $2, td.accept_failure
 					FROM task_dependencies td
 					WHERE td.prerequisite_task_id = $1
 					ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
@@ -1626,7 +1631,7 @@ func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.Worker
         LEFT JOIN (
             SELECT worker_id, COUNT(*) as active_tasks
             FROM task
-            WHERE status IN ('C', 'R') -- Accepted or Running
+            WHERE status IN ('A', 'C', 'D', 'O', 'R')
             GROUP BY worker_id
         ) t ON w.worker_id = t.worker_id
     `)
@@ -3752,7 +3757,7 @@ func (s *taskQueueServer) DebugAssignTask(ctx context.Context, req *pb.DebugAssi
 			FROM task_dependencies d
 			JOIN task t ON d.prerequisite_task_id = t.task_id
 			WHERE d.dependent_task_id = $1
-			  AND t.status != 'S'
+			  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
 		)
 	`, req.TaskId).Scan(&depsSatisfied)
 	if err != nil {

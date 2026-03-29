@@ -48,13 +48,15 @@ class Param:
         required: bool = False,
         default: Any = None,
         choices: List[Any] = None,
-        help: str = ""
+        help: str = "",
+        requires: Optional[dict] = None,
     ):
         self.typ = typ
         self.required = required
         self.default = default
         self.choices = choices
         self.help = help
+        self.requires = requires  # {param_name: required_value} — enforced when this param is truthy
         self.name = None  # to be set by metaclass
 
     def __set_name__(self, owner, name):
@@ -105,6 +107,9 @@ class ParamSpec(type):
         return cls
 
     def parse(cls, values: dict):
+        unknown = set(values.keys()) - set(cls._declared_params.keys())
+        if unknown:
+            raise ValueError(f"Unknown parameter(s): {', '.join(sorted(unknown))}")
         parsed = {}
         for name, param in cls._declared_params.items():
             if name in values:
@@ -124,6 +129,34 @@ class ParamSpec(type):
                 parsed[name] = param.default
             elif param.required:
                 raise ValueError(f"Missing required parameter: '{name}'")
+
+        # Validate parameter dependencies (requires)
+        _falsy = (False, 'false', 'False', 'No', 'no', 'none', 'None', '', 0)
+        for name, param in cls._declared_params.items():
+            if param.requires and name in parsed:
+                val = parsed[name]
+                # Determine if the trigger matches
+                when = param.requires.get('when')
+                if when is not None:
+                    # Explicit when: value — match against it
+                    if isinstance(when, bool):
+                        triggered = (bool(val) and val not in _falsy) == when
+                    else:
+                        triggered = str(val) == str(when)
+                else:
+                    # No when: — trigger on truthy
+                    triggered = bool(val) and val not in _falsy
+                if triggered:
+                    for req_name, req_val in param.requires.items():
+                        if req_name == 'when':
+                            continue
+                        actual = parsed.get(req_name)
+                        if isinstance(req_val, bool):
+                            actual_truthy = bool(actual) and actual not in _falsy
+                            if actual_truthy != req_val:
+                                raise ValueError(f"Parameter '{name}' (={val}) requires '{req_name}' to be {req_val}, but got {actual}")
+                        elif str(actual) != str(req_val):
+                            raise ValueError(f"Parameter '{name}' (={val}) requires '{req_name}' to be {req_val}, but got {actual}")
 
         # Auto-validate Path-typed params
         path_values = [v for name, v in parsed.items() if cls._declared_params[name].typ is Path]

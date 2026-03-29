@@ -149,6 +149,36 @@ params:
 
 Supported types: `string`, `integer`, `boolean`, `enum`, `path`, `provider_region`.
 
+### Parameter dependencies (`requires`)
+
+A parameter can declare that it requires other parameters to have specific values. The `requires` block uses an optional `when:` clause to specify which value triggers the constraint:
+
+```yaml
+params:
+  oral:
+    type: boolean
+    default: false
+  nsat:
+    type: boolean
+    default: false
+    requires:
+      oral: true      # nsat=true requires oral=true (when: defaults to truthy)
+```
+
+For enum parameters, use `when:` to match a specific value:
+
+```yaml
+  metaphlan:
+    type: enum
+    choices: ["No", "4.0", "4.1"]
+    default: "No"
+    requires:
+      when: "4.0"
+      legacy_db: true   # metaphlan=4.0 requires legacy_db=true
+```
+
+If `when:` is omitted, the constraint triggers whenever the parameter is truthy. Validation runs after all parameters (including defaults) are resolved, so contradictory defaults are caught at launch time.
+
 The `paired` parameter is particularly important in bioinformatics. It should be declared explicitly and passed to modules that need it.
 
 ## Iterators
@@ -462,10 +492,30 @@ Supported install methods: `conda:`, `apt:`, `binary:`, `pip:`.
 | `grouped` | `true` for fan-in steps (after the sample loop, collects all samples) |
 | `per_sample` | `false` for one-off steps (before the sample loop, e.g. index building) |
 | `skip_if_exists` | `true` to skip if output already has files |
+| `accept_failure` | `true` to allow this step to run even if some prerequisites failed terminally (all retries exhausted). Default: `false` — any failed prerequisite blocks the step |
 | `paired` | `true`/`false` or `"{params.paired}"` — passed to modules that support it |
 | `task_spec` | `cpu:`, `mem:`, `disk:` per task |
 | `worker_pool` | Override with `max_recruited:` etc. |
 | `container` | Override the module's default container |
+
+### Dependency behavior and `accept_failure`
+
+Dependencies between steps are automatic: a step that declares `inputs: fastp.fastqs` depends on the `fastp` step. For `grouped: true` (fan-in) steps, the task depends on **all** tasks from the referenced step across all iterations.
+
+By default, a dependent task only runs when **all** its prerequisites have succeeded (`status = 'S'`). If any prerequisite fails — even after exhausting all retries — the dependent task stays blocked in `W` (Waiting) forever.
+
+The `accept_failure: true` flag changes this: a prerequisite is also considered done if it has **terminally failed** (status `'F'` with `retry = 0`, meaning all retries exhausted). This is useful for aggregation steps that should run with partial results:
+
+```yaml
+# Compile results even if some samples failed
+- module: compile_results.yaml
+  inputs: analysis.output
+  grouped: true
+  accept_failure: true
+  publish: "{params.final_output}"
+```
+
+A prerequisite that fails but still has retries remaining is **not** considered terminal — the retry will create a fresh clone, and the dependency waits for the clone's outcome. Only when all retries are exhausted does `accept_failure` apply.
 
 ### The `resource` field
 
@@ -576,27 +626,60 @@ steps:
       json.dump(result, open(f'/output/{sample}_result.json', 'w'))
 ```
 
-| Value | Meaning |
-|---|---|
-| `sh` | Default. Command runs in `sh -c "..."`. Works in all containers (alpine, ubuntu, etc.) |
-| `bash` | Command runs in `bash -c "..."`. Needed for bash-specific features (arrays, `set -o pipefail`) |
-| `python` | Command runs as a Python script. The container must have Python |
-| `none` | No shell wrapping. Command is passed directly as Docker entrypoint arguments. Use for binaries that don't need shell features |
+| Value | Meaning | Typed interpolation |
+|---|---|---|
+| `sh` | Default. Command runs in `sh -c "..."`. Works in all containers (alpine, ubuntu, etc.) | No |
+| `bash` | Command runs in `bash -c "..."`. Needed for bash-specific features (arrays, `set -o pipefail`) | No |
+| `python` | Command runs as a Python script. The container must have Python | Yes (`True`/`False`) |
+| `r` | Command runs as an R script (via `Rscript`). The container must have R | Yes (`TRUE`/`FALSE`) |
+| `none` | No shell wrapping. Command is passed directly as Docker entrypoint arguments. Use for binaries that don't need shell features | No |
 
 Note: scitq builtins (`. /builtin/std.sh`, `_para`, `_wait`) require a shell. If `language: none`, builtins are not available.
 
+### Typed interpolation for Python and R
+
+When `language` is `python` or `r`, `{VAR}` resolves to a **typed literal** appropriate for the language instead of a raw string:
+
+| Value | Shell (`sh`/`bash`) | Python | R |
+|---|---|---|---|
+| `"true"` | `true` | `True` | `TRUE` |
+| `"false"` | `false` | `False` | `FALSE` |
+| `"42"` | `42` | `42` | `42` |
+| `"hello"` | `hello` | `'hello'` | `'hello'` |
+
+This allows using `{VAR}` directly in Python/R code without manual type conversion:
+
+```yaml
+- name: compile
+  language: python
+  command: |
+    sample_list = {SAMPLES}.split(',')    # → 'S001,S002,...'.split(',')
+
+    if {COMPUTE_NSAT}:                    # → if True: / if False:
+        compute_nsat()
+
+    json.dump({
+        'batch': {BATCH},                # → 'my_batch'
+        'depth': {DEPTH},                # → 20000000
+        'unpaired': {UNPAIRED},          # → True
+    }, f)
+```
+
+**Convention**: YAML variables are UPPERCASE (`{BATCH}`, `{VERSION}`). Python/R variables are lowercase (`sample`, `catalog`). The YAML engine only resolves identifiers it knows — unknown names are left untouched for the language runtime.
+
+**Important edge case**: for shell commands (`sh`, `bash`), an unresolved `{UPPERCASE_VAR}` is treated as an error (catches typos like `{VESRION}`). For Python and R, this check is **disabled** because `{NAME}` is valid syntax in both languages — a set literal in Python, a code block in R. A typo like `{VESRION}` in a Python step will not be caught by the YAML engine; it will produce a `NameError` at runtime. To mitigate this, assign YAML vars to lowercase Python/R variables at the top of the command, then use the lowercase names throughout.
+
 ### Variables in commands
 
-YAML commands have access to these environment variables (set by the worker and the YAML runner):
+YAML commands have access to these runtime environment variables (set by the worker):
 
 | Variable | Source | Description |
 |---|---|---|
 | `${CPU}` | Worker | Number of CPUs available for this task |
 | `${THREADS}` | Worker | Same as CPU (alias for Snakemake compatibility) |
 | `${MEM}` | Worker | Available memory in GB |
-| Iterator variables | `iterate:` block | `${SAMPLE}`, `${SEED}`, etc. — from the iterator's `name` field, uppercased |
 
-These are container environment variables. They require a shell to expand (`language: sh` or `bash`). In `language: python`, access them via `os.environ['CPU']`. In `language: none`, they are still set but not expanded — the binary must read them from the environment itself.
+These are container environment variables. They require a shell to expand (`language: sh` or `bash`). In `language: python`, access them via `os.environ['CPU']`. In `language: r`, use `Sys.getenv('CPU')`. In `language: none`, they are still set but not expanded — the binary must read them from the environment itself.
 
 ## Top-level options
 
@@ -605,7 +688,7 @@ name: template-name
 version: 1.0.0
 description: What this template does
 tag: "{params.input_dir}"              # workflow name suffix
-language: sh                            # default: sh (shell). Options: sh, bash, python, none
+language: sh                            # default: sh (shell). Options: sh, bash, python, r, none
 container: alpine                       # default container for custom steps
 publish_root: "azure://results/project" # base URI for publish=true
 skip_if_exists: true                    # DAG mode for all steps
@@ -689,8 +772,8 @@ The template provides what the module doesn't: inputs, resource, paired flag, gr
 | Conditionals | `cond:` on any param (boolean, enum, string) | Full Python (`cond()`, `if/else`) |
 | Loops | `iterate:` (single, product, range, list, lines) | Any Python loop |
 | Modules | YAML files + Python modules | Python functions |
-| Execution | Via CLI (`scitq template run`) | Direct (`python template.py`) or via CLI |
-| Server dependency | Always (CLI sends to server) | Optional (can `--dry-run` locally) |
+| Execution | Via CLI (`scitq template run`) or direct (`python -m scitq2.yaml_runner`) | Direct (`python template.py`) or via CLI |
+| Server dependency | Always (needs server for workflow creation) | Always (needs server for workflow creation) |
 
 ## Complete example: parameter sweep with product iterator
 

@@ -162,6 +162,7 @@ type TaskRequest struct {
 	Dependency       []int32                `protobuf:"varint,16,rep,packed,name=dependency,proto3" json:"dependency,omitempty"` // IDs of tasks that this task depends on
 	TaskName         *string                `protobuf:"bytes,17,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
 	SkipIfExists     bool                   `protobuf:"varint,18,opt,name=skip_if_exists,json=skipIfExists,proto3" json:"skip_if_exists,omitempty"`
+	AcceptFailure    bool                   `protobuf:"varint,19,opt,name=accept_failure,json=acceptFailure,proto3" json:"accept_failure,omitempty"` // If true, dependencies accept failed prerequisites
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -318,6 +319,13 @@ func (x *TaskRequest) GetTaskName() string {
 func (x *TaskRequest) GetSkipIfExists() bool {
 	if x != nil {
 		return x.SkipIfExists
+	}
+	return false
+}
+
+func (x *TaskRequest) GetAcceptFailure() bool {
+	if x != nil {
+		return x.AcceptFailure
 	}
 	return false
 }
@@ -7654,7 +7662,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_concurrencyB\x0f\n" +
 	"\r_is_permanentB\v\n" +
 	"\t_providerB\t\n" +
-	"\a_region\"\x8f\x06\n" +
+	"\a_region\"\xb6\x06\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -7678,7 +7686,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"dependency\x12 \n" +
 	"\ttask_name\x18\x11 \x01(\tH\n" +
 	"R\btaskName\x88\x01\x01\x12$\n" +
-	"\x0eskip_if_exists\x18\x12 \x01(\bR\fskipIfExistsB\b\n" +
+	"\x0eskip_if_exists\x18\x12 \x01(\bR\fskipIfExists\x12%\n" +
+	"\x0eaccept_failure\x18\x13 \x01(\bR\racceptFailureB\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +

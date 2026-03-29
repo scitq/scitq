@@ -238,6 +238,7 @@ def run(func: Callable):
             workflow_status = "D" if args.debug else None
             activate = standalone and not args.debug and not args.dry_run
             if args.no_recruiters:
+                workflow.worker_pool = None
                 for step in workflow.steps:
                     step.worker_pool = None
             workflow.compile(client, activate_leading_tasks=activate, workflow_status=workflow_status)

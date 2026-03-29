@@ -1,6 +1,8 @@
 package watchdog
 
 import (
+	"context"
+	"database/sql"
 	"log"
 	"sync"
 	"time"
@@ -301,6 +303,47 @@ func (w *Watchdog) RebuildFromWorkers(workers []WorkerInfo) {
 	}
 
 	log.Printf("[watchdog] rebuild complete: %d workers loaded", len(workers))
+}
+
+// ResyncActiveTasks re-queries the DB for the current active task counts and
+// fixes up any drift caused by TaskFinished calls that arrived between the
+// initial FetchWorkersForWatchdog query and RebuildFromWorkers.
+func (w *Watchdog) ResyncActiveTasks(ctx context.Context, db *sql.DB) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT worker_id, COUNT(*) as active_tasks
+		FROM task
+		WHERE status IN ('A', 'C', 'D', 'O', 'R')
+		GROUP BY worker_id
+	`)
+	if err != nil {
+		log.Printf("⚠️ [watchdog] resync query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	dbCounts := map[int32]int{}
+	for rows.Next() {
+		var wid int32
+		var count int
+		if rows.Scan(&wid, &count) == nil {
+			dbCounts[wid] = count
+		}
+	}
+
+	w.activeTasks.Range(func(key, value any) bool {
+		wid := key.(int32)
+		memCount := value.(int)
+		dbCount := dbCounts[wid] // 0 if not in map
+		if memCount != dbCount {
+			log.Printf("[watchdog] resync worker %d: memory=%d, db=%d → correcting", wid, memCount, dbCount)
+			w.activeTasks.Store(wid, dbCount)
+			if dbCount == 0 {
+				w.idleStatus.Store(wid, IdleStatusIdle)
+				w.lastNotIdle.Store(wid, time.Now())
+			}
+		}
+		return true
+	})
 }
 
 // Non-blocking wrappers with timeout logging so slow actions don't stall the watchdog loop

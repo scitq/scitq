@@ -1,0 +1,1 @@
+ALTER TABLE task_dependencies ADD COLUMN accept_failure BOOLEAN NOT NULL DEFAULT FALSE;

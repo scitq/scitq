@@ -262,7 +262,9 @@ Workflow and there can only be one Workflow object in a scitq DSL script.
   - task_spec: optional task specification for the step (overrides workflow default),
   - naming_strategy: optional naming strategy for the step (overrides workflow default),
   - depends: optional dependencies for the task (can be Step or list of Steps),
-  - retry: optional number of retries for the task (overrides workflow default)
+  - skip_if_exists: optional bool to skip the task if output already contains files,
+  - retry: optional number of retries for the task (overrides workflow default),
+  - accept_failure: if True, dependencies are satisfied even when prerequisites fail terminally (all retries exhausted). Default: False
 
 ### `compile(self, client: scitq2.grpc_client.Scitq2Client) -> int`
 

@@ -175,7 +175,8 @@ class Task:
                  depends: Optional[Union[List["Task"],"GroupedStep"]] = None,
                  publish: Optional[str]=None,
                  skip_if_exists: bool = False,
-                 retry: Optional[int]=None):
+                 retry: Optional[int]=None,
+                 accept_failure: bool = False):
         self.tag = tag
         self.command = command
         self.container = container
@@ -184,6 +185,7 @@ class Task:
         self.depends = depends
         self.publish = publish
         self.skip_if_exists = skip_if_exists
+        self.accept_failure = accept_failure
         if inputs is None:
             self.inputs = []
         elif isinstance(inputs, list):
@@ -296,6 +298,7 @@ class Task:
                 task_name=self.full_name,
                 skip_if_exists=self.skip_if_exists,
                 retry=self.retry,
+                accept_failure=self.accept_failure,
             )
 
 
@@ -368,7 +371,8 @@ class Step:
         language: Optional[Language] = None,
         depends: Optional[Union["Step",List["Step"]]] = None,
         skip_if_exists: bool = False,
-        retry: Optional[int]=None
+        retry: Optional[int]=None,
+        accept_failure: bool = False,
     ):
         """Complete an existing Step object with a new Task."""
         if outputs:
@@ -408,7 +412,8 @@ class Step:
 
         task = Task(tag=tag, step=self, command=command, container=container,
                     inputs=inputs, resources=resources_list, language=language,
-                    depends=resolved_depends, publish=publish, skip_if_exists=skip_if_exists, retry=retry)
+                    depends=resolved_depends, publish=publish, skip_if_exists=skip_if_exists, retry=retry,
+                    accept_failure=accept_failure)
         self.tasks.append(task)
 
     def _resolve_publish(self, raw_publish, tag: Optional[str]) -> Optional[str]:
@@ -545,7 +550,8 @@ class Workflow:
         naming_strategy: Optional[callable] = None,
         depends: Optional[Union["Step", List["Step"]]] = None,
         skip_if_exists: Optional[bool] = None,
-        retry: Optional[int] = None
+        retry: Optional[int] = None,
+        accept_failure: bool = False,
     ) -> Step:
         """Add a Step to the Workflow with a single Task.
         If the Step already exists with the same name, the Task is added to the existing Step.
@@ -591,7 +597,8 @@ class Workflow:
         if tag is None and step.tasks:
             raise RuntimeError(f"Step '{name}' has no tag specified and has several iterations which is forbidden")
         step.add_task(tag=tag, command=command, container=container, outputs=outputs, inputs=inputs, resources=resources,
-                      language=effective_language, depends=depends, skip_if_exists=skip_if_exists, retry=retry)
+                      language=effective_language, depends=depends, skip_if_exists=skip_if_exists, retry=retry,
+                      accept_failure=accept_failure)
         return step
 
     def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: Optional[str] = None) -> int:
