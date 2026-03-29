@@ -85,6 +85,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.RetryTaskRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.TaskResponse.FromString,
                 _registered_method=True)
+        self.ForceRunTask = channel.unary_unary(
+                '/taskqueue.TaskQueue/ForceRunTask',
+                request_serializer=taskqueue__pb2.ForceRunTaskRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
         self.ListWorkers = channel.unary_unary(
                 '/taskqueue.TaskQueue/ListWorkers',
                 request_serializer=taskqueue__pb2.ListWorkersRequest.SerializeToString,
@@ -441,6 +446,13 @@ class TaskQueueServicer(object):
 
     def RetryTask(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ForceRunTask(self, request, context):
+        """Force W→P, bypassing dependency checks
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -853,6 +865,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.RetryTask,
                     request_deserializer=taskqueue__pb2.RetryTaskRequest.FromString,
                     response_serializer=taskqueue__pb2.TaskResponse.SerializeToString,
+            ),
+            'ForceRunTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.ForceRunTask,
+                    request_deserializer=taskqueue__pb2.ForceRunTaskRequest.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
             'ListWorkers': grpc.unary_unary_rpc_method_handler(
                     servicer.ListWorkers,
@@ -1420,6 +1437,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/RetryTask',
             taskqueue__pb2.RetryTaskRequest.SerializeToString,
             taskqueue__pb2.TaskResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ForceRunTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ForceRunTask',
+            taskqueue__pb2.ForceRunTaskRequest.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
             options,
             channel_credentials,
             insecure,

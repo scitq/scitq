@@ -17,6 +17,7 @@ service TaskQueue {
     rpc GetLogsChunk(GetLogsRequest) returns (LogChunkList);
     rpc ListTasks (ListTasksRequest) returns (TaskList);
     rpc RetryTask (RetryTaskRequest) returns (TaskResponse);
+    rpc ForceRunTask (ForceRunTaskRequest) returns (Ack); // Force W→P, bypassing dependency checks
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
@@ -112,6 +113,7 @@ message TaskRequest {
     optional string task_name = 17;
     bool skip_if_exists = 18;
     bool accept_failure = 19; // If true, dependencies accept failed prerequisites
+    optional string publish = 20; // Publish path (copied from output on success only)
 }
 
 message Task {
@@ -140,6 +142,7 @@ message Task {
     optional double weight = 23; // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
     optional int64 run_start_time = 24; // epoch timestamp of the first task start time
     bool skip_if_exists = 25;
+    optional string publish = 26; // Publish path (output copied here on success only)
 }
 
 message TaskList {
@@ -149,6 +152,10 @@ message TaskList {
 message RetryTaskRequest {
     int32 task_id = 1;
     optional int32 retry = 2;
+}
+
+message ForceRunTaskRequest {
+    int32 task_id = 1;
 }
 
 message Worker {

@@ -227,13 +227,13 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              command, shell, container, container_options, step_id,
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
-             status, task_name, skip_if_exists, created_at
+             status, task_name, skip_if_exists, publish, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
-             $15, $16, $17, NOW()
+             $15, $16, $17, $18, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -243,7 +243,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
-		initialStatus, req.TaskName, req.SkipIfExists,
+		initialStatus, req.TaskName, req.SkipIfExists, req.Publish,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -868,7 +868,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					retry, is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, previous_task_id, retry_count,
-					task_name
+					task_name, publish
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -877,7 +877,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					GREATEST(retry - 1, 0), is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, task_id, retry_count + 1,
-					task_name
+					task_name, publish
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id
@@ -1201,6 +1201,26 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 
 func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
 	return s.retryTaskInternal(ctx, req, "R", false)
+}
+
+func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTaskRequest) (*pb.Ack, error) {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`,
+		req.TaskId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to force-run task %d: %w", req.TaskId, err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil, fmt.Errorf("task %d is not in waiting (W) status", req.TaskId)
+	}
+	log.Printf("⚡ Task %d forced from W → P (dependency check bypassed)", req.TaskId)
+	ws.EmitWS("task", req.TaskId, "status", struct {
+		TaskId int32  `json:"taskId"`
+		Status string `json:"status"`
+	}{TaskId: req.TaskId, Status: "P"})
+	s.triggerAssign()
+	return &pb.Ack{}, nil
 }
 
 func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) error {
@@ -2451,7 +2471,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
             t.task_id, t.task_name, t.command, t.container, t.container_options, t.status,
             t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden,
             s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry,
-			EXTRACT(EPOCH FROM t.run_started_at)::bigint AS run_started_epoch
+			EXTRACT(EPOCH FROM t.run_started_at)::bigint AS run_started_epoch,
+			t.publish
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -2491,13 +2512,13 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 	var tasks []*pb.Task
 	for rows.Next() {
 		var (
-			task                                                      pb.Task
-			taskName, shellNull, outputNull                           sql.NullString
-			inputNull, resourceNull                                   pq.StringArray
-			workerIDNull, stepIDNull, prevTaskID, wfIDNull, retryNull sql.NullInt32
-			runStartTimeNull                                          sql.NullInt64
-			retryCount                                                int32
-			hidden                                                    bool
+			task                                                              pb.Task
+			taskName, shellNull, outputNull, publishNull                      sql.NullString
+			inputNull, resourceNull                                           pq.StringArray
+			workerIDNull, stepIDNull, prevTaskID, wfIDNull, retryNull         sql.NullInt32
+			runStartTimeNull                                                  sql.NullInt64
+			retryCount                                                        int32
+			hidden                                                            bool
 		)
 
 		if err := rows.Scan(
@@ -2520,6 +2541,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&outputNull,
 			&retryNull,
 			&runStartTimeNull,
+			&publishNull,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -2530,6 +2552,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		task.Input = utils.StringArrayToSlice(inputNull)
 		task.Resource = utils.StringArrayToSlice(resourceNull)
 		task.Output = utils.NullStringToPtr(outputNull)
+		task.Publish = utils.NullStringToPtr(publishNull)
 		task.WorkerId = utils.NullInt32ToPtr(workerIDNull)
 		task.StepId = utils.NullInt32ToPtr(stepIDNull)
 		task.PreviousTaskId = utils.NullInt32ToPtr(prevTaskID)
@@ -2644,7 +2667,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
 			download_timeout, running_timeout, upload_timeout,
-			status, weight
+			status, weight, publish
 		FROM task
 		WHERE worker_id = $1
 		  AND status IN ('A', 'C', 'D', 'R', 'U', 'V')
@@ -2659,9 +2682,10 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		var status string
 		var weight sql.NullFloat64
 
+		var publishNull sql.NullString
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
@@ -2670,6 +2694,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		if shell.Valid {
 			task.Shell = proto.String(shell.String)
 		}
+		task.Publish = utils.NullStringToPtr(publishNull)
 		if weight.Valid {
 			task.Weight = &weight.Float64
 			taskUpdateList[task.TaskId] = &pb.TaskUpdate{Weight: weight.Float64}

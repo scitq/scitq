@@ -119,9 +119,9 @@ class Output(OutputBase):
             return f"Output({self.task.full_name}, grouped={self.grouped}, globs={self.globs}, publish={self.task.publish}), action={self.action}: {e}" 
 
     def resolve_path(self) -> Union[str, List[str]]:
-        """Resolve the output path for this output, based on the workflow and step."""
+        """Resolve the output path: publish path if set, otherwise workspace path."""
         wf = self.task.step.workflow
-        
+
         def build_path(task: "Task") -> Optional[str]:
             if task.publish is not None:
                 return task.publish
@@ -277,9 +277,19 @@ class Task:
             else:
                 raise ValueError(f"Invalid input type: {type(input_item)}. Expected str or Output.")
         
-        resolved_output = Output(task=self, grouped=False).resolve_path()
-        #if resolved_output is None:
-        #    raise ValueError(f"Task {self.full_name} output path could not be resolved (no publish and no workspace_root).")
+        # Resolve output: always use workspace path for worker upload.
+        # Publish path (if set) is sent separately — worker copies there on success only.
+        wf = self.step.workflow
+        resolved_output = None
+        resolved_publish = None
+        if wf.workspace_root is not None:
+            resolved_output = f"{wf.workspace_root}/{wf.full_name}/{self.full_name}/"
+        if self.publish is not None:
+            resolved_publish = self.publish
+            if resolved_output is None:
+                # No workspace — publish path doubles as output (legacy behavior)
+                resolved_output = resolved_publish
+                resolved_publish = None
 
         # Resolve resources
         resolved_resources = list(map(str, self.resources))
@@ -293,6 +303,7 @@ class Task:
                 depends=resolved_depends,
                 inputs=resolved_inputs,
                 output=resolved_output,
+                publish=resolved_publish,
                 resources=resolved_resources,
                 status=status,
                 task_name=self.full_name,

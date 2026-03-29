@@ -92,7 +92,14 @@ func (um *UploadManager) StartUploadWorkers(activeTasks *sync.Map) {
 }
 
 func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
-	if task.Output == nil {
+	// Determine upload target: on success with publish, upload to publish path.
+	// On failure (or no publish), upload to workspace output path.
+	uploadTarget := task.Output
+	if task.Status == "S" && task.Publish != nil && *task.Publish != "" {
+		uploadTarget = task.Publish
+	}
+
+	if uploadTarget == nil {
 		log.Printf("⚠️ Task %d has no output target; skipping upload", task.TaskId)
 		um.Completion <- task
 		return
@@ -148,7 +155,7 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 			}
 			continue
 		}
-		target := fetch.Join(*task.Output, relPath)
+		target := fetch.Join(*uploadTarget, relPath)
 		um.UploadQueue <- &UploadFile{Task: task, SourcePath: path, TargetPath: target}
 	}
 }

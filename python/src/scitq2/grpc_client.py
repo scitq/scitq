@@ -208,6 +208,7 @@ class Scitq2Client:
         task_name: Optional[str] = None,
         skip_if_exists: bool = False,
         accept_failure: bool = False,
+        publish: Optional[str] = None,
     ) -> int:
         """
         Submits a task to a specific step.
@@ -253,6 +254,8 @@ class Scitq2Client:
             request.skip_if_exists = True
         if accept_failure:
             request.accept_failure = True
+        if publish is not None:
+            request.publish = publish
         response = self.stub.SubmitTask(request)
         return response.task_id
 

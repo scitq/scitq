@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"path"
 	"strings"
 	"time"
 
@@ -221,13 +222,14 @@ func (s *taskQueueServer) assignPendingTasks() {
 // skipExistingTasks checks all pending tasks with skip_if_exists=true and promotes
 // them to S if their output already contains files.
 func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
-	// Find pending tasks with skip_if_exists=true and a non-empty output path
+	// Find pending tasks with skip_if_exists=true and a non-empty output/publish path
 	rows, err := tx.Query(`
-		SELECT task_id, output, step_id
+		SELECT task_id, COALESCE(publish, output), step_id
 		FROM task
 		WHERE status = 'P'
 		  AND skip_if_exists = TRUE
-		  AND output IS NOT NULL AND output <> ''
+		  AND COALESCE(publish, output) IS NOT NULL
+		  AND COALESCE(publish, output) <> ''
 	`)
 	if err != nil {
 		log.Printf("⚠️ skip-if-exists: failed to query: %v", err)
@@ -236,14 +238,14 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 	defer rows.Close()
 
 	type candidate struct {
-		taskID int32
-		output string
-		stepID sql.NullInt32
+		taskID    int32
+		checkPath string
+		stepID    sql.NullInt32
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.taskID, &c.output, &c.stepID); err != nil {
+		if err := rows.Scan(&c.taskID, &c.checkPath, &c.stepID); err != nil {
 			continue
 		}
 		candidates = append(candidates, c)
@@ -255,17 +257,42 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 
 	skipped := map[int32]bool{}
 	for _, c := range candidates {
-		files, err := fetch.List(s.rcloneRemotes, c.output)
+		checkPath := c.checkPath
+		// Support glob patterns: extract dir and pattern
+		var globPattern string
+		base := path.Base(checkPath)
+		if strings.ContainsAny(base, "*?") {
+			globPattern = base
+			checkPath = path.Dir(checkPath) + "/"
+		}
+
+		files, err := fetch.List(s.rcloneRemotes, checkPath)
 		if err != nil || len(files) == 0 {
 			continue // output doesn't exist, run normally
 		}
+
+		// If glob pattern specified, filter files
+		if globPattern != "" {
+			matched := false
+			for _, f := range files {
+				name := path.Base(f)
+				if ok, _ := path.Match(globPattern, name); ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+
 		// Output exists — skip to S
 		_, err = tx.Exec(`UPDATE task SET status = 'S' WHERE task_id = $1`, c.taskID)
 		if err != nil {
 			log.Printf("⚠️ skip-if-exists: failed to update task %d: %v", c.taskID, err)
 			continue
 		}
-		log.Printf("⏭️ Task %d skipped (output exists at %s)", c.taskID, c.output)
+		log.Printf("⏭️ Task %d skipped (output exists at %s)", c.taskID, c.checkPath)
 		skipped[c.taskID] = true
 
 		// Emit WS event
