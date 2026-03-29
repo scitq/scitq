@@ -36,6 +36,7 @@ type Attr struct {
 	Server  string `arg:"-s,--server,env:SCITQ_SERVER" default:"localhost:50051" help:"gRPC server address"`
 	TimeOut int    `arg:"-t,--timeout" default:"300" help:"Timeout for server interaction (in seconds)"`
 	Token   string `arg:"-T,--token" default:"" help:"authentication token (used for tests)"`
+	JSON    bool   `arg:"--json" help:"Output in JSON format (for scripting and AI agents)"`
 
 	// Task Commands (Sub-Subcommands)
 	Task *struct {
@@ -341,6 +342,18 @@ func (cli *CLI) WithTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), time.Duration(cli.Attr.TimeOut)*time.Second)
 }
 
+// jsonOut prints v as JSON if --json is set and returns true; otherwise returns false.
+// Commands use: if c.jsonOut(data) { return nil }
+func (c *CLI) jsonOut(v any) bool {
+	if !c.Attr.JSON {
+		return false
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(v)
+	return true
+}
+
 // createTask sends a task creation request.
 func (c *CLI) TaskCreate() error {
 	ctx, cancel := c.WithTimeout()
@@ -408,6 +421,10 @@ func (c *CLI) TaskList() error {
 	res, err := c.QC.Client.ListTasks(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error fetching tasks: %w", err)
+	}
+
+	if c.jsonOut(res.Tasks) {
+		return nil
 	}
 
 	fmt.Println("📋 Task List:")
@@ -1022,6 +1039,10 @@ func (c *CLI) WorkflowList() error {
 		return fmt.Errorf("failed to list workflows: %w", err)
 	}
 
+	if c.jsonOut(res.Workflows) {
+		return nil
+	}
+
 	fmt.Println("📘 Workflow List:")
 	for _, w := range res.Workflows {
 		if w.MaximumWorkers != nil {
@@ -1179,6 +1200,10 @@ func (c *CLI) TemplateUpload() error {
 		return fmt.Errorf("❌ Upload failed: %s", resp.Message)
 	}
 
+	if c.jsonOut(resp) {
+		return nil
+	}
+
 	fmt.Println("✅ Upload successful:")
 	fmt.Printf("  ID:        %d\n", resp.GetWorkflowTemplateId())
 	fmt.Printf("  Name:      %s\n", resp.GetName())
@@ -1212,6 +1237,10 @@ func (c *CLI) TemplateList() error {
 	res, err := c.QC.Client.ListTemplates(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to list templates: %w", err)
+	}
+
+	if c.jsonOut(res.Templates) {
+		return nil
 	}
 
 	if len(res.Templates) == 0 {
@@ -1266,6 +1295,10 @@ func (c *CLI) TemplateDetail() error {
 		return fmt.Errorf("no template found with ID %d", *c.Attr.Template.Detail.TemplateId)
 	}
 	t := res.Templates[0]
+
+	if c.jsonOut(t) {
+		return nil
+	}
 
 	fmt.Printf("📦 Template %s (v%s) — %s\n", t.Name, t.Version, t.Description)
 	fmt.Printf("🕒 Uploaded: %s\n", t.UploadedAt)
@@ -1388,6 +1421,10 @@ func (c *CLI) TemplateRun() error {
 		return err
 	}
 
+	if c.jsonOut(res) {
+		return nil
+	}
+
 	if res.Status != "S" {
 		errMsg := "<unknown error>"
 		if res.ErrorMessage != nil {
@@ -1413,6 +1450,10 @@ func (c *CLI) RunList() error {
 	res, err := c.QC.Client.ListTemplateRuns(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to list template runs: %w", err)
+	}
+
+	if c.jsonOut(res.Runs) {
+		return nil
 	}
 
 	if len(res.Runs) == 0 {
@@ -1526,6 +1567,10 @@ func (c *CLI) ModuleList() error {
 	resp, err := c.QC.Client.ListModules(ctx, &emptypb.Empty{})
 	if err != nil {
 		return fmt.Errorf("failed to list modules: %w", err)
+	}
+
+	if c.jsonOut(resp.Modules) {
+		return nil
 	}
 
 	if len(resp.Modules) == 0 {
@@ -2071,7 +2116,12 @@ func Run(c CLI) error {
 
 	switch {
 	case c.Attr.Login != nil:
-		fmt.Print(createToken(c.Attr.Server, c.Attr.Login.User, c.Attr.Login.Password))
+		token := createToken(c.Attr.Server, c.Attr.Login.User, c.Attr.Login.Password)
+		if c.Attr.JSON {
+			json.NewEncoder(os.Stdout).Encode(map[string]string{"token": token})
+		} else {
+			fmt.Print(token)
+		}
 		return nil
 	case c.Attr.Cert != nil:
 		fmt.Print(fetchCertificate(c.Attr.Server))

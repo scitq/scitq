@@ -7,10 +7,17 @@ scitq uses user authentication so you must login (the admin user and password is
 To manage your authentication it is required to have a token in memory set in a shell variable, `SCITQ_TOKEN`, so the recommended way to do that is to type this each time you restart a session:
 
 ```sh
-SCITQ_TOKEN=$(scitq login)
+export SCITQ_TOKEN=$(scitq login)
 ```
 
 Once you have the token, you can set it in a shell environment script (like `.profile`), but if your privacy matters to you, this is not recommended, prefer refreshing the token in memory each time.
+
+Alternatively, pass `--server` and `--token` directly on each command (useful for scripting and AI agents — see [Global flags](#global-flags)):
+
+```sh
+TOKEN=$(scitq login --user admin --password mypass --server myserver:443 --json | jq -r .token)
+scitq template list --server myserver:443 --token $TOKEN --json
+```
 
 NB: if you forget to login, the CLI will recall that to you.
 
@@ -35,6 +42,33 @@ If your password or login is wrong, you'll get this message.
 ```
 2025/10/29 17:04:02 login failed: rpc error: code = Unauthenticated desc = invalid credentials (xxxxx)
 ```
+
+## Global flags
+
+These flags apply to all commands:
+
+| Flag | Env var | Default | Description |
+|---|---|---|---|
+| `--server`, `-s` | `SCITQ_SERVER` | `localhost:50051` | gRPC server address |
+| `--token`, `-T` | `SCITQ_TOKEN` | (empty) | Authentication token |
+| `--timeout`, `-t` | | `300` | Timeout in seconds |
+| `--json` | | `false` | Output in JSON format |
+
+The `--server` and `--token` flags allow fully stateless usage without environment variables, which is useful for scripting and AI agents:
+
+```sh
+# Login and capture token in one step
+TOKEN=$(scitq login --user admin --password mypass --server beta2.gmt.bio:443 --json | jq -r .token)
+
+# Use token directly — no env vars needed
+scitq template list --server beta2.gmt.bio:443 --token $TOKEN --json
+scitq template run --name biomscope --param 'bioproject=PRJEB6070' --server beta2.gmt.bio:443 --token $TOKEN --json
+```
+
+The `--json` flag makes every command output structured JSON instead of human-readable text. This enables:
+- **Scripting**: pipe output through `jq` or similar tools
+- **AI agents**: parse structured data without regex
+- **Automation**: integrate scitq into CI/CD pipelines
 
 ## CLI logic
 
