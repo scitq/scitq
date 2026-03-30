@@ -153,7 +153,9 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 | `edit_step_command` | Find/replace in all failed tasks of a step and retry them |
 | **Workers** | |
 | `list_workers` | List deployed workers |
+| `deploy_worker` | Deploy new worker instances (by provider/flavor name) |
 | `delete_worker` | Delete a worker |
+| `update_worker` | Update worker settings (concurrency, step, permanent, scope) |
 | **Steps** | |
 | `list_steps` | List steps (optionally by workflow) |
 | **Files** | |
@@ -183,9 +185,46 @@ The session starts pre-authenticated — no need to call the `login` tool.
 2. Call `login` tool with username/password → session is authenticated
 3. Call other tools — session token is reused automatically
 
-### Configuration
+### Server configuration
 
-The MCP endpoint is enabled automatically on the HTTPS server. No additional configuration is needed. Connect your MCP client to `https://<server_fqdn>:<port>/mcp`.
+The MCP endpoint is enabled automatically on the HTTPS server. No additional configuration is needed. The endpoint is at `https://<server_fqdn>/mcp`.
+
+### Claude Code integration
+
+Add the scitq MCP server to Claude Code so tools appear natively:
+
+```bash
+# Get a token first
+TOKEN=$(scitq login --server myserver:50051 --json | jq -r .token)
+
+# Register the MCP server with Bearer token for pre-authentication
+claude mcp add --transport http scitq https://myserver/mcp \
+  --header "Authorization: Bearer $TOKEN"
+```
+
+Verify it's configured:
+
+```bash
+claude mcp list          # should show "scitq"
+```
+
+Inside Claude Code, use `/mcp` to see the available tools. After that, scitq tools (`list_flavors`, `list_templates`, `run_template`, `list_tasks`, etc.) are available as native tool calls — no shell commands needed.
+
+To register multiple servers (e.g. production and testing):
+
+```bash
+claude mcp add --transport http scitq-prod https://prod.example.com/mcp \
+  --header "Authorization: Bearer $PROD_TOKEN"
+
+claude mcp add --transport http scitq-test https://test.example.com/mcp \
+  --header "Authorization: Bearer $TEST_TOKEN"
+```
+
+To remove a server:
+
+```bash
+claude mcp remove scitq
+```
 
 ### CLI alternative
 

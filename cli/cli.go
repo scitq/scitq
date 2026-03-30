@@ -715,79 +715,24 @@ func (c *CLI) WorkerDeploy() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	var regionFilter string
-	if c.Attr.Worker.Deploy.Region == "" {
-		regionFilter = "region is default"
-	} else {
-		regionFilter = fmt.Sprintf("region=%s", c.Attr.Worker.Deploy.Region)
-	}
-
-	// Try to parse flavor as ID first, then fall back to name
-	flavorID, err := strconv.Atoi(c.Attr.Worker.Deploy.Flavor)
-	var filter string
-
-	if err == nil {
-		// Input is a valid integer, search by flavor ID
-		filter = fmt.Sprintf("provider=%s:flavor_id=%d:%s", c.Attr.Worker.Deploy.Provider, flavorID, regionFilter)
-	} else {
-		// Input is not a valid integer, search by flavor name
-		filter = fmt.Sprintf("provider=%s:flavor_name=%s:%s", c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Flavor, regionFilter)
-	}
-
-	req := &pb.ListFlavorsRequest{
-		Limit:  1,
-		Filter: filter,
-	}
-	res, err := c.QC.Client.ListFlavors(ctx, req)
-	if err != nil {
-		return fmt.Errorf("error fetching flavor: %w", err)
-	}
-	if len(res.Flavors) != 1 {
-		// Provide diagnostic help when no flavors are found
-		if len(res.Flavors) == 0 {
-			// Try to find flavors without provider/region constraints to help diagnose the issue
-			diagReq := &pb.ListFlavorsRequest{
-				Limit:  10,
-				Filter: fmt.Sprintf("flavor_name=%s", c.Attr.Worker.Deploy.Flavor),
-			}
-			diagRes, diagErr := c.QC.Client.ListFlavors(ctx, diagReq)
-			if diagErr == nil && len(diagRes.Flavors) > 0 {
-				// Flavor exists but not with the specified provider/region
-				var availableProviders []string
-				for _, f := range diagRes.Flavors {
-					availableProviders = append(availableProviders, f.Provider)
-				}
-				return fmt.Errorf("flavor '%s' not found for provider '%s' and region '%s'. Available providers for this flavor: %v. Use 'scitq flavor list --filter flavor_name=%s' to see details",
-					c.Attr.Worker.Deploy.Flavor, c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Region, availableProviders, c.Attr.Worker.Deploy.Flavor)
-			}
-			return fmt.Errorf("no flavors found matching provider='%s', flavor='%s', region='%s'. Please check your provider, flavor name, and region. Use 'scitq flavor list' to see available flavors",
-				c.Attr.Worker.Deploy.Provider, c.Attr.Worker.Deploy.Flavor, c.Attr.Worker.Deploy.Region)
-		}
-		return fmt.Errorf("expected exactly one flavor, got %d", len(res.Flavors))
-	}
-
-	flavor := res.Flavors[0]
-	// Now you can work with 'flavor'
-	fmt.Printf("✅ Identified flavor: %s (ID: %d)\n", flavor.FlavorName, flavor.FlavorId)
-
-	// Build the WorkerDeployRequest using parameters from CLI.
-	req2 := &pb.WorkerRequest{
-		ProviderId:  flavor.ProviderId,
-		FlavorId:    flavor.FlavorId,
-		RegionId:    flavor.RegionId,
-		Number:      int32(c.Attr.Worker.Deploy.Count),
-		StepId:      &c.Attr.Worker.Deploy.StepId,
+	req := &pb.CreateWorkerByNameRequest{
+		Provider:    c.Attr.Worker.Deploy.Provider,
+		Flavor:      c.Attr.Worker.Deploy.Flavor,
+		Region:      c.Attr.Worker.Deploy.Region,
+		Count:       int32(c.Attr.Worker.Deploy.Count),
 		Concurrency: int32(c.Attr.Worker.Deploy.Concurrency),
 		Prefetch:    int32(c.Attr.Worker.Deploy.Prefetch),
 	}
+	if c.Attr.Worker.Deploy.StepId != 0 {
+		req.StepId = &c.Attr.Worker.Deploy.StepId
+	}
 
-	// Call the gRPC DeployWorker RPC.
-	res2, err := c.QC.Client.CreateWorker(ctx, req2)
+	res, err := c.QC.Client.CreateWorkerByName(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error deploying worker: %w", err)
 	}
 
-	for _, w := range res2.WorkersDetails {
+	for _, w := range res.WorkersDetails {
 		fmt.Printf("✅ Worker deployed with ID: %d, Name: %s\n", w.WorkerId, w.WorkerName)
 	}
 	return nil

@@ -1907,6 +1907,40 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 	}, nil
 }
 
+func (s *taskQueueServer) CreateWorkerByName(ctx context.Context, req *pb.CreateWorkerByNameRequest) (*pb.WorkerIds, error) {
+	// Resolve names to IDs via ListFlavors (same approach as CLI)
+	regionFilter := "region is default"
+	if req.Region != "" {
+		regionFilter = fmt.Sprintf("region=%s", req.Region)
+	}
+	filter := fmt.Sprintf("provider=%s:flavor_name=%s:%s", req.Provider, req.Flavor, regionFilter)
+	flavors, err := s.ListFlavors(ctx, &pb.ListFlavorsRequest{Limit: 1, Filter: filter})
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve flavor: %w", err)
+	}
+	if len(flavors.Flavors) == 0 {
+		return nil, fmt.Errorf("no flavor found for provider=%s flavor=%s region=%s", req.Provider, req.Flavor, req.Region)
+	}
+	f := flavors.Flavors[0]
+	count := req.Count
+	if count == 0 {
+		count = 1
+	}
+	concurrency := req.Concurrency
+	if concurrency == 0 {
+		concurrency = 1
+	}
+	return s.CreateWorker(ctx, &pb.WorkerRequest{
+		ProviderId:  f.ProviderId,
+		FlavorId:    f.FlavorId,
+		RegionId:    f.RegionId,
+		Number:      count,
+		Concurrency: concurrency,
+		Prefetch:    req.Prefetch,
+		StepId:      req.StepId,
+	})
+}
+
 func (s *taskQueueServer) GetWorkerStatuses(ctx context.Context, req *pb.WorkerStatusRequest) (*pb.WorkerStatusResponse, error) {
 	var statuses []*pb.WorkerStatus
 

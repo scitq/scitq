@@ -110,6 +110,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.WorkerRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.WorkerIds.FromString,
                 _registered_method=True)
+        self.CreateWorkerByName = channel.unary_unary(
+                '/taskqueue.TaskQueue/CreateWorkerByName',
+                request_serializer=taskqueue__pb2.CreateWorkerByNameRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.WorkerIds.FromString,
+                _registered_method=True)
         self.UpdateWorkerStatus = channel.unary_unary(
                 '/taskqueue.TaskQueue/UpdateWorkerStatus',
                 request_serializer=taskqueue__pb2.WorkerStatus.SerializeToString,
@@ -509,6 +514,13 @@ class TaskQueueServicer(object):
 
     def CreateWorker(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CreateWorkerByName(self, request, context):
+        """Name-based variant (resolves names to IDs)
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -958,6 +970,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
             'CreateWorker': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateWorker,
                     request_deserializer=taskqueue__pb2.WorkerRequest.FromString,
+                    response_serializer=taskqueue__pb2.WorkerIds.SerializeToString,
+            ),
+            'CreateWorkerByName': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateWorkerByName,
+                    request_deserializer=taskqueue__pb2.CreateWorkerByNameRequest.FromString,
                     response_serializer=taskqueue__pb2.WorkerIds.SerializeToString,
             ),
             'UpdateWorkerStatus': grpc.unary_unary_rpc_method_handler(
@@ -1670,6 +1687,33 @@ class TaskQueue(object):
             target,
             '/taskqueue.TaskQueue/CreateWorker',
             taskqueue__pb2.WorkerRequest.SerializeToString,
+            taskqueue__pb2.WorkerIds.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CreateWorkerByName(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/CreateWorkerByName',
+            taskqueue__pb2.CreateWorkerByNameRequest.SerializeToString,
             taskqueue__pb2.WorkerIds.FromString,
             options,
             channel_credentials,

@@ -35,6 +35,7 @@ const (
 	TaskQueue_EditStepCommand_FullMethodName           = "/taskqueue.TaskQueue/EditStepCommand"
 	TaskQueue_ListWorkers_FullMethodName               = "/taskqueue.TaskQueue/ListWorkers"
 	TaskQueue_CreateWorker_FullMethodName              = "/taskqueue.TaskQueue/CreateWorker"
+	TaskQueue_CreateWorkerByName_FullMethodName        = "/taskqueue.TaskQueue/CreateWorkerByName"
 	TaskQueue_UpdateWorkerStatus_FullMethodName        = "/taskqueue.TaskQueue/UpdateWorkerStatus"
 	TaskQueue_DeleteWorker_FullMethodName              = "/taskqueue.TaskQueue/DeleteWorker"
 	TaskQueue_UpdateWorker_FullMethodName              = "/taskqueue.TaskQueue/UpdateWorker"
@@ -117,6 +118,7 @@ type TaskQueueClient interface {
 	EditStepCommand(ctx context.Context, in *EditStepCommandRequest, opts ...grpc.CallOption) (*EditStepCommandResponse, error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
+	CreateWorkerByName(ctx context.Context, in *CreateWorkerByNameRequest, opts ...grpc.CallOption) (*WorkerIds, error)
 	UpdateWorkerStatus(ctx context.Context, in *WorkerStatus, opts ...grpc.CallOption) (*Ack, error)
 	DeleteWorker(ctx context.Context, in *WorkerDeletion, opts ...grpc.CallOption) (*JobId, error)
 	UpdateWorker(ctx context.Context, in *WorkerUpdateRequest, opts ...grpc.CallOption) (*Ack, error)
@@ -356,6 +358,16 @@ func (c *taskQueueClient) CreateWorker(ctx context.Context, in *WorkerRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkerIds)
 	err := c.cc.Invoke(ctx, TaskQueue_CreateWorker_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) CreateWorkerByName(ctx context.Context, in *CreateWorkerByNameRequest, opts ...grpc.CallOption) (*WorkerIds, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerIds)
+	err := c.cc.Invoke(ctx, TaskQueue_CreateWorkerByName_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -991,6 +1003,7 @@ type TaskQueueServer interface {
 	EditStepCommand(context.Context, *EditStepCommandRequest) (*EditStepCommandResponse, error)
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
+	CreateWorkerByName(context.Context, *CreateWorkerByNameRequest) (*WorkerIds, error)
 	UpdateWorkerStatus(context.Context, *WorkerStatus) (*Ack, error)
 	DeleteWorker(context.Context, *WorkerDeletion) (*JobId, error)
 	UpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error)
@@ -1109,6 +1122,9 @@ func (UnimplementedTaskQueueServer) ListWorkers(context.Context, *ListWorkersReq
 }
 func (UnimplementedTaskQueueServer) CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateWorker not implemented")
+}
+func (UnimplementedTaskQueueServer) CreateWorkerByName(context.Context, *CreateWorkerByNameRequest) (*WorkerIds, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateWorkerByName not implemented")
 }
 func (UnimplementedTaskQueueServer) UpdateWorkerStatus(context.Context, *WorkerStatus) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateWorkerStatus not implemented")
@@ -1555,6 +1571,24 @@ func _TaskQueue_CreateWorker_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).CreateWorker(ctx, req.(*WorkerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_CreateWorkerByName_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateWorkerByNameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).CreateWorkerByName(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_CreateWorkerByName_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).CreateWorkerByName(ctx, req.(*CreateWorkerByNameRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2711,6 +2745,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateWorker",
 			Handler:    _TaskQueue_CreateWorker_Handler,
+		},
+		{
+			MethodName: "CreateWorkerByName",
+			Handler:    _TaskQueue_CreateWorkerByName_Handler,
 		},
 		{
 			MethodName: "UpdateWorkerStatus",

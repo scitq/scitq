@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -74,6 +75,29 @@ type toolResult struct {
 type contentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+// normalizeArgs converts string-encoded numbers to real JSON numbers.
+// MCP clients (e.g. Claude Code) may send integers as strings despite the schema declaring them as integer.
+func normalizeArgs(raw json.RawMessage) json.RawMessage {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return raw
+	}
+	changed := false
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			if n, err := strconv.ParseFloat(s, 64); err == nil {
+				m[k] = n
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return raw
+	}
+	out, _ := json.Marshal(m)
+	return out
 }
 
 func newMCPHandler(s *taskQueueServer) *mcpHandler {
@@ -279,6 +303,19 @@ func (h *mcpHandler) listTools() []mcpTool {
 			},
 		},
 		{
+			Name:        "submit_task",
+			Description: "Submit a task for execution. Returns the new task ID.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"command":   {Type: "string", Description: "Command to execute"},
+					"container": {Type: "string", Description: "Docker container image"},
+					"shell":     {Type: "string", Description: "Shell to use (sh, bash, python). Default: sh"},
+				},
+				Required: []string{"command", "container"},
+			},
+		},
+		{
 			Name:        "task_logs",
 			Description: "Get stdout and stderr of a task.",
 			InputSchema: inputSchema{
@@ -301,11 +338,44 @@ func (h *mcpHandler) listTools() []mcpTool {
 			InputSchema: inputSchema{Type: "object"},
 		},
 		{
+			Name:        "deploy_worker",
+			Description: "Deploy new worker instances on a cloud provider.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"provider":    {Type: "string", Description: "Provider (e.g. azure.primary, openstack.ovh)"},
+					"flavor":      {Type: "string", Description: "Flavor name (e.g. Standard_D32s_v5)"},
+					"region":      {Type: "string", Description: "Region (optional, defaults to provider default)"},
+					"count":       {Type: "integer", Description: "Number of workers (default: 1)"},
+					"concurrency": {Type: "integer", Description: "Initial concurrency (default: 1)"},
+					"prefetch":    {Type: "integer", Description: "Initial prefetch (default: 0)"},
+					"step_id":     {Type: "integer", Description: "Step ID to assign to (optional)"},
+				},
+				Required: []string{"provider", "flavor"},
+			},
+		},
+		{
 			Name:        "delete_worker",
 			Description: "Delete a worker (destroys the VM if cloud-deployed).",
 			InputSchema: inputSchema{
 				Type:     "object",
 				Properties: map[string]schemaProperty{"worker_id": {Type: "integer", Description: "Worker ID"}},
+				Required: []string{"worker_id"},
+			},
+		},
+		{
+			Name:        "update_worker",
+			Description: "Update worker settings (step assignment, concurrency, prefetch, permanent flag, recyclable scope).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"worker_id":        {Type: "integer", Description: "Worker ID"},
+					"step_id":          {Type: "integer", Description: "Step ID to assign to (optional)"},
+					"concurrency":      {Type: "integer", Description: "New concurrency (optional)"},
+					"prefetch":         {Type: "integer", Description: "New prefetch (optional)"},
+					"permanent":        {Type: "boolean", Description: "Set as permanent (optional)"},
+					"recyclable_scope": {Type: "string", Description: "Recyclable scope: S (step), W (workflow), G (global) (optional)"},
+				},
 				Required: []string{"worker_id"},
 			},
 		},
@@ -432,6 +502,18 @@ func (h *mcpHandler) listTools() []mcpTool {
 				},
 			},
 		},
+		// --- Flavors ---
+		{
+			Name:        "list_flavors",
+			Description: "List available instance flavors. Use filter to narrow results (e.g. cpu>=8:mem>=30:cost>0).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"filter": {Type: "string", Description: "Filter expression (e.g. cpu>=32:mem>=120:provider=azure.primary:cost>0)"},
+					"limit":  {Type: "integer", Description: "Max results (default: 20)"},
+				},
+			},
+		},
 		// --- File operations ---
 		{
 			Name:        "file_list",
@@ -465,6 +547,7 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 	if err := json.Unmarshal(raw, &call); err != nil {
 		return nil, &rpcError{Code: -32602, Message: "Invalid params"}
 	}
+	call.Arguments = normalizeArgs(call.Arguments)
 
 	// Login doesn't need auth
 	if call.Name == "login" {
@@ -499,6 +582,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolDeleteWorkflow(authCtx, call.Arguments)
 	case "list_tasks":
 		return h.toolListTasks(authCtx, call.Arguments)
+	case "submit_task":
+		return h.toolSubmitTask(authCtx, call.Arguments)
 	case "task_logs":
 		return h.toolTaskLogs(authCtx, call.Arguments)
 	case "retry_task":
@@ -509,8 +594,12 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolTaskStatusCounts(authCtx, call.Arguments)
 	case "list_workers":
 		return h.toolListWorkers(authCtx)
+	case "deploy_worker":
+		return h.toolDeployWorker(authCtx, call.Arguments)
 	case "delete_worker":
 		return h.toolDeleteWorker(authCtx, call.Arguments)
+	case "update_worker":
+		return h.toolUpdateWorker(authCtx, call.Arguments)
 	case "list_modules":
 		return h.toolListModules(authCtx)
 	case "upload_module":
@@ -523,6 +612,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolEditStepCommand(authCtx, call.Arguments)
 	case "list_steps":
 		return h.toolListSteps(authCtx, call.Arguments)
+	case "list_flavors":
+		return h.toolListFlavors(authCtx, call.Arguments)
 	case "file_list":
 		return h.toolFileList(authCtx, call.Arguments)
 	case "list_template_runs":
@@ -686,19 +777,70 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 	if err != nil {
 		return errorResult(err), nil
 	}
-	return jsonResult(res.Tasks), nil
+	// Return summary (without full command text which can be huge)
+	type taskSummary struct {
+		TaskID     int32  `json:"task_id"`
+		TaskName   string `json:"task_name,omitempty"`
+		Status     string `json:"status"`
+		StepID     int32  `json:"step_id,omitempty"`
+		WorkerID   int32  `json:"worker_id,omitempty"`
+		WorkflowID int32  `json:"workflow_id,omitempty"`
+		Container  string `json:"container"`
+		RetryCount int32  `json:"retry_count,omitempty"`
+	}
+	summaries := make([]taskSummary, 0, len(res.Tasks))
+	for _, t := range res.Tasks {
+		s := taskSummary{
+			TaskID:     t.TaskId,
+			Status:     t.Status,
+			Container:  t.Container,
+			RetryCount: t.RetryCount,
+		}
+		if t.TaskName != nil { s.TaskName = *t.TaskName }
+		if t.StepId != nil { s.StepID = *t.StepId }
+		if t.WorkerId != nil { s.WorkerID = *t.WorkerId }
+		if t.WorkflowId != nil { s.WorkflowID = *t.WorkflowId }
+		summaries = append(summaries, s)
+	}
+	return jsonResult(summaries), nil
+}
+
+func (h *mcpHandler) toolSubmitTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Command   string `json:"command"`
+		Container string `json:"container"`
+		Shell     string `json:"shell"`
+	}
+	json.Unmarshal(args, &p)
+	req := &pb.TaskRequest{
+		Command:   p.Command,
+		Container: p.Container,
+		Status:    "P",
+	}
+	if p.Shell != "" {
+		req.Shell = &p.Shell
+	}
+	res, err := h.server.SubmitTask(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(map[string]any{"task_id": res.TaskId}), nil
 }
 
 func (h *mcpHandler) toolTaskLogs(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
 		TaskID int32 `json:"task_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return errorResult(fmt.Errorf("invalid arguments: %w (raw: %s)", err, string(args))), nil
+	}
+	if p.TaskID == 0 {
+		return errorResult(fmt.Errorf("task_id is required (raw args: %s)", string(args))), nil
+	}
 
-	logType := "stdout"
 	res, err := h.server.GetLogsChunk(ctx, &pb.GetLogsRequest{
-		TaskIds:  []int32{p.TaskID},
-		LogType:  &logType,
+		TaskIds:   []int32{p.TaskID},
+		ChunkSize: 10000,
 	})
 	if err != nil {
 		return errorResult(err), nil
@@ -732,6 +874,39 @@ func (h *mcpHandler) toolListWorkers(ctx context.Context) (any, *rpcError) {
 	return jsonResult(res.Workers), nil
 }
 
+func (h *mcpHandler) toolDeployWorker(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Provider    string `json:"provider"`
+		Flavor      string `json:"flavor"`
+		Region      string `json:"region"`
+		Count       int32  `json:"count"`
+		Concurrency int32  `json:"concurrency"`
+		Prefetch    int32  `json:"prefetch"`
+		StepID      int32  `json:"step_id"`
+	}
+	json.Unmarshal(args, &p)
+	req := &pb.CreateWorkerByNameRequest{
+		Provider:    p.Provider,
+		Flavor:      p.Flavor,
+		Region:      p.Region,
+		Count:       p.Count,
+		Concurrency: p.Concurrency,
+		Prefetch:    p.Prefetch,
+	}
+	if p.StepID != 0 {
+		req.StepId = &p.StepID
+	}
+	res, err := h.server.CreateWorkerByName(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	var ids []int32
+	for _, w := range res.WorkersDetails {
+		ids = append(ids, w.WorkerId)
+	}
+	return jsonResult(map[string]any{"worker_ids": ids}), nil
+}
+
 func (h *mcpHandler) toolDeleteWorker(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct{ WorkerID int32 `json:"worker_id"` }
 	json.Unmarshal(args, &p)
@@ -740,6 +915,40 @@ func (h *mcpHandler) toolDeleteWorker(ctx context.Context, args json.RawMessage)
 		return errorResult(err), nil
 	}
 	return textResult(fmt.Sprintf("Worker %d deletion initiated", p.WorkerID)), nil
+}
+
+func (h *mcpHandler) toolUpdateWorker(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		WorkerID        int32  `json:"worker_id"`
+		StepID          int32  `json:"step_id"`
+		Concurrency     int32  `json:"concurrency"`
+		Prefetch        int32  `json:"prefetch"`
+		Permanent       bool   `json:"permanent"`
+		RecyclableScope string `json:"recyclable_scope"`
+	}
+	json.Unmarshal(args, &p)
+	req := &pb.WorkerUpdateRequest{WorkerId: p.WorkerID}
+	if p.StepID != 0 {
+		req.StepId = &p.StepID
+	}
+	if p.Concurrency != 0 {
+		req.Concurrency = &p.Concurrency
+	}
+	if p.Prefetch != 0 {
+		req.Prefetch = &p.Prefetch
+	}
+	if p.Permanent {
+		v := true
+		req.IsPermanent = &v
+	}
+	if p.RecyclableScope != "" {
+		req.RecyclableScope = &p.RecyclableScope
+	}
+	_, err := h.server.UserUpdateWorker(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Worker %d updated", p.WorkerID)), nil
 }
 
 func (h *mcpHandler) toolRetryTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
@@ -893,6 +1102,25 @@ func (h *mcpHandler) toolListSteps(ctx context.Context, args json.RawMessage) (a
 		return errorResult(err), nil
 	}
 	return jsonResult(res.Steps), nil
+}
+
+func (h *mcpHandler) toolListFlavors(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Filter string `json:"filter"`
+		Limit  int32  `json:"limit"`
+	}
+	json.Unmarshal(args, &p)
+	if p.Limit == 0 {
+		p.Limit = 20
+	}
+	res, err := h.server.ListFlavors(ctx, &pb.ListFlavorsRequest{
+		Filter: p.Filter,
+		Limit:  p.Limit,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Flavors), nil
 }
 
 func (h *mcpHandler) toolFileList(ctx context.Context, args json.RawMessage) (any, *rpcError) {
