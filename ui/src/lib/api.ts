@@ -468,7 +468,26 @@ export async function retryTask(taskId: number, retryCount?: number): Promise<nu
   }
 }
 
-/* -------------------------------- JOB -------------------------------- */ 
+/**
+ * Edit a task's command and retry it via the HTTP API endpoint.
+ * Returns the new task ID.
+ */
+export async function editAndRetryTask(taskId: number, command: string): Promise<number> {
+  const resp = await fetch("/api/task/edit-retry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ task_id: taskId, command }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error(body.error || `Failed to edit task ${taskId}`);
+  }
+  const data = await resp.json();
+  return data.new_task_id;
+}
+
+/* -------------------------------- JOB -------------------------------- */
 
 /**
  * Retrieves a paginated list of jobs from the server with optional limit and offset

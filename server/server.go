@@ -3140,6 +3140,63 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// httpEditAndRetryTask is an HTTP endpoint for the UI to edit a task's command and retry it.
+// POST /api/task/edit-retry with JSON body {"task_id": 123, "command": "new command"}
+func (s *taskQueueServer) httpEditAndRetryTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Auth from cookie
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+	var userID int
+	var username string
+	var isAdmin bool
+	err = s.db.QueryRow(
+		`SELECT u.user_id, u.username, u.is_admin FROM scitq_user_session ss
+		 JOIN scitq_user u ON ss.user_id=u.user_id
+		 WHERE ss.session_id=$1 AND ss.expires_at > now()`,
+		cookie.Value).Scan(&userID, &username, &isAdmin)
+	if err != nil {
+		http.Error(w, "Invalid session", http.StatusUnauthorized)
+		return
+	}
+	ctx := context.WithValue(r.Context(), userContextKey, &AuthenticatedUser{
+		UserID: userID, Username: username, IsAdmin: isAdmin,
+	})
+
+	var req struct {
+		TaskID  int32  `json:"task_id"`
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.EditAndRetryTask(ctx, &pb.EditAndRetryTaskRequest{
+		TaskId:  req.TaskID,
+		Command: req.Command,
+	})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"old_task_id": req.TaskID,
+		"new_task_id": resp.TaskId,
+	})
+}
+
 // parseJWT verifies and parses the JWT token string using the given secret key.
 func parseJWT(tokenStr string, secretKey string) (jwt.MapClaims, error) {
 	// Parse the JWT token with validation of the signing method
@@ -4715,6 +4772,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	mux.HandleFunc("/WorkerToken", fetchWorkerTokenHandler(s))
 	mux.HandleFunc("/ws", ws.Handler)
 	mux.Handle("/mcp", newMCPHandler(s))
+	mux.HandleFunc("/api/task/edit-retry", s.httpEditAndRetryTask)
 
 	// 🧲 Static files and binary client
 	mux.Handle("/scitq-client", staticHandler)

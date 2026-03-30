@@ -8,7 +8,8 @@
     getSteps,
     streamTaskLogsOutput,
     streamTaskLogsErr,
-    getLogsBatch
+    getLogsBatch,
+    editAndRetryTask
   } from '../lib/api';
   import TaskList from '../components/TaskList.svelte';
   import { LogChunk, TaskLog } from '../../gen/taskqueue';
@@ -38,6 +39,9 @@
   let selectedTaskStatus: string = '';
   // Command of the selected task (for log modal)
   let selectedTaskCommand: String = undefined;
+  let editMode = false;
+  let editCommandText = '';
+  let editError = '';
   // Current sorting method
   let sortBy: 'task' | 'worker' | 'wf' | 'step' = 'task';
   // Steps for the currently selected workflow
@@ -599,8 +603,29 @@ async function handleWebSocketMessage(message) {
     showLogModal = false;
     selectedTaskId = null;
     selectedTaskCommand = '';
+    editMode = false;
+    editCommandText = '';
+    editError = '';
     hasMoreStdout = true;
     hasMoreStderr = true;
+  }
+
+  function startEditMode() {
+    editMode = true;
+    editCommandText = String(selectedTaskCommand);
+    editError = '';
+  }
+
+  async function submitEditAndRetry() {
+    if (!selectedTaskId) return;
+    editError = '';
+    try {
+      const newId = await editAndRetryTask(selectedTaskId, editCommandText);
+      editMode = false;
+      closeLogModal();
+    } catch (err) {
+      editError = err.message || 'Failed to edit and retry task';
+    }
   }
 
   /**
@@ -973,7 +998,19 @@ async function handleWebSocketMessage(message) {
           </div>
         {/if}
       </div>
-      <p class="tasks-command-preview"> {selectedTaskCommand}</p>
+      {#if editMode}
+        <div style="margin:0.5em 0;">
+          <textarea
+            bind:value={editCommandText}
+            style="width:100%;min-height:200px;font-family:monospace;font-size:0.85em;padding:0.5em;border:1px solid #666;border-radius:4px;background:#1a1a2e;color:#e0e0e0;"
+          ></textarea>
+          {#if editError}
+            <p style="color:#ff6b6b;margin:0.25em 0;">{editError}</p>
+          {/if}
+        </div>
+      {:else}
+        <p class="tasks-command-preview"> {selectedTaskCommand}</p>
+      {/if}
       <div class="tasks-log-columns">
         <!-- Stdout Log Panel -->
         {#if logsToShowOut.length > 0}
@@ -1044,7 +1081,17 @@ async function handleWebSocketMessage(message) {
           </div>
         {/if}
       </div>
-      <button class="tasks-modal-close" on:click={closeLogModal}>Close</button>
+      <div style="display:flex;gap:0.5em;justify-content:flex-end;margin-top:0.5em;">
+        {#if editMode}
+          <button class="tasks-modal-close" style="background:#4caf50;" on:click={submitEditAndRetry}>Save & Retry</button>
+          <button class="tasks-modal-close" on:click={() => { editMode = false; editError = ''; }}>Cancel</button>
+        {:else}
+          {#if selectedTaskStatus === 'F'}
+            <button class="tasks-modal-close" style="background:#ff9800;" on:click={startEditMode}>Edit & Retry</button>
+          {/if}
+          <button class="tasks-modal-close" on:click={closeLogModal}>Close</button>
+        {/if}
+      </div>
     </div>
   </div>
 {/if}
