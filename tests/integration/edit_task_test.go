@@ -111,6 +111,8 @@ func TestEditStepCommand(t *testing.T) {
 
 	// Create a workflow and step
 	wfName := fmt.Sprintf("edit-step-test-%d", time.Now().UnixNano())
+	_, err = qc.CreateWorkflow(ctx, &pb.WorkflowRequest{Name: wfName})
+	require.NoError(t, err)
 	stepResp, err := qc.CreateStep(ctx, &pb.StepRequest{WorkflowName: &wfName, Name: "edit-step"})
 	require.NoError(t, err)
 	stepID := stepResp.StepId
@@ -199,6 +201,8 @@ func TestEditStepCommandRegexp(t *testing.T) {
 
 	// Create workflow and step with a failed task with a versioned command
 	wfName := fmt.Sprintf("regexp-edit-test-%d", time.Now().UnixNano())
+	_, err = qc.CreateWorkflow(ctx, &pb.WorkflowRequest{Name: wfName})
+	require.NoError(t, err)
 	stepResp, err := qc.CreateStep(ctx, &pb.StepRequest{WorkflowName: &wfName, Name: "regexp-step"})
 	require.NoError(t, err)
 	stepID := stepResp.StepId

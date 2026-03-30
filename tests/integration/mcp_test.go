@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,8 +261,9 @@ type hostPort struct {
 
 func splitHostPort(t *testing.T, addr string) hostPort {
 	t.Helper()
-	var hp hostPort
-	_, err := fmt.Sscanf(addr, "%[^:]:%d", &hp.host, &hp.port)
-	require.NoError(t, err, "failed to parse %q", addr)
-	return hp
+	parts := strings.SplitN(addr, ":", 2)
+	require.Len(t, parts, 2, "failed to parse %q", addr)
+	port, err := strconv.Atoi(parts[1])
+	require.NoError(t, err, "failed to parse port from %q", addr)
+	return hostPort{host: parts[0], port: port}
 }

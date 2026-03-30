@@ -4189,15 +4189,15 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 		return nil, fmt.Errorf("failed to insert step: %w", err)
 	}
 
-	ws.EmitWS("step", *req.WorkflowId, "created", struct {
+	ws.EmitWS("step", workflowID, "created", struct {
 		StepId       int32   `json:"stepId"`
 		Name         *string `json:"name,omitempty"`
-		WorkflowId   *int32  `json:"workflowId,omitempty"`
+		WorkflowId   int32   `json:"workflowId"`
 		WorkflowName *string `json:"workflowName,omitempty"`
 	}{
 		StepId:       stepID,
 		Name:         &req.Name,
-		WorkflowId:   req.WorkflowId,
+		WorkflowId:   workflowID,
 		WorkflowName: req.WorkflowName,
 	})
 
