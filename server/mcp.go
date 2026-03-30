@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -126,7 +125,7 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Method {
 	case "initialize":
-		session, sessionID = h.handleInitialize(w, req)
+		session, sessionID = h.handleInitialize(w, r, req)
 		if session == nil {
 			return // already wrote response
 		}
@@ -174,9 +173,16 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *mcpHandler) handleInitialize(w http.ResponseWriter, req jsonrpcRequest) (*mcpSession, string) {
+func (h *mcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request, req jsonrpcRequest) (*mcpSession, string) {
 	sid := generateSessionID()
 	session := &mcpSession{}
+
+	// If Authorization: Bearer <token> is provided, pre-authenticate the session
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		session.token = strings.TrimPrefix(auth, "Bearer ")
+		log.Printf("🔐 MCP session %s pre-authenticated via Bearer token", sid)
+	}
+
 	h.sessions.Store(sid, session)
 
 	resp := jsonrpcResponse{
@@ -288,6 +294,139 @@ func (h *mcpHandler) listTools() []mcpTool {
 			Description: "List private YAML modules on the server.",
 			InputSchema: inputSchema{Type: "object"},
 		},
+		// --- Worker tools ---
+		{
+			Name:        "list_workers",
+			Description: "List deployed workers.",
+			InputSchema: inputSchema{Type: "object"},
+		},
+		{
+			Name:        "delete_worker",
+			Description: "Delete a worker (destroys the VM if cloud-deployed).",
+			InputSchema: inputSchema{
+				Type:     "object",
+				Properties: map[string]schemaProperty{"worker_id": {Type: "integer", Description: "Worker ID"}},
+				Required: []string{"worker_id"},
+			},
+		},
+		// --- Task management ---
+		{
+			Name:        "retry_task",
+			Description: "Retry a failed task (creates a fresh clone).",
+			InputSchema: inputSchema{
+				Type:     "object",
+				Properties: map[string]schemaProperty{"task_id": {Type: "integer", Description: "Task ID"}},
+				Required: []string{"task_id"},
+			},
+		},
+		{
+			Name:        "force_run_task",
+			Description: "Force a waiting (W) task to pending (P), bypassing dependency checks.",
+			InputSchema: inputSchema{
+				Type:     "object",
+				Properties: map[string]schemaProperty{"task_id": {Type: "integer", Description: "Task ID"}},
+				Required: []string{"task_id"},
+			},
+		},
+		{
+			Name:        "task_status_counts",
+			Description: "Get task count per status for a workflow or globally.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"workflow_id": {Type: "integer", Description: "Filter by workflow ID (optional)"},
+				},
+			},
+		},
+		// --- Workflow management ---
+		{
+			Name:        "update_workflow_status",
+			Description: "Update a workflow's status (R=Running, P=Paused, D=Debug).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"workflow_id": {Type: "integer", Description: "Workflow ID"},
+					"status":     {Type: "string", Description: "New status: R (Running), P (Paused), D (Debug)"},
+				},
+				Required: []string{"workflow_id", "status"},
+			},
+		},
+		{
+			Name:        "delete_workflow",
+			Description: "Delete a workflow and all its tasks.",
+			InputSchema: inputSchema{
+				Type:     "object",
+				Properties: map[string]schemaProperty{"workflow_id": {Type: "integer", Description: "Workflow ID"}},
+				Required: []string{"workflow_id"},
+			},
+		},
+		// --- Template/module download ---
+		{
+			Name:        "download_template",
+			Description: "Download a template script source code.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"name":    {Type: "string", Description: "Template name"},
+					"version": {Type: "string", Description: "Version (default: latest)"},
+				},
+				Required: []string{"name"},
+			},
+		},
+		{
+			Name:        "upload_module",
+			Description: "Upload a private YAML module to the server.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"filename": {Type: "string", Description: "Module filename (e.g. my_step.yaml)"},
+					"content":  {Type: "string", Description: "YAML content of the module"},
+					"force":    {Type: "boolean", Description: "Overwrite if exists"},
+				},
+				Required: []string{"filename", "content"},
+			},
+		},
+		{
+			Name:        "download_module",
+			Description: "Download a private YAML module from the server.",
+			InputSchema: inputSchema{
+				Type:     "object",
+				Properties: map[string]schemaProperty{"name": {Type: "string", Description: "Module filename"}},
+				Required: []string{"name"},
+			},
+		},
+		// --- Steps and recruiters ---
+		{
+			Name:        "list_steps",
+			Description: "List steps, optionally filtered by workflow.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"workflow_id": {Type: "integer", Description: "Filter by workflow ID (optional)"},
+				},
+			},
+		},
+		// --- File operations ---
+		{
+			Name:        "file_list",
+			Description: "List files at a remote URI (cloud storage).",
+			InputSchema: inputSchema{
+				Type:     "object",
+				Properties: map[string]schemaProperty{"uri": {Type: "string", Description: "URI to list (e.g. s3://bucket/path/)"}},
+				Required: []string{"uri"},
+			},
+		},
+		// --- Run management ---
+		{
+			Name:        "list_template_runs",
+			Description: "List template execution runs.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"template_id": {Type: "integer", Description: "Filter by template ID (optional)"},
+				},
+			},
+		},
 	}
 }
 
@@ -324,14 +463,40 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolTemplateDetail(authCtx, call.Arguments)
 	case "run_template":
 		return h.toolRunTemplate(authCtx, call.Arguments)
+	case "download_template":
+		return h.toolDownloadTemplate(authCtx, call.Arguments)
 	case "list_workflows":
 		return h.toolListWorkflows(authCtx, call.Arguments)
+	case "update_workflow_status":
+		return h.toolUpdateWorkflowStatus(authCtx, call.Arguments)
+	case "delete_workflow":
+		return h.toolDeleteWorkflow(authCtx, call.Arguments)
 	case "list_tasks":
 		return h.toolListTasks(authCtx, call.Arguments)
 	case "task_logs":
 		return h.toolTaskLogs(authCtx, call.Arguments)
+	case "retry_task":
+		return h.toolRetryTask(authCtx, call.Arguments)
+	case "force_run_task":
+		return h.toolForceRunTask(authCtx, call.Arguments)
+	case "task_status_counts":
+		return h.toolTaskStatusCounts(authCtx, call.Arguments)
+	case "list_workers":
+		return h.toolListWorkers(authCtx)
+	case "delete_worker":
+		return h.toolDeleteWorker(authCtx, call.Arguments)
 	case "list_modules":
 		return h.toolListModules(authCtx)
+	case "upload_module":
+		return h.toolUploadModule(authCtx, call.Arguments)
+	case "download_module":
+		return h.toolDownloadModule(authCtx, call.Arguments)
+	case "list_steps":
+		return h.toolListSteps(authCtx, call.Arguments)
+	case "file_list":
+		return h.toolFileList(authCtx, call.Arguments)
+	case "list_template_runs":
+		return h.toolListTemplateRuns(authCtx, call.Arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
 	}
@@ -529,6 +694,165 @@ func (h *mcpHandler) toolListModules(ctx context.Context) (any, *rpcError) {
 	return jsonResult(res.Modules), nil
 }
 
+func (h *mcpHandler) toolListWorkers(ctx context.Context) (any, *rpcError) {
+	res, err := h.server.ListWorkers(ctx, &pb.ListWorkersRequest{})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Workers), nil
+}
+
+func (h *mcpHandler) toolDeleteWorker(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ WorkerID int32 `json:"worker_id"` }
+	json.Unmarshal(args, &p)
+	_, err := h.server.DeleteWorker(ctx, &pb.WorkerDeletion{WorkerId: p.WorkerID})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Worker %d deletion initiated", p.WorkerID)), nil
+}
+
+func (h *mcpHandler) toolRetryTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ TaskID int32 `json:"task_id"` }
+	json.Unmarshal(args, &p)
+	res, err := h.server.RetryTask(ctx, &pb.RetryTaskRequest{TaskId: p.TaskID})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Task %d retried — new task ID: %d", p.TaskID, res.TaskId)), nil
+}
+
+func (h *mcpHandler) toolForceRunTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ TaskID int32 `json:"task_id"` }
+	json.Unmarshal(args, &p)
+	_, err := h.server.ForceRunTask(ctx, &pb.ForceRunTaskRequest{TaskId: p.TaskID})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Task %d forced from W to P", p.TaskID)), nil
+}
+
+func (h *mcpHandler) toolTaskStatusCounts(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	res, err := h.server.GetTaskStatusCounts(ctx, &pb.TaskStatusCountsRequest{})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(map[string]any{
+		"global_counts": res.GlobalCounts,
+		"total":         res.TotalCount,
+	}), nil
+}
+
+func (h *mcpHandler) toolUpdateWorkflowStatus(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		WorkflowID int32  `json:"workflow_id"`
+		Status     string `json:"status"`
+	}
+	json.Unmarshal(args, &p)
+	_, err := h.server.UpdateWorkflowStatus(ctx, &pb.WorkflowStatusUpdate{
+		WorkflowId: p.WorkflowID,
+		Status:     p.Status,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Workflow %d status updated to %s", p.WorkflowID, p.Status)), nil
+}
+
+func (h *mcpHandler) toolDeleteWorkflow(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ WorkflowID int32 `json:"workflow_id"` }
+	json.Unmarshal(args, &p)
+	_, err := h.server.DeleteWorkflow(ctx, &pb.WorkflowId{WorkflowId: p.WorkflowID})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Workflow %d deleted", p.WorkflowID)), nil
+}
+
+func (h *mcpHandler) toolDownloadTemplate(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	json.Unmarshal(args, &p)
+	req := &pb.DownloadTemplateRequest{Name: &p.Name}
+	if p.Version != "" {
+		req.Version = &p.Version
+	}
+	res, err := h.server.DownloadTemplate(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return &toolResult{
+		Content: []contentBlock{{Type: "text", Text: string(res.Content)}},
+	}, nil
+}
+
+func (h *mcpHandler) toolUploadModule(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Filename string `json:"filename"`
+		Content  string `json:"content"`
+		Force    bool   `json:"force"`
+	}
+	json.Unmarshal(args, &p)
+	_, err := h.server.UploadModule(ctx, &pb.UploadModuleRequest{
+		Filename: p.Filename,
+		Content:  []byte(p.Content),
+		Force:    p.Force,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Module '%s' uploaded", p.Filename)), nil
+}
+
+func (h *mcpHandler) toolDownloadModule(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ Name string `json:"name"` }
+	json.Unmarshal(args, &p)
+	res, err := h.server.DownloadModule(ctx, &pb.DownloadModuleRequest{Filename: p.Name})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return &toolResult{
+		Content: []contentBlock{{Type: "text", Text: string(res.Content)}},
+	}, nil
+}
+
+func (h *mcpHandler) toolListSteps(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ WorkflowID int32 `json:"workflow_id"` }
+	json.Unmarshal(args, &p)
+	filter := &pb.StepFilter{WorkflowId: p.WorkflowID}
+	res, err := h.server.ListSteps(ctx, filter)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Steps), nil
+}
+
+func (h *mcpHandler) toolFileList(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ URI string `json:"uri"` }
+	json.Unmarshal(args, &p)
+	res, err := h.server.FetchList(ctx, &pb.FetchListRequest{Uri: p.URI})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Files), nil
+}
+
+func (h *mcpHandler) toolListTemplateRuns(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ TemplateID int32 `json:"template_id"` }
+	json.Unmarshal(args, &p)
+	filter := &pb.TemplateRunFilter{}
+	if p.TemplateID != 0 {
+		filter.WorkflowTemplateId = &p.TemplateID
+	}
+	res, err := h.server.ListTemplateRuns(ctx, filter)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Runs), nil
+}
+
 // --- Helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -541,6 +865,12 @@ func generateSessionID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func textResult(msg string) *toolResult {
+	return &toolResult{
+		Content: []contentBlock{{Type: "text", Text: msg}},
+	}
 }
 
 func jsonResult(v any) *toolResult {
@@ -557,20 +887,32 @@ func errorResult(err error) *toolResult {
 	}
 }
 
-// resolveSessionContext resolves a session token to an authenticated user context.
-func (h *mcpHandler) resolveSessionContext(ctx context.Context, sessionToken string) context.Context {
+// resolveSessionContext resolves a token (JWT or session) to an authenticated user context.
+func (h *mcpHandler) resolveSessionContext(ctx context.Context, token string) context.Context {
+	// Try JWT first (from scitq login --json)
+	claims, err := parseJWT(token, h.server.cfg.Scitq.JwtSecret)
+	if err == nil {
+		userID := int(claims["user_id"].(float64))
+		username, _ := claims["username"].(string)
+		isAdmin, _ := claims["is_admin"].(bool)
+		return context.WithValue(ctx, userContextKey, &AuthenticatedUser{
+			UserID:   userID,
+			Username: username,
+			IsAdmin:  isAdmin,
+		})
+	}
+
+	// Fall back to session token (from Login RPC)
 	var userID int
 	var username string
 	var isAdmin bool
-	err := h.server.db.QueryRow(
+	err = h.server.db.QueryRow(
 		`SELECT u.user_id, u.username, u.is_admin FROM scitq_user_session s
 		 JOIN scitq_user u ON s.user_id=u.user_id
 		 WHERE s.session_id=$1 AND s.expires_at > now()`,
-		sessionToken).Scan(&userID, &username, &isAdmin)
+		token).Scan(&userID, &username, &isAdmin)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Printf("MCP: invalid session token")
-		}
+		log.Printf("MCP: invalid token (neither JWT nor session)")
 		return ctx
 	}
 	return context.WithValue(ctx, userContextKey, &AuthenticatedUser{

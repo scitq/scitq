@@ -111,19 +111,58 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 
 | Tool | Description |
 |---|---|
-| `login` | Authenticate with username/password. Must be called first. |
+| **Auth** | |
+| `login` | Authenticate with username/password. Must be called first (unless using Bearer token). |
+| **Templates** | |
 | `list_templates` | List available workflow templates |
 | `template_detail` | Get template metadata and parameter schema |
 | `run_template` | Run a template with parameters |
+| `download_template` | Download template source code |
+| `list_template_runs` | List template execution runs |
+| **Modules** | |
+| `list_modules` | List private YAML modules |
+| `upload_module` | Upload a YAML module |
+| `download_module` | Download a YAML module |
+| **Workflows** | |
 | `list_workflows` | List workflows |
+| `update_workflow_status` | Pause, resume, or debug a workflow |
+| `delete_workflow` | Delete a workflow and all its tasks |
+| **Tasks** | |
 | `list_tasks` | List tasks with filters (workflow_id, status, limit) |
 | `task_logs` | Get stdout and stderr for a task |
-| `list_modules` | List private YAML modules |
+| `task_status_counts` | Get task counts per status |
+| `retry_task` | Retry a failed task |
+| `force_run_task` | Force a waiting task to pending (bypass dependencies) |
+| **Workers** | |
+| `list_workers` | List deployed workers |
+| `delete_worker` | Delete a worker |
+| **Steps** | |
+| `list_steps` | List steps (optionally by workflow) |
+| **Files** | |
+| `file_list` | List files at a remote URI |
 
-### Session flow
+### Authentication
+
+Two options:
+
+**Option 1: Bearer token** (recommended for agents that already have a token)
+
+Pass the JWT from `scitq login` in the `Authorization` header during `initialize`:
+
+```
+POST /mcp
+Authorization: Bearer eyJ...
+Content-Type: application/json
+
+{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {...}}
+```
+
+The session starts pre-authenticated — no need to call the `login` tool.
+
+**Option 2: Login tool** (for agents without a pre-existing token)
 
 1. Send `initialize` request → server returns `Mcp-Session-Id`
-2. Call `login` tool with credentials → session is authenticated
+2. Call `login` tool with username/password → session is authenticated
 3. Call other tools — session token is reused automatically
 
 ### Configuration
