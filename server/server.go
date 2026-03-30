@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1221,6 +1222,84 @@ func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTask
 	}{TaskId: req.TaskId, Status: "P"})
 	s.triggerAssign()
 	return &pb.Ack{}, nil
+}
+
+func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndRetryTaskRequest) (*pb.TaskResponse, error) {
+	// Update the command on the original task, then retry
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE task SET command = $1 WHERE task_id = $2 AND NOT hidden`,
+		req.Command, req.TaskId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update command on task %d: %w", req.TaskId, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return nil, fmt.Errorf("task %d not found or hidden", req.TaskId)
+	}
+	log.Printf("✏️ Task %d command edited, retrying", req.TaskId)
+	return s.retryTaskInternal(ctx, &pb.RetryTaskRequest{TaskId: req.TaskId}, "R", false)
+}
+
+func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepCommandRequest) (*pb.EditStepCommandResponse, error) {
+	// Find all visible failed tasks in the step
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT task_id, command FROM task
+		 WHERE step_id = $1 AND status = 'F' AND NOT hidden`,
+		req.StepId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tasks for step %d: %w", req.StepId, err)
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		taskID  int32
+		command string
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if rows.Scan(&c.taskID, &c.command) == nil {
+			candidates = append(candidates, c)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return &pb.EditStepCommandResponse{}, nil
+	}
+
+	var newTaskIDs []int32
+	for _, c := range candidates {
+		var newCmd string
+		if req.IsRegexp {
+			re, err := regexp.Compile(req.Find)
+			if err != nil {
+				return nil, fmt.Errorf("invalid regexp %q: %w", req.Find, err)
+			}
+			newCmd = re.ReplaceAllString(c.command, req.Replace)
+		} else {
+			newCmd = strings.ReplaceAll(c.command, req.Find, req.Replace)
+		}
+
+		if newCmd == c.command {
+			continue // no change
+		}
+
+		// Edit the command and retry
+		resp, err := s.EditAndRetryTask(ctx, &pb.EditAndRetryTaskRequest{
+			TaskId:  c.taskID,
+			Command: newCmd,
+		})
+		if err != nil {
+			log.Printf("⚠️ EditStepCommand: failed to edit task %d: %v", c.taskID, err)
+			continue
+		}
+		newTaskIDs = append(newTaskIDs, resp.TaskId)
+	}
+
+	log.Printf("✏️ EditStepCommand: step %d — %d tasks edited and retried", req.StepId, len(newTaskIDs))
+	return &pb.EditStepCommandResponse{
+		EditedCount: int32(len(newTaskIDs)),
+		NewTaskIds:  newTaskIDs,
+	}, nil
 }
 
 func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) error {

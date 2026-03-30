@@ -31,6 +31,8 @@ const (
 	TaskQueue_ListTasks_FullMethodName                 = "/taskqueue.TaskQueue/ListTasks"
 	TaskQueue_RetryTask_FullMethodName                 = "/taskqueue.TaskQueue/RetryTask"
 	TaskQueue_ForceRunTask_FullMethodName              = "/taskqueue.TaskQueue/ForceRunTask"
+	TaskQueue_EditAndRetryTask_FullMethodName          = "/taskqueue.TaskQueue/EditAndRetryTask"
+	TaskQueue_EditStepCommand_FullMethodName           = "/taskqueue.TaskQueue/EditStepCommand"
 	TaskQueue_ListWorkers_FullMethodName               = "/taskqueue.TaskQueue/ListWorkers"
 	TaskQueue_CreateWorker_FullMethodName              = "/taskqueue.TaskQueue/CreateWorker"
 	TaskQueue_UpdateWorkerStatus_FullMethodName        = "/taskqueue.TaskQueue/UpdateWorkerStatus"
@@ -111,6 +113,8 @@ type TaskQueueClient interface {
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskList, error)
 	RetryTask(ctx context.Context, in *RetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	ForceRunTask(ctx context.Context, in *ForceRunTaskRequest, opts ...grpc.CallOption) (*Ack, error)
+	EditAndRetryTask(ctx context.Context, in *EditAndRetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
+	EditStepCommand(ctx context.Context, in *EditStepCommandRequest, opts ...grpc.CallOption) (*EditStepCommandResponse, error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
 	UpdateWorkerStatus(ctx context.Context, in *WorkerStatus, opts ...grpc.CallOption) (*Ack, error)
@@ -312,6 +316,26 @@ func (c *taskQueueClient) ForceRunTask(ctx context.Context, in *ForceRunTaskRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Ack)
 	err := c.cc.Invoke(ctx, TaskQueue_ForceRunTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) EditAndRetryTask(ctx context.Context, in *EditAndRetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_EditAndRetryTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) EditStepCommand(ctx context.Context, in *EditStepCommandRequest, opts ...grpc.CallOption) (*EditStepCommandResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EditStepCommandResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_EditStepCommand_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -963,6 +987,8 @@ type TaskQueueServer interface {
 	ListTasks(context.Context, *ListTasksRequest) (*TaskList, error)
 	RetryTask(context.Context, *RetryTaskRequest) (*TaskResponse, error)
 	ForceRunTask(context.Context, *ForceRunTaskRequest) (*Ack, error)
+	EditAndRetryTask(context.Context, *EditAndRetryTaskRequest) (*TaskResponse, error)
+	EditStepCommand(context.Context, *EditStepCommandRequest) (*EditStepCommandResponse, error)
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
 	UpdateWorkerStatus(context.Context, *WorkerStatus) (*Ack, error)
@@ -1071,6 +1097,12 @@ func (UnimplementedTaskQueueServer) RetryTask(context.Context, *RetryTaskRequest
 }
 func (UnimplementedTaskQueueServer) ForceRunTask(context.Context, *ForceRunTaskRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ForceRunTask not implemented")
+}
+func (UnimplementedTaskQueueServer) EditAndRetryTask(context.Context, *EditAndRetryTaskRequest) (*TaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EditAndRetryTask not implemented")
+}
+func (UnimplementedTaskQueueServer) EditStepCommand(context.Context, *EditStepCommandRequest) (*EditStepCommandResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EditStepCommand not implemented")
 }
 func (UnimplementedTaskQueueServer) ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkers not implemented")
@@ -1451,6 +1483,42 @@ func _TaskQueue_ForceRunTask_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).ForceRunTask(ctx, req.(*ForceRunTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_EditAndRetryTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EditAndRetryTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).EditAndRetryTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_EditAndRetryTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).EditAndRetryTask(ctx, req.(*EditAndRetryTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_EditStepCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EditStepCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).EditStepCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_EditStepCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).EditStepCommand(ctx, req.(*EditStepCommandRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2627,6 +2695,14 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForceRunTask",
 			Handler:    _TaskQueue_ForceRunTask_Handler,
+		},
+		{
+			MethodName: "EditAndRetryTask",
+			Handler:    _TaskQueue_EditAndRetryTask_Handler,
+		},
+		{
+			MethodName: "EditStepCommand",
+			Handler:    _TaskQueue_EditStepCommand_Handler,
 		},
 		{
 			MethodName: "ListWorkers",

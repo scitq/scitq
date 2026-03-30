@@ -395,6 +395,32 @@ func (h *mcpHandler) listTools() []mcpTool {
 				Required: []string{"name"},
 			},
 		},
+		{
+			Name:        "edit_and_retry_task",
+			Description: "Edit a task's command and retry it. Returns the new task ID.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"task_id": {Type: "integer", Description: "Task ID to edit"},
+					"command": {Type: "string", Description: "New command"},
+				},
+				Required: []string{"task_id", "command"},
+			},
+		},
+		{
+			Name:        "edit_step_command",
+			Description: "Find/replace in all failed tasks of a step and retry them.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"step_id":   {Type: "integer", Description: "Step ID"},
+					"find":      {Type: "string", Description: "Text or regexp to find"},
+					"replace":   {Type: "string", Description: "Replacement text"},
+					"is_regexp": {Type: "boolean", Description: "Treat find as regexp"},
+				},
+				Required: []string{"step_id", "find", "replace"},
+			},
+		},
 		// --- Steps and recruiters ---
 		{
 			Name:        "list_steps",
@@ -491,6 +517,10 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolUploadModule(authCtx, call.Arguments)
 	case "download_module":
 		return h.toolDownloadModule(authCtx, call.Arguments)
+	case "edit_and_retry_task":
+		return h.toolEditAndRetryTask(authCtx, call.Arguments)
+	case "edit_step_command":
+		return h.toolEditStepCommand(authCtx, call.Arguments)
 	case "list_steps":
 		return h.toolListSteps(authCtx, call.Arguments)
 	case "file_list":
@@ -816,6 +846,42 @@ func (h *mcpHandler) toolDownloadModule(ctx context.Context, args json.RawMessag
 	return &toolResult{
 		Content: []contentBlock{{Type: "text", Text: string(res.Content)}},
 	}, nil
+}
+
+func (h *mcpHandler) toolEditAndRetryTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		TaskID  int32  `json:"task_id"`
+		Command string `json:"command"`
+	}
+	json.Unmarshal(args, &p)
+	res, err := h.server.EditAndRetryTask(ctx, &pb.EditAndRetryTaskRequest{
+		TaskId:  p.TaskID,
+		Command: p.Command,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Task %d edited and retried → new task ID: %d", p.TaskID, res.TaskId)), nil
+}
+
+func (h *mcpHandler) toolEditStepCommand(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		StepID   int32  `json:"step_id"`
+		Find     string `json:"find"`
+		Replace  string `json:"replace"`
+		IsRegexp bool   `json:"is_regexp"`
+	}
+	json.Unmarshal(args, &p)
+	res, err := h.server.EditStepCommand(ctx, &pb.EditStepCommandRequest{
+		StepId:   p.StepID,
+		Find:     p.Find,
+		Replace:  p.Replace,
+		IsRegexp: p.IsRegexp,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res), nil
 }
 
 func (h *mcpHandler) toolListSteps(ctx context.Context, args json.RawMessage) (any, *rpcError) {

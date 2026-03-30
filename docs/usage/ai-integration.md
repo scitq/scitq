@@ -85,6 +85,21 @@ All list and detail commands support `--json`. The output is structured JSON pri
 | `workflow list --json` | Array of workflow objects |
 | `module list --json` | Array of module filenames |
 
+### Fix broken commands
+
+When tasks fail due to a command error, you can edit and retry without recreating the workflow:
+
+```sh
+# Edit a single task's command and retry it
+scitq task edit --id 12345 --command "fixed_command ..." --server $S --token $T --json
+
+# Find/replace across all failed tasks in a step
+scitq step edit --id 456 --find "old_path" --replace "new_path" --server $S --token $T --json
+
+# Regexp replace
+scitq step edit --id 456 --find "bowtie2 -k \d+" --replace "bowtie2 -k 200" --regexp --server $S --token $T --json
+```
+
 ## Tips for AI agents
 
 - **Always use `--json`** for parseable output. Without it, the CLI outputs human-readable text with emojis.
@@ -92,6 +107,7 @@ All list and detail commands support `--json`. The output is structured JSON pri
 - **Use `--no-recruiters`** for safe testing. This creates the workflow without deploying cloud workers.
 - **Check task status** by filtering: `task list --workflow <id> --status F --json` to find failures.
 - **Read stderr for errors**: `task stderr --id <id>` gives the task's error output, which usually contains the root cause.
+- **Fix and retry**: use `task edit` to fix a single task, or `step edit` to fix all failed tasks in a step with find/replace.
 
 For the full CLI reference, see the [CLI documentation](cli.md). For details on the `--server`, `--token`, and `--json` flags, see [Global flags](cli.md#global-flags).
 
@@ -133,6 +149,8 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 | `task_status_counts` | Get task counts per status |
 | `retry_task` | Retry a failed task |
 | `force_run_task` | Force a waiting task to pending (bypass dependencies) |
+| `edit_and_retry_task` | Edit a task's command and retry it |
+| `edit_step_command` | Find/replace in all failed tasks of a step and retry them |
 | **Workers** | |
 | `list_workers` | List deployed workers |
 | `delete_worker` | Delete a worker |

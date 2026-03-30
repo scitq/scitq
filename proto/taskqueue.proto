@@ -18,6 +18,8 @@ service TaskQueue {
     rpc ListTasks (ListTasksRequest) returns (TaskList);
     rpc RetryTask (RetryTaskRequest) returns (TaskResponse);
     rpc ForceRunTask (ForceRunTaskRequest) returns (Ack); // Force W→P, bypassing dependency checks
+    rpc EditAndRetryTask (EditAndRetryTaskRequest) returns (TaskResponse); // Edit command and retry a single task
+    rpc EditStepCommand (EditStepCommandRequest) returns (EditStepCommandResponse); // Find/replace in all failed tasks of a step and retry them
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
     rpc UpdateWorkerStatus(WorkerStatus) returns (Ack);
@@ -161,6 +163,23 @@ message RetryTaskRequest {
 
 message ForceRunTaskRequest {
     int32 task_id = 1;
+}
+
+message EditAndRetryTaskRequest {
+    int32 task_id = 1;
+    string command = 2; // New command to use for the retry
+}
+
+message EditStepCommandRequest {
+    int32 step_id = 1;
+    string find = 2;       // Plain text or regexp pattern to find
+    string replace = 3;    // Replacement string
+    bool is_regexp = 4;    // If true, find is a regexp pattern
+}
+
+message EditStepCommandResponse {
+    int32 edited_count = 1;   // Number of tasks edited and retried
+    repeated int32 new_task_ids = 2;
 }
 
 message Worker {

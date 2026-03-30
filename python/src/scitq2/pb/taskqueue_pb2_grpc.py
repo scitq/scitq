@@ -90,6 +90,16 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.ForceRunTaskRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
+        self.EditAndRetryTask = channel.unary_unary(
+                '/taskqueue.TaskQueue/EditAndRetryTask',
+                request_serializer=taskqueue__pb2.EditAndRetryTaskRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.TaskResponse.FromString,
+                _registered_method=True)
+        self.EditStepCommand = channel.unary_unary(
+                '/taskqueue.TaskQueue/EditStepCommand',
+                request_serializer=taskqueue__pb2.EditStepCommandRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.EditStepCommandResponse.FromString,
+                _registered_method=True)
         self.ListWorkers = channel.unary_unary(
                 '/taskqueue.TaskQueue/ListWorkers',
                 request_serializer=taskqueue__pb2.ListWorkersRequest.SerializeToString,
@@ -472,6 +482,20 @@ class TaskQueueServicer(object):
 
     def ForceRunTask(self, request, context):
         """Force W→P, bypassing dependency checks
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def EditAndRetryTask(self, request, context):
+        """Edit command and retry a single task
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def EditStepCommand(self, request, context):
+        """Find/replace in all failed tasks of a step and retry them
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -915,6 +939,16 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.ForceRunTask,
                     request_deserializer=taskqueue__pb2.ForceRunTaskRequest.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'EditAndRetryTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.EditAndRetryTask,
+                    request_deserializer=taskqueue__pb2.EditAndRetryTaskRequest.FromString,
+                    response_serializer=taskqueue__pb2.TaskResponse.SerializeToString,
+            ),
+            'EditStepCommand': grpc.unary_unary_rpc_method_handler(
+                    servicer.EditStepCommand,
+                    request_deserializer=taskqueue__pb2.EditStepCommandRequest.FromString,
+                    response_serializer=taskqueue__pb2.EditStepCommandResponse.SerializeToString,
             ),
             'ListWorkers': grpc.unary_unary_rpc_method_handler(
                     servicer.ListWorkers,
@@ -1529,6 +1563,60 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/ForceRunTask',
             taskqueue__pb2.ForceRunTaskRequest.SerializeToString,
             taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EditAndRetryTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/EditAndRetryTask',
+            taskqueue__pb2.EditAndRetryTaskRequest.SerializeToString,
+            taskqueue__pb2.TaskResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EditStepCommand(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/EditStepCommand',
+            taskqueue__pb2.EditStepCommandRequest.SerializeToString,
+            taskqueue__pb2.EditStepCommandResponse.FromString,
             options,
             channel_credentials,
             insecure,

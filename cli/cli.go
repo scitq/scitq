@@ -79,6 +79,11 @@ type Attr struct {
 			ID    int32  `arg:"--id,required" help:"Task ID to retry"`
 			Retry *int32 `arg:"--retry" help:"Number of retries left (optional)"`
 		} `arg:"subcommand:retry" help:"Retry a failed task"`
+
+		Edit *struct {
+			ID      int32  `arg:"--id,required" help:"Task ID to edit and retry"`
+			Command string `arg:"--command,required" help:"New command for the task"`
+		} `arg:"subcommand:edit" help:"Edit a task's command and retry it"`
 	} `arg:"subcommand:task" help:"Manage tasks"`
 
 	// Worker Commands (Sub-Subcommands)
@@ -212,6 +217,13 @@ type Attr struct {
 			TaskName     string  `arg:"--task-name" help:"Filter relevant step IDs by tasks whose name matches substring (case-insensitive, client-side)"`
 			Totals       bool    `arg:"--totals" help:"Add totals line at the end of the stats"`
 		} `arg:"subcommand:stats" help:"Show step statistics"`
+
+		Edit *struct {
+			StepId  int32  `arg:"--id,required" help:"Step ID"`
+			Find    string `arg:"--find,required" help:"Text or regexp pattern to find in commands"`
+			Replace string `arg:"--replace,required" help:"Replacement text"`
+			Regexp  bool   `arg:"--regexp" help:"Treat --find as a regexp pattern"`
+		} `arg:"subcommand:edit" help:"Find/replace in all failed tasks of a step and retry them"`
 	} `arg:"subcommand:step" help:"Manage steps"`
 
 	// File commands
@@ -548,6 +560,51 @@ func (c *CLI) TaskRetry() error {
 	}
 
 	fmt.Printf("🔁 Retried task %d → new task ID %d\n", c.Attr.Task.Retry.ID, res.TaskId)
+	return nil
+}
+
+// TaskEdit edits a task's command and retries it.
+func (c *CLI) TaskEdit() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	res, err := c.QC.Client.EditAndRetryTask(ctx, &pb.EditAndRetryTaskRequest{
+		TaskId:  c.Attr.Task.Edit.ID,
+		Command: c.Attr.Task.Edit.Command,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to edit and retry task: %w", err)
+	}
+
+	if c.jsonOut(map[string]any{"old_task_id": c.Attr.Task.Edit.ID, "new_task_id": res.TaskId}) {
+		return nil
+	}
+	fmt.Printf("✏️ Task %d edited and retried → new task ID %d\n", c.Attr.Task.Edit.ID, res.TaskId)
+	return nil
+}
+
+// StepEdit does find/replace on all failed tasks in a step and retries them.
+func (c *CLI) StepEdit() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	res, err := c.QC.Client.EditStepCommand(ctx, &pb.EditStepCommandRequest{
+		StepId:   c.Attr.Step.Edit.StepId,
+		Find:     c.Attr.Step.Edit.Find,
+		Replace:  c.Attr.Step.Edit.Replace,
+		IsRegexp: c.Attr.Step.Edit.Regexp,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to edit step commands: %w", err)
+	}
+
+	if c.jsonOut(res) {
+		return nil
+	}
+	fmt.Printf("✏️ %d tasks edited and retried in step %d\n", res.EditedCount, c.Attr.Step.Edit.StepId)
+	for _, id := range res.NewTaskIds {
+		fmt.Printf("  → new task ID %d\n", id)
+	}
 	return nil
 }
 
@@ -2172,6 +2229,8 @@ func Run(c CLI) error {
 			err = c.TaskLogs()
 		case c.Attr.Task.Retry != nil:
 			err = c.TaskRetry()
+		case c.Attr.Task.Edit != nil:
+			err = c.TaskEdit()
 		}
 	// Worker commands
 	case c.Attr.Worker != nil:
@@ -2261,6 +2320,8 @@ func Run(c CLI) error {
 			err = c.StepDelete()
 		case c.Attr.Step.Stats != nil:
 			err = c.StepStats()
+		case c.Attr.Step.Edit != nil:
+			err = c.StepEdit()
 		}
 	case c.Attr.File != nil:
 		switch {
