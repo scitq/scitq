@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -108,8 +109,9 @@ func TestEditStepCommand(t *testing.T) {
 	defer qclient.Close()
 	qc := qclient.Client
 
-	// Create a step
-	stepResp, err := qc.CreateStep(ctx, &pb.StepRequest{Name: "edit-step-test"})
+	// Create a workflow and step
+	wfName := fmt.Sprintf("edit-step-test-%d", time.Now().UnixNano())
+	stepResp, err := qc.CreateStep(ctx, &pb.StepRequest{WorkflowName: &wfName, Name: "edit-step"})
 	require.NoError(t, err)
 	stepID := stepResp.StepId
 
@@ -195,8 +197,9 @@ func TestEditStepCommandRegexp(t *testing.T) {
 	defer qclient.Close()
 	qc := qclient.Client
 
-	// Create step and a failed task with a versioned command
-	stepResp, err := qc.CreateStep(ctx, &pb.StepRequest{Name: "regexp-edit-test"})
+	// Create workflow and step with a failed task with a versioned command
+	wfName := fmt.Sprintf("regexp-edit-test-%d", time.Now().UnixNano())
+	stepResp, err := qc.CreateStep(ctx, &pb.StepRequest{WorkflowName: &wfName, Name: "regexp-step"})
 	require.NoError(t, err)
 	stepID := stepResp.StepId
 
