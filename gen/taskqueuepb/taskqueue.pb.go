@@ -5501,6 +5501,7 @@ type WorkerStats struct {
 	Disks           []*DiskUsage           `protobuf:"bytes,5,rep,name=disks,proto3" json:"disks,omitempty"`                                                // Per-disk usage
 	DiskIo          *DiskIOStats           `protobuf:"bytes,6,opt,name=disk_io,json=diskIo,proto3" json:"disk_io,omitempty"`                                // Global disk IO (aggregated)
 	NetIo           *NetIOStats            `protobuf:"bytes,7,opt,name=net_io,json=netIo,proto3" json:"net_io,omitempty"`                                   // Global network IO (aggregated)
+	NumCpus         int32                  `protobuf:"varint,8,opt,name=num_cpus,json=numCpus,proto3" json:"num_cpus,omitempty"`                            // Number of CPU cores on this worker
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -5582,6 +5583,13 @@ func (x *WorkerStats) GetNetIo() *NetIOStats {
 		return x.NetIo
 	}
 	return nil
+}
+
+func (x *WorkerStats) GetNumCpus() int32 {
+	if x != nil {
+		return x.NumCpus
+	}
+	return 0
 }
 
 type DiskUsage struct {
@@ -8824,7 +8832,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\v_start_timeB\v\n" +
 	"\t_end_time\"?\n" +
 	"\x11StepStatsResponse\x12*\n" +
-	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xb4\x02\n" +
+	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xcf\x02\n" +
 	"\vWorkerStats\x12*\n" +
 	"\x11cpu_usage_percent\x18\x01 \x01(\x02R\x0fcpuUsagePercent\x12*\n" +
 	"\x11mem_usage_percent\x18\x02 \x01(\x02R\x0fmemUsagePercent\x12\x1b\n" +
@@ -8832,7 +8840,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0eiowait_percent\x18\x04 \x01(\x02R\riowaitPercent\x12*\n" +
 	"\x05disks\x18\x05 \x03(\v2\x14.taskqueue.DiskUsageR\x05disks\x12/\n" +
 	"\adisk_io\x18\x06 \x01(\v2\x16.taskqueue.DiskIOStatsR\x06diskIo\x12,\n" +
-	"\x06net_io\x18\a \x01(\v2\x15.taskqueue.NetIOStatsR\x05netIo\"Q\n" +
+	"\x06net_io\x18\a \x01(\v2\x15.taskqueue.NetIOStatsR\x05netIo\x12\x19\n" +
+	"\bnum_cpus\x18\b \x01(\x05R\anumCpus\"Q\n" +
 	"\tDiskUsage\x12\x1f\n" +
 	"\vdevice_name\x18\x01 \x01(\tR\n" +
 	"deviceName\x12#\n" +

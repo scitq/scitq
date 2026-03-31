@@ -2,6 +2,7 @@ package workerstats
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ type WorkerStats struct {
 	Disks           []DiskUsage
 	DiskIO          DiskIOStats
 	NetIO           NetIOStats
+	NumCPUs         int32
 }
 
 type DiskUsage struct {
@@ -81,6 +83,8 @@ func findBackingPartition(parts []disk.PartitionStat, path string) (disk.Partiti
 func CollectWorkerStats() (*WorkerStats, error) {
 	var stats WorkerStats
 	var err error
+
+	stats.NumCPUs = int32(runtime.NumCPU())
 
 	cpuPercents, err := cpu.Percent(0, false)
 	if err != nil {
@@ -170,59 +174,7 @@ func CollectWorkerStats() (*WorkerStats, error) {
 		seenDev[p.Device] = true
 	}
 
-	/*
-		now := time.Now()
-		diskCounters, err := disk.IOCounters()
-		if err != nil {
-			return nil, err
-		}
-		netCounters, err := net.IOCounters(false)
-		if err != nil {
-			return nil, err
-		}
-
-		if !lastTime.IsZero() {
-			dt := now.Sub(lastTime).Seconds()
-			if dt > 0 {
-				// Disk IO aggregation
-				var readTotal, writeTotal uint64
-				var lastReadTotal, lastWriteTotal uint64
-				for _, v := range diskCounters {
-					readTotal += v.ReadBytes
-					writeTotal += v.WriteBytes
-				}
-				for _, v := range lastDiskIO {
-					lastReadTotal += v.ReadBytes
-					lastWriteTotal += v.WriteBytes
-				}
-				stats.DiskIO.ReadBytesTotal = int64(readTotal)
-				stats.DiskIO.WriteBytesTotal = int64(writeTotal)
-				stats.DiskIO.ReadBytesRate = float32(readTotal-lastReadTotal) / float32(dt)
-				stats.DiskIO.WriteBytesRate = float32(writeTotal-lastWriteTotal) / float32(dt)
-
-				// Net IO aggregation
-				if len(netCounters) > 0 {
-					nowNet := netCounters[0]
-					lastNet := lastNetIO["total"]
-					stats.NetIO.RecvBytesTotal = int64(nowNet.BytesRecv)
-					stats.NetIO.SentBytesTotal = int64(nowNet.BytesSent)
-					stats.NetIO.RecvBytesRate = float32(nowNet.BytesRecv-lastNet.BytesRecv) / float32(dt)
-					stats.NetIO.SentBytesRate = float32(nowNet.BytesSent-lastNet.BytesSent) / float32(dt)
-				}
-			}
-		}
-
-		// Save for next time
-		lastDiskIO = diskCounters
-		if len(netCounters) > 0 {
-			if lastNetIO == nil {
-				lastNetIO = make(map[string]net.IOCountersStat)
-			}
-			lastNetIO["total"] = netCounters[0]
-		}
-		lastTime = now
-	*/
-
+	now := time.Now()
 	diskCounters, err := disk.IOCounters()
 	if err != nil {
 		return nil, err
@@ -239,16 +191,41 @@ func CollectWorkerStats() (*WorkerStats, error) {
 	}
 	stats.DiskIO.ReadBytesTotal = int64(readTotal)
 	stats.DiskIO.WriteBytesTotal = int64(writeTotal)
-	stats.DiskIO.ReadBytesRate = 0
-	stats.DiskIO.WriteBytesRate = 0
 
 	if len(netCounters) > 0 {
 		nowNet := netCounters[0]
 		stats.NetIO.RecvBytesTotal = int64(nowNet.BytesRecv)
 		stats.NetIO.SentBytesTotal = int64(nowNet.BytesSent)
-		stats.NetIO.RecvBytesRate = 0
-		stats.NetIO.SentBytesRate = 0
 	}
+
+	if !lastTime.IsZero() {
+		dt := now.Sub(lastTime).Seconds()
+		if dt > 0 {
+			var lastReadTotal, lastWriteTotal uint64
+			for _, v := range lastDiskIO {
+				lastReadTotal += v.ReadBytes
+				lastWriteTotal += v.WriteBytes
+			}
+			stats.DiskIO.ReadBytesRate = float32(float64(readTotal-lastReadTotal) / dt)
+			stats.DiskIO.WriteBytesRate = float32(float64(writeTotal-lastWriteTotal) / dt)
+
+			if len(netCounters) > 0 && lastNetIO != nil {
+				lastNet := lastNetIO["total"]
+				nowNet := netCounters[0]
+				stats.NetIO.RecvBytesRate = float32(float64(nowNet.BytesRecv-lastNet.BytesRecv) / dt)
+				stats.NetIO.SentBytesRate = float32(float64(nowNet.BytesSent-lastNet.BytesSent) / dt)
+			}
+		}
+	}
+
+	lastDiskIO = diskCounters
+	if len(netCounters) > 0 {
+		if lastNetIO == nil {
+			lastNetIO = make(map[string]net.IOCountersStat)
+		}
+		lastNetIO["total"] = netCounters[0]
+	}
+	lastTime = now
 
 	return &stats, nil
 }
@@ -283,5 +260,6 @@ func (ws *WorkerStats) ToProto() *pb.WorkerStats {
 			RecvBytesRate:  ws.NetIO.RecvBytesRate,
 			SentBytesRate:  ws.NetIO.SentBytesRate,
 		},
+		NumCpus: ws.NumCPUs,
 	}
 }

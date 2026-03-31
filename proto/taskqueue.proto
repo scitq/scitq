@@ -655,12 +655,13 @@ message WorkerStats {
     float cpu_usage_percent = 1;      // 0-100, float
     float mem_usage_percent = 2;      // 0-100, float
     float load_1min = 3;               // e.g., 0.58, float
-    float iowait_percent = 4;       // 0-100 float 
+    float iowait_percent = 4;       // 0-100 float
 
     repeated DiskUsage disks = 5;      // Per-disk usage
 
     DiskIOStats disk_io = 6;            // Global disk IO (aggregated)
     NetIOStats net_io = 7;              // Global network IO (aggregated)
+    int32 num_cpus = 8;                // Number of CPU cores on this worker
 }
 
 message DiskUsage {

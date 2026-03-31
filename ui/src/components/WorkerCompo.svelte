@@ -125,8 +125,6 @@
   // --- WS unsubscribe reference for cleanup ---
   let unsubscribeWS: (() => void) | null = null;
 
-  // Track per-worker previous totals for rate computation
-  let lastTotals: Record<number, { time: Date, diskRead: number, diskWrite: number, netRecv: number, netSent: number }> = {};
 
   // Make reactive
   $: diskZoom, networkZoom, diskAutoZoom, networkAutoZoom;
@@ -168,40 +166,10 @@
           case 'stats': {
             const raw = (payload as any).stats;
             if (raw) {
-              // Compute per-second rates using previous totals, safely
-              const now = new Date();
-              const prev = lastTotals[id];
-              const current = {
-                diskRead: raw.disk_io?.read_bytes_total || 0,
-                diskWrite: raw.disk_io?.write_bytes_total || 0,
-                netRecv: raw.net_io?.recv_bytes_total || 0,
-                netSent: raw.net_io?.sent_bytes_total || 0
-              };
-              const dt = prev ? (now.getTime() - prev.time.getTime()) / 1000 : 1;
-              const safeRate = (num: number) => !isFinite(num) || isNaN(num) ? 0 : num;
-
-              const readRate = safeRate(prev ? (current.diskRead - prev.diskRead) / dt : 0);
-              const writeRate = safeRate(prev ? (current.diskWrite - prev.diskWrite) / dt : 0);
-              const recvRate = safeRate(prev ? (current.netRecv - prev.netRecv) / dt : 0);
-              const sentRate = safeRate(prev ? (current.netSent - prev.netSent) / dt : 0);
-              lastTotals[id] = { ...current, time: now };
-              // Build stats object compatible with WorkerStats.fromJson
-              const computedStats = {
-                ...raw,
-                disk_io: {
-                  ...raw.disk_io,
-                  read_bytes_rate: readRate,
-                  write_bytes_rate: writeRate
-                },
-                net_io: {
-                  ...raw.net_io,
-                  recv_bytes_rate: recvRate,
-                  sent_bytes_rate: sentRate
-                }
-              };
-              workersStatsMap[id] = WorkerStats.fromJson(computedStats);
+              // Use server-computed rates directly (computed worker-side with accurate timing)
+              workersStatsMap[id] = WorkerStats.fromJson(raw);
               workersStatsMap = { ...workersStatsMap };
-              updateHistoryFromStats();
+              updateHistoryForWorker(id);
             }
             break;
           }
@@ -515,31 +483,33 @@
   /**
    * Updates per-worker disk and network histories from current workersStatsMap.
    */
-  function updateHistoryFromStats() {
+  function updateHistoryForWorker(workerId: number) {
     const now = new Date();
-    for (const id in workersStatsMap) {
-      const stats = workersStatsMap[id];
-      // Disk I/O
-      if (!diskHistories[id]) diskHistories[id] = [];
-      diskHistories[id] = [
-        ...diskHistories[id].slice(-MAX_HISTORY + 1),
-        {
-          time: now,
-          read: stats?.diskIo?.readBytesRate || 0,
-          write: stats?.diskIo?.writeBytesRate || 0
-        }
-      ];
-      // Network I/O
-      if (!networkHistories[id]) networkHistories[id] = [];
-      networkHistories[id] = [
-        ...networkHistories[id].slice(-MAX_HISTORY + 1),
-        {
-          time: now,
-          sent: stats?.netIo?.sentBytesRate || 0,
-          received: stats?.netIo?.recvBytesRate || 0
-        }
-      ];
-    }
+    const stats = workersStatsMap[workerId];
+    if (!stats) return;
+    // Disk I/O
+    if (!diskHistories[workerId]) diskHistories[workerId] = [];
+    diskHistories[workerId] = [
+      ...diskHistories[workerId].slice(-MAX_HISTORY + 1),
+      {
+        time: now,
+        read: stats?.diskIo?.readBytesRate || 0,
+        write: stats?.diskIo?.writeBytesRate || 0
+      }
+    ];
+    // Network I/O
+    if (!networkHistories[workerId]) networkHistories[workerId] = [];
+    networkHistories[workerId] = [
+      ...networkHistories[workerId].slice(-MAX_HISTORY + 1),
+      {
+        time: now,
+        sent: stats?.netIo?.sentBytesRate || 0,
+        received: stats?.netIo?.recvBytesRate || 0
+      }
+    ];
+    // Trigger Svelte reactivity
+    diskHistories = { ...diskHistories };
+    networkHistories = { ...networkHistories };
   }
 
   /**
@@ -776,6 +746,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
             {:else}
               <th>Name</th>
               <th>Wf.Step</th>
+              <th>Scope</th>
               <th>Status</th>
               <th>Concurrency</th>
               <th>Prefetch</th>
@@ -980,7 +951,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
             {#if workersStatsMap[worker.workerId]}
               {#if displayMode === 'table'}
                 <!-- Table mode -->
-                <td title={`IOWait: ${workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%` + '\n' + `Load: ${workersStatsMap[worker.workerId]?.load1Min?.toFixed(1) ?? 'N/A'}`}>
+                <td title={`IOWait: ${workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%\n` + (workersStatsMap[worker.workerId]?.numCpus > 0 ? `Load/CPU: ${((workersStatsMap[worker.workerId]?.load1Min ?? 0) / workersStatsMap[worker.workerId].numCpus * 100).toFixed(0)}% (${workersStatsMap[worker.workerId].numCpus} CPUs)` : `Load: ${workersStatsMap[worker.workerId]?.load1Min?.toFixed(1) ?? 'N/A'}`)}>
                   {workersStatsMap[worker.workerId]?.cpuUsagePercent?.toFixed(1) ?? 'N/A'}%
                   {#if workersStatsMap[worker.workerId]?.iowaitPercent > 1}
                     <div style="color: red;">{workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%</div>
@@ -1032,12 +1003,19 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                             </div>
                           </div>
 
-                          <!-- Load -->
+                          <!-- Load per CPU -->
                           <div class="metric-chart">
-                            <div class="chart-title">Load: {workersStatsMap[worker.workerId].load1Min?.toFixed(1) ?? 0}</div>
-                            <div class="chart-bar-container">
-                              <div class="chart-bar" style={`width: ${Math.min(100, (workersStatsMap[worker.workerId].load1Min ?? 0) * 33.3)}%`}></div>
-                            </div>
+                            {#if workersStatsMap[worker.workerId].numCpus > 0}
+                              <div class="chart-title">Load/CPU: {((workersStatsMap[worker.workerId].load1Min ?? 0) / workersStatsMap[worker.workerId].numCpus * 100).toFixed(0)}%</div>
+                              <div class="chart-bar-container">
+                                <div class="chart-bar" style={`width: ${Math.min(100, (workersStatsMap[worker.workerId].load1Min ?? 0) / workersStatsMap[worker.workerId].numCpus * 100)}%`}></div>
+                              </div>
+                            {:else}
+                              <div class="chart-title">Load: {workersStatsMap[worker.workerId].load1Min?.toFixed(1) ?? 0}</div>
+                              <div class="chart-bar-container">
+                                <div class="chart-bar" style={`width: ${Math.min(100, (workersStatsMap[worker.workerId].load1Min ?? 0) * 10)}%`}></div>
+                              </div>
+                            {/if}
                           </div>
                         </div>
                       

@@ -1519,6 +1519,10 @@ export interface WorkerStats {
      * @generated from protobuf field: taskqueue.NetIOStats net_io = 7
      */
     netIo?: NetIOStats; // Global network IO (aggregated)
+    /**
+     * @generated from protobuf field: int32 num_cpus = 8
+     */
+    numCpus: number; // Number of CPU cores on this worker
 }
 /**
  * @generated from protobuf message taskqueue.DiskUsage
@@ -7274,7 +7278,8 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
             { no: 4, name: "iowait_percent", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
             { no: 5, name: "disks", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => DiskUsage },
             { no: 6, name: "disk_io", kind: "message", T: () => DiskIOStats },
-            { no: 7, name: "net_io", kind: "message", T: () => NetIOStats }
+            { no: 7, name: "net_io", kind: "message", T: () => NetIOStats },
+            { no: 8, name: "num_cpus", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStats>): WorkerStats {
@@ -7284,6 +7289,7 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
         message.load1Min = 0;
         message.iowaitPercent = 0;
         message.disks = [];
+        message.numCpus = 0;
         if (value !== undefined)
             reflectionMergePartial<WorkerStats>(this, message, value);
         return message;
