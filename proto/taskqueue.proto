@@ -559,6 +559,10 @@ message Workflow {
     string status = 3;
     string run_strategy = 4;
     optional int32 maximum_workers = 5;
+    int32 total_tasks = 6;
+    int32 succeeded_tasks = 7;
+    int32 failed_tasks = 8;
+    int32 running_tasks = 9;
 }
 message WorkflowRequest {
     string name = 1;

@@ -3783,6 +3783,18 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
 			return nil, fmt.Errorf("failed to scan workflow: %w", err)
 		}
+		// Populate progress from in-memory step stats aggregator (no DB hit)
+		s.stats.mu.Lock()
+		if steps, ok := s.stats.data[wf.WorkflowId]; ok {
+			for _, agg := range steps {
+				wf.TotalTasks += agg.Total
+				wf.SucceededTasks += agg.Succeeded
+				wf.FailedTasks += agg.ReallyFailed
+				wf.RunningTasks += agg.Accepted + agg.Running + agg.Uploading
+			}
+		}
+		s.stats.mu.Unlock()
+
 		workflows = append(workflows, &wf)
 	}
 

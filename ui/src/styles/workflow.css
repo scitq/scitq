@@ -231,6 +231,37 @@
     font-weight: bold;
 }
 
+/* Workflow progress bar */
+.wf-progress-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  margin: 0 0.75rem;
+  min-width: 100px;
+  border: 1px solid var(--border-color);
+}
+
+.wf-progress-success {
+  background: #4caf50;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.wf-progress-running {
+  background: #2196f3;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.wf-progress-failed {
+  background: #f44336;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
 /* Table styling */
 .listTable {
     width: 100%;

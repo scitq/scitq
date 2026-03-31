@@ -6446,7 +6446,11 @@ class Workflow$Type extends MessageType<Workflow> {
             { no: 1, name: "workflow_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "run_strategy", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "maximum_workers", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 5, name: "maximum_workers", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "total_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "succeeded_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "failed_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 9, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Workflow>): Workflow {
@@ -6454,6 +6458,10 @@ class Workflow$Type extends MessageType<Workflow> {
         message.workflowId = 0;
         message.name = "";
         message.runStrategy = "";
+        message.totalTasks = 0;
+        message.succeededTasks = 0;
+        message.failedTasks = 0;
+        message.runningTasks = 0;
         if (value !== undefined)
             reflectionMergePartial<Workflow>(this, message, value);
         return message;
@@ -6469,11 +6477,26 @@ class Workflow$Type extends MessageType<Workflow> {
                 case /* string name */ 2:
                     message.name = reader.string();
                     break;
+                case /* string status */ 3:
+                    message.status = reader.string();
+                    break;
                 case /* string run_strategy */ 4:
                     message.runStrategy = reader.string();
                     break;
                 case /* optional int32 maximum_workers */ 5:
                     message.maximumWorkers = reader.int32();
+                    break;
+                case /* int32 total_tasks */ 6:
+                    message.totalTasks = reader.int32();
+                    break;
+                case /* int32 succeeded_tasks */ 7:
+                    message.succeededTasks = reader.int32();
+                    break;
+                case /* int32 failed_tasks */ 8:
+                    message.failedTasks = reader.int32();
+                    break;
+                case /* int32 running_tasks */ 9:
+                    message.runningTasks = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -6496,9 +6519,24 @@ class Workflow$Type extends MessageType<Workflow> {
         /* string run_strategy = 4; */
         if (message.runStrategy !== "")
             writer.tag(4, WireType.LengthDelimited).string(message.runStrategy);
+        /* string status = 3; */
+        if (message.status !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.status);
         /* optional int32 maximum_workers = 5; */
         if (message.maximumWorkers !== undefined)
             writer.tag(5, WireType.Varint).int32(message.maximumWorkers);
+        /* int32 total_tasks = 6; */
+        if (message.totalTasks !== 0)
+            writer.tag(6, WireType.Varint).int32(message.totalTasks);
+        /* int32 succeeded_tasks = 7; */
+        if (message.succeededTasks !== 0)
+            writer.tag(7, WireType.Varint).int32(message.succeededTasks);
+        /* int32 failed_tasks = 8; */
+        if (message.failedTasks !== 0)
+            writer.tag(8, WireType.Varint).int32(message.failedTasks);
+        /* int32 running_tasks = 9; */
+        if (message.runningTasks !== 0)
+            writer.tag(9, WireType.Varint).int32(message.runningTasks);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

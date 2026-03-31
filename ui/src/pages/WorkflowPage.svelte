@@ -52,8 +52,8 @@
     workersPerStepId = mapWorkersToStepIds(workers);
     console.log('Loaded workers:', workers);
     console.log('Workers per stepId map:', workersPerStepId);
-    // Subscribe to workflow entity events only
-    unsubscribeWS = wsClient.subscribeWithTopics({ workflow: [] }, handleMessage);
+    // Subscribe to workflow + step-stats events
+    unsubscribeWS = wsClient.subscribeWithTopics({ workflow: [], 'step-stats': [] }, handleMessage);
   });
 
 
@@ -101,10 +101,50 @@
         if (typeof idToRemove === 'number') {
           workflows = workflows.filter(wf => wf.workflowId !== idToRemove);
           pendingWorkflows = pendingWorkflows.filter(wf => wf.workflowId !== idToRemove);
-          console.log('workflow removed via WebSocket:', idToRemove);
         }
         return;
       }
+
+      if (action === 'status') {
+        const wfId = message.id;
+        const newStatus = p.status;
+        if (typeof wfId === 'number' && typeof newStatus === 'string') {
+          workflows = workflows.map(wf =>
+            wf.workflowId === wfId ? { ...wf, status: newStatus } : wf
+          );
+        }
+        return;
+      }
+    }
+
+    // Step-stats delta: update workflow progress counters
+    if (message?.type === 'step-stats' && message?.action === 'delta') {
+      const p = message.payload || {};
+      const wfId = p.workflowId;
+      const oldStatus = p.oldStatus;
+      const newStatus = p.newStatus;
+      if (typeof wfId !== 'number') return;
+
+      workflows = workflows.map(wf => {
+        if (wf.workflowId !== wfId) return wf;
+        const updated = { ...wf };
+
+        // Decrement old status bucket
+        if (oldStatus === 'S') updated.succeededTasks = Math.max(0, (updated.succeededTasks || 0) - 1);
+        else if (oldStatus === 'F') updated.failedTasks = Math.max(0, (updated.failedTasks || 0) - 1);
+        else if (['A', 'C', 'D', 'O', 'R', 'U', 'V'].includes(oldStatus)) updated.runningTasks = Math.max(0, (updated.runningTasks || 0) - 1);
+
+        // Increment new status bucket
+        if (newStatus === 'S') updated.succeededTasks = (updated.succeededTasks || 0) + 1;
+        else if (newStatus === 'F') updated.failedTasks = (updated.failedTasks || 0) + 1;
+        else if (['A', 'C', 'D', 'O', 'R', 'U', 'V'].includes(newStatus)) updated.runningTasks = (updated.runningTasks || 0) + 1;
+
+        // Total only increases on first submission (oldStatus is empty/null)
+        if (!oldStatus) updated.totalTasks = (updated.totalTasks || 0) + 1;
+
+        return updated;
+      });
+      return;
     }
   }
 
