@@ -90,7 +90,7 @@ func createToken(serverAddr string, user, userPassword *string) string {
 		Password: password,
 	})
 	if err != nil {
-		log.Fatalf("login failed: %v (%s)", err, password)
+		return fmt.Sprintf("login failed: %v (%s)", err, password)
 	}
 
 	// Store token for current session only

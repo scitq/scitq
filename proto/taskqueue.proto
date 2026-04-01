@@ -561,8 +561,9 @@ message Workflow {
     optional int32 maximum_workers = 5;
     int32 total_tasks = 6;
     int32 succeeded_tasks = 7;
-    int32 failed_tasks = 8;
-    int32 running_tasks = 9;
+    int32 failed_tasks = 8;     // Terminal failures only
+    int32 running_tasks = 9;    // Accepted + Running + Uploading
+    int32 retrying_tasks = 10;  // Tasks currently being retried (failed once, clone in progress)
 }
 message WorkflowRequest {
     string name = 1;

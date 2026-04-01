@@ -20,6 +20,7 @@ import (
 func NewStepAgg() *StepAgg {
 	return &StepAgg{
 		RunningTasks: make(map[int32]time.Time),
+		RetryingSet:  make(map[int32]bool),
 		Download: Accumulator{
 			Min: math.MaxFloat64,
 		},
@@ -55,6 +56,8 @@ type StepAgg struct {
 	Succeeded    int32
 	Failed       int32
 	ReallyFailed int32 // tasks that have exhausted all retries and are failed
+	Retrying     int32            // tasks currently being retried
+	RetryingSet  map[int32]bool  // set of task IDs currently retrying
 	Total        int32
 
 	// Accumulators for durations
@@ -100,6 +103,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			COUNT(*) FILTER (WHERE t.status = 'S') AS succeeded,
 			COUNT(*) FILTER (WHERE t.status = 'F' AND t.hidden) AS failed,
 			COUNT(*) FILTER (WHERE t.status = 'F' AND NOT t.hidden) AS reallyfailed,
+			COUNT(*) FILTER (WHERE NOT t.hidden AND t.previous_task_id IS NOT NULL AND t.status NOT IN ('S','F')) AS retrying,
 
 			-- download/upload accumulators
 			COALESCE(SUM(t.download_duration), 0) AS dl_sum,
@@ -148,7 +152,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 		var (
 			workflowID, stepID                                    int32
 			total, waiting, pending, accepted, running, uploading int32
-			succeeded, failed, reallyfailed                       int32
+			succeeded, failed, reallyfailed, retrying              int32
 			dlSum, dlMin, dlMax, upSum, upMin, upMax              float64
 			dlCount, upCount                                      int32
 			runSCount                                             int32
@@ -162,7 +166,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 		if err := rows.Scan(
 			&workflowID,
 			&stepID,
-			&total, &waiting, &pending, &accepted, &running, &uploading, &succeeded, &failed, &reallyfailed,
+			&total, &waiting, &pending, &accepted, &running, &uploading, &succeeded, &failed, &reallyfailed, &retrying,
 			&dlSum, &dlMin, &dlMax, &upSum, &upMin, &upMax,
 			&dlCount, &upCount,
 			&runSCount, &runSSum, &runSMin, &runSMax,
@@ -190,6 +194,8 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			Succeeded:    succeeded,
 			Failed:       failed,
 			ReallyFailed: reallyfailed,
+			Retrying:     retrying,
+			RetryingSet:  make(map[int32]bool),
 			Total:        total,
 			Download:     Accumulator{Count: dlCount, Sum: dlSum, Min: dlMin, Max: dlMax},
 			Upload:       Accumulator{Count: upCount, Sum: upSum, Min: upMin, Max: upMax},

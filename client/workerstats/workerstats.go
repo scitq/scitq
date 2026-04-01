@@ -4,6 +4,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -51,6 +52,7 @@ type NetIOStats struct {
 }
 
 var (
+	statsMu    sync.Mutex
 	lastDiskIO map[string]disk.IOCountersStat
 	lastNetIO  map[string]net.IOCountersStat
 	lastTime   time.Time
@@ -81,6 +83,9 @@ func findBackingPartition(parts []disk.PartitionStat, path string) (disk.Partiti
 }
 
 func CollectWorkerStats() (*WorkerStats, error) {
+	statsMu.Lock()
+	defer statsMu.Unlock()
+
 	var stats WorkerStats
 	var err error
 

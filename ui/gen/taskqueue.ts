@@ -6450,7 +6450,8 @@ class Workflow$Type extends MessageType<Workflow> {
             { no: 6, name: "total_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 7, name: "succeeded_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 8, name: "failed_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 9, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 9, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "retrying_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Workflow>): Workflow {
@@ -6462,6 +6463,7 @@ class Workflow$Type extends MessageType<Workflow> {
         message.succeededTasks = 0;
         message.failedTasks = 0;
         message.runningTasks = 0;
+        message.retryingTasks = 0;
         if (value !== undefined)
             reflectionMergePartial<Workflow>(this, message, value);
         return message;
@@ -6497,6 +6499,9 @@ class Workflow$Type extends MessageType<Workflow> {
                     break;
                 case /* int32 running_tasks */ 9:
                     message.runningTasks = reader.int32();
+                    break;
+                case /* int32 retrying_tasks */ 10:
+                    message.retryingTasks = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -6537,6 +6542,9 @@ class Workflow$Type extends MessageType<Workflow> {
         /* int32 running_tasks = 9; */
         if (message.runningTasks !== 0)
             writer.tag(9, WireType.Varint).int32(message.runningTasks);
+        /* int32 retrying_tasks = 10; */
+        if (message.retryingTasks !== 0)
+            writer.tag(10, WireType.Varint).int32(message.retryingTasks);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -256,6 +256,12 @@
   transition: width 0.3s ease;
 }
 
+.wf-progress-retrying {
+  background: #ff9800;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
 .wf-progress-failed {
   background: #f44336;
   height: 100%;

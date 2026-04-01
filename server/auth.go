@@ -19,6 +19,7 @@ import (
 type contextKey string
 
 const userContextKey contextKey = "user"
+const tokenContextKey contextKey = "token"
 
 type AuthenticatedUser struct {
 	UserID   int
@@ -69,7 +70,7 @@ func workerAuthInterceptor(expectedToken string, db *sql.DB) grpc.UnaryServerInt
 				if strings.HasPrefix(tokens[0], "Bearer ") {
 					session_id := strings.TrimPrefix(tokens[0], "Bearer ")
 
-					// Check if the session ID is valid
+					// Look up session in DB (Login stores JWT as session_id)
 					var (
 						userID   int
 						username string
@@ -95,7 +96,6 @@ func workerAuthInterceptor(expectedToken string, db *sql.DB) grpc.UnaryServerInt
 					if err != nil {
 						log.Printf("Failed to update last used time for session ID %s: %v", session_id, err)
 					}
-
 				} else {
 					return nil, status.Error(codes.Unauthenticated, "invalid token")
 				}
@@ -160,21 +160,25 @@ func grpcMetadataFromContext(ctx context.Context) (map[string][]string, bool) {
 
 func extractTokenFromContext(ctx context.Context) string {
 	md, ok := grpcMetadataFromContext(ctx)
-	if !ok {
-		return ""
-	}
+	if ok {
+		// Prefer "authorization: Bearer TOKEN"
+		authHeaders := md["authorization"]
+		for _, h := range authHeaders {
+			if strings.HasPrefix(h, "Bearer ") {
+				return strings.TrimSpace(h[len("Bearer "):])
+			}
+		}
 
-	// Prefer "authorization: Bearer TOKEN"
-	authHeaders := md["authorization"]
-	for _, h := range authHeaders {
-		if strings.HasPrefix(h, "Bearer ") {
-			return strings.TrimSpace(h[len("Bearer "):])
+		// Fallback: raw token in header (if stored differently)
+		if tokenList, ok := md["scitq-token"]; ok && len(tokenList) > 0 {
+			return tokenList[0]
 		}
 	}
 
-	// Fallback: raw token in header (if stored differently)
-	if tokenList, ok := md["scitq-token"]; ok && len(tokenList) > 0 {
-		return tokenList[0]
+	// Fallback: token stored in context (MCP/HTTP path)
+	if t, ok := ctx.Value(tokenContextKey).(string); ok && t != "" {
+		log.Printf("🔑 extractTokenFromContext: found token via context key (%d chars)", len(t))
+		return t
 	}
 
 	return ""

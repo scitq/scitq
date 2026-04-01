@@ -123,6 +123,7 @@
       const wfId = p.workflowId;
       const oldStatus = p.oldStatus;
       const newStatus = p.newStatus;
+      const isRetry = !!p.retried;
       if (typeof wfId !== 'number') return;
 
       workflows = workflows.map(wf => {
@@ -138,6 +139,14 @@
         if (newStatus === 'S') updated.succeededTasks = (updated.succeededTasks || 0) + 1;
         else if (newStatus === 'F') updated.failedTasks = (updated.failedTasks || 0) + 1;
         else if (['A', 'C', 'D', 'O', 'R', 'U', 'V'].includes(newStatus)) updated.runningTasks = (updated.runningTasks || 0) + 1;
+
+        // Retrying: increment on retry clone creation, decrement on terminal
+        if (isRetry && !oldStatus) {
+          updated.retryingTasks = (updated.retryingTasks || 0) + 1;
+        }
+        if (isRetry && (newStatus === 'S' || newStatus === 'F')) {
+          updated.retryingTasks = Math.max(0, (updated.retryingTasks || 0) - 1);
+        }
 
         // Total only increases on first submission (oldStatus is empty/null)
         if (!oldStatus) updated.totalTasks = (updated.totalTasks || 0) + 1;

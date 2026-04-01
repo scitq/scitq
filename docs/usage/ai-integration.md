@@ -133,6 +133,7 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 | `list_templates` | List available workflow templates |
 | `template_detail` | Get template metadata and parameter schema |
 | `run_template` | Run a template with parameters |
+| `upload_template` | Upload a template script (YAML or Python) |
 | `download_template` | Download template source code |
 | `list_template_runs` | List template execution runs |
 | **Modules** | |

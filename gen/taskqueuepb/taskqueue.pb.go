@@ -4521,8 +4521,9 @@ type Workflow struct {
 	MaximumWorkers *int32                 `protobuf:"varint,5,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
 	TotalTasks     int32                  `protobuf:"varint,6,opt,name=total_tasks,json=totalTasks,proto3" json:"total_tasks,omitempty"`
 	SucceededTasks int32                  `protobuf:"varint,7,opt,name=succeeded_tasks,json=succeededTasks,proto3" json:"succeeded_tasks,omitempty"`
-	FailedTasks    int32                  `protobuf:"varint,8,opt,name=failed_tasks,json=failedTasks,proto3" json:"failed_tasks,omitempty"`
-	RunningTasks   int32                  `protobuf:"varint,9,opt,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`
+	FailedTasks    int32                  `protobuf:"varint,8,opt,name=failed_tasks,json=failedTasks,proto3" json:"failed_tasks,omitempty"`        // Terminal failures only
+	RunningTasks   int32                  `protobuf:"varint,9,opt,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`     // Accepted + Running + Uploading
+	RetryingTasks  int32                  `protobuf:"varint,10,opt,name=retrying_tasks,json=retryingTasks,proto3" json:"retrying_tasks,omitempty"` // Tasks currently being retried (failed once, clone in progress)
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4616,6 +4617,13 @@ func (x *Workflow) GetFailedTasks() int32 {
 func (x *Workflow) GetRunningTasks() int32 {
 	if x != nil {
 		return x.RunningTasks
+	}
+	return 0
+}
+
+func (x *Workflow) GetRetryingTasks() int32 {
+	if x != nil {
+		return x.RetryingTasks
 	}
 	return 0
 }
@@ -8766,7 +8774,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"WorkflowId\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
-	"workflowId\"\xce\x02\n" +
+	"workflowId\"\xf5\x02\n" +
 	"\bWorkflow\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
 	"workflowId\x12\x12\n" +
@@ -8778,7 +8786,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"totalTasks\x12'\n" +
 	"\x0fsucceeded_tasks\x18\a \x01(\x05R\x0esucceededTasks\x12!\n" +
 	"\ffailed_tasks\x18\b \x01(\x05R\vfailedTasks\x12#\n" +
-	"\rrunning_tasks\x18\t \x01(\x05R\frunningTasksB\x12\n" +
+	"\rrunning_tasks\x18\t \x01(\x05R\frunningTasks\x12%\n" +
+	"\x0eretrying_tasks\x18\n" +
+	" \x01(\x05R\rretryingTasksB\x12\n" +
 	"\x10_maximum_workers\"\xc8\x01\n" +
 	"\x0fWorkflowRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12&\n" +

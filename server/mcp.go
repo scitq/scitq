@@ -203,8 +203,10 @@ func (h *mcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request, re
 
 	// If Authorization: Bearer <token> is provided, pre-authenticate the session
 	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		session.token = strings.TrimPrefix(auth, "Bearer ")
-		log.Printf("🔐 MCP session %s pre-authenticated via Bearer token", sid)
+		session.token = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		log.Printf("🔐 MCP session %s pre-authenticated via Bearer token (len=%d, prefix=%q)", sid, len(session.token), session.token[:min(20, len(session.token))])
+	} else {
+		log.Printf("⚠️ MCP session %s: no Bearer token (Authorization header: %q)", sid, r.Header.Get("Authorization"))
 	}
 
 	h.sessions.Store(sid, session)
@@ -296,9 +298,10 @@ func (h *mcpHandler) listTools() []mcpTool {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"workflow_id": {Type: "integer", Description: "Filter by workflow ID"},
-					"status":      {Type: "string", Description: "Filter by status (P, A, C, R, S, F, W)"},
-					"limit":       {Type: "integer", Description: "Max results (default: 50)"},
+					"workflow_id":  {Type: "integer", Description: "Filter by workflow ID"},
+					"status":       {Type: "string", Description: "Filter by status (P, A, C, R, S, F, W)"},
+					"limit":        {Type: "integer", Description: "Max results (default: 50)"},
+					"show_hidden":  {Type: "boolean", Description: "Include hidden tasks (retried parents)"},
 				},
 			},
 		},
@@ -431,6 +434,19 @@ func (h *mcpHandler) listTools() []mcpTool {
 			},
 		},
 		// --- Template/module download ---
+		{
+			Name:        "upload_template",
+			Description: "Upload a template script (YAML or Python). Returns the template ID and metadata.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"filename": {Type: "string", Description: "Filename with extension (e.g. biomscope.yaml or qc.py)"},
+					"content":  {Type: "string", Description: "Template file content"},
+					"force":    {Type: "boolean", Description: "Overwrite existing template with same name/version"},
+				},
+				Required: []string{"filename", "content"},
+			},
+		},
 		{
 			Name:        "download_template",
 			Description: "Download a template script source code.",
@@ -572,6 +588,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolTemplateDetail(authCtx, call.Arguments)
 	case "run_template":
 		return h.toolRunTemplate(authCtx, call.Arguments)
+	case "upload_template":
+		return h.toolUploadTemplate(authCtx, call.Arguments)
 	case "download_template":
 		return h.toolDownloadTemplate(authCtx, call.Arguments)
 	case "list_workflows":
@@ -757,6 +775,7 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		WorkflowID int32  `json:"workflow_id"`
 		Status     string `json:"status"`
 		Limit      int32  `json:"limit"`
+		ShowHidden bool   `json:"show_hidden"`
 	}
 	json.Unmarshal(args, &p)
 
@@ -766,6 +785,9 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 	}
 	if p.Status != "" {
 		req.StatusFilter = &p.Status
+	}
+	if p.ShowHidden {
+		req.ShowHidden = &p.ShowHidden
 	}
 	limit := p.Limit
 	if limit == 0 {
@@ -1008,6 +1030,32 @@ func (h *mcpHandler) toolDeleteWorkflow(ctx context.Context, args json.RawMessag
 	return textResult(fmt.Sprintf("Workflow %d deleted", p.WorkflowID)), nil
 }
 
+func (h *mcpHandler) toolUploadTemplate(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Filename string `json:"filename"`
+		Content  string `json:"content"`
+		Force    bool   `json:"force"`
+	}
+	json.Unmarshal(args, &p)
+	resp, err := h.server.UploadTemplate(ctx, &pb.UploadTemplateRequest{
+		Script:   []byte(p.Content),
+		Force:    p.Force,
+		Filename: &p.Filename,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	if !resp.Success {
+		return errorResult(fmt.Errorf("%s", resp.Message)), nil
+	}
+	return jsonResult(map[string]any{
+		"template_id": resp.GetWorkflowTemplateId(),
+		"name":        resp.GetName(),
+		"version":     resp.GetVersion(),
+		"description": resp.GetDescription(),
+	}), nil
+}
+
 func (h *mcpHandler) toolDownloadTemplate(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
 		Name    string `json:"name"`
@@ -1183,6 +1231,10 @@ func errorResult(err error) *toolResult {
 
 // resolveSessionContext resolves a token (JWT or session) to an authenticated user context.
 func (h *mcpHandler) resolveSessionContext(ctx context.Context, token string) context.Context {
+	// Always store the raw token so extractTokenFromContext can find it
+	// (needed by RunTemplate to pass SCITQ_TOKEN to the script runner)
+	ctx = context.WithValue(ctx, tokenContextKey, token)
+
 	// Try JWT first (from scitq login --json)
 	claims, err := parseJWT(token, h.server.cfg.Scitq.JwtSecret)
 	if err == nil {

@@ -573,6 +573,12 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			stepAgg.ReallyFailed++
 		}
 
+		// Decrement Retrying when a retry clone reaches a terminal state
+		if (req.NewStatus == "S" || req.NewStatus == "F") && stepAgg.RetryingSet[req.TaskId] {
+			delete(stepAgg.RetryingSet, req.TaskId)
+			stepAgg.Retrying--
+		}
+
 		// RunningTasks map using DB runStartedEpoch
 		if req.NewStatus == "R" {
 			if stepAgg.RunningTasks == nil {
@@ -942,10 +948,12 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 
 			if txErr == nil {
 				_ = tx.Commit()
-				// After commit, increment Pending in StepAgg for new retry task
+				// After commit, increment Pending + Retrying in StepAgg for new retry task
 				if workflowID.Valid && stepID.Valid {
 					stepAgg := s.stats.data[workflowID.Int32][stepID.Int32]
 					stepAgg.Pending++
+					stepAgg.Retrying++
+					stepAgg.RetryingSet[int32(newID)] = true
 				}
 				// Emit step-stats event for retry (clone)
 				if workflowID.Valid && stepID.Valid {
@@ -1143,6 +1151,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 					stepAgg.Failed++
 				}
 				stepAgg.Pending++
+				stepAgg.Retrying++
+				stepAgg.RetryingSet[newID] = true
 			}
 		}
 		s.stats.mu.Unlock()
@@ -3791,6 +3801,7 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 				wf.SucceededTasks += agg.Succeeded
 				wf.FailedTasks += agg.ReallyFailed
 				wf.RunningTasks += agg.Accepted + agg.Running + agg.Uploading
+				wf.RetryingTasks += agg.Retrying
 			}
 		}
 		s.stats.mu.Unlock()

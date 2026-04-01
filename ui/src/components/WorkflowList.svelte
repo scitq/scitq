@@ -77,13 +77,16 @@
           <span class="wf-id">#{wf.workflowId}</span>
           <a href={`#/tasks?workflowId=${wf.workflowId}`} class="wf-name">{wf.name}</a>
           {#if wf.totalTasks > 0}
-            {@const pctSuccess = wf.succeededTasks / wf.totalTasks * 100}
-            {@const pctFailed = wf.failedTasks / wf.totalTasks * 100}
-            {@const pctRunning = wf.runningTasks / wf.totalTasks * 100}
+            {@const t = wf.totalTasks}
+            {@const pctSuccess = wf.succeededTasks / t * 100}
+            {@const pctFailed = wf.failedTasks / t * 100}
+            {@const pctRunning = wf.runningTasks / t * 100}
+            {@const pctRetrying = (wf.retryingTasks || 0) / t * 100}
             <div class="wf-progress-bar"
-                 title={`${wf.succeededTasks}/${wf.totalTasks} succeeded, ${wf.failedTasks} failed, ${wf.runningTasks} running`}>
+                 title={`${wf.succeededTasks}/${t} succeeded, ${wf.failedTasks} failed, ${wf.runningTasks} running` + (wf.retryingTasks ? `, ${wf.retryingTasks} retrying` : '')}>
               <div class="wf-progress-success" style="width:{pctSuccess}%"></div>
               <div class="wf-progress-running" style="width:{pctRunning}%"></div>
+              <div class="wf-progress-retrying" style="width:{pctRetrying}%"></div>
               <div class="wf-progress-failed" style="width:{pctFailed}%"></div>
             </div>
           {:else}

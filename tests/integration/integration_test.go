@@ -39,6 +39,7 @@ import (
 )
 
 var serverStartMu sync.Mutex
+var cliMu sync.Mutex // protects os.Args in runCLICommand
 
 func captureOutput(f func()) string {
 	// Create a pipe to capture stdout
@@ -150,6 +151,10 @@ func SendRawGRPCRequest(serverAddr, token string) {
 }
 
 func runCLICommand(c cli.CLI, args []string) (string, error) {
+	// Serialize CLI calls — os.Args is global and not goroutine-safe
+	cliMu.Lock()
+	defer cliMu.Unlock()
+
 	server, timeout, token := c.Attr.Server, c.Attr.TimeOut, c.Attr.Token
 	c2 := cli.CLI{
 		Attr: cli.Attr{
@@ -158,15 +163,28 @@ func runCLICommand(c cli.CLI, args []string) (string, error) {
 			Token:   token,
 		},
 	}
-	//c.Attr = cli.Attr{Server: server, TimeOut: timeout, Token: token} // Reset before parsing
-	os.Args = append([]string{"scitq-cli"}, args...)
+	// --server and --token must be in os.Args because arg.MustParse overwrites the struct
+	cliArgs := []string{"scitq"}
+	if server != "" {
+		cliArgs = append(cliArgs, "--server", server)
+	}
+	if token != "" {
+		cliArgs = append(cliArgs, "--token", token)
+	}
+	os.Args = append(cliArgs, args...)
 
 	var err error
 	output := captureOutput(func() {
 		err = cli.Run(c2) // Generic CLI entry point if available
 	})
+	// Also retry if the output contains an error (e.g. login failed due to race condition)
+	if err == nil && strings.Contains(output, "login failed") {
+		err = fmt.Errorf("%s", output)
+	}
 	if err != nil && (strings.Contains(err.Error(), "connection refused") ||
-		strings.Contains(err.Error(), "Unavailable")) {
+		strings.Contains(err.Error(), "Unavailable") ||
+		strings.Contains(err.Error(), "invalid credentials") ||
+		strings.Contains(err.Error(), "login failed")) {
 		for i := 0; i < 10; i++ {
 			time.Sleep(500 * time.Millisecond)
 			log.Printf("Error connecting CLI, retrying (%d/10)...", i+1)
