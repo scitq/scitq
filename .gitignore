@@ -39,7 +39,7 @@ scripts
 python/pyproject.toml
 python/src/scitq2/__version__.py
 python/src/scitq2.egg-info/
-**/python-src.tgz
+python-src.tgz
 python/venv/
 python/build/
 
