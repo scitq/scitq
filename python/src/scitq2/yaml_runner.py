@@ -73,6 +73,19 @@ def _apply_filter(value: str, filter_name: str) -> str:
         return value.upper()
     elif filter_name == 'int':
         return str(int(float(value)))
+    elif filter_name.startswith('format=') or filter_name.startswith('format '):
+        # Format with Python %-style: {IDX|format=%04d} → "0042"
+        fmt = filter_name.split('=', 1)[1] if '=' in filter_name else filter_name[7:]
+        try:
+            # Try numeric formatting first
+            if 'd' in fmt or 'x' in fmt or 'o' in fmt:
+                return fmt % int(float(value))
+            elif 'f' in fmt or 'e' in fmt:
+                return fmt % float(value)
+            else:
+                return fmt % value
+        except (ValueError, TypeError):
+            return value
     else:
         return value
 
@@ -545,9 +558,12 @@ def _resolve_adhoc_container(step_def: dict, workflow, registry: str = "gmtscien
 # ---------------------------------------------------------------------------
 
 def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = False):
-    """Resolve 'step_name.output_name' to an Output object."""
+    """Resolve 'step_name.output_name' to an Output object, or pass through raw URIs."""
     if not input_ref:
         return None
+    # Raw URI — pass through as-is (e.g. "s3://bucket/path/", "azure://container/path/")
+    if '://' in input_ref:
+        return input_ref
     parts = input_ref.split('.')
     if len(parts) == 2:
         step_name, output_name = parts

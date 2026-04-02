@@ -218,8 +218,12 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 		} else {
 			stepMaxStr = "unlimited"
 		}
-		log.Printf("ℹ️ [DEBUG] Found active recruiter: step_id=%d rank=%d pending_tasks=%d active_taskrate=%d current_workers=%d step_maximum=%s workflow_maximum=%v\n",
-			r.StepID, r.Rank, r.PendingTasks, r.ActiveTaskrate, r.CurrentWorkers, stepMaxStr, wfcMem[r.WorkflowID].Maximum)
+		wfMax := "unlimited"
+		if m := wfcMem[r.WorkflowID].Maximum; m != nil {
+			wfMax = fmt.Sprintf("%d", *m)
+		}
+		log.Printf("ℹ️ [DEBUG] Found active recruiter: step_id=%d rank=%d pending_tasks=%d active_taskrate=%d current_workers=%d step_maximum=%s workflow_maximum=%s\n",
+			r.StepID, r.Rank, r.PendingTasks, r.ActiveTaskrate, r.CurrentWorkers, stepMaxStr, wfMax)
 		key := RecruiterKey{StepID: r.StepID, Rank: r.Rank}
 		state, seen := recruiterTimers[key]
 		if !seen {

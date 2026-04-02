@@ -3602,6 +3602,23 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to insert recruiter: %w", err)
 	}
 
+	// Auto-bump workflow maximum_workers if the recruiter's max exceeds it
+	if req.MaxWorkers != nil {
+		var wfID sql.NullInt32
+		var wfMax sql.NullInt32
+		err := s.db.QueryRowContext(ctx,
+			`SELECT w.workflow_id, w.maximum_workers
+			 FROM step s JOIN workflow w ON s.workflow_id = w.workflow_id
+			 WHERE s.step_id = $1`, req.StepId).Scan(&wfID, &wfMax)
+		if err == nil && wfID.Valid && wfMax.Valid && *req.MaxWorkers > wfMax.Int32 {
+			s.db.ExecContext(ctx,
+				`UPDATE workflow SET maximum_workers = $1 WHERE workflow_id = $2`,
+				*req.MaxWorkers, wfID.Int32)
+			log.Printf("📈 Auto-bumped workflow %d maximum_workers from %d to %d (recruiter create on step %d)",
+				wfID.Int32, wfMax.Int32, *req.MaxWorkers, req.StepId)
+		}
+	}
+
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -3723,6 +3740,22 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	case "ok":
 		if err := tx.Commit(); err != nil {
 			return &pb.Ack{Success: false}, fmt.Errorf("failed to commit recruiter update: %w", err)
+		}
+		// Auto-bump workflow maximum_workers if the recruiter's new max exceeds it
+		if req.MaxWorkers != nil {
+			var wfID sql.NullInt32
+			var wfMax sql.NullInt32
+			err := s.db.QueryRowContext(ctx,
+				`SELECT w.workflow_id, w.maximum_workers
+				 FROM step s JOIN workflow w ON s.workflow_id = w.workflow_id
+				 WHERE s.step_id = $1`, req.StepId).Scan(&wfID, &wfMax)
+			if err == nil && wfID.Valid && wfMax.Valid && *req.MaxWorkers > wfMax.Int32 {
+				s.db.ExecContext(ctx,
+					`UPDATE workflow SET maximum_workers = $1 WHERE workflow_id = $2`,
+					*req.MaxWorkers, wfID.Int32)
+				log.Printf("📈 Auto-bumped workflow %d maximum_workers from %d to %d (recruiter update on step %d)",
+					wfID.Int32, wfMax.Int32, *req.MaxWorkers, req.StepId)
+			}
 		}
 		return &pb.Ack{Success: true}, nil
 	case "missing_concurrency":

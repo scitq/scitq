@@ -297,13 +297,21 @@ steps:
 
 Dependencies are automatic: if step B declares `inputs: A.output`, step B depends on step A. For fan-in steps, the dependency is on **all** tasks from the referenced step.
 
-Multiple inputs are combined with a list:
+Inputs can also be **raw URIs** — any string containing `://` is passed through as-is:
+
+```yaml
+  - name: process
+    inputs: "s3://bucket/data/{SAMPLE}/"   # Raw URI, not a step reference
+```
+
+Multiple inputs are combined with a list (mixing step references and URIs is allowed):
 
 ```yaml
   - name: compile
     inputs:
       - align.sam
       - fastp.json
+      - "azure://ref/metadata.tsv"
     grouped: true
 ```
 
@@ -446,6 +454,9 @@ Variable references support filters with the `|` syntax:
 | `\|basename` | Basename with extension | `"/path/file.txt"` → `"file.txt"` |
 | `\|dir` | Parent directory | `"/path/file.txt"` → `"/path"` |
 | `\|int` | Convert to integer | `"42"` → `"42"` |
+| `\|lower` | Lowercase | `"Hello"` → `"hello"` |
+| `\|upper` | Uppercase | `"Hello"` → `"HELLO"` |
+| `\|format=FMT` | Python %-style formatting | `{IDX\|format=%04d}` → `"0042"` |
 
 ### Default values
 

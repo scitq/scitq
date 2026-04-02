@@ -414,14 +414,15 @@ func (h *mcpHandler) listTools() []mcpTool {
 		// --- Workflow management ---
 		{
 			Name:        "update_workflow_status",
-			Description: "Update a workflow's status (R=Running, P=Paused, D=Debug).",
+			Description: "Update a workflow's status and/or maximum workers.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"workflow_id": {Type: "integer", Description: "Workflow ID"},
-					"status":     {Type: "string", Description: "New status: R (Running), P (Paused), D (Debug)"},
+					"workflow_id":    {Type: "integer", Description: "Workflow ID"},
+					"status":        {Type: "string", Description: "New status: R (Running), P (Paused), D (Debug)"},
+					"maximum_workers": {Type: "integer", Description: "Maximum workers allowed for this workflow"},
 				},
-				Required: []string{"workflow_id", "status"},
+				Required: []string{"workflow_id"},
 			},
 		},
 		{
@@ -518,6 +519,65 @@ func (h *mcpHandler) listTools() []mcpTool {
 				},
 			},
 		},
+		// --- Recruiters ---
+		{
+			Name:        "list_recruiters",
+			Description: "List recruiters, optionally filtered by step.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"step_id": {Type: "integer", Description: "Filter by step ID (optional)"},
+				},
+			},
+		},
+		{
+			Name:        "create_recruiter",
+			Description: "Create a recruiter for a step. Protofilter defines worker selection (e.g. 'cpu>=32:mem>=120').",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"step_id":      {Type: "integer", Description: "Step ID"},
+					"protofilter":  {Type: "string", Description: "Worker filter (e.g. cpu>=32:mem>=120:provider=azure.primary)"},
+					"rank":         {Type: "integer", Description: "Rank (default: 1)"},
+					"max_workers":  {Type: "integer", Description: "Maximum workers to recruit"},
+					"concurrency":  {Type: "integer", Description: "Static concurrency per worker"},
+					"prefetch":     {Type: "integer", Description: "Prefetch count"},
+					"cpu_per_task": {Type: "integer", Description: "CPU per task (dynamic concurrency)"},
+					"rounds":       {Type: "integer", Description: "Recruitment rounds (default: 1)"},
+					"timeout":      {Type: "integer", Description: "Timeout in seconds"},
+				},
+				Required: []string{"step_id", "protofilter"},
+			},
+		},
+		{
+			Name:        "update_recruiter",
+			Description: "Update a recruiter's settings.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"step_id":      {Type: "integer", Description: "Step ID"},
+					"rank":         {Type: "integer", Description: "Rank"},
+					"protofilter":  {Type: "string", Description: "Updated worker filter"},
+					"max_workers":  {Type: "integer", Description: "Updated max workers"},
+					"concurrency":  {Type: "integer", Description: "Updated concurrency"},
+					"prefetch":     {Type: "integer", Description: "Updated prefetch"},
+					"cpu_per_task": {Type: "integer", Description: "Updated CPU per task"},
+				},
+				Required: []string{"step_id", "rank"},
+			},
+		},
+		{
+			Name:        "delete_recruiter",
+			Description: "Delete a recruiter.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"step_id": {Type: "integer", Description: "Step ID"},
+					"rank":    {Type: "integer", Description: "Rank"},
+				},
+				Required: []string{"step_id", "rank"},
+			},
+		},
 		// --- Flavors ---
 		{
 			Name:        "list_flavors",
@@ -538,6 +598,34 @@ func (h *mcpHandler) listTools() []mcpTool {
 				Type:     "object",
 				Properties: map[string]schemaProperty{"uri": {Type: "string", Description: "URI to list (e.g. s3://bucket/path/)"}},
 				Required: []string{"uri"},
+			},
+		},
+		// --- Worker events ---
+		{
+			Name:        "list_worker_events",
+			Description: "List worker events (logs from worker lifecycle: install, bootstrap, runtime errors).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"worker_id": {Type: "integer", Description: "Filter by worker ID (optional)"},
+					"level":     {Type: "string", Description: "Filter by level: D (debug), I (info), W (warning), E (error)"},
+					"class":     {Type: "string", Description: "Filter by event class (e.g. install, bootstrap, runtime)"},
+					"limit":     {Type: "integer", Description: "Max events (default: 50)"},
+				},
+			},
+		},
+		{
+			Name:        "prune_worker_events",
+			Description: "Delete old worker events. Use dry_run=true to preview.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"before":    {Type: "string", Description: "Delete events before this date (RFC3339, e.g. 2025-01-01T00:00:00Z)"},
+					"level":     {Type: "string", Description: "Filter by level"},
+					"class":     {Type: "string", Description: "Filter by event class"},
+					"worker_id": {Type: "integer", Description: "Filter by worker ID"},
+					"dry_run":   {Type: "boolean", Description: "Preview only, don't delete"},
+				},
 			},
 		},
 		// --- Run management ---
@@ -630,10 +718,22 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolEditStepCommand(authCtx, call.Arguments)
 	case "list_steps":
 		return h.toolListSteps(authCtx, call.Arguments)
+	case "list_recruiters":
+		return h.toolListRecruiters(authCtx, call.Arguments)
+	case "create_recruiter":
+		return h.toolCreateRecruiter(authCtx, call.Arguments)
+	case "update_recruiter":
+		return h.toolUpdateRecruiter(authCtx, call.Arguments)
+	case "delete_recruiter":
+		return h.toolDeleteRecruiter(authCtx, call.Arguments)
 	case "list_flavors":
 		return h.toolListFlavors(authCtx, call.Arguments)
 	case "file_list":
 		return h.toolFileList(authCtx, call.Arguments)
+	case "list_worker_events":
+		return h.toolListWorkerEvents(authCtx, call.Arguments)
+	case "prune_worker_events":
+		return h.toolPruneWorkerEvents(authCtx, call.Arguments)
 	case "list_template_runs":
 		return h.toolListTemplateRuns(authCtx, call.Arguments)
 	default:
@@ -1006,18 +1106,30 @@ func (h *mcpHandler) toolTaskStatusCounts(ctx context.Context, args json.RawMess
 
 func (h *mcpHandler) toolUpdateWorkflowStatus(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
-		WorkflowID int32  `json:"workflow_id"`
-		Status     string `json:"status"`
+		WorkflowID     int32  `json:"workflow_id"`
+		Status         string `json:"status"`
+		MaximumWorkers int32  `json:"maximum_workers"`
 	}
 	json.Unmarshal(args, &p)
-	_, err := h.server.UpdateWorkflowStatus(ctx, &pb.WorkflowStatusUpdate{
+	req := &pb.WorkflowStatusUpdate{
 		WorkflowId: p.WorkflowID,
 		Status:     p.Status,
-	})
+	}
+	if p.MaximumWorkers != 0 {
+		req.MaximumWorkers = &p.MaximumWorkers
+	}
+	_, err := h.server.UpdateWorkflowStatus(ctx, req)
 	if err != nil {
 		return errorResult(err), nil
 	}
-	return textResult(fmt.Sprintf("Workflow %d status updated to %s", p.WorkflowID, p.Status)), nil
+	msg := fmt.Sprintf("Workflow %d updated", p.WorkflowID)
+	if p.Status != "" {
+		msg += fmt.Sprintf(" (status=%s)", p.Status)
+	}
+	if p.MaximumWorkers != 0 {
+		msg += fmt.Sprintf(" (maximum_workers=%d)", p.MaximumWorkers)
+	}
+	return textResult(msg), nil
 }
 
 func (h *mcpHandler) toolDeleteWorkflow(ctx context.Context, args json.RawMessage) (any, *rpcError) {
@@ -1152,6 +1264,93 @@ func (h *mcpHandler) toolListSteps(ctx context.Context, args json.RawMessage) (a
 	return jsonResult(res.Steps), nil
 }
 
+func (h *mcpHandler) toolListRecruiters(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ StepID int32 `json:"step_id"` }
+	json.Unmarshal(args, &p)
+	filter := &pb.RecruiterFilter{}
+	if p.StepID != 0 {
+		filter.StepId = &p.StepID
+	}
+	res, err := h.server.ListRecruiters(ctx, filter)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Recruiters), nil
+}
+
+func (h *mcpHandler) toolCreateRecruiter(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		StepID      int32  `json:"step_id"`
+		Protofilter string `json:"protofilter"`
+		Rank        int32  `json:"rank"`
+		MaxWorkers  int32  `json:"max_workers"`
+		Concurrency int32  `json:"concurrency"`
+		Prefetch    int32  `json:"prefetch"`
+		CpuPerTask  int32  `json:"cpu_per_task"`
+		Rounds      int32  `json:"rounds"`
+		Timeout     int32  `json:"timeout"`
+	}
+	json.Unmarshal(args, &p)
+	if p.Rank == 0 { p.Rank = 1 }
+	if p.Rounds == 0 { p.Rounds = 1 }
+	req := &pb.Recruiter{
+		StepId:      p.StepID,
+		Rank:        p.Rank,
+		Protofilter: p.Protofilter,
+		Rounds:      p.Rounds,
+		Timeout:     p.Timeout,
+	}
+	if p.MaxWorkers != 0 { req.MaxWorkers = &p.MaxWorkers }
+	if p.Concurrency != 0 { req.Concurrency = &p.Concurrency }
+	if p.Prefetch != 0 { req.Prefetch = &p.Prefetch }
+	if p.CpuPerTask != 0 { req.CpuPerTask = &p.CpuPerTask }
+	_, err := h.server.CreateRecruiter(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Recruiter created for step %d rank %d", p.StepID, p.Rank)), nil
+}
+
+func (h *mcpHandler) toolUpdateRecruiter(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		StepID      int32  `json:"step_id"`
+		Rank        int32  `json:"rank"`
+		Protofilter string `json:"protofilter"`
+		MaxWorkers  int32  `json:"max_workers"`
+		Concurrency int32  `json:"concurrency"`
+		Prefetch    int32  `json:"prefetch"`
+		CpuPerTask  int32  `json:"cpu_per_task"`
+	}
+	json.Unmarshal(args, &p)
+	req := &pb.RecruiterUpdate{
+		StepId: p.StepID,
+		Rank:   p.Rank,
+	}
+	if p.Protofilter != "" { req.Protofilter = &p.Protofilter }
+	if p.MaxWorkers != 0 { req.MaxWorkers = &p.MaxWorkers }
+	if p.Concurrency != 0 { req.Concurrency = &p.Concurrency }
+	if p.Prefetch != 0 { req.Prefetch = &p.Prefetch }
+	if p.CpuPerTask != 0 { req.CpuPerTask = &p.CpuPerTask }
+	_, err := h.server.UpdateRecruiter(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Recruiter updated for step %d rank %d", p.StepID, p.Rank)), nil
+}
+
+func (h *mcpHandler) toolDeleteRecruiter(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		StepID int32 `json:"step_id"`
+		Rank   int32 `json:"rank"`
+	}
+	json.Unmarshal(args, &p)
+	_, err := h.server.DeleteRecruiter(ctx, &pb.RecruiterId{StepId: p.StepID, Rank: p.Rank})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Recruiter deleted for step %d rank %d", p.StepID, p.Rank)), nil
+}
+
 func (h *mcpHandler) toolListFlavors(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
 		Filter string `json:"filter"`
@@ -1169,6 +1368,52 @@ func (h *mcpHandler) toolListFlavors(ctx context.Context, args json.RawMessage) 
 		return errorResult(err), nil
 	}
 	return jsonResult(res.Flavors), nil
+}
+
+func (h *mcpHandler) toolListWorkerEvents(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		WorkerID int32  `json:"worker_id"`
+		Level    string `json:"level"`
+		Class    string `json:"class"`
+		Limit    int32  `json:"limit"`
+	}
+	json.Unmarshal(args, &p)
+	filter := &pb.WorkerEventFilter{}
+	if p.WorkerID != 0 { filter.WorkerId = &p.WorkerID }
+	if p.Level != "" { filter.Level = &p.Level }
+	if p.Class != "" { filter.Class = &p.Class }
+	if p.Limit != 0 {
+		filter.Limit = &p.Limit
+	} else {
+		limit := int32(50)
+		filter.Limit = &limit
+	}
+	res, err := h.server.ListWorkerEvents(ctx, filter)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Events), nil
+}
+
+func (h *mcpHandler) toolPruneWorkerEvents(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Before   string `json:"before"`
+		Level    string `json:"level"`
+		Class    string `json:"class"`
+		WorkerID int32  `json:"worker_id"`
+		DryRun   bool   `json:"dry_run"`
+	}
+	json.Unmarshal(args, &p)
+	filter := &pb.WorkerEventPruneFilter{DryRun: p.DryRun}
+	if p.Before != "" { filter.Before = &p.Before }
+	if p.Level != "" { filter.Level = &p.Level }
+	if p.Class != "" { filter.Class = &p.Class }
+	if p.WorkerID != 0 { filter.WorkerId = &p.WorkerID }
+	res, err := h.server.PruneWorkerEvents(ctx, filter)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(map[string]int32{"matched": res.Matched, "deleted": res.Deleted}), nil
 }
 
 func (h *mcpHandler) toolFileList(ctx context.Context, args json.RawMessage) (any, *rpcError) {
