@@ -35,6 +35,8 @@
   let selectedCommand: string = undefined;
   // Currently selected status filter
   let selectedStatus: string = '';
+  // Show hidden tasks toggle
+  let showHidden: boolean = false;
   // Status of the selected task (for log modal)
   let selectedTaskStatus: string = '';
   // Command of the selected task (for log modal)
@@ -214,7 +216,8 @@ async function handleWebSocketMessage(message) {
       sortBy,
       selectedCommand,
       TASKS_CHUNK_SIZE,
-      0
+      0,
+      showHidden
     );
     firstTasks = [...displayedTasks];
     hasMoreTasks = displayedTasks.length === TASKS_CHUNK_SIZE;
@@ -251,6 +254,7 @@ async function handleWebSocketMessage(message) {
       workerId: parseNumber(params.get('workerId')),
       workflowId: parseNumber(params.get('workflowId')),
       stepId: parseNumber(params.get('stepId')),
+      showHidden: params.get('showHidden') === 'true',
       command: params.get('command') ? decodeURIComponent(params.get('command')) : undefined
     };
   }
@@ -266,6 +270,7 @@ async function handleWebSocketMessage(message) {
     selectedWfId = filters.workflowId ?? undefined;
     selectedStepId = filters.stepId ?? undefined;
     selectedStatus = filters.status ?? undefined;
+    showHidden = filters.showHidden ?? false;
 
     // Load steps if workflow is selected
     if (selectedWfId !== undefined) {
@@ -284,9 +289,10 @@ async function handleWebSocketMessage(message) {
         sortBy,
         selectedCommand,
         TASKS_CHUNK_SIZE,
-        0
+        0,
+        showHidden
       );
-    
+
       if (Array.isArray(initialLoad)) {
         displayedTasks = initialLoad;
         if(!selectedCommand){
@@ -301,7 +307,8 @@ async function handleWebSocketMessage(message) {
             sortBy,
             undefined,
             TASKS_CHUNK_SIZE,
-            0
+            0,
+            showHidden
            );
         }
         hasMoreTasks = initialLoad.length === TASKS_CHUNK_SIZE;
@@ -375,7 +382,8 @@ async function handleWebSocketMessage(message) {
             sortBy,
             selectedCommand,
             TASKS_CHUNK_SIZE,
-            displayedTasks.length
+            displayedTasks.length,
+            showHidden
         );
 
         if (additionalTasks.length > 0) {
@@ -907,6 +915,10 @@ async function handleWebSocketMessage(message) {
     <button class="tasks-status-waiting" on:click={() => handleStatusClick('W')}>Waiting</button>
     <button class="tasks-status-suspended" on:click={() => handleStatusClick('Z')}>Suspended</button>
     <button class="tasks-status-canceled" on:click={() => handleStatusClick('X')}>Canceled</button>
+    <label style="margin-left:1em;display:flex;align-items:center;gap:0.3em;font-size:0.85em;color:gray;cursor:pointer;">
+      <input type="checkbox" bind:checked={showHidden} on:change={loadInitialTasks} />
+      Show hidden
+    </label>
   </div>
 
   <!-- Task List Container -->
@@ -991,7 +1003,20 @@ async function handleWebSocketMessage(message) {
             <code style="font-size:0.85em;word-break:break-all;">{displayedTasks.find(t => t.taskId === selectedTaskId).resource.join(', ')}</code>
           </div>
         {/if}
-        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.output}
+        {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.publish}
+          <div>
+            <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Publish:</span>
+            <code style="font-size:0.85em;word-break:break-all;">{displayedTasks.find(t => t.taskId === selectedTaskId).publish}</code>
+          </div>
+          <!-- Output (workspace) shown only for failed tasks when publish exists —
+               on failure, output goes to workspace not publish, useful for debugging -->
+          {#if displayedTasks.find(t => t.taskId === selectedTaskId)?.status === 'F' && displayedTasks.find(t => t.taskId === selectedTaskId)?.output}
+            <div>
+              <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Output (workspace):</span>
+              <code style="font-size:0.85em;word-break:break-all;">{displayedTasks.find(t => t.taskId === selectedTaskId).output}</code>
+            </div>
+          {/if}
+        {:else if displayedTasks.find(t => t.taskId === selectedTaskId)?.output}
           <div>
             <span style="color:gray;font-size:0.9em;margin-right:0.25em;">Output:</span>
             <code style="font-size:0.85em;word-break:break-all;">{displayedTasks.find(t => t.taskId === selectedTaskId).output}</code>

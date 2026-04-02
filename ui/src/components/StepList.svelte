@@ -555,15 +555,15 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
                        style="left: {pct(step.successfulTasks + step.runningTasks, step.totalTasks)}%; width: {pct(step.reallyFailedTasks, step.totalTasks)}%;"></div>
                 </div>
               </div></td>
-              <td>{showIfNonZero(step.waitingTasks + step.pendingTasks) }</td> 
-              <td>{showIfNonZero(step.acceptedTasks) }</td>
-              <td>{showIfNonZero(step.runningTasks) }</td>
-              <td class="success-cell">{showIfNonZero(step.successfulTasks) }</td>
+              <td><a href="#/tasks?stepId={step.stepId}&status=W">{showIfNonZero(step.waitingTasks + step.pendingTasks)}</a></td>
+              <td><a href="#/tasks?stepId={step.stepId}&status=C">{showIfNonZero(step.acceptedTasks)}</a></td>
+              <td><a href="#/tasks?stepId={step.stepId}&status=R">{showIfNonZero(step.runningTasks)}</a></td>
+              <td class="success-cell"><a href="#/tasks?stepId={step.stepId}&status=S">{showIfNonZero(step.successfulTasks)}</a></td>
               <td class="fail-cell">
-                <span class="really-failed">{showIfNonZero(step.reallyFailedTasks)}</span>
-                <span class="retried-failed">{showIfNonZero(step.failedTasks)}</span>
+                <a href="#/tasks?stepId={step.stepId}&status=F" class="really-failed">{showIfNonZero(step.reallyFailedTasks)}</a>
+                <a href="#/tasks?stepId={step.stepId}&status=F&showHidden=true" class="retried-failed">{showIfNonZero(step.failedTasks)}</a>
               </td>
-              <td>{showIfNonZero(step.totalTasks) }</td>
+              <td><a href="#/tasks?stepId={step.stepId}">{showIfNonZero(step.totalTasks)}</a></td>
               <td class="duration-cell">
                 {#if step.runningTasks > 0}
                   <div class="duration-grid duration-running">

@@ -770,9 +770,13 @@ export async function getAllTasks(
   command?: string,
   limit?: number,
   offset?: number,
+  showHidden?: boolean,
 ): Promise<taskqueue.Task[]> {
   try {
     const request: taskqueue.ListTasksRequest = {};
+    if (showHidden) {
+      request.showHidden = true;
+    }
 
     if (statusFilter) {
       request.statusFilter = statusFilter;
