@@ -36,7 +36,7 @@ func getWorkflowCounters(db *sql.DB, workflowCounterMemory map[int32]WorkflowCou
         LEFT JOIN
             step s ON wf.workflow_id = s.workflow_id
         LEFT JOIN
-            worker w ON w.step_id = s.step_id
+            worker w ON w.step_id = s.step_id AND w.deleted_at IS NULL
         GROUP BY
             wf.workflow_id
     `)
@@ -118,6 +118,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
                 COALESCE(SUM(t.weight),0) AS load
             FROM worker w
             LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+            WHERE w.deleted_at IS NULL
             GROUP BY w.worker_id, w.step_id, w.concurrency
         ),
         worker_agg AS (
@@ -273,6 +274,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
                 COALESCE(SUM(t.weight),0) AS load
             FROM worker w
             LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+            WHERE w.deleted_at IS NULL
             GROUP BY w.worker_id, w.step_id, w.concurrency
         ),
         worker_agg AS (
@@ -539,6 +541,7 @@ func findRecyclableWorkers(
 			w.flavor_id = ANY($1::int[])
 			AND w.region_id = ANY($2::int[])
 			AND w.status = 'R'
+			AND w.deleted_at IS NULL
 			AND w.recyclable_scope IN ('G','W')
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id,

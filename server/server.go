@@ -407,7 +407,7 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 		return
 	}
 	// Free workers: promote workflow-scoped workers to global when workflow completes
-	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, workflowID)
+	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND deleted_at IS NULL AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, workflowID)
 	ws.EmitWS("workflow", workflowID, "status", struct {
 		WorkflowId int32  `json:"workflowId"`
 		Status     string `json:"status"`
@@ -1600,7 +1600,7 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		(req.IsPermanent != nil && *req.IsPermanent))
 
 	// **Check if worker already exists**
-	err = tx.QueryRow(`SELECT worker_id,is_permanent FROM worker WHERE worker_name = $1`, req.Name).Scan(&workerID, &isPermanent)
+	err = tx.QueryRow(`SELECT worker_id,is_permanent FROM worker WHERE worker_name = $1 AND deleted_at IS NULL`, req.Name).Scan(&workerID, &isPermanent)
 	if err == sql.ErrNoRows {
 		if req.IsPermanent != nil {
 			isPermanent = *req.IsPermanent
@@ -1733,8 +1733,8 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.WorkerInfo, error) {
 	// Example: adapt fields if needed
 	rows, err := db.QueryContext(ctx, `
-        SELECT w.worker_id, w.status, w.is_permanent, 
-               COALESCE(t.active_tasks, 0) as active_tasks, 
+        SELECT w.worker_id, w.status, w.is_permanent,
+               COALESCE(t.active_tasks, 0) as active_tasks,
                (SELECT MAX(t2.modified_at) FROM task t2 where t2.worker_id=w.worker_id AND t2.status in ('F','S')) as last_not_idle
         FROM worker w
         LEFT JOIN (
@@ -1743,6 +1743,7 @@ func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.Worker
             WHERE status IN ('A', 'C', 'D', 'O', 'R')
             GROUP BY worker_id
         ) t ON w.worker_id = t.worker_id
+        WHERE w.deleted_at IS NULL
     `)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch workers: %w", err)
@@ -1957,7 +1958,7 @@ func (s *taskQueueServer) GetWorkerStatuses(ctx context.Context, req *pb.WorkerS
 	for _, workerID := range req.WorkerIds {
 		var status string
 
-		err := s.db.QueryRow("SELECT status FROM worker WHERE worker_id = $1", workerID).Scan(&status)
+		err := s.db.QueryRow("SELECT status FROM worker WHERE worker_id = $1 AND deleted_at IS NULL", workerID).Scan(&status)
 		if err != nil {
 			log.Printf("⚠️ Error retrieving status for worker_id %d: %v", workerID, err)
 			status = "unknown"
@@ -2031,7 +2032,7 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 		return &pb.Ack{Success: false}, fmt.Errorf("no fields provided to update")
 	}
 
-	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d", i)
+	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d AND deleted_at IS NULL", i)
 	args = append(args, req.GetWorkerId())
 
 	_, err = tx.Exec(query, args...)
@@ -2140,7 +2141,7 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 		return &pb.Ack{Success: false}, status.Error(codes.InvalidArgument, "no fields provided to update")
 	}
 
-	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d", i)
+	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d AND deleted_at IS NULL", i)
 	args = append(args, req.GetWorkerId())
 
 	_, err = tx.Exec(query, args...)
@@ -2176,7 +2177,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 	var statusStr string
 	err = tx.QueryRow(`SELECT w.worker_name, r.provider_id, r.region_id, r.region_name, w.is_permanent, w.status FROM worker w
 	JOIN region r ON w.region_id=r.region_id
-	WHERE w.worker_id=$1`, req.WorkerId).Scan(&workerName, &providerId, &regionId, &regionName, &is_permanent, &statusStr)
+	WHERE w.worker_id=$1 AND w.deleted_at IS NULL`, req.WorkerId).Scan(&workerName, &providerId, &regionId, &regionName, &is_permanent, &statusStr)
 	// Protective check: avoid panic on empty status string
 	if len(statusStr) == 0 {
 		return nil, fmt.Errorf("empty status string for worker %d", req.WorkerId)
@@ -2227,13 +2228,13 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 			// Defer status change to after commit via UpdateWorkerStatus (which also emits a plain worker.status event)
 			s.addJob(job)
 		} else {
-			// Final DB deletion & quota/watchdog updates (worker already undeployed)
+			// Soft-delete & quota/watchdog updates (worker already undeployed)
 			var provider string
 			var cpu int32
 			var mem float32
 			err = tx.QueryRow(`
-				DELETE FROM worker
-				USING flavor f, provider p
+				UPDATE worker SET deleted_at = now(), status = 'D'
+				FROM flavor f, provider p
 				WHERE worker.worker_id = $1
 				  AND worker.flavor_id = f.flavor_id
 				  AND f.provider_id = p.provider_id
@@ -2242,7 +2243,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 						  f.mem
 			`, req.WorkerId).Scan(&provider, &cpu, &mem)
 			if err != nil {
-				return nil, fmt.Errorf("failed to delete worker %d with quota data: %v", req.WorkerId, err)
+				return nil, fmt.Errorf("failed to soft-delete worker %d with quota data: %v", req.WorkerId, err)
 			}
 			// Update quota manager and watchdog after commit
 			defer func(region, prov string, c int32, m float32, id int32) {
@@ -2253,9 +2254,9 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 		}
 	} else {
 		if status == 'O' || status == 'I' {
-			_, err = tx.Exec("DELETE FROM worker WHERE worker_id=$1", req.WorkerId)
+			_, err = tx.Exec("UPDATE worker SET deleted_at = now(), status = 'D' WHERE worker_id=$1", req.WorkerId)
 			if err != nil {
-				return nil, fmt.Errorf("failed to delete worker %d: %w", req.WorkerId, err)
+				return nil, fmt.Errorf("failed to soft-delete worker %d: %w", req.WorkerId, err)
 			}
 		} else {
 			return nil, fmt.Errorf("will not delete permanent worker %d with status %c", req.WorkerId, status)
@@ -2540,7 +2541,7 @@ func (s *taskQueueServer) UpdateJob(ctx context.Context, req *pb.JobUpdate) (*pb
 }
 
 func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
-	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2", req.Status, req.WorkerId)
+	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2 AND deleted_at IS NULL", req.Status, req.WorkerId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker status: %w", err)
 	}
@@ -2776,7 +2777,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 
 	// 1️⃣ Fetch concurrency
 	err := s.db.QueryRow(`
-		SELECT concurrency FROM worker WHERE worker_id = $1
+		SELECT concurrency FROM worker WHERE worker_id = $1 AND deleted_at IS NULL
 	`, req.WorkerId).Scan(&concurrency)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -2901,14 +2902,14 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 
 	if req.WorkflowId != nil {
 		query += `
-			WHERE w.step_id IN (
+			WHERE w.deleted_at IS NULL AND w.step_id IN (
 				SELECT step_id FROM step WHERE workflow_id = $1
 			)
 			ORDER BY worker_id
 			`
 		rows, err = tx.Query(query, *req.WorkflowId)
 	} else {
-		query += `ORDER BY worker_id`
+		query += `WHERE w.deleted_at IS NULL ORDER BY worker_id`
 		rows, err = tx.Query(query)
 	}
 
@@ -4138,7 +4139,7 @@ func (s *taskQueueServer) emitDeletedTasksForWorkflow(workflowID int32) {
 func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId) (*pb.Ack, error) {
 	s.emitDeletedTasksForWorkflow(req.WorkflowId)
 	// Free workers: promote workflow-scoped workers to global before cascade nullifies step_id
-	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, req.WorkflowId)
+	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND deleted_at IS NULL AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, req.WorkflowId)
 	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
@@ -4378,7 +4379,7 @@ func (s *taskQueueServer) RegisterSpecifications(ctx context.Context, req *taskq
 	// Step 1: get the worker
 	var currentFlavorId sql.NullInt64
 	var currentRegionId sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT flavor_id,region_id FROM worker WHERE worker_id = $1`, req.WorkerId).Scan(&currentFlavorId, &currentRegionId)
+	err = tx.QueryRowContext(ctx, `SELECT flavor_id,region_id FROM worker WHERE worker_id = $1 AND deleted_at IS NULL`, req.WorkerId).Scan(&currentFlavorId, &currentRegionId)
 	if err == sql.ErrNoRows {
 		return &taskqueuepb.Ack{Success: false}, fmt.Errorf("worker %s not found", req.WorkerId)
 	} else if err != nil {
@@ -4818,6 +4819,8 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		}
 
 		s.startJobQueue()
+		s.startFlavorStatsJobs()
+		s.startOrphanCleanup()
 		pb.RegisterTaskQueueServer(grpcServer, s)
 
 		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))

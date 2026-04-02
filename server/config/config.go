@@ -135,6 +135,9 @@ type Config struct {
 
 		// GRPCDSLTimeout is the timeout (in seconds) for DSL scripts which can take a long time to complete.
 		GRPCDSLTimeout int `yaml:"grpc_dsl_timeout" default:"1800"`
+
+		// WorkerRetention is the number of days to retain soft-deleted workers before pruning.
+		WorkerRetention int `yaml:"worker_retention" default:"30"`
 	} `yaml:"scitq"`
 
 	// Providers contains configurations for different cloud providers supported by scitq.

@@ -72,7 +72,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 		SELECT w.worker_id, COALESCE(w.step_id,0), w.concurrency+w.prefetch-COALESCE(SUM(t.weight),0) AS capacity
 		FROM worker w
 		LEFT JOIN task t ON (t.worker_id=w.worker_id AND t.status IN ('A','C','D','O','R'))
-		WHERE w.status='R'
+		WHERE w.status='R' AND w.deleted_at IS NULL
 		GROUP BY w.worker_id, w.step_id, w.concurrency, w.prefetch
 		HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
 	`)
@@ -376,7 +376,7 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 			SELECT w.worker_id
 			FROM worker w
 			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
-			WHERE w.status = 'R' AND w.step_id = $2
+			WHERE w.status = 'R' AND w.deleted_at IS NULL AND w.step_id = $2
 			GROUP BY w.worker_id, w.concurrency, w.prefetch
 			HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
 			ORDER BY (w.concurrency + w.prefetch - COALESCE(SUM(t.weight),0)) DESC, w.worker_id

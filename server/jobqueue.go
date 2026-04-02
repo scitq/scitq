@@ -120,7 +120,7 @@ func (s *taskQueueServer) processJob(job Job) error {
 		if err != nil {
 			return fmt.Errorf("failed to create worker %s: %v", job.WorkerName, err)
 		}
-		_, err = s.db.Exec("UPDATE worker SET ipv4=$1, status='I' WHERE worker_id=$2", IPaddress, job.WorkerID)
+		_, err = s.db.Exec("UPDATE worker SET ipv4=$1, status='I' WHERE worker_id=$2 AND deleted_at IS NULL", IPaddress, job.WorkerID)
 		if err != nil {
 			return fmt.Errorf("worker created but db update failed %s: %v", job.WorkerName, err)
 		}

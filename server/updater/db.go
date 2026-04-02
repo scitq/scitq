@@ -247,6 +247,7 @@ func (ps *PostgresSession) IsFlavorInUse(name string, providerID int32) (bool, e
 		JOIN flavor f ON w.flavor_id = f.flavor_id
 		WHERE f.flavor_name = $1
 		  AND f.provider_id = $2
+		  AND w.deleted_at IS NULL
 	)`
 	var exists bool
 	if err := ps.tx.QueryRow(query, name, providerID).Scan(&exists); err != nil {
