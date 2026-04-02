@@ -263,68 +263,156 @@ def _assign_worker(client: Scitq2Client, step_id: int) -> bool:
 
 
 def _wait_for_recruitment(client: Scitq2Client, workflow_id: int, task_id: int, step_id: int) -> bool:
+    """Wait for a recruited worker to appear, deploy, and pick up the task.
+
+    Detects three failure modes:
+      1. No worker appears at all after 10s → retrigger
+      2. Worker appears then disappears (ghost) → retrigger
+      3. Worker stays in installing state too long (>300s) → delete + retrigger
+    """
+    NO_WORKER_TIMEOUT = 10    # seconds before we give up waiting for any worker
+    STUCK_TIMEOUT = 300       # seconds before we consider a deploying worker stuck
+
     spinner = [" .  ", " .. ", " ..."]
     idx = 0
-    print("Recruitment requested ... (Ctrl-C to assign differently)")
+    print("Recruitment requested ... (Ctrl-C to cancel)")
+    start = time.time()
+    seen_worker_id: Optional[int] = None
+    seen_worker_at: Optional[float] = None
+
     try:
-        start = time.time()
         while True:
-            line = f"\rRecruitment requested{spinner[idx]}"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            idx = (idx + 1) % len(spinner)
             elapsed = time.time() - start
-            if elapsed < 2:
-                time.sleep(0.1)
-            elif elapsed < 10:
-                time.sleep(0.25)
-            else:
-                time.sleep(0.5)
+
+            # Check task status first
             task = _find_task(client.list_tasks(workflow_id=workflow_id, show_hidden=True), task_id)
             if task is None:
                 sys.stdout.write("\n")
-                sys.stdout.flush()
                 print(f"Task {task_id} not found.")
                 return False
             if task.status in ("A", "C", "D", "O", "R", "U", "V"):
-                sys.stdout.write("\rRecruitment succeeded waiting for task to start   \n")
+                sys.stdout.write("\rWorker ready, task running.                        \n")
                 sys.stdout.flush()
                 _stream_task_logs(client, workflow_id, task_id)
                 return True
             if task.status in ("S", "F"):
-                sys.stdout.write("\rRecruitment succeeded waiting for task to start   \n")
+                sys.stdout.write("\rTask completed.                                    \n")
                 sys.stdout.flush()
                 tasks = client.list_tasks(workflow_id=workflow_id, show_hidden=True)
                 refreshed = _find_task(tasks, task_id) or task
                 print(f"{_task_label(task_id, refreshed)} finished with status {_format_status(refreshed, tasks)}.")
                 return True
-            if _has_worker_for_step(client, workflow_id, step_id):
-                sys.stdout.write("\rRecruitment succeeded waiting for task to start   \n")
+
+            # Track worker for this step
+            worker = _find_step_worker(client, workflow_id, step_id)
+
+            if worker is not None:
+                if seen_worker_id is None:
+                    seen_worker_id = worker.worker_id
+                    seen_worker_at = time.time()
+                if worker.status == "R":
+                    sys.stdout.write("\rWorker ready, waiting for task assignment.          \n")
+                    sys.stdout.flush()
+                    return True
+                # Worker deploying — show status
+                deploy_elapsed = time.time() - seen_worker_at
+                status_line = f"\rWorker {worker.name} deploying (status {worker.status}, {int(deploy_elapsed)}s)"
+                sys.stdout.write(status_line.ljust(60))
                 sys.stdout.flush()
-                return True
+                # Stuck worker detection
+                if deploy_elapsed > STUCK_TIMEOUT:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    return _handle_stuck_worker(client, workflow_id, task_id, step_id, worker)
+            elif seen_worker_id is not None:
+                # Worker was seen but is now gone (ghost)
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                print(f"Worker {seen_worker_id} appeared then disappeared (ghost worker).")
+                return _handle_recruitment_failure(client, workflow_id, task_id, step_id)
+            else:
+                # No worker yet
+                sys.stdout.write(f"\rWaiting for worker{spinner[idx]}".ljust(60))
+                sys.stdout.flush()
+                idx = (idx + 1) % len(spinner)
+                if elapsed > NO_WORKER_TIMEOUT:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    print("No worker appeared after recruitment.")
+                    return _handle_recruitment_failure(client, workflow_id, task_id, step_id)
+
+            # Adaptive polling
+            if elapsed < 2:
+                time.sleep(0.2)
+            elif elapsed < 10:
+                time.sleep(0.5)
+            else:
+                time.sleep(1.0)
+
     except KeyboardInterrupt:
         sys.stdout.write("\rRecruitment interrupted.                           \n")
         sys.stdout.flush()
-        while True:
-            print("r) Trigger recruitment")
-            print("w) Assign a worker manually")
-            print("c) Cancel")
-            choice = input("Select option [r/w/c]: ").strip().lower()
-            if choice == "r":
-                return _wait_for_recruitment(client, workflow_id, task_id, step_id)
-            if choice == "w":
-                return _assign_worker(client, step_id)
-            if choice == "c":
-                return False
-            print("Invalid choice.")
+        return _handle_recruitment_failure(client, workflow_id, task_id, step_id)
 
 
-def _has_worker_for_step(client: Scitq2Client, workflow_id: int, step_id: int) -> bool:
+def _handle_recruitment_failure(client: Scitq2Client, workflow_id: int, task_id: int, step_id: int) -> bool:
+    while True:
+        print(f"r) Retrigger recruitment{_recruiter_hint(client, step_id)}")
+        print("w) Assign a worker manually")
+        print("c) Cancel")
+        choice = input("Select option [r/w/c]: ").strip().lower()
+        if choice == "r":
+            try:
+                client.debug_recruit_step(workflow_id=workflow_id, step_id=step_id)
+            except grpc.RpcError as e:
+                print(f"Recruitment failed: {e.details() or str(e)}")
+            return _wait_for_recruitment(client, workflow_id, task_id, step_id)
+        if choice == "w":
+            return _assign_worker(client, step_id)
+        if choice == "c":
+            return False
+        print("Invalid choice.")
+
+
+def _handle_stuck_worker(client: Scitq2Client, workflow_id: int, task_id: int, step_id: int, worker) -> bool:
+    while True:
+        print(f"Worker {worker.name} [{worker.worker_id}] stuck in status {worker.status}.")
+        print(f"d) Delete worker and retrigger recruitment")
+        print(f"r) Retrigger recruitment (keep stuck worker)")
+        print("w) Assign a different worker manually")
+        print("c) Cancel")
+        choice = input("Select option [d/r/w/c]: ").strip().lower()
+        if choice == "d":
+            try:
+                client.delete_worker(worker_id=worker.worker_id)
+                print(f"Worker {worker.worker_id} deleted.")
+            except grpc.RpcError as e:
+                print(f"Failed to delete worker: {e.details() or str(e)}")
+            try:
+                client.debug_recruit_step(workflow_id=workflow_id, step_id=step_id)
+            except grpc.RpcError as e:
+                print(f"Recruitment failed: {e.details() or str(e)}")
+            return _wait_for_recruitment(client, workflow_id, task_id, step_id)
+        if choice == "r":
+            try:
+                client.debug_recruit_step(workflow_id=workflow_id, step_id=step_id)
+            except grpc.RpcError as e:
+                print(f"Recruitment failed: {e.details() or str(e)}")
+            return _wait_for_recruitment(client, workflow_id, task_id, step_id)
+        if choice == "w":
+            return _assign_worker(client, step_id)
+        if choice == "c":
+            return False
+        print("Invalid choice.")
+
+
+def _find_step_worker(client: Scitq2Client, workflow_id: int, step_id: int):
+    """Find any worker assigned to this step (any status except Deleting)."""
     workers = client.list_workers(workflow_id=workflow_id)
     for w in workers:
-        if w.status == "R" and w.step_id is not None and w.step_id == step_id:
-            return True
-    return False
+        if w.step_id is not None and w.step_id == step_id and w.status != "D":
+            return w
+    return None
 
 
 def _stream_task_logs(client: Scitq2Client, workflow_id: int, task_id: int) -> None:

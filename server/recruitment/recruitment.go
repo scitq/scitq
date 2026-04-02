@@ -538,6 +538,7 @@ func findRecyclableWorkers(
 		WHERE
 			w.flavor_id = ANY($1::int[])
 			AND w.region_id = ANY($2::int[])
+			AND w.status = 'R'
 			AND w.recyclable_scope IN ('G','W')
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id,

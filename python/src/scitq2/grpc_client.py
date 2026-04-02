@@ -136,6 +136,9 @@ class Scitq2Client:
             req.workflow_id = workflow_id
         return self.stub.ListWorkers(req).workers
 
+    def delete_worker(self, *, worker_id: int) -> None:
+        self.stub.DeleteWorker(taskqueue_pb2.WorkerDeletion(worker_id=worker_id))
+
     def list_recruiters(self, *, step_id: Optional[int] = None):
         req = taskqueue_pb2.RecruiterFilter()
         if step_id is not None:
