@@ -751,7 +751,8 @@ func recycleWorkers(
               UPDATE worker w
               SET concurrency = u.new_concurrency,
                   prefetch = u.new_prefetch,
-                  step_id = $4
+                  step_id = $4,
+                  recyclable_scope = 'W'
               FROM (
                 SELECT UNNEST($1::int[]) AS worker_id,
                        UNNEST($2::int[]) AS new_concurrency,

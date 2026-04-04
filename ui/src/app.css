@@ -16,6 +16,9 @@
   --table-row-even: #f8f8f8;
   --link-color: #1a56db;
   --link-hover: #0d47a1;
+  --status-success: #2e7d32;
+  --status-running: #1565c0;
+  --status-fail: #c62828;
   --toolbar-bg: var(--primary-color);
   --toolbar-text: white;
   
@@ -44,6 +47,9 @@
   --table-row-even: #252525;
   --link-color: #64b5f6;
   --link-hover: #42a5f5;
+  --status-success: #81c784;
+  --status-running: #e0e0e0;
+  --status-fail: #ef5350;
   --toolbar-bg: var(--primary-color);
   --toolbar-text: white;
 }
@@ -144,6 +150,10 @@ body{
   text-align: center;
   vertical-align: middle;
   white-space: nowrap;
+}
+
+.listTable a {
+  color: var(--link-color);
 }
 
 .listTable th {

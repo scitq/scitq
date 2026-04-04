@@ -622,11 +622,11 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
 </div>
 <style>
   .success-cell {
-    color: lightgreen;
+    color: var(--status-success);
     font-weight: bold;
   }
   .really-failed {
-    color: red;
+    color: var(--status-fail);
     font-weight: bold;
     margin-right: 4px;
   }
@@ -648,12 +648,12 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
     font-variant-numeric: tabular-nums;
   }
   .duration-success {
-    color: lightgreen;
+    color: var(--status-success);
   }
   .duration-fail {
-    color: red;
+    color: var(--status-fail);
   }
   .duration-running {
-    color: white;
+    color: var(--status-running);
   }
 </style>
