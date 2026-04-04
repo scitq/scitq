@@ -766,7 +766,9 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
              dry_run: bool = False, standalone: bool = True,
              pipeline_dir: Optional[str] = None,
              no_recruiters: bool = False,
-             verbose: bool = False) -> Optional[int]:
+             verbose: bool = False,
+             opportunistic: bool = False,
+             untrusted: Optional[List[str]] = None) -> Optional[int]:
     """Run a YAML pipeline definition."""
     # Validate
     if 'name' not in data:
@@ -930,9 +932,23 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
             print(f"   - {m}", file=sys.stderr)
         sys.exit(1)
 
+    # Resolve opportunistic reuse settings from YAML data
+    yaml_opportunistic = data.get('opportunistic', False)
+    if isinstance(yaml_opportunistic, str):
+        yaml_opportunistic = str(_resolve_refs(yaml_opportunistic, params)).lower() in ('true', '1', 'yes')
+    yaml_untrusted_raw = data.get('untrusted', '')
+    if isinstance(yaml_untrusted_raw, str):
+        yaml_untrusted_raw = str(_resolve_refs(yaml_untrusted_raw, params))
+        yaml_untrusted = [s.strip() for s in yaml_untrusted_raw.split(',') if s.strip()]
+    else:
+        yaml_untrusted = []
+    effective_opportunistic = opportunistic or yaml_opportunistic
+    effective_untrusted = untrusted or yaml_untrusted
+
     # Compile (client already created above for RESOURCE_ROOT)
     activate = standalone and not dry_run
-    workflow.compile(client, activate_leading_tasks=activate)
+    workflow.compile(client, activate_leading_tasks=activate,
+                     opportunistic=effective_opportunistic, untrusted=effective_untrusted)
 
     if dry_run:
         client.delete_workflow(workflow.workflow_id)

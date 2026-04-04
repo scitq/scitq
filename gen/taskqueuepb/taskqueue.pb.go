@@ -164,6 +164,7 @@ type TaskRequest struct {
 	SkipIfExists     bool                   `protobuf:"varint,18,opt,name=skip_if_exists,json=skipIfExists,proto3" json:"skip_if_exists,omitempty"`
 	AcceptFailure    bool                   `protobuf:"varint,19,opt,name=accept_failure,json=acceptFailure,proto3" json:"accept_failure,omitempty"` // If true, dependencies accept failed prerequisites
 	Publish          *string                `protobuf:"bytes,20,opt,name=publish,proto3,oneof" json:"publish,omitempty"`                             // Publish path (copied from output on success only)
+	ReuseKey         *string                `protobuf:"bytes,21,opt,name=reuse_key,json=reuseKey,proto3,oneof" json:"reuse_key,omitempty"`           // SHA-256 hex for opportunistic reuse
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -338,6 +339,13 @@ func (x *TaskRequest) GetPublish() string {
 	return ""
 }
 
+func (x *TaskRequest) GetReuseKey() string {
+	if x != nil && x.ReuseKey != nil {
+		return *x.ReuseKey
+	}
+	return ""
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -365,7 +373,8 @@ type Task struct {
 	Weight           *float64               `protobuf:"fixed64,23,opt,name=weight,proto3,oneof" json:"weight,omitempty"`                                  // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
 	RunStartTime     *int64                 `protobuf:"varint,24,opt,name=run_start_time,json=runStartTime,proto3,oneof" json:"run_start_time,omitempty"` // epoch timestamp of the first task start time
 	SkipIfExists     bool                   `protobuf:"varint,25,opt,name=skip_if_exists,json=skipIfExists,proto3" json:"skip_if_exists,omitempty"`
-	Publish          *string                `protobuf:"bytes,26,opt,name=publish,proto3,oneof" json:"publish,omitempty"` // Publish path (output copied here on success only)
+	Publish          *string                `protobuf:"bytes,26,opt,name=publish,proto3,oneof" json:"publish,omitempty"`                   // Publish path (output copied here on success only)
+	ReuseKey         *string                `protobuf:"bytes,27,opt,name=reuse_key,json=reuseKey,proto3,oneof" json:"reuse_key,omitempty"` // SHA-256 hex for opportunistic reuse
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -578,6 +587,13 @@ func (x *Task) GetSkipIfExists() bool {
 func (x *Task) GetPublish() string {
 	if x != nil && x.Publish != nil {
 		return *x.Publish
+	}
+	return ""
+}
+
+func (x *Task) GetReuseKey() string {
+	if x != nil && x.ReuseKey != nil {
+		return *x.ReuseKey
 	}
 	return ""
 }
@@ -8296,7 +8312,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_concurrencyB\x0f\n" +
 	"\r_is_permanentB\v\n" +
 	"\t_providerB\t\n" +
-	"\a_region\"\xe1\x06\n" +
+	"\a_region\"\x91\a\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -8322,7 +8338,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"R\btaskName\x88\x01\x01\x12$\n" +
 	"\x0eskip_if_exists\x18\x12 \x01(\bR\fskipIfExists\x12%\n" +
 	"\x0eaccept_failure\x18\x13 \x01(\bR\racceptFailure\x12\x1d\n" +
-	"\apublish\x18\x14 \x01(\tH\vR\apublish\x88\x01\x01B\b\n" +
+	"\apublish\x18\x14 \x01(\tH\vR\apublish\x88\x01\x01\x12 \n" +
+	"\treuse_key\x18\x15 \x01(\tH\fR\breuseKey\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -8337,7 +8354,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_task_nameB\n" +
 	"\n" +
-	"\b_publish\"\xf5\b\n" +
+	"\b_publishB\f\n" +
+	"\n" +
+	"_reuse_key\"\xa5\t\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -8369,7 +8388,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x06weight\x18\x17 \x01(\x01H\x0eR\x06weight\x88\x01\x01\x12)\n" +
 	"\x0erun_start_time\x18\x18 \x01(\x03H\x0fR\frunStartTime\x88\x01\x01\x12$\n" +
 	"\x0eskip_if_exists\x18\x19 \x01(\bR\fskipIfExists\x12\x1d\n" +
-	"\apublish\x18\x1a \x01(\tH\x10R\apublish\x88\x01\x01B\b\n" +
+	"\apublish\x18\x1a \x01(\tH\x10R\apublish\x88\x01\x01\x12 \n" +
+	"\treuse_key\x18\x1b \x01(\tH\x11R\breuseKey\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -8390,7 +8410,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\a_weightB\x11\n" +
 	"\x0f_run_start_timeB\n" +
 	"\n" +
-	"\b_publish\"1\n" +
+	"\b_publishB\f\n" +
+	"\n" +
+	"_reuse_key\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +

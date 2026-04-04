@@ -64,6 +64,9 @@ func (s *taskQueueServer) assignPendingTasks() {
 		return
 	}
 
+	// Opportunistic reuse: check pending tasks with reuse_key against task_reuse store (DB-only, no I/O)
+	s.reuseCheckTasks(tx)
+
 	// Skip-if-exists: check all pending tasks with the flag before worker assignment
 	s.skipExistingTasks(tx)
 
@@ -338,6 +341,101 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 				if allDone {
 					tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, depID)
 					log.Printf("✅ skip-if-exists: promoted task %d to P (dependencies resolved)", depID)
+				}
+			}
+		}
+		s.triggerAssign()
+	}
+}
+
+// reuseCheckTasks checks pending tasks with a reuse_key and promotes them to S
+// if a matching entry exists in task_reuse (opportunistic reuse).
+func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
+	rows, err := tx.Query(`
+		SELECT t.task_id, t.reuse_key, t.step_id, tr.output_path, tr.task_id AS original_task_id
+		FROM task t
+		JOIN task_reuse tr ON t.reuse_key = tr.reuse_key
+		WHERE t.status = 'P'
+		  AND t.reuse_key IS NOT NULL
+	`)
+	if err != nil {
+		log.Printf("⚠️ reuse-check: failed to query: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type reuseHit struct {
+		taskID         int32
+		reuseKey       string
+		stepID         sql.NullInt32
+		outputPath     string
+		originalTaskID int32
+	}
+	var hits []reuseHit
+	for rows.Next() {
+		var h reuseHit
+		if err := rows.Scan(&h.taskID, &h.reuseKey, &h.stepID, &h.outputPath, &h.originalTaskID); err != nil {
+			continue
+		}
+		hits = append(hits, h)
+	}
+
+	if len(hits) == 0 {
+		return
+	}
+
+	reused := map[int32]bool{}
+	for _, h := range hits {
+		_, err = tx.Exec(`UPDATE task SET status = 'S', reuse_hit = true, reuse_original_output = output, output = $2 WHERE task_id = $1 AND status = 'P'`, h.taskID, h.outputPath)
+		if err != nil {
+			log.Printf("⚠️ reuse-check: failed to update task %d: %v", h.taskID, err)
+			continue
+		}
+		log.Printf("♻️ reuse hit for task %d (key=%s…), reusing output from task %d", h.taskID, h.reuseKey[:12], h.originalTaskID)
+		reused[h.taskID] = true
+
+		ws.EmitWS("task", h.taskID, "status", struct {
+			TaskId int32  `json:"taskId"`
+			Status string `json:"status"`
+		}{TaskId: h.taskID, Status: "S"})
+	}
+
+	// Promote W→P for dependents (same logic as skipExistingTasks)
+	if len(reused) > 0 {
+		for taskID := range reused {
+			depRows, err := tx.Query(`
+				SELECT d.dependent_task_id
+				FROM task_dependencies d
+				JOIN task t ON d.dependent_task_id = t.task_id
+				WHERE d.prerequisite_task_id = $1
+				  AND t.status = 'W'
+			`, taskID)
+			if err != nil {
+				continue
+			}
+			var depIDs []int32
+			for depRows.Next() {
+				var depID int32
+				if depRows.Scan(&depID) == nil {
+					depIDs = append(depIDs, depID)
+				}
+			}
+			depRows.Close()
+
+			for _, depID := range depIDs {
+				var allDone bool
+				tx.QueryRow(`
+					SELECT NOT EXISTS (
+						SELECT 1
+						FROM task_dependencies d
+						JOIN task t ON d.prerequisite_task_id = t.task_id
+						WHERE d.dependent_task_id = $1
+						  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+					)
+				`, depID).Scan(&allDone)
+				if allDone {
+					tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, depID)
+					log.Printf("♻️ reuse: promoted task %d to P (dependencies resolved)", depID)
 				}
 			}
 		}

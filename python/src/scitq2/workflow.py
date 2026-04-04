@@ -199,8 +199,10 @@ class Task:
         self.language = language or Raw()
         self.retry = retry
         self.dependency_task_ids: List[int] = []
-    
-    def compile(self, client: Scitq2Client):
+        self.task_id: Optional[int] = None
+        self.reuse_key: Optional[str] = None
+
+    def compile(self, client: Scitq2Client, opportunistic: bool = False, untrusted: Optional[List[str]] = None):
         # Resolve command using the language's compile_command method
         resolved_command = self.language.compile_command(self.command)
         resolved_shell = self.language.executable()
@@ -294,6 +296,14 @@ class Task:
         # Resolve resources
         resolved_resources = list(map(str, self.resources))
 
+        # Compute reuse key if opportunistic reuse is enabled
+        computed_reuse_key = None
+        if opportunistic and self.step.name not in (untrusted or []):
+            computed_reuse_key = self._compute_reuse_key(
+                resolved_command, resolved_shell, resolved_resources, input_items
+            )
+        self.reuse_key = computed_reuse_key
+
         status = "W" if resolved_depends else DEFAULT_TASK_STATUS
         self.task_id = client.submit_task(
                 step_id=self.step.step_id,
@@ -310,8 +320,55 @@ class Task:
                 skip_if_exists=self.skip_if_exists,
                 retry=self.retry,
                 accept_failure=self.accept_failure,
+                reuse_key=computed_reuse_key,
             )
 
+
+
+    def _compute_reuse_key(self, command, shell, resources, input_items):
+        """Compute SHA-256 reuse key from task fingerprint + input identities."""
+        import hashlib
+
+        # Task fingerprint: what the task *does*
+        fp_parts = [
+            f"command:{command}",
+            f"shell:{shell or ''}",
+            f"container:{self.container}",
+            f"container_options:",
+        ]
+        for r in sorted(resources):
+            fp_parts.append(f"resource:{r}")
+        fingerprint = hashlib.sha256("\n".join(fp_parts).encode()).hexdigest()
+
+        # Input identities: what the task *processes*
+        input_identities = []
+        for inp in input_items:
+            if isinstance(inp, OutputBase):
+                ids = self._extract_input_identities(inp)
+                if ids is None:
+                    return None  # chain broken
+                input_identities.extend(ids)
+            elif isinstance(inp, str):
+                input_identities.append(inp)
+
+        key_parts = [fingerprint] + sorted(input_identities)
+        return hashlib.sha256("\n".join(key_parts).encode()).hexdigest()
+
+    def _extract_input_identities(self, output):
+        """Extract input identities from an OutputBase for reuse key computation."""
+        if isinstance(output, Output):
+            if output.grouped:
+                ids = []
+                for task in output.task.step.tasks:
+                    if task.reuse_key is None:
+                        return None
+                    ids.append(task.reuse_key)
+                return ids
+            else:
+                if output.task.reuse_key is None:
+                    return None
+                return [output.task.reuse_key]
+        return []
 
 
 class TaskSpec:
@@ -456,7 +513,7 @@ class Step:
             task = self.task
         return Output(task=task, grouped=grouped, globs=output_glob, move=move, action=action)
 
-    def compile(self, client: Scitq2Client):
+    def compile(self, client: Scitq2Client, opportunistic: bool = False, untrusted: Optional[List[str]] = None):
         """Compile the Step into real scitq objects by calling appropriate gRPC functions. Called automatically during the template run phase."""
         self.step_id = client.create_step(self.workflow.workflow_id, self.name)
 
@@ -472,7 +529,7 @@ class Step:
                 raise e
 
         for task in self.tasks:
-            task.compile(client)
+            task.compile(client, opportunistic=opportunistic, untrusted=untrusted)
     
     def grouped(self) -> GroupedStep:
         """Create a grouped step with a specific tag."""
@@ -612,7 +669,8 @@ class Workflow:
                       accept_failure=accept_failure)
         return step
 
-    def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: Optional[str] = None) -> int:
+    def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: Optional[str] = None,
+                opportunistic: bool = False, untrusted: Optional[List[str]] = None) -> int:
         if self.provider:
             self.workspace_root = client.get_workspace_root(
                 provider=self.provider,
@@ -641,7 +699,7 @@ class Workflow:
         if template_run_id:
             client.update_template_run(template_run_id=int(template_run_id), workflow_id=self.workflow_id)
         for step in self._steps.values():
-            step.compile(client)
+            step.compile(client, opportunistic=opportunistic, untrusted=untrusted)
 
         if activate_leading_tasks:
             client.update_workflow_status(workflow_id=self.workflow_id, status="R")

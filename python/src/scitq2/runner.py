@@ -144,6 +144,8 @@ def run(func: Callable):
     parser.add_argument("--debug", action="store_true", help="Run in Debug mode with interactive task selection.")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run", help="Create the workflow, verify it, then delete it without launching.")
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters.")
+    parser.add_argument("--opportunistic", action="store_true", help="Enable opportunistic reuse of previous results.")
+    parser.add_argument("--untrusted", type=str, default="", help="Comma-separated step names to force re-execute.")
     args = parser.parse_args()
 
     try:
@@ -241,7 +243,9 @@ def run(func: Callable):
                 workflow.worker_pool = None
                 for step in workflow.steps:
                     step.worker_pool = None
-            workflow.compile(client, activate_leading_tasks=activate, workflow_status=workflow_status)
+            untrusted_list = [s.strip() for s in args.untrusted.split(",") if s.strip()] if args.untrusted else []
+            workflow.compile(client, activate_leading_tasks=activate, workflow_status=workflow_status,
+                             opportunistic=args.opportunistic, untrusted=untrusted_list)
         except grpc.RpcError as e:
             _handle_grpc_error(e)
         if args.dry_run:

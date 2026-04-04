@@ -122,6 +122,7 @@ message TaskRequest {
     bool skip_if_exists = 18;
     bool accept_failure = 19; // If true, dependencies accept failed prerequisites
     optional string publish = 20; // Publish path (copied from output on success only)
+    optional string reuse_key = 21; // SHA-256 hex for opportunistic reuse
 }
 
 message Task {
@@ -151,6 +152,7 @@ message Task {
     optional int64 run_start_time = 24; // epoch timestamp of the first task start time
     bool skip_if_exists = 25;
     optional string publish = 26; // Publish path (output copied here on success only)
+    optional string reuse_key = 27; // SHA-256 hex for opportunistic reuse
 }
 
 message TaskList {

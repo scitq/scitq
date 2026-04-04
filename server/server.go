@@ -228,13 +228,13 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              command, shell, container, container_options, step_id,
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
-             status, task_name, skip_if_exists, publish, created_at
+             status, task_name, skip_if_exists, publish, reuse_key, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
-             $15, $16, $17, $18, NOW()
+             $15, $16, $17, $18, $19, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -244,7 +244,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
-		initialStatus, req.TaskName, req.SkipIfExists, req.Publish,
+		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -999,11 +999,56 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 	}
 
+	// Lazy reuse verification: on task failure, check if any prerequisite was a reuse hit
+	// with stale output. If so, invalidate the reuse entry, reset the prerequisite to P,
+	// and reset this task to W so it re-runs after the prerequisite completes.
+	if req.NewStatus == "F" {
+		s.checkStaleReuse(ctx, req.TaskId)
+	}
+
 	if workflowID.Valid {
 		shouldRecomputeWorkflow = req.NewStatus == "S" || req.NewStatus == "F"
 		if shouldRecomputeWorkflow {
 			if !(req.NewStatus == "F" && effectiveRetry > 0) && !(req.NewStatus == "S" && promotedWaitingTasks) {
 				s.recomputeWorkflowStatus(ctx, workflowID.Int32)
+			}
+		}
+	}
+
+	// Store reuse entry on successful completion (from actual execution, not reuse hit)
+	if req.NewStatus == "S" {
+		var reuseKey sql.NullString
+		var outputPath, publish sql.NullString
+		var stepName sql.NullString
+		s.db.QueryRowContext(ctx, `
+			SELECT t.reuse_key, t.output, t.publish, s.step_name
+			FROM task t
+			LEFT JOIN step s ON t.step_id = s.step_id
+			WHERE t.task_id = $1
+		`, req.TaskId).Scan(&reuseKey, &outputPath, &publish, &stepName)
+		if reuseKey.Valid && reuseKey.String != "" {
+			stablePath := outputPath.String
+			if publish.Valid && publish.String != "" {
+				stablePath = publish.String
+			}
+			if stablePath != "" {
+				var wfID sql.NullInt32
+				if workflowID.Valid {
+					wfID = workflowID
+				}
+				_, err := s.db.ExecContext(ctx, `
+					INSERT INTO task_reuse (reuse_key, output_path, task_id, step_name, workflow_id)
+					VALUES ($1, $2, $3, $4, $5)
+					ON CONFLICT (reuse_key) DO UPDATE SET
+						output_path = EXCLUDED.output_path,
+						task_id = EXCLUDED.task_id,
+						step_name = EXCLUDED.step_name,
+						workflow_id = EXCLUDED.workflow_id,
+						created_at = now()
+				`, reuseKey.String, stablePath, req.TaskId, stepName, wfID)
+				if err != nil {
+					log.Printf("⚠️ failed to store reuse entry for task %d: %v", req.TaskId, err)
+				}
 			}
 		}
 	}
@@ -1033,6 +1078,84 @@ func getLogPath(taskID int32, logType string, logRoot string) string {
 	dir := fmt.Sprintf("%s/%d", logRoot, taskID/1000)
 	_ = os.MkdirAll(dir, 0755)
 	return filepath.Join(dir, fmt.Sprintf("%d_%s.log", taskID, logType))
+}
+
+// checkStaleReuse verifies that reuse-hit prerequisites of a failed task still have
+// valid output. If any output is gone (stale), the reuse entry is invalidated, the
+// prerequisite is reset to P (so it actually runs), and the failed task is reset to W
+// (so it waits for the prerequisite and re-runs automatically).
+func (s *taskQueueServer) checkStaleReuse(ctx context.Context, failedTaskID int32) {
+	// Find reuse-hit prerequisites of this failed task
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.task_id, t.reuse_key, t.output, t.reuse_original_output
+		FROM task_dependencies d
+		JOIN task t ON d.prerequisite_task_id = t.task_id
+		WHERE d.dependent_task_id = $1
+		  AND t.reuse_hit = true
+	`, failedTaskID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type staleCandidate struct {
+		taskID         int32
+		reuseKey       string
+		output         string
+		originalOutput sql.NullString
+	}
+	var candidates []staleCandidate
+	for rows.Next() {
+		var c staleCandidate
+		if err := rows.Scan(&c.taskID, &c.reuseKey, &c.output, &c.originalOutput); err != nil {
+			continue
+		}
+		candidates = append(candidates, c)
+	}
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	for _, c := range candidates {
+		// Verify output still exists
+		files, err := fetch.List(s.rcloneRemotes, c.output)
+		if err == nil && len(files) > 0 {
+			continue // output is still there, not a stale reuse issue
+		}
+
+		// Output is gone — invalidate reuse entry
+		log.Printf("♻️ stale reuse detected: task %d output missing at %s", c.taskID, c.output)
+		s.db.ExecContext(ctx, `DELETE FROM task_reuse WHERE reuse_key = $1`, c.reuseKey)
+
+		// Reset prerequisite: S → P, restore original output
+		origOutput := ""
+		if c.originalOutput.Valid {
+			origOutput = c.originalOutput.String
+		}
+		_, err = s.db.ExecContext(ctx, `
+			UPDATE task SET status = 'P', output = $2, reuse_hit = false, reuse_original_output = NULL
+			WHERE task_id = $1 AND reuse_hit = true
+		`, c.taskID, origOutput)
+		if err != nil {
+			log.Printf("⚠️ failed to reset stale reuse-hit task %d: %v", c.taskID, err)
+			continue
+		}
+		log.Printf("♻️ reset reuse-hit task %d to P (will run for real)", c.taskID)
+
+		// Reset the failed downstream task: F → W (wait for prerequisite to complete)
+		_, err = s.db.ExecContext(ctx, `
+			UPDATE task SET status = 'W' WHERE task_id = $1 AND status = 'F'
+		`, failedTaskID)
+		if err != nil {
+			log.Printf("⚠️ failed to reset downstream task %d to W: %v", failedTaskID, err)
+		} else {
+			log.Printf("♻️ reset downstream task %d to W (waiting for prerequisite %d)", failedTaskID, c.taskID)
+		}
+
+		// Trigger assignment so the reset prerequisite gets picked up
+		s.triggerAssign()
+	}
 }
 
 func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTaskRequest, resumeStatus string, requireDebug bool) (*pb.TaskResponse, error) {
