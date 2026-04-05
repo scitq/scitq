@@ -2719,7 +2719,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
             t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden,
             s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry,
 			EXTRACT(EPOCH FROM t.run_started_at)::bigint AS run_started_epoch,
-			t.publish
+			t.publish,
+			t.download_duration, t.run_duration, t.upload_duration
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -2764,6 +2765,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			inputNull, resourceNull                                           pq.StringArray
 			workerIDNull, stepIDNull, prevTaskID, wfIDNull, retryNull         sql.NullInt32
 			runStartTimeNull                                                  sql.NullInt64
+			downloadDur, runDur, uploadDur                                    sql.NullInt32
 			retryCount                                                        int32
 			hidden                                                            bool
 		)
@@ -2789,6 +2791,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&retryNull,
 			&runStartTimeNull,
 			&publishNull,
+			&downloadDur,
+			&runDur,
+			&uploadDur,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -2808,6 +2813,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		task.RetryCount = retryCount
 		task.Hidden = hidden
 		task.RunStartTime = utils.NullInt64ToPtr(runStartTimeNull)
+		task.DownloadDuration = utils.NullInt32ToPtr(downloadDur)
+		task.RunDuration = utils.NullInt32ToPtr(runDur)
+		task.UploadDuration = utils.NullInt32ToPtr(uploadDur)
 
 		tasks = append(tasks, &task)
 	}

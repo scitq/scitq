@@ -373,8 +373,11 @@ type Task struct {
 	Weight           *float64               `protobuf:"fixed64,23,opt,name=weight,proto3,oneof" json:"weight,omitempty"`                                  // Fraction of the assigned worker's concurrency consumed by this task (default 1.0)
 	RunStartTime     *int64                 `protobuf:"varint,24,opt,name=run_start_time,json=runStartTime,proto3,oneof" json:"run_start_time,omitempty"` // epoch timestamp of the first task start time
 	SkipIfExists     bool                   `protobuf:"varint,25,opt,name=skip_if_exists,json=skipIfExists,proto3" json:"skip_if_exists,omitempty"`
-	Publish          *string                `protobuf:"bytes,26,opt,name=publish,proto3,oneof" json:"publish,omitempty"`                   // Publish path (output copied here on success only)
-	ReuseKey         *string                `protobuf:"bytes,27,opt,name=reuse_key,json=reuseKey,proto3,oneof" json:"reuse_key,omitempty"` // SHA-256 hex for opportunistic reuse
+	Publish          *string                `protobuf:"bytes,26,opt,name=publish,proto3,oneof" json:"publish,omitempty"`                                            // Publish path (output copied here on success only)
+	ReuseKey         *string                `protobuf:"bytes,27,opt,name=reuse_key,json=reuseKey,proto3,oneof" json:"reuse_key,omitempty"`                          // SHA-256 hex for opportunistic reuse
+	DownloadDuration *int32                 `protobuf:"varint,28,opt,name=download_duration,json=downloadDuration,proto3,oneof" json:"download_duration,omitempty"` // seconds spent downloading inputs
+	RunDuration      *int32                 `protobuf:"varint,29,opt,name=run_duration,json=runDuration,proto3,oneof" json:"run_duration,omitempty"`                // seconds spent running the command
+	UploadDuration   *int32                 `protobuf:"varint,30,opt,name=upload_duration,json=uploadDuration,proto3,oneof" json:"upload_duration,omitempty"`       // seconds spent uploading outputs
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -596,6 +599,27 @@ func (x *Task) GetReuseKey() string {
 		return *x.ReuseKey
 	}
 	return ""
+}
+
+func (x *Task) GetDownloadDuration() int32 {
+	if x != nil && x.DownloadDuration != nil {
+		return *x.DownloadDuration
+	}
+	return 0
+}
+
+func (x *Task) GetRunDuration() int32 {
+	if x != nil && x.RunDuration != nil {
+		return *x.RunDuration
+	}
+	return 0
+}
+
+func (x *Task) GetUploadDuration() int32 {
+	if x != nil && x.UploadDuration != nil {
+		return *x.UploadDuration
+	}
+	return 0
 }
 
 type TaskList struct {
@@ -8356,7 +8380,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_publishB\f\n" +
 	"\n" +
-	"_reuse_key\"\xa5\t\n" +
+	"_reuse_key\"\xe8\n" +
+	"\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -8389,7 +8414,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0erun_start_time\x18\x18 \x01(\x03H\x0fR\frunStartTime\x88\x01\x01\x12$\n" +
 	"\x0eskip_if_exists\x18\x19 \x01(\bR\fskipIfExists\x12\x1d\n" +
 	"\apublish\x18\x1a \x01(\tH\x10R\apublish\x88\x01\x01\x12 \n" +
-	"\treuse_key\x18\x1b \x01(\tH\x11R\breuseKey\x88\x01\x01B\b\n" +
+	"\treuse_key\x18\x1b \x01(\tH\x11R\breuseKey\x88\x01\x01\x120\n" +
+	"\x11download_duration\x18\x1c \x01(\x05H\x12R\x10downloadDuration\x88\x01\x01\x12&\n" +
+	"\frun_duration\x18\x1d \x01(\x05H\x13R\vrunDuration\x88\x01\x01\x12,\n" +
+	"\x0fupload_duration\x18\x1e \x01(\x05H\x14R\x0euploadDuration\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -8412,7 +8440,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_publishB\f\n" +
 	"\n" +
-	"_reuse_key\"1\n" +
+	"_reuse_keyB\x14\n" +
+	"\x12_download_durationB\x0f\n" +
+	"\r_run_durationB\x12\n" +
+	"\x10_upload_duration\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +

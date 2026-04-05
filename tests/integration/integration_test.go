@@ -436,6 +436,25 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("task did not reach S; last output:\n%s", output)
 	}
 
+	// verify duration fields are populated via gRPC
+	{
+		qclient, err := lib.CreateClient(server_connection_string, token)
+		assert.NoError(t, err)
+		defer qclient.Close()
+		res, err := qclient.Client.ListTasks(context.Background(), &pb.ListTasksRequest{})
+		assert.NoError(t, err)
+		var task1 *pb.Task
+		for _, tk := range res.Tasks {
+			if tk.TaskId == 1 {
+				task1 = tk
+				break
+			}
+		}
+		assert.NotNil(t, task1, "task 1 should exist")
+		assert.NotNil(t, task1.RunStartTime, "run_start_time should be set")
+		assert.NotNil(t, task1.RunDuration, "run_duration should be set for completed task")
+	}
+
 	// look for task output
 	output, err = runCLICommand(c, []string{"task", "stdout", "--id", "1"})
 	assert.NoError(t, err)

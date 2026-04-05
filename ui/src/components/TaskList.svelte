@@ -107,6 +107,23 @@
     return logs.map((line, i) => ({ id: `${taskId}-err-${i}`, text: line }));
   }
 
+  function formatTaskDuration(task: any): string {
+    if (task.runDuration && task.runDuration > 0) {
+      const total = (task.downloadDuration || 0) + task.runDuration + (task.uploadDuration || 0);
+      const m = Math.floor(total / 60);
+      const s = total % 60;
+      return m > 0 ? `${m}m${s}s` : `${s}s`;
+    }
+    if (task.runStartTime && task.status === 'R') {
+      const elapsed = Math.floor(Date.now() / 1000 - Number(task.runStartTime));
+      if (elapsed < 0) return '';
+      const m = Math.floor(elapsed / 60);
+      const s = elapsed % 60;
+      return m > 0 ? `${m}m${s}s` : `${s}s`;
+    }
+    return '';
+  }
+
 async function retryTaskClick(taskId: number) {
   errorMessage = null;
   try {
@@ -134,6 +151,7 @@ async function retryTaskClick(taskId: number) {
           <th>Wf</th>
           <th>Step</th>
           <th>Status</th>
+          <th>Duration</th>
           <th>stdout/stderr</th>
           <th>Output</th>
           <th>Actions</th>
@@ -153,6 +171,7 @@ async function retryTaskClick(taskId: number) {
             <td>
               <div class="tasks-status-pill {getJobStatusClass(task.status)}" title={getJobStatusText(task.status)}></div>
             </td>
+            <td class="tabnum">{formatTaskDuration(task)}</td>
             <td>
               <div style="white-space: pre-wrap;">
                 {#each getLogsOut(task.taskId) as log (log.id)}

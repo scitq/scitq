@@ -153,6 +153,9 @@ message Task {
     bool skip_if_exists = 25;
     optional string publish = 26; // Publish path (output copied here on success only)
     optional string reuse_key = 27; // SHA-256 hex for opportunistic reuse
+    optional int32 download_duration = 28; // seconds spent downloading inputs
+    optional int32 run_duration = 29;      // seconds spent running the command
+    optional int32 upload_duration = 30;   // seconds spent uploading outputs
 }
 
 message TaskList {

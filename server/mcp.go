@@ -901,14 +901,17 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 	}
 	// Return summary (without full command text which can be huge)
 	type taskSummary struct {
-		TaskID     int32  `json:"task_id"`
-		TaskName   string `json:"task_name,omitempty"`
-		Status     string `json:"status"`
-		StepID     int32  `json:"step_id,omitempty"`
-		WorkerID   int32  `json:"worker_id,omitempty"`
-		WorkflowID int32  `json:"workflow_id,omitempty"`
-		Container  string `json:"container"`
-		RetryCount int32  `json:"retry_count,omitempty"`
+		TaskID           int32  `json:"task_id"`
+		TaskName         string `json:"task_name,omitempty"`
+		Status           string `json:"status"`
+		StepID           int32  `json:"step_id,omitempty"`
+		WorkerID         int32  `json:"worker_id,omitempty"`
+		WorkflowID       int32  `json:"workflow_id,omitempty"`
+		Container        string `json:"container"`
+		RetryCount       int32  `json:"retry_count,omitempty"`
+		DownloadDuration int32  `json:"download_duration,omitempty"`
+		RunDuration      int32  `json:"run_duration,omitempty"`
+		UploadDuration   int32  `json:"upload_duration,omitempty"`
 	}
 	summaries := make([]taskSummary, 0, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -922,6 +925,9 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		if t.StepId != nil { s.StepID = *t.StepId }
 		if t.WorkerId != nil { s.WorkerID = *t.WorkerId }
 		if t.WorkflowId != nil { s.WorkflowID = *t.WorkflowId }
+		if t.DownloadDuration != nil { s.DownloadDuration = *t.DownloadDuration }
+		if t.RunDuration != nil { s.RunDuration = *t.RunDuration }
+		if t.UploadDuration != nil { s.UploadDuration = *t.UploadDuration }
 		summaries = append(summaries, s)
 	}
 	return jsonResult(summaries), nil

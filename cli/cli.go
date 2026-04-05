@@ -455,8 +455,15 @@ func (c *CLI) TaskList() error {
 		if c.Attr.Task.List.ShowHidden {
 			hidden = fmt.Sprintf(" | Hidden: %t", task.Hidden)
 		}
-		fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s%s%s\n",
-			task.TaskId, name, task.Command, task.Container, task.Status, retries, hidden)
+		duration := ""
+		if task.RunDuration != nil && *task.RunDuration > 0 {
+			duration = fmt.Sprintf(" | Duration: %s", formatDuration(float32(*task.RunDuration)))
+		} else if task.RunStartTime != nil && task.Status == "R" {
+			elapsed := time.Since(time.Unix(*task.RunStartTime, 0))
+			duration = fmt.Sprintf(" | Running: %s", formatDuration(float32(elapsed.Seconds())))
+		}
+		fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s%s%s%s\n",
+			task.TaskId, name, task.Command, task.Container, task.Status, retries, duration, hidden)
 	}
 	return nil
 }

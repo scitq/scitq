@@ -219,6 +219,18 @@ export interface Task {
      * @generated from protobuf field: optional int64 run_start_time = 24
      */
     runStartTime?: string; // epoch timestamp of the first task start time
+    /**
+     * @generated from protobuf field: optional int32 download_duration = 28
+     */
+    downloadDuration?: number; // seconds spent downloading inputs
+    /**
+     * @generated from protobuf field: optional int32 run_duration = 29
+     */
+    runDuration?: number; // seconds spent running the command
+    /**
+     * @generated from protobuf field: optional int32 upload_duration = 30
+     */
+    uploadDuration?: number; // seconds spent uploading outputs
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -2539,7 +2551,10 @@ class Task$Type extends MessageType<Task> {
             { no: 21, name: "hidden", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 22, name: "previous_task_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 23, name: "weight", kind: "scalar", opt: true, T: 1 /*ScalarType.DOUBLE*/ },
-            { no: 24, name: "run_start_time", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ }
+            { no: 24, name: "run_start_time", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
+            { no: 28, name: "download_duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 29, name: "run_duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 30, name: "upload_duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -2633,6 +2648,15 @@ class Task$Type extends MessageType<Task> {
                 case /* optional int64 run_start_time */ 24:
                     message.runStartTime = reader.int64().toString();
                     break;
+                case /* optional int32 download_duration */ 28:
+                    message.downloadDuration = reader.int32();
+                    break;
+                case /* optional int32 run_duration */ 29:
+                    message.runDuration = reader.int32();
+                    break;
+                case /* optional int32 upload_duration */ 30:
+                    message.uploadDuration = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2717,6 +2741,15 @@ class Task$Type extends MessageType<Task> {
         /* optional int64 run_start_time = 24; */
         if (message.runStartTime !== undefined)
             writer.tag(24, WireType.Varint).int64(message.runStartTime);
+        /* optional int32 download_duration = 28; */
+        if (message.downloadDuration !== undefined)
+            writer.tag(28, WireType.Varint).int32(message.downloadDuration);
+        /* optional int32 run_duration = 29; */
+        if (message.runDuration !== undefined)
+            writer.tag(29, WireType.Varint).int32(message.runDuration);
+        /* optional int32 upload_duration = 30; */
+        if (message.uploadDuration !== undefined)
+            writer.tag(30, WireType.Varint).int32(message.uploadDuration);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
