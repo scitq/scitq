@@ -228,6 +228,20 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 	return agg, nil
 }
 
+// Reconcile rebuilds the in-memory stats from the database,
+// fixing any drift between cached counters and actual task states.
+func (a *StepStatsAgg) Reconcile(db *sql.DB) {
+	fresh, err := NewStepStatsAgg(db)
+	if err != nil {
+		log.Printf("⚠️ stats reconciliation failed: %v", err)
+		return
+	}
+	a.mu.Lock()
+	a.data = fresh.data
+	a.mu.Unlock()
+	log.Printf("♻️ stats reconciled from DB")
+}
+
 // EnsureStep guarantees an entry exists for (workflowID, stepID).
 func (a *StepStatsAgg) EnsureStep(workflowID, stepID int32) {
 	a.mu.Lock()

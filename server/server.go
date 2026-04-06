@@ -177,6 +177,20 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 
 	go s.watchdog.Run(s.stopWatchdog)
 
+	// Periodic stats reconciliation (fixes counter drift)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.stats.Reconcile(s.db)
+			case <-s.stopWatchdog:
+				return
+			}
+		}
+	}()
+
 	return s
 }
 

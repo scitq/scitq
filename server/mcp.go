@@ -223,7 +223,51 @@ func (h *mcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request, re
 				"name":    "scitq",
 				"version": version.Version,
 			},
-			"instructions": "scitq distributed task queue. Use the login tool first to authenticate, then list_templates to discover available workflows.",
+			"instructions": `scitq2 — distributed task queue for scientific workloads.
+
+## Core concepts
+
+- **Task**: a command executed inside a Docker container on a worker. Tasks have inputs (downloaded before execution), resources (shared read-only data), and outputs (uploaded after execution). Status codes: W (waiting for dependencies), P (pending), A (assigned), C (accepted), D (downloading), O (on hold), R (running), U/V (uploading), S (succeeded), F (failed).
+- **Step**: groups tasks that share the same container, resources, and compute requirements. Workers are assigned to steps, not to individual tasks.
+- **Workflow**: groups steps into a pipeline. Steps within a workflow can have dependencies (inputs from a previous step). Workflow status: R (running), P (paused), D (debug), S (succeeded), F (failed/stuck).
+- **Worker**: a compute instance (cloud VM or local machine) that executes tasks. Workers have concurrency (how many tasks run in parallel) and prefetch (how many tasks to download in advance while others run).
+- **Flavor**: an instance type (CPU, memory, disk, GPU, cost). Use list_flavors with a filter to find suitable ones BEFORE deploying.
+- **Provider**: a cloud provider configuration (e.g. azure.primary, openstack.ovh). Each provider has regions.
+- **Recruiter**: auto-deploys workers for a step. Defined by a protofilter (e.g. "cpu>=8:mem>=60:provider=azure.primary"), max_workers cap, concurrency, and prefetch settings.
+
+## YAML workflow templates
+
+The primary way to define and run workflows is via YAML templates. Use list_templates to discover available templates, template_detail to inspect parameters, and run_template to execute.
+
+When writing new YAML templates:
+- Define all steps at once in a single template rather than submitting tasks one by one. This is more efficient and lets scitq manage the full DAG.
+- Use template_detail on existing templates to understand the YAML structure and conventions.
+- Use download_template to read the source of existing templates as examples.
+
+## Operational guidance
+
+### Start small
+- Always cap recruitment with a parameter (e.g. max_workers as a template param) and start with 1 worker unless the template is well-tested or a close variant of one.
+- Once tasks start completing successfully, increase recruitment via update_recruiter.
+
+### Check flavors first
+- Before launching a workflow, use list_flavors with appropriate filters (e.g. "cpu>=8:mem>=60:cost>0") to verify suitable instance types exist in the target provider/region.
+
+### Prefetch tuning
+Prefetch is key to scitq performance but tricky to set right. Diagnose live:
+1. Compare running tasks vs expected (active_workers × concurrency). If running tasks are consistently below capacity, it's either a prefetch or warm-up issue.
+2. **Warm-up**: if tasks use large resources (reference databases, mmap-heavy tools like hermes or bowtie2), the first task on each worker is slow while data loads into memory. This is normal and not a prefetch problem.
+3. **Prefetch shortage**: if there are no large resources but tasks are quick (seconds to a few minutes), time is lost between tasks on download/preparation. Increase prefetch so the next task is ready before the current one finishes.
+4. The right prefetch depends on task speed, input size, and worker disk capacity. It can be adjusted live via update_worker (prefetch is per-worker), but should also be updated in the YAML template for future runs.
+
+### Troubleshooting
+- Use task_status_counts to get a quick overview of workflow progress.
+- Use task_logs to inspect stdout/stderr of failed tasks.
+- Use list_worker_events to check worker lifecycle issues (install failures, evictions).
+- Use retry_task or edit_and_retry_task to recover from failures.
+- Use kill_task to stop a stuck or runaway task.
+
+Always call login first to authenticate before using other tools.`,
 		},
 	}
 	w.Header().Set("Mcp-Session-Id", sid)

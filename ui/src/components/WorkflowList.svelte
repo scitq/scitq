@@ -75,6 +75,8 @@
         <!-- Workflow information section -->
         <div class="wf-info">
           <span class="wf-id">#{wf.workflowId}</span>
+          <span class="wf-status-dot {wf.status === 'S' ? 'wf-dot-green' : wf.runningTasks > 0 ? 'wf-dot-blue' : wf.failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
+                title={wf.status === 'S' ? 'Completed' : wf.runningTasks > 0 ? `${wf.runningTasks} active` : wf.status === 'F' ? `Stuck: ${wf.failedTasks} failed` : wf.failedTasks > 0 ? `${wf.failedTasks} failed, no active tasks` : 'Idle'}></span>
           <a href={`#/tasks?workflowId=${wf.workflowId}`} class="wf-name">{wf.name}</a>
           {#if wf.totalTasks > 0}
             {@const t = wf.totalTasks}
