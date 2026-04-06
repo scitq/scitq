@@ -1126,6 +1126,40 @@ def my_tool(workflow, sample, *, inputs=None, worker_pool=None, **kwargs) -> Ste
 
 Place it in any Python file and import it in your workflow template.
 
+## Opportunistic reuse
+
+The `run()` function accepts `opportunistic` and `untrusted` parameters to enable cross-workflow result reuse:
+
+```python
+from scitq2 import *
+
+def my_pipeline(workflow):
+    step_qc = workflow.Step(name="qc", ...)
+    step_align = workflow.Step(name="align", inputs=step_qc.output(), ...)
+    step_count = workflow.Step(name="count", inputs=step_align.output("counts"), ...)
+
+# Normal run — everything executes
+run(my_pipeline)
+
+# Reuse run — skip tasks already done on identical inputs
+run(my_pipeline, opportunistic=True)
+
+# Reuse, but force QC to re-run (container uses :latest which was updated)
+run(my_pipeline, opportunistic=True, untrusted=["qc"])
+```
+
+When `opportunistic=True`, each task gets a **reuse key** computed from its command, container, resources, and input identities. Tasks with a matching key in the reuse store are instantly marked as succeeded with the cached output — no worker needed.
+
+The `untrusted` list forces specific steps to re-execute. Since internal inputs use upstream reuse keys as identity, breaking trust at one step breaks the entire downstream chain.
+
+See [YAML templates — Opportunistic reuse](yaml-templates.md#opportunistic-reuse) for the full explanation of the mechanism.
+
+The CLI runner also supports these flags:
+
+```sh
+python -m scitq2.runner my_workflow.py --opportunistic --untrusted qc
+```
+
 ## Reference
 
 see [DSL Reference](../reference/python_dsl.md)

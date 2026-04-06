@@ -242,6 +242,31 @@ Streams both stdout and stderr of a task, with colors (blue for stdout, red for 
 scitq task logs --id <task id>
 ```
 
+#### `task kill`
+
+Sends a kill signal to a running task. The signal is delivered on the next worker ping cycle (typically within 5 seconds) and the task's Docker container is killed.
+
+```sh
+scitq task kill --id <task id>
+```
+
+The task will transition to failed (F) status after being killed. If the task has retries remaining, it will be retried automatically.
+
+#### `task edit`
+
+Edits a failed task's command and retries it (hides the old task and creates a new one with the modified command):
+
+```sh
+scitq task edit --id <task id> --command "fixed_command ..."
+```
+
+#### Duration in task list
+
+The `task list` output includes duration information:
+
+- **Completed tasks** (S or F): shows the total run duration (e.g. `Duration: 4m32s`)
+- **Running tasks** (R): shows the elapsed time since execution started (e.g. `Running: 2m15s`)
+
 ### `flavor`
 
 `flavor` is the term coined by Openstack to describe a type of instance, scitq kept it.

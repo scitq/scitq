@@ -694,3 +694,83 @@ steps:
 | Arbitrary logic | Full Python | Limited to `cond:` branching |
 
 The Python DSL is more powerful for complex logic, but YAML templates are simpler to write, review, and maintain for standard pipelines. Both produce identical workflows — you can start with YAML and switch to Python if you outgrow it.
+
+## Opportunistic reuse
+
+Many workflows are re-run on overlapping data batches. **Opportunistic reuse** lets scitq skip tasks that have already been executed with identical computation and inputs, reusing their output across workflows.
+
+Unlike `skip_if_exists` (which checks a single output path), reuse is content-addressed: it matches on *what the task does* and *what it processes*, not on *where the output lives*.
+
+### Enabling reuse
+
+Reuse is controlled at **workflow level**, not per step:
+
+```yaml
+params:
+  opportunistic:
+    type: boolean
+    default: false
+    help: Reuse results from previous identical runs
+  untrusted:
+    type: string
+    default: ""
+    help: Comma-separated step names to force re-execute
+
+opportunistic: "{params.opportunistic}"
+untrusted: "{params.untrusted}"
+```
+
+Running with reuse:
+
+```sh
+# Normal run — everything executes
+scitq template run my_pipeline input_dir=azure://data/batch42 location=azure.swedencentral
+
+# With reuse — skip tasks already done on identical inputs
+scitq template run my_pipeline input_dir=azure://data/batch42 location=azure.swedencentral opportunistic=true
+
+# Reuse, but force QC to re-run (e.g. container uses :latest which was updated)
+scitq template run my_pipeline input_dir=azure://data/batch42 location=azure.swedencentral opportunistic=true untrusted=qc
+```
+
+### How it works
+
+Each task is identified by a **reuse key** — a SHA-256 hash of:
+
+- **Task fingerprint**: command, shell, container (including tag), container_options, sorted resources
+- **Input identities**: for external inputs, the URI itself; for internal inputs (outputs of a previous step), the reuse key of the producing task
+
+Two tasks with the same reuse key produce the same output. When a task with a reuse key is about to be assigned to a worker:
+
+1. The server looks up the key in the reuse store
+2. **Hit**: the task is instantly marked as succeeded with the cached output path — no worker needed
+3. **Miss**: the task runs normally, and on success its output is stored for future reuse
+
+### Trust chain
+
+Internal inputs create a transitive trust chain. If step A produces output used by step B, then step B's reuse key incorporates step A's reuse key. If any step in the chain is untrusted or has no reuse key, downstream steps cannot be reused either.
+
+### Untrusted steps
+
+The `untrusted` parameter lists steps that must always re-execute. This is useful when:
+
+- A step's container uses a mutable tag like `:latest` that was updated
+- You want to re-validate a specific step
+- A resource was updated in-place
+
+Since breaking trust at one step breaks the entire downstream chain, typically there's at most one untrusted step per run.
+
+### Lazy output verification
+
+Reuse hits are database lookups (instant). If a cached output turns out to be missing (deleted workspace, cleaned storage), the downstream task will fail — at that point the stale entry is automatically invalidated and the prerequisite task re-runs.
+
+### Reuse vs skip_if_exists
+
+Both can be active simultaneously. The reuse check runs first (DB lookup, no I/O). If it misses, `skip_if_exists` can still skip based on output path presence. They are complementary:
+
+| Feature | `skip_if_exists` | Opportunistic reuse |
+|---|---|---|
+| Scope | Single task, output path check | Cross-workflow, content-addressed |
+| Check | File existence at output/publish path | Database key lookup |
+| Speed | Requires I/O (listing remote files) | Instant (DB primary key) |
+| Granularity | Per step | Workflow-level opt-in |

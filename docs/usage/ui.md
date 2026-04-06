@@ -119,6 +119,17 @@ Restarting task will hide the previous failed task (the task can still be seen w
 
 The workflow page gives monitoring possibilities at the upper scale compared to the task page.
 
+Each workflow displays a colored status dot between its ID and name:
+
+| Color | Meaning |
+|---|---|
+| 🟢 Green | Completed — all tasks succeeded |
+| 🔵 Blue | Active — tasks are currently running |
+| 🔴 Red | Stuck or failed — failures present, no tasks running |
+| ⚪ Gray | Idle — no failures, no running tasks (e.g. pending with no worker) |
+
+A red dot with a tooltip like "Stuck: N failed" indicates a deadlocked workflow where waiting tasks depend on failed tasks. A gray dot signals that the workflow is idle — tasks may be pending but no worker is available to run them.
+
 ![horizontal chevron icon](imgs/horizontal-chevron-icon.png) When clicking on the chevron icon, the workflow will open, showing the different steps included with their stats:
 
 ![workflow detail](imgs/workflow-detail.png)
