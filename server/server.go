@@ -1357,6 +1357,23 @@ func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTask
 	return &pb.Ack{}, nil
 }
 
+func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequest) (*pb.Ack, error) {
+	if req.Signal != "K" {
+		return nil, fmt.Errorf("unsupported signal %q (only K for kill)", req.Signal)
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE task SET signal = $1 WHERE task_id = $2 AND status IN ('R','D','O','C')`,
+		req.Signal, req.TaskId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to signal task %d: %w", req.TaskId, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return nil, fmt.Errorf("task %d not found or not in a running state", req.TaskId)
+	}
+	log.Printf("🔪 Kill signal queued for task %d", req.TaskId)
+	return &pb.Ack{}, nil
+}
+
 func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndRetryTaskRequest) (*pb.TaskResponse, error) {
 	// Update the command on the original task, then retry
 	result, err := s.db.ExecContext(ctx,
@@ -2985,11 +3002,30 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		log.Printf("⚠️ Worker %d did not send stats", req.WorkerId)
 	}
 
+	// Collect pending kill signals for this worker and clear them atomically
+	var killTaskIDs []int32
+	killRows, err := s.db.Query(`
+		UPDATE task SET signal = NULL
+		WHERE worker_id = $1 AND signal IS NOT NULL AND status IN ('R','D','O','C')
+		RETURNING task_id
+	`, req.WorkerId)
+	if err == nil {
+		defer killRows.Close()
+		for killRows.Next() {
+			var tid int32
+			if killRows.Scan(&tid) == nil {
+				killTaskIDs = append(killTaskIDs, tid)
+				log.Printf("🔪 Sending kill signal for task %d to worker %d", tid, req.WorkerId)
+			}
+		}
+	}
+
 	return &pb.TaskListAndOther{
 		Tasks:       tasks,
 		ActiveTasks: activeTaskIDs,
 		Concurrency: concurrency,
 		Updates:     &pb.TaskUpdateList{Updates: taskUpdateList},
+		KillTasks:   killTaskIDs,
 	}, nil
 }
 

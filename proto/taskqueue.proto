@@ -87,6 +87,7 @@ service TaskQueue {
     rpc DeleteWorkerEvent(WorkerEventId) returns (Ack);
     rpc PruneWorkerEvents(WorkerEventPruneFilter) returns (WorkerEventPruneResult);
     rpc GetTaskStatusCounts(TaskStatusCountsRequest) returns (TaskStatusCountsResponse);
+    rpc SignalTask(TaskSignalRequest) returns (Ack);
 }   
 
 message TaskResponse {
@@ -229,6 +230,12 @@ message TaskListAndOther {
     int32 concurrency = 2;
     TaskUpdateList updates = 3;
     repeated int32 active_tasks = 4;
+    repeated int32 kill_tasks = 5;  // tasks to docker kill on this worker
+}
+
+message TaskSignalRequest {
+    int32 task_id = 1;
+    string signal = 2; // "K" for kill
 }
 
 message TaskStatusUpdate {

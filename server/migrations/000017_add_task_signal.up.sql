@@ -1,0 +1,1 @@
+ALTER TABLE task ADD COLUMN signal CHAR(1) NULL;

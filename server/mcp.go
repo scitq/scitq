@@ -402,6 +402,15 @@ func (h *mcpHandler) listTools() []mcpTool {
 			},
 		},
 		{
+			Name:        "kill_task",
+			Description: "Send a kill signal to a running task. The task's container will be killed on the next worker ping.",
+			InputSchema: inputSchema{
+				Type:       "object",
+				Properties: map[string]schemaProperty{"task_id": {Type: "integer", Description: "Task ID"}},
+				Required:   []string{"task_id"},
+			},
+		},
+		{
 			Name:        "task_status_counts",
 			Description: "Get task count per status for a workflow or globally.",
 			InputSchema: inputSchema{
@@ -696,6 +705,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolRetryTask(authCtx, call.Arguments)
 	case "force_run_task":
 		return h.toolForceRunTask(authCtx, call.Arguments)
+	case "kill_task":
+		return h.toolKillTask(authCtx, call.Arguments)
 	case "task_status_counts":
 		return h.toolTaskStatusCounts(authCtx, call.Arguments)
 	case "list_workers":
@@ -1097,6 +1108,16 @@ func (h *mcpHandler) toolForceRunTask(ctx context.Context, args json.RawMessage)
 		return errorResult(err), nil
 	}
 	return textResult(fmt.Sprintf("Task %d forced from W to P", p.TaskID)), nil
+}
+
+func (h *mcpHandler) toolKillTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ TaskID int32 `json:"task_id"` }
+	json.Unmarshal(args, &p)
+	_, err := h.server.SignalTask(ctx, &pb.TaskSignalRequest{TaskId: p.TaskID, Signal: "K"})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Kill signal queued for task %d", p.TaskID)), nil
 }
 
 func (h *mcpHandler) toolTaskStatusCounts(ctx context.Context, args json.RawMessage) (any, *rpcError) {

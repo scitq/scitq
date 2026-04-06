@@ -97,6 +97,7 @@ const (
 	TaskQueue_DeleteWorkerEvent_FullMethodName         = "/taskqueue.TaskQueue/DeleteWorkerEvent"
 	TaskQueue_PruneWorkerEvents_FullMethodName         = "/taskqueue.TaskQueue/PruneWorkerEvents"
 	TaskQueue_GetTaskStatusCounts_FullMethodName       = "/taskqueue.TaskQueue/GetTaskStatusCounts"
+	TaskQueue_SignalTask_FullMethodName                = "/taskqueue.TaskQueue/SignalTask"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -183,6 +184,7 @@ type TaskQueueClient interface {
 	DeleteWorkerEvent(ctx context.Context, in *WorkerEventId, opts ...grpc.CallOption) (*Ack, error)
 	PruneWorkerEvents(ctx context.Context, in *WorkerEventPruneFilter, opts ...grpc.CallOption) (*WorkerEventPruneResult, error)
 	GetTaskStatusCounts(ctx context.Context, in *TaskStatusCountsRequest, opts ...grpc.CallOption) (*TaskStatusCountsResponse, error)
+	SignalTask(ctx context.Context, in *TaskSignalRequest, opts ...grpc.CallOption) (*Ack, error)
 }
 
 type taskQueueClient struct {
@@ -984,6 +986,16 @@ func (c *taskQueueClient) GetTaskStatusCounts(ctx context.Context, in *TaskStatu
 	return out, nil
 }
 
+func (c *taskQueueClient) SignalTask(ctx context.Context, in *TaskSignalRequest, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_SignalTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -1068,6 +1080,7 @@ type TaskQueueServer interface {
 	DeleteWorkerEvent(context.Context, *WorkerEventId) (*Ack, error)
 	PruneWorkerEvents(context.Context, *WorkerEventPruneFilter) (*WorkerEventPruneResult, error)
 	GetTaskStatusCounts(context.Context, *TaskStatusCountsRequest) (*TaskStatusCountsResponse, error)
+	SignalTask(context.Context, *TaskSignalRequest) (*Ack, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -1308,6 +1321,9 @@ func (UnimplementedTaskQueueServer) PruneWorkerEvents(context.Context, *WorkerEv
 }
 func (UnimplementedTaskQueueServer) GetTaskStatusCounts(context.Context, *TaskStatusCountsRequest) (*TaskStatusCountsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTaskStatusCounts not implemented")
+}
+func (UnimplementedTaskQueueServer) SignalTask(context.Context, *TaskSignalRequest) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SignalTask not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -2691,6 +2707,24 @@ func _TaskQueue_GetTaskStatusCounts_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_SignalTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskSignalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).SignalTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_SignalTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).SignalTask(ctx, req.(*TaskSignalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2993,6 +3027,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTaskStatusCounts",
 			Handler:    _TaskQueue_GetTaskStatusCounts_Handler,
+		},
+		{
+			MethodName: "SignalTask",
+			Handler:    _TaskQueue_SignalTask_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

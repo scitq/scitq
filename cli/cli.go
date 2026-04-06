@@ -84,6 +84,10 @@ type Attr struct {
 			ID      int32  `arg:"--id,required" help:"Task ID to edit and retry"`
 			Command string `arg:"--command,required" help:"New command for the task"`
 		} `arg:"subcommand:edit" help:"Edit a task's command and retry it"`
+
+		Kill *struct {
+			ID int32 `arg:"--id,required" help:"Task ID to kill"`
+		} `arg:"subcommand:kill" help:"Send kill signal to a running task"`
 	} `arg:"subcommand:task" help:"Manage tasks"`
 
 	// Worker Commands (Sub-Subcommands)
@@ -587,6 +591,26 @@ func (c *CLI) TaskEdit() error {
 		return nil
 	}
 	fmt.Printf("✏️ Task %d edited and retried → new task ID %d\n", c.Attr.Task.Edit.ID, res.TaskId)
+	return nil
+}
+
+// TaskKill sends a kill signal to a running task.
+func (c *CLI) TaskKill() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.SignalTask(ctx, &pb.TaskSignalRequest{
+		TaskId: c.Attr.Task.Kill.ID,
+		Signal: "K",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to kill task: %w", err)
+	}
+
+	if c.jsonOut(map[string]any{"task_id": c.Attr.Task.Kill.ID, "signal": "K"}) {
+		return nil
+	}
+	fmt.Printf("🔪 Kill signal sent for task %d\n", c.Attr.Task.Kill.ID)
 	return nil
 }
 
@@ -2183,6 +2207,8 @@ func Run(c CLI) error {
 			err = c.TaskRetry()
 		case c.Attr.Task.Edit != nil:
 			err = c.TaskEdit()
+		case c.Attr.Task.Kill != nil:
+			err = c.TaskKill()
 		}
 	// Worker commands
 	case c.Attr.Worker != nil:

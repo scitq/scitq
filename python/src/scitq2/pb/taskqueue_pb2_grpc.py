@@ -420,6 +420,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.TaskStatusCountsRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.TaskStatusCountsResponse.FromString,
                 _registered_method=True)
+        self.SignalTask = channel.unary_unary(
+                '/taskqueue.TaskQueue/SignalTask',
+                request_serializer=taskqueue__pb2.TaskSignalRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
 
 
 class TaskQueueServicer(object):
@@ -894,6 +899,12 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SignalTask(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TaskQueueServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1281,6 +1292,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.GetTaskStatusCounts,
                     request_deserializer=taskqueue__pb2.TaskStatusCountsRequest.FromString,
                     response_serializer=taskqueue__pb2.TaskStatusCountsResponse.SerializeToString,
+            ),
+            'SignalTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.SignalTask,
+                    request_deserializer=taskqueue__pb2.TaskSignalRequest.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -3362,6 +3378,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/GetTaskStatusCounts',
             taskqueue__pb2.TaskStatusCountsRequest.SerializeToString,
             taskqueue__pb2.TaskStatusCountsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SignalTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/SignalTask',
+            taskqueue__pb2.TaskSignalRequest.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
             options,
             channel_credentials,
             insecure,

@@ -210,7 +210,8 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	// Add scripts folder for long commands
-	command := []string{"run", "--rm", "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
+	containerName := fmt.Sprintf("scitq-task-%d", task.TaskId)
+	command := []string{"run", "--rm", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
 	option := ""
 	for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
 		if folder == "resource" || folder == "scripts" {
@@ -467,6 +468,18 @@ func (w *WorkerConfig) fetchTasks(
 		}
 		return true
 	})
+
+	// Execute kill signals
+	for _, tid := range res.KillTasks {
+		tid := tid
+		go func() {
+			containerName := fmt.Sprintf("scitq-task-%d", tid)
+			log.Printf("🔪 Killing container %s (task %d)", containerName, tid)
+			if out, err := exec.Command("docker", "kill", containerName).CombinedOutput(); err != nil {
+				log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
+			}
+		}()
+	}
 
 	return res.Tasks, nil
 }

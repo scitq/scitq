@@ -253,16 +253,26 @@ class TaskUpdateList(_message.Message):
     def __init__(self, updates: _Optional[_Mapping[int, TaskUpdate]] = ...) -> None: ...
 
 class TaskListAndOther(_message.Message):
-    __slots__ = ("tasks", "concurrency", "updates", "active_tasks")
+    __slots__ = ("tasks", "concurrency", "updates", "active_tasks", "kill_tasks")
     TASKS_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     UPDATES_FIELD_NUMBER: _ClassVar[int]
     ACTIVE_TASKS_FIELD_NUMBER: _ClassVar[int]
+    KILL_TASKS_FIELD_NUMBER: _ClassVar[int]
     tasks: _containers.RepeatedCompositeFieldContainer[Task]
     concurrency: int
     updates: TaskUpdateList
     active_tasks: _containers.RepeatedScalarFieldContainer[int]
-    def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., concurrency: _Optional[int] = ..., updates: _Optional[_Union[TaskUpdateList, _Mapping]] = ..., active_tasks: _Optional[_Iterable[int]] = ...) -> None: ...
+    kill_tasks: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., concurrency: _Optional[int] = ..., updates: _Optional[_Union[TaskUpdateList, _Mapping]] = ..., active_tasks: _Optional[_Iterable[int]] = ..., kill_tasks: _Optional[_Iterable[int]] = ...) -> None: ...
+
+class TaskSignalRequest(_message.Message):
+    __slots__ = ("task_id", "signal")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    SIGNAL_FIELD_NUMBER: _ClassVar[int]
+    task_id: int
+    signal: str
+    def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ...) -> None: ...
 
 class TaskStatusUpdate(_message.Message):
     __slots__ = ("task_id", "new_status", "duration", "free_retry")
