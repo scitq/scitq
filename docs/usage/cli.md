@@ -549,6 +549,8 @@ The round setting is a key tactical number for a recruitment rule. If a step has
 
 If your task requires a significant amount of preparation (lots of download, long loading time), then increasing the rounds paramater is likely to be more efficient in terms of costs (at the price of a little more delay).
 
+Note: deployment is also governed by the **quotas** defined in `scitq.yaml` for each provider and region (CPU, memory, and instance count limits). If the quota is reached, recruiters will wait until workers are deleted before deploying new ones. See the [configuration reference](../reference/configuration.md#quota-per-region-resource-limits) for details.
+
 Examples:
 
 ```sh

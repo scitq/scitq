@@ -64,7 +64,7 @@
 |  | Offer | `azure.<account>.image.offer` | `UbuntuServer` | `string` |  |
 |  | Sku | `azure.<account>.image.sku` | `24.04-LTS` | `string` |  |
 |  | Version | `azure.<account>.image.version` | `latest` | `string` |  |
-|  | Quotas | `azure.<account>.quotas` | `` | `map[string]Quota` | key: region |
+|  | Quotas | `azure.<account>.quotas` | `` | `map[string]Quota` | key: region (see Quota below) |
 |  | Regions | `azure.<account>.regions` | `` | `[]string` |  |
 |  | UpdatePeriodicity | `azure.<account>.update_periodicity` | `` | `string` | Update periodicity in minutes |
 |  | LocalWorkspaceRoots | `azure.<account>.local_workspaces` | `` | `map[string]string` |  |
@@ -102,7 +102,7 @@
 |  | FlavorID | `openstack.<account>.flavor_id` | `` | `string` |  |
 |  | NetworkID | `openstack.<account>.network_id` | `` | `string` |  |
 |  | ExtNetworkID | `openstack.<account>.ext_network_id` | `` | `string` |  |
-|  | Quotas | `openstack.<account>.quotas` | `` | `map[string]Quota` | key: region |
+|  | Quotas | `openstack.<account>.quotas` | `` | `map[string]Quota` | key: region (see Quota below) |
 |  | Regions | `openstack.<account>.regions` | `` | `[]string` |  |
 |  | Custom | `openstack.<account>.custom` | `` | `map[string]*ast.InterfaceType` | Vendor-specific custom settings |
 |  | UpdatePeriodicity | `openstack.<account>.update_periodicity` | `` | `string` | Update periodicity in minutes |
@@ -117,3 +117,27 @@
 |  | DefaultRegion | `local.local.default_region` | `` | `string` |  |
 |  | Regions | `local.local.regions` | `` | `[]string` |  |
 |  | LocalWorkspaceRoots | `local.local.local_workspaces` | `` | `map[string]string` |  |
+
+### Quota (per-region resource limits)
+
+Quotas are defined per region within a provider. They control how many resources scitq is allowed to consume before it stops deploying new workers.
+
+| Field | YAML key | Default | Type | Description |
+|-------|----------|---------|------|-------------|
+| MaxCPU | `cpu` | `0` | `int32` | Maximum vCPUs allowed in this region. Required. |
+| MaxMemGB | `mem` | `0` | `float32` | Maximum memory in GB (optional, 0 = unlimited). |
+| MaxInstances | `instances` | `0` | `int32` | Maximum number of VM instances (optional, 0 = unlimited). Prevents `PublicIPCountLimitReached` and similar per-instance Azure limits. |
+
+Example:
+
+```yaml
+providers:
+  azure:
+    primary:
+      quotas:
+        swedencentral:
+          cpu: 340
+          instances: 20
+```
+
+The `instances` limit is also **learned from failures**: if scitq encounters an instance-count error (like Azure `PublicIPCountLimitReached`) during deployment, it automatically sets `MaxInstances` to the current instance count for that region. Further deploys are blocked until existing workers are deleted, freeing instance slots. This means even without configuring `instances` explicitly, scitq will stop hammering the Azure API after the first failure.
