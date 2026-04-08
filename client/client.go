@@ -210,7 +210,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	// Add scripts folder for long commands
-	containerName := fmt.Sprintf("scitq-task-%d", task.TaskId)
+	containerName := fmt.Sprintf("scitq-%d-task-%d", os.Getpid(), task.TaskId)
 	command := []string{"run", "--rm", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
 	option := ""
 	for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
@@ -473,7 +473,7 @@ func (w *WorkerConfig) fetchTasks(
 	for _, sig := range res.Signals {
 		sig := sig
 		go func() {
-			containerName := fmt.Sprintf("scitq-task-%d", sig.TaskId)
+			containerName := fmt.Sprintf("scitq-%d-task-%d", os.Getpid(), sig.TaskId)
 			if sig.Signal == "T" {
 				args := []string{"stop"}
 				if sig.GracePeriod != nil && *sig.GracePeriod > 0 {

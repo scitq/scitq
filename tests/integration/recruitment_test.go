@@ -18,7 +18,8 @@ import (
 // to verify that the provider is registered and synced into DB properly.
 // It’s the first step before testing adaptive concurrency & recycling logic.
 func TestRecruitmentCycle(t *testing.T) {
-	t.Parallel()
+	// Not parallel: this test spawns many fake workers + Docker containers
+	// and needs full CI resources to complete within the timeout.
 	ctx := context.Background()
 
 	// --- 1️⃣ Prepare config override with a fake provider ---
