@@ -159,8 +159,9 @@ type Config struct {
 
 // Quota defines resource limits such as CPU and memory for cloud provider instances.
 type Quota struct {
-	MaxCPU   int32   `yaml:"cpu"`
-	MaxMemGB float32 `yaml:"mem,omitempty"` // optional
+	MaxCPU       int32   `yaml:"cpu"`
+	MaxMemGB     float32 `yaml:"mem,omitempty"`       // optional
+	MaxInstances int32   `yaml:"instances,omitempty"` // optional, 0 = unlimited (can also be learned from failures)
 }
 
 // DockerCredential represents a registry→secret pair used by clients to auth to a container registry

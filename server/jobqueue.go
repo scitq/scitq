@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/server/providers"
 	ws "github.com/scitq/scitq/server/websocket"
 	"google.golang.org/protobuf/proto"
 )
@@ -19,6 +21,7 @@ type Job struct {
 	WorkerID      int32
 	WorkerName    string
 	ProviderID    int32
+	ProviderName  string
 	Region        string
 	Flavor        string
 	Action        rune // "C", "D", "R"
@@ -89,7 +92,14 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 	case err := <-done:
 		if err != nil {
 			log.Printf("⚠️ Failed to process job %d: %v", job.JobID, err)
-			if job.Retry > 0 {
+			// Instance limit errors are non-transient: learn the limit and don't retry
+			if errors.Is(err, providers.ErrInstanceLimitReached) {
+				log.Printf("🚫 Job %d: instance limit reached for %s/%s — not retrying", job.JobID, job.Region, job.ProviderName)
+				s.qm.RegisterInstanceLimit(job.Region, job.ProviderName)
+				if err := s.updateJobStatus(job.JobID, "F"); err != nil {
+					log.Printf("⚠️ Failed to update job status to failed: %v", err)
+				}
+			} else if job.Retry > 0 {
 				job.Retry--
 				s.addJob(job) // Retry job
 			} else {

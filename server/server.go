@@ -1991,15 +1991,16 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		s.qm.RegisterLaunch(regionName, provider, cpu, memory)
 
 		job := Job{
-			JobID:      jobID,
-			WorkerID:   workerID,
-			WorkerName: workerName,
-			ProviderID: providerID,
-			Region:     regionName,
-			Flavor:     flavorName,
-			Action:     'C',
-			Retry:      defaultJobRetry,
-			Timeout:    defaultJobTimeout,
+			JobID:        jobID,
+			WorkerID:     workerID,
+			WorkerName:   workerName,
+			ProviderID:   providerID,
+			ProviderName: provider,
+			Region:       regionName,
+			Flavor:       flavorName,
+			Action:       'C',
+			Retry:        defaultJobRetry,
+			Timeout:      defaultJobTimeout,
 		}
 		jobs = append(jobs, job)
 

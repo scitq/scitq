@@ -18,6 +18,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/scitq/scitq/server/config"
+	"github.com/scitq/scitq/server/providers"
 )
 
 // AzureProvider holds global configuration for Azure.
@@ -78,12 +79,34 @@ func (ap *AzureProvider) resourceGroupName(workerName string) string {
 	return workerName + ap.resourceGroupSuffix()
 }
 
+// isInstanceLimitError checks if an Azure error indicates an instance-count limit.
+func isInstanceLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) {
+		switch respErr.ErrorCode {
+		case "PublicIPCountLimitReached", "OperationNotAllowed":
+			return true
+		}
+	}
+	// Fallback: check error string for known codes
+	s := err.Error()
+	return strings.Contains(s, "PublicIPCountLimitReached")
+}
+
 // retry executes fn up to 'attempts' times with exponential backoff.
+// If the error is a non-transient instance limit, it stops immediately.
 func retry(fn func() error, attempts int, delay time.Duration) error {
 	var err error
 	for i := 0; i < attempts; i++ {
 		if err = fn(); err == nil {
 			return nil
+		}
+		if isInstanceLimitError(err) {
+			log.Printf("Error during processing: %v (instance limit — not retrying)", err)
+			return fmt.Errorf("%w: %v", providers.ErrInstanceLimitReached, err)
 		}
 		log.Printf("Error during processing: %v, retrying", err)
 		time.Sleep(delay * time.Duration(i+1))

@@ -8,10 +8,11 @@ import (
 )
 
 type RegionalQuota struct {
-	Region   string
-	Provider string
-	MaxCPU   int32
-	MaxMemGB float32
+	Region       string
+	Provider     string
+	MaxCPU       int32
+	MaxMemGB     float32
+	MaxInstances int32 // 0 = unlimited (learned from failures)
 }
 
 type RegionalUsage struct {
@@ -19,6 +20,7 @@ type RegionalUsage struct {
 	Provider  string
 	UsedCPU   int32
 	UsedMemGB float32
+	Instances int32
 }
 
 type QuotaManager struct {
@@ -41,20 +43,20 @@ func (qm *QuotaManager) CanLaunch(region, provider string, cpu int32, memGB floa
 	usage := val.(RegionalUsage)
 
 	if usage.UsedCPU+cpu > quota.MaxCPU {
-		log.Printf("[DEBUG] QuotaManager: cannot launch in %s/%s, usage CPU %d/%d, Mem %.1f/%.1f GB",
-			region, provider,
-			usage.UsedCPU, quota.MaxCPU,
-			usage.UsedMemGB, quota.MaxMemGB,
-		)
+		log.Printf("[DEBUG] QuotaManager: cannot launch in %s/%s, CPU %d/%d",
+			region, provider, usage.UsedCPU, quota.MaxCPU)
 		return false
 	}
 
 	if quota.MaxMemGB > 0 && usage.UsedMemGB+float32(memGB) > quota.MaxMemGB {
-		log.Printf("[DEBUG] QuotaManager: cannot launch in %s/%s, usage CPU %d/%d, Mem %.1f/%.1f GB",
-			region, provider,
-			usage.UsedCPU, quota.MaxCPU,
-			usage.UsedMemGB, quota.MaxMemGB,
-		)
+		log.Printf("[DEBUG] QuotaManager: cannot launch in %s/%s, Mem %.1f/%.1f GB",
+			region, provider, usage.UsedMemGB, quota.MaxMemGB)
+		return false
+	}
+
+	if quota.MaxInstances > 0 && usage.Instances >= quota.MaxInstances {
+		log.Printf("[DEBUG] QuotaManager: cannot launch in %s/%s, instances %d/%d",
+			region, provider, usage.Instances, quota.MaxInstances)
 		return false
 	}
 
@@ -68,11 +70,13 @@ func (qm *QuotaManager) RegisterLaunch(region, provider string, cpu int32, memGB
 
 	usage.UsedCPU += cpu
 	usage.UsedMemGB += memGB
+	usage.Instances++
 
-	log.Printf("[DEBUG] QuotaManager: after launch in %s/%s, usage is now CPU %d/%d, Mem %.1f/%.1f GB",
+	log.Printf("[DEBUG] QuotaManager: after launch in %s/%s, usage is now CPU %d/%d, Mem %.1f/%.1f GB, Instances %d",
 		region, provider,
 		usage.UsedCPU, qm.Quotas[key].MaxCPU,
 		usage.UsedMemGB, qm.Quotas[key].MaxMemGB,
+		usage.Instances,
 	)
 	qm.Usage.Store(key, usage)
 }
@@ -84,14 +88,35 @@ func (qm *QuotaManager) RegisterDelete(region, provider string, cpu int32, memGB
 
 	usage.UsedCPU -= cpu
 	usage.UsedMemGB -= memGB
+	usage.Instances--
 	if usage.UsedCPU < 0 {
 		usage.UsedCPU = 0
 	}
 	if usage.UsedMemGB < 0 {
 		usage.UsedMemGB = 0
 	}
+	if usage.Instances < 0 {
+		usage.Instances = 0
+	}
 
 	qm.Usage.Store(key, usage)
+}
+
+// RegisterInstanceLimit is called when a deployment fails with an instance-count
+// error (e.g. PublicIPCountLimitReached). It learns the limit from the current
+// usage so future deploys are blocked before hitting the Azure API.
+func (qm *QuotaManager) RegisterInstanceLimit(region, provider string) {
+	key := quotaKey(region, provider)
+	val, ok := qm.Usage.Load(key)
+	if !ok {
+		return
+	}
+	usage := val.(RegionalUsage)
+
+	quota := qm.Quotas[key]
+	quota.MaxInstances = usage.Instances
+	qm.Quotas[key] = quota
+	log.Printf("⚠️ QuotaManager: learned instance limit for %s/%s: %d (from deployment failure)", region, provider, usage.Instances)
 }
 
 // NewQuotaManager builds a QuotaManager from the loaded configuration.
@@ -104,12 +129,13 @@ func NewQuotaManager(cfg *config.Config) *QuotaManager {
 		log.Printf("QuotaManager: loading quotas for provider %s", name)
 		for region, quota := range p.GetQuotas() {
 			key := quotaKey(region, name)
-			log.Printf("  region %s: CPU %d, Mem %.1f GB", region, quota.MaxCPU, quota.MaxMemGB)
+			log.Printf("  region %s: CPU %d, Mem %.1f GB, Instances %d", region, quota.MaxCPU, quota.MaxMemGB, quota.MaxInstances)
 			qm.Quotas[key] = RegionalQuota{
-				Region:   region,
-				Provider: name,
-				MaxCPU:   quota.MaxCPU,
-				MaxMemGB: quota.MaxMemGB,
+				Region:       region,
+				Provider:     name,
+				MaxCPU:       quota.MaxCPU,
+				MaxMemGB:     quota.MaxMemGB,
+				MaxInstances: quota.MaxInstances,
 			}
 		}
 	}
