@@ -1,0 +1,1 @@
+ALTER TABLE task ADD COLUMN signal_grace INT NULL;

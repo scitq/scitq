@@ -695,6 +695,28 @@ steps:
 
 The Python DSL is more powerful for complex logic, but YAML templates are simpler to write, review, and maintain for standard pipelines. Both produce identical workflows — you can start with YAML and switch to Python if you outgrow it.
 
+## Quality scoring
+
+Steps can define **quality variables** — named metrics extracted from task stdout/stderr via regex patterns. These are combined into a **quality score** that enables optimization loops and monitoring.
+
+```yaml
+steps:
+  - name: train
+    container: my_trainer
+    command: "train --lr 0.01 /input/data"
+    quality:
+      variables:
+        accuracy: "accuracy: ([0-9.]+)"
+        loss: "final loss: ([0-9.]+)"
+      score: "accuracy"
+```
+
+Quality extraction runs when a task succeeds. Each regex is matched against the full stdout+stderr, and the **last match** is taken (supporting iterative programs that output metrics per epoch). The score formula is a simple arithmetic expression over variable names (`+`, `-`, `*`, `/`, parentheses).
+
+The quality score and individual variables are stored on the task and returned by the API (`quality_score`, `quality_vars` in task list output and MCP).
+
+For optimization workflows, quality scoring is used with the [Python DSL live mode](dsl.md#live-mode-and-optimization) to implement Optuna-style hyperparameter search with parallel trials and pruning.
+
 ## Opportunistic reuse
 
 Many workflows are re-run on overlapping data batches. **Opportunistic reuse** lets scitq skip tasks that have already been executed with identical computation and inputs, reusing their output across workflows.

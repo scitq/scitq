@@ -233,6 +233,7 @@ message TaskUpdateList {
 message TaskSignal {
     int32 task_id = 1;
     string signal = 2;  // "K" = SIGKILL (docker kill), "T" = SIGTERM (docker stop)
+    optional int32 grace_period = 3; // seconds before SIGKILL after SIGTERM (default: 10)
 }
 
 message TaskListAndOther {
@@ -245,7 +246,8 @@ message TaskListAndOther {
 
 message TaskSignalRequest {
     int32 task_id = 1;
-    string signal = 2; // "K" for kill
+    string signal = 2; // "K" for kill, "T" for terminate (SIGTERM)
+    optional int32 grace_period = 3; // seconds before SIGKILL after SIGTERM (default: 10)
 }
 
 message TaskStatusUpdate {
@@ -588,12 +590,14 @@ message Workflow {
     int32 failed_tasks = 8;     // Terminal failures only
     int32 running_tasks = 9;    // Accepted + Running + Uploading
     int32 retrying_tasks = 10;  // Tasks currently being retried (failed once, clone in progress)
+    bool live = 11;             // Live mode: prevents auto-completion of workflow
 }
 message WorkflowRequest {
     string name = 1;
     optional string run_strategy = 2;
     optional int32 maximum_workers = 3;
     optional string status = 4;
+    optional bool live = 5;     // Live mode: prevents auto-completion
 }
 
 message WorkflowList {

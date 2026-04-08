@@ -90,13 +90,15 @@ class Scitq2Client:
         )
         self.stub = taskqueue_pb2_grpc.TaskQueueStub(self.channel)
 
-    def create_workflow(self, name: str, maximum_workers: Optional[int] = None, status: Optional[str] = None) -> int:
+    def create_workflow(self, name: str, maximum_workers: Optional[int] = None, status: Optional[str] = None, live: bool = False) -> int:
         """
         Creates a new workflow on the server.
 
         Parameters:
         - name (str): Name of the workflow
-        - description (str): Optional description
+        - maximum_workers (int, optional): Maximum workers for the workflow
+        - status (str, optional): Initial status
+        - live (bool): Live mode — prevents auto-completion
 
         Returns:
         - int: The workflow ID
@@ -106,6 +108,8 @@ class Scitq2Client:
             request.maximum_workers = maximum_workers
         if status is not None:
             request.status = status
+        if live:
+            request.live = True
         response = self.stub.CreateWorkflow(request)
         return response.workflow_id
 
@@ -193,9 +197,13 @@ class Scitq2Client:
         response = self.stub.CreateStep(request)
         return response.step_id
 
-    def signal_task(self, task_id: int, signal: str = "K"):
-        """Send a signal to a running task. K=SIGKILL, T=SIGTERM."""
-        self.stub.SignalTask(taskqueue_pb2.TaskSignalRequest(task_id=task_id, signal=signal))
+    def signal_task(self, task_id: int, signal: str = "K", grace_period: Optional[int] = None):
+        """Send a signal to a running task. K=SIGKILL, T=SIGTERM.
+        grace_period: seconds before SIGKILL after SIGTERM (default: 10)."""
+        req = taskqueue_pb2.TaskSignalRequest(task_id=task_id, signal=signal)
+        if grace_period is not None:
+            req.grace_period = grace_period
+        self.stub.SignalTask(req)
 
     def submit_task(
         self,

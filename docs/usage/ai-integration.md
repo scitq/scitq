@@ -108,8 +108,9 @@ scitq step edit --id 456 --find "bowtie2 -k \d+" --replace "bowtie2 -k 200" --re
 - **Check task status** by filtering: `task list --workflow <id> --status F --json` to find failures.
 - **Read stderr for errors**: `task stderr --id <id>` gives the task's error output, which usually contains the root cause.
 - **Fix and retry**: use `task edit` to fix a single task, or `step edit` to fix all failed tasks in a step with find/replace.
-- **Kill stuck tasks**: use `task kill --id <id>` to terminate a running task's container. The task will fail and retry if retries remain.
+- **Kill stuck tasks**: use `task kill --id <id>` (SIGKILL) or `task stop --id <id>` (SIGTERM, graceful) to terminate a running task's container.
 - **Task durations**: `task list --json` includes `download_duration`, `run_duration`, and `upload_duration` (in seconds) for completed tasks, and `run_start_time` (epoch) for running tasks.
+- **Quality scores**: steps can define quality extraction via regex. `task list --json` includes `quality_score` and `quality_vars` for tasks whose step has a quality definition.
 
 For the full CLI reference, see the [CLI documentation](cli.md). For details on the `--server`, `--token`, and `--json` flags, see [Global flags](cli.md#global-flags).
 
@@ -152,7 +153,8 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 | `task_status_counts` | Get task counts per status |
 | `retry_task` | Retry a failed task |
 | `force_run_task` | Force a waiting task to pending (bypass dependencies) |
-| `kill_task` | Send a kill signal to a running task |
+| `kill_task` | Send a kill signal (SIGKILL) to a running task |
+| `stop_task` | Send a graceful stop (SIGTERM) to a running task |
 | `edit_and_retry_task` | Edit a task's command and retry it |
 | `edit_step_command` | Find/replace in all failed tasks of a step and retry them |
 | **Workers** | |

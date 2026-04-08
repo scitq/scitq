@@ -263,12 +263,14 @@ class TaskUpdateList(_message.Message):
     def __init__(self, updates: _Optional[_Mapping[int, TaskUpdate]] = ...) -> None: ...
 
 class TaskSignal(_message.Message):
-    __slots__ = ("task_id", "signal")
+    __slots__ = ("task_id", "signal", "grace_period")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     SIGNAL_FIELD_NUMBER: _ClassVar[int]
+    GRACE_PERIOD_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     signal: str
-    def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ...) -> None: ...
+    grace_period: int
+    def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ..., grace_period: _Optional[int] = ...) -> None: ...
 
 class TaskListAndOther(_message.Message):
     __slots__ = ("tasks", "concurrency", "updates", "active_tasks", "signals")
@@ -285,12 +287,14 @@ class TaskListAndOther(_message.Message):
     def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., concurrency: _Optional[int] = ..., updates: _Optional[_Union[TaskUpdateList, _Mapping]] = ..., active_tasks: _Optional[_Iterable[int]] = ..., signals: _Optional[_Iterable[_Union[TaskSignal, _Mapping]]] = ...) -> None: ...
 
 class TaskSignalRequest(_message.Message):
-    __slots__ = ("task_id", "signal")
+    __slots__ = ("task_id", "signal", "grace_period")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     SIGNAL_FIELD_NUMBER: _ClassVar[int]
+    GRACE_PERIOD_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     signal: str
-    def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ...) -> None: ...
+    grace_period: int
+    def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ..., grace_period: _Optional[int] = ...) -> None: ...
 
 class TaskStatusUpdate(_message.Message):
     __slots__ = ("task_id", "new_status", "duration", "free_retry")
@@ -853,7 +857,7 @@ class WorkflowId(_message.Message):
     def __init__(self, workflow_id: _Optional[int] = ...) -> None: ...
 
 class Workflow(_message.Message):
-    __slots__ = ("workflow_id", "name", "status", "run_strategy", "maximum_workers", "total_tasks", "succeeded_tasks", "failed_tasks", "running_tasks", "retrying_tasks")
+    __slots__ = ("workflow_id", "name", "status", "run_strategy", "maximum_workers", "total_tasks", "succeeded_tasks", "failed_tasks", "running_tasks", "retrying_tasks", "live")
     WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
@@ -864,6 +868,7 @@ class Workflow(_message.Message):
     FAILED_TASKS_FIELD_NUMBER: _ClassVar[int]
     RUNNING_TASKS_FIELD_NUMBER: _ClassVar[int]
     RETRYING_TASKS_FIELD_NUMBER: _ClassVar[int]
+    LIVE_FIELD_NUMBER: _ClassVar[int]
     workflow_id: int
     name: str
     status: str
@@ -874,19 +879,22 @@ class Workflow(_message.Message):
     failed_tasks: int
     running_tasks: int
     retrying_tasks: int
-    def __init__(self, workflow_id: _Optional[int] = ..., name: _Optional[str] = ..., status: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., total_tasks: _Optional[int] = ..., succeeded_tasks: _Optional[int] = ..., failed_tasks: _Optional[int] = ..., running_tasks: _Optional[int] = ..., retrying_tasks: _Optional[int] = ...) -> None: ...
+    live: bool
+    def __init__(self, workflow_id: _Optional[int] = ..., name: _Optional[str] = ..., status: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., total_tasks: _Optional[int] = ..., succeeded_tasks: _Optional[int] = ..., failed_tasks: _Optional[int] = ..., running_tasks: _Optional[int] = ..., retrying_tasks: _Optional[int] = ..., live: bool = ...) -> None: ...
 
 class WorkflowRequest(_message.Message):
-    __slots__ = ("name", "run_strategy", "maximum_workers", "status")
+    __slots__ = ("name", "run_strategy", "maximum_workers", "status", "live")
     NAME_FIELD_NUMBER: _ClassVar[int]
     RUN_STRATEGY_FIELD_NUMBER: _ClassVar[int]
     MAXIMUM_WORKERS_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
+    LIVE_FIELD_NUMBER: _ClassVar[int]
     name: str
     run_strategy: str
     maximum_workers: int
     status: str
-    def __init__(self, name: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., status: _Optional[str] = ...) -> None: ...
+    live: bool
+    def __init__(self, name: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., status: _Optional[str] = ..., live: bool = ...) -> None: ...
 
 class WorkflowList(_message.Message):
     __slots__ = ("workflows",)

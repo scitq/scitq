@@ -370,15 +370,16 @@ Add `T` (terminate) signal:
 | Signal | Docker command | Effect |
 |--------|---------------|--------|
 | `K` | `docker kill <container>` | SIGKILL — instant death, no cleanup |
-| `T` | `docker stop <container>` | SIGTERM → grace period (10s) → SIGKILL |
+| `T` | `docker stop --time <grace> <container>` | SIGTERM → grace period → SIGKILL |
 
 When PID 1 in the container is a shell (`bash -c "gpredomics ..."`), SIGTERM propagates to the child process group. Programs that handle SIGTERM/SIGHUP (like gpredomics) can clean up and exit gracefully.
 
-The pruning system uses `T` (graceful stop). The manual kill command uses `K` by default but can be changed:
+The pruning system uses `T` (graceful stop). The grace period (seconds before SIGKILL after SIGTERM) is configurable — important for programs like gpredomics that need time to save state:
 
 ```sh
-scitq task kill --id 123          # SIGKILL (default, backward compatible)
-scitq task stop --id 123          # SIGTERM (graceful)
+scitq task kill --id 123                # SIGKILL (default, backward compatible)
+scitq task stop --id 123                # SIGTERM, 10s grace (default)
+scitq task stop --id 123 --grace 60     # SIGTERM, 60s grace
 ```
 
 ### Client-side change
@@ -433,4 +434,4 @@ Steps 1-2 are standalone and useful immediately. Steps 3-5 deliver the core opti
 
 5. **Optuna as a library, not a service.** Optuna runs inside the DSL process, not as a separate server. Its study storage (SQLite or PostgreSQL) provides persistence. This keeps the architecture simple.
 
-6. **Pruning is graceful.** Uses SIGTERM (`docker stop`) so programs can save state and exit cleanly. The grace period (default 10s) is configurable.
+6. **Pruning is graceful.** Uses SIGTERM (`docker stop --time <grace>`) so programs can save state and exit cleanly. The grace period defaults to 10 seconds but is configurable per signal (via `--grace` on CLI, `grace_period` in MCP/gRPC). For programs like gpredomics that need more time, set a higher value (e.g. 60s).

@@ -475,8 +475,13 @@ func (w *WorkerConfig) fetchTasks(
 		go func() {
 			containerName := fmt.Sprintf("scitq-task-%d", sig.TaskId)
 			if sig.Signal == "T" {
+				args := []string{"stop"}
+				if sig.GracePeriod != nil && *sig.GracePeriod > 0 {
+					args = append(args, "--time", fmt.Sprintf("%d", *sig.GracePeriod))
+				}
+				args = append(args, containerName)
 				log.Printf("🛑 Stopping container %s (task %d, SIGTERM)", containerName, sig.TaskId)
-				if out, err := exec.Command("docker", "stop", containerName).CombinedOutput(); err != nil {
+				if out, err := exec.Command("docker", args...).CombinedOutput(); err != nil {
 					log.Printf("⚠️ docker stop %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
 				}
 			} else {

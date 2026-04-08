@@ -1317,7 +1317,8 @@ func (x *TaskUpdateList) GetUpdates() map[int32]*TaskUpdate {
 type TaskSignal struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Signal        string                 `protobuf:"bytes,2,opt,name=signal,proto3" json:"signal,omitempty"` // "K" = SIGKILL (docker kill), "T" = SIGTERM (docker stop)
+	Signal        string                 `protobuf:"bytes,2,opt,name=signal,proto3" json:"signal,omitempty"`                                     // "K" = SIGKILL (docker kill), "T" = SIGTERM (docker stop)
+	GracePeriod   *int32                 `protobuf:"varint,3,opt,name=grace_period,json=gracePeriod,proto3,oneof" json:"grace_period,omitempty"` // seconds before SIGKILL after SIGTERM (default: 10)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1364,6 +1365,13 @@ func (x *TaskSignal) GetSignal() string {
 		return x.Signal
 	}
 	return ""
+}
+
+func (x *TaskSignal) GetGracePeriod() int32 {
+	if x != nil && x.GracePeriod != nil {
+		return *x.GracePeriod
+	}
+	return 0
 }
 
 type TaskListAndOther struct {
@@ -1445,7 +1453,8 @@ func (x *TaskListAndOther) GetSignals() []*TaskSignal {
 type TaskSignalRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Signal        string                 `protobuf:"bytes,2,opt,name=signal,proto3" json:"signal,omitempty"` // "K" for kill
+	Signal        string                 `protobuf:"bytes,2,opt,name=signal,proto3" json:"signal,omitempty"`                                     // "K" for kill, "T" for terminate (SIGTERM)
+	GracePeriod   *int32                 `protobuf:"varint,3,opt,name=grace_period,json=gracePeriod,proto3,oneof" json:"grace_period,omitempty"` // seconds before SIGKILL after SIGTERM (default: 10)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1492,6 +1501,13 @@ func (x *TaskSignalRequest) GetSignal() string {
 		return x.Signal
 	}
 	return ""
+}
+
+func (x *TaskSignalRequest) GetGracePeriod() int32 {
+	if x != nil && x.GracePeriod != nil {
+		return *x.GracePeriod
+	}
+	return 0
 }
 
 type TaskStatusUpdate struct {
@@ -4732,6 +4748,7 @@ type Workflow struct {
 	FailedTasks    int32                  `protobuf:"varint,8,opt,name=failed_tasks,json=failedTasks,proto3" json:"failed_tasks,omitempty"`        // Terminal failures only
 	RunningTasks   int32                  `protobuf:"varint,9,opt,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`     // Accepted + Running + Uploading
 	RetryingTasks  int32                  `protobuf:"varint,10,opt,name=retrying_tasks,json=retryingTasks,proto3" json:"retrying_tasks,omitempty"` // Tasks currently being retried (failed once, clone in progress)
+	Live           bool                   `protobuf:"varint,11,opt,name=live,proto3" json:"live,omitempty"`                                        // Live mode: prevents auto-completion of workflow
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4836,12 +4853,20 @@ func (x *Workflow) GetRetryingTasks() int32 {
 	return 0
 }
 
+func (x *Workflow) GetLive() bool {
+	if x != nil {
+		return x.Live
+	}
+	return false
+}
+
 type WorkflowRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	RunStrategy    *string                `protobuf:"bytes,2,opt,name=run_strategy,json=runStrategy,proto3,oneof" json:"run_strategy,omitempty"`
 	MaximumWorkers *int32                 `protobuf:"varint,3,opt,name=maximum_workers,json=maximumWorkers,proto3,oneof" json:"maximum_workers,omitempty"`
 	Status         *string                `protobuf:"bytes,4,opt,name=status,proto3,oneof" json:"status,omitempty"`
+	Live           *bool                  `protobuf:"varint,5,opt,name=live,proto3,oneof" json:"live,omitempty"` // Live mode: prevents auto-completion
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4902,6 +4927,13 @@ func (x *WorkflowRequest) GetStatus() string {
 		return *x.Status
 	}
 	return ""
+}
+
+func (x *WorkflowRequest) GetLive() bool {
+	if x != nil && x.Live != nil {
+		return *x.Live
+	}
+	return false
 }
 
 type WorkflowList struct {
@@ -8698,20 +8730,24 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aupdates\x18\x01 \x03(\v2&.taskqueue.TaskUpdateList.UpdatesEntryR\aupdates\x1aQ\n" +
 	"\fUpdatesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x12+\n" +
-	"\x05value\x18\x02 \x01(\v2\x15.taskqueue.TaskUpdateR\x05value:\x028\x01\"=\n" +
+	"\x05value\x18\x02 \x01(\v2\x15.taskqueue.TaskUpdateR\x05value:\x028\x01\"v\n" +
 	"\n" +
 	"TaskSignal\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
-	"\x06signal\x18\x02 \x01(\tR\x06signal\"\xe4\x01\n" +
+	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
+	"\fgrace_period\x18\x03 \x01(\x05H\x00R\vgracePeriod\x88\x01\x01B\x0f\n" +
+	"\r_grace_period\"\xe4\x01\n" +
 	"\x10TaskListAndOther\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\x12 \n" +
 	"\vconcurrency\x18\x02 \x01(\x05R\vconcurrency\x123\n" +
 	"\aupdates\x18\x03 \x01(\v2\x19.taskqueue.TaskUpdateListR\aupdates\x12!\n" +
 	"\factive_tasks\x18\x04 \x03(\x05R\vactiveTasks\x12/\n" +
-	"\asignals\x18\x06 \x03(\v2\x15.taskqueue.TaskSignalR\asignals\"D\n" +
+	"\asignals\x18\x06 \x03(\v2\x15.taskqueue.TaskSignalR\asignals\"}\n" +
 	"\x11TaskSignalRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
-	"\x06signal\x18\x02 \x01(\tR\x06signal\"\xab\x01\n" +
+	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
+	"\fgrace_period\x18\x03 \x01(\x05H\x00R\vgracePeriod\x88\x01\x01B\x0f\n" +
+	"\r_grace_period\"\xab\x01\n" +
 	"\x10TaskStatusUpdate\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\n" +
@@ -9037,7 +9073,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"WorkflowId\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
-	"workflowId\"\xf5\x02\n" +
+	"workflowId\"\x89\x03\n" +
 	"\bWorkflow\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05R\n" +
 	"workflowId\x12\x12\n" +
@@ -9051,16 +9087,19 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\ffailed_tasks\x18\b \x01(\x05R\vfailedTasks\x12#\n" +
 	"\rrunning_tasks\x18\t \x01(\x05R\frunningTasks\x12%\n" +
 	"\x0eretrying_tasks\x18\n" +
-	" \x01(\x05R\rretryingTasksB\x12\n" +
-	"\x10_maximum_workers\"\xc8\x01\n" +
+	" \x01(\x05R\rretryingTasks\x12\x12\n" +
+	"\x04live\x18\v \x01(\bR\x04liveB\x12\n" +
+	"\x10_maximum_workers\"\xea\x01\n" +
 	"\x0fWorkflowRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12&\n" +
 	"\frun_strategy\x18\x02 \x01(\tH\x00R\vrunStrategy\x88\x01\x01\x12,\n" +
 	"\x0fmaximum_workers\x18\x03 \x01(\x05H\x01R\x0emaximumWorkers\x88\x01\x01\x12\x1b\n" +
-	"\x06status\x18\x04 \x01(\tH\x02R\x06status\x88\x01\x01B\x0f\n" +
+	"\x06status\x18\x04 \x01(\tH\x02R\x06status\x88\x01\x01\x12\x17\n" +
+	"\x04live\x18\x05 \x01(\bH\x03R\x04live\x88\x01\x01B\x0f\n" +
 	"\r_run_strategyB\x12\n" +
 	"\x10_maximum_workersB\t\n" +
-	"\a_status\"A\n" +
+	"\a_statusB\a\n" +
+	"\x05_live\"A\n" +
 	"\fWorkflowList\x121\n" +
 	"\tworkflows\x18\x01 \x03(\v2\x13.taskqueue.WorkflowR\tworkflows\"\x91\x01\n" +
 	"\x14WorkflowStatusUpdate\x12\x1f\n" +
@@ -9868,6 +9907,8 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[5].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[10].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[12].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[15].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[17].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[18].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[20].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[26].OneofWrappers = []any{}

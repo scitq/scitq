@@ -456,11 +456,14 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "stop_task",
-			Description: "Send a graceful stop signal (SIGTERM) to a running task. The task's container receives SIGTERM and has 10s to exit before SIGKILL.",
+			Description: "Send a graceful stop signal (SIGTERM) to a running task. The task's container receives SIGTERM and has grace_period seconds to exit before SIGKILL.",
 			InputSchema: inputSchema{
-				Type:       "object",
-				Properties: map[string]schemaProperty{"task_id": {Type: "integer", Description: "Task ID"}},
-				Required:   []string{"task_id"},
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"task_id":      {Type: "integer", Description: "Task ID"},
+					"grace_period": {Type: "integer", Description: "Seconds before SIGKILL (default: 10)"},
+				},
+				Required: []string{"task_id"},
 			},
 		},
 		{
@@ -1176,9 +1179,16 @@ func (h *mcpHandler) toolKillTask(ctx context.Context, args json.RawMessage) (an
 }
 
 func (h *mcpHandler) toolStopTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
-	var p struct{ TaskID int32 `json:"task_id"` }
+	var p struct {
+		TaskID      int32  `json:"task_id"`
+		GracePeriod *int32 `json:"grace_period"`
+	}
 	json.Unmarshal(args, &p)
-	_, err := h.server.SignalTask(ctx, &pb.TaskSignalRequest{TaskId: p.TaskID, Signal: "T"})
+	req := &pb.TaskSignalRequest{TaskId: p.TaskID, Signal: "T"}
+	if p.GracePeriod != nil {
+		req.GracePeriod = p.GracePeriod
+	}
+	_, err := h.server.SignalTask(ctx, req)
 	if err != nil {
 		return errorResult(err), nil
 	}

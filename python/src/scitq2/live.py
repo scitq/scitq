@@ -95,10 +95,11 @@ class LiveContext:
         except ValueError:
             return None
 
-    def stop(self, task):
-        """Send SIGTERM (graceful stop) to a running task."""
+    def stop(self, task, grace_period: Optional[int] = None):
+        """Send SIGTERM (graceful stop) to a running task.
+        grace_period: seconds before SIGKILL (default: 10)."""
         task_id = self._task_id(task)
-        self.client.signal_task(task_id, "T")
+        self.client.signal_task(task_id, "T", grace_period=grace_period)
 
     def kill(self, task):
         """Send SIGKILL (hard kill) to a running task."""

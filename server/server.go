@@ -409,6 +409,7 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 			WHERE w.workflow_id = $1
 			  AND d.new_status IS NOT NULL
 			  AND w.status <> d.new_status
+			  AND NOT w.live
 			RETURNING d.new_status
 		)
 		SELECT new_status FROM updated
@@ -1434,9 +1435,13 @@ func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequ
 	if req.Signal != "K" && req.Signal != "T" {
 		return nil, fmt.Errorf("unsupported signal %q (K for kill, T for terminate)", req.Signal)
 	}
+	var grace interface{} = nil
+	if req.GracePeriod != nil {
+		grace = *req.GracePeriod
+	}
 	result, err := s.db.ExecContext(ctx,
-		`UPDATE task SET signal = $1 WHERE task_id = $2 AND status IN ('R','D','O','C')`,
-		req.Signal, req.TaskId)
+		`UPDATE task SET signal = $1, signal_grace = $3 WHERE task_id = $2 AND status IN ('R','D','O','C')`,
+		req.Signal, req.TaskId, grace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to signal task %d: %w", req.TaskId, err)
 	}
@@ -3101,17 +3106,32 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 	// Collect pending signals for this worker and clear them atomically
 	var signals []*pb.TaskSignal
 	signalRows, err := s.db.Query(`
-		UPDATE task SET signal = NULL
-		WHERE worker_id = $1 AND signal IS NOT NULL AND status IN ('R','D','O','C')
-		RETURNING task_id, signal
+		WITH pending AS (
+			SELECT task_id, signal, signal_grace FROM task
+			WHERE worker_id = $1 AND signal IS NOT NULL AND status IN ('R','D','O','C')
+		),
+		cleared AS (
+			UPDATE task SET signal = NULL, signal_grace = NULL
+			FROM pending p WHERE task.task_id = p.task_id
+		)
+		SELECT task_id, signal, signal_grace FROM pending
 	`, req.WorkerId)
-	if err == nil {
+	if err != nil {
+		log.Printf("⚠️ Failed to query signals for worker %d: %v", req.WorkerId, err)
+	} else {
 		defer signalRows.Close()
 		for signalRows.Next() {
 			var tid int32
 			var sig string
-			if signalRows.Scan(&tid, &sig) == nil {
-				signals = append(signals, &pb.TaskSignal{TaskId: tid, Signal: sig})
+			var grace sql.NullInt32
+			if err := signalRows.Scan(&tid, &sig, &grace); err != nil {
+				log.Printf("⚠️ Failed to scan signal row: %v", err)
+			} else {
+				ts := &pb.TaskSignal{TaskId: tid, Signal: sig}
+				if grace.Valid {
+					ts.GracePeriod = &grace.Int32
+				}
+				signals = append(signals, ts)
 				log.Printf("🔪 Sending %s signal for task %d to worker %d", sig, tid, req.WorkerId)
 			}
 		}
@@ -4057,7 +4077,7 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
 	// Base query to select workflow fields
 	query := `
-        SELECT workflow_id, workflow_name, status, run_strategy, maximum_workers 
+        SELECT workflow_id, workflow_name, status, run_strategy, maximum_workers, live
         FROM workflow
     `
 	var args []interface{}
@@ -4104,7 +4124,7 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 	var workflows []*pb.Workflow
 	for rows.Next() {
 		var wf pb.Workflow
-		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers); err != nil {
+		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers, &wf.Live); err != nil {
 			return nil, fmt.Errorf("failed to scan workflow: %w", err)
 		}
 		// Populate progress from in-memory step stats aggregator (no DB hit)
@@ -4150,20 +4170,22 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 		statusVal = normalized
 	}
 
+	liveVal := req.Live != nil && *req.Live
+
 	var workflowID int32
 	var err error
 	if req.MaximumWorkers == nil {
 		err = s.db.QueryRow(`
-			INSERT INTO workflow (workflow_name, run_strategy, status)
-			VALUES ($1, $2, $3)
+			INSERT INTO workflow (workflow_name, run_strategy, status, live)
+			VALUES ($1, $2, $3, $4)
 			RETURNING workflow_id
-		`, req.Name, req.RunStrategy, statusVal).Scan(&workflowID)
+		`, req.Name, req.RunStrategy, statusVal, liveVal).Scan(&workflowID)
 	} else {
 		err = s.db.QueryRow(`
-		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers, status)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers, status, live)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING workflow_id
-	`, req.Name, req.RunStrategy, *req.MaximumWorkers, statusVal).Scan(&workflowID)
+	`, req.Name, req.RunStrategy, *req.MaximumWorkers, statusVal, liveVal).Scan(&workflowID)
 	}
 
 	if err != nil {

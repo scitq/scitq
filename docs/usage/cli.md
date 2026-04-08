@@ -252,6 +252,17 @@ scitq task kill --id <task id>
 
 The task will transition to failed (F) status after being killed. If the task has retries remaining, it will be retried automatically.
 
+#### `task stop`
+
+Sends a graceful stop signal (SIGTERM) to a running task. The container's process receives SIGTERM and has a grace period to exit cleanly before being killed with SIGKILL. Useful for Optuna-style pruning of unpromising trials.
+
+```sh
+scitq task stop --id <task id> [--grace <seconds>]
+```
+
+Options:
+- `--grace`: seconds the container has to exit after SIGTERM before SIGKILL (default: 10). Increase for programs that need time to save state (e.g. `--grace 60`).
+
 #### `task edit`
 
 Edits a failed task's command and retries it (hides the old task and creates a new one with the modified command):
@@ -404,11 +415,13 @@ Options:
   - `D`: **Debug** mode — tasks are not assigned automatically; use the DSL `--debug` flag to enter interactive task selection. Recruitment is limited to 1 worker. When exiting debug to normal execution, the original maximum workers setting is restored.
   - `Z`: **Suspended** — workflow is created but not yet launched.  
 - `--maximum-workers`: caps the total number of workers the workflow can use.
+- `--live`: live mode — prevents the workflow from auto-completing when all tasks finish. Used for optimization loops where new tasks are submitted dynamically. Close with `workflow update --status S` when done.
 
 Example:
 
 ```sh
 scitq workflow create --name myworkflow --run-strategy B --maximum-workers 50
+scitq workflow create --name optuna_search --live    # for optimization loops
 ```
 
 #### `workflow delete`

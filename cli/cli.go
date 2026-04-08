@@ -90,7 +90,8 @@ type Attr struct {
 		} `arg:"subcommand:kill" help:"Send kill signal (SIGKILL) to a running task"`
 
 		Stop *struct {
-			ID int32 `arg:"--id,required" help:"Task ID to stop"`
+			ID    int32  `arg:"--id,required" help:"Task ID to stop"`
+			Grace *int32 `arg:"--grace" help:"Grace period in seconds before SIGKILL (default: 10)"`
 		} `arg:"subcommand:stop" help:"Send stop signal (SIGTERM) to a running task"`
 	} `arg:"subcommand:task" help:"Manage tasks"`
 
@@ -623,10 +624,14 @@ func (c *CLI) TaskStop() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	_, err := c.QC.Client.SignalTask(ctx, &pb.TaskSignalRequest{
+	req := &pb.TaskSignalRequest{
 		TaskId: c.Attr.Task.Stop.ID,
 		Signal: "T",
-	})
+	}
+	if c.Attr.Task.Stop.Grace != nil {
+		req.GracePeriod = c.Attr.Task.Stop.Grace
+	}
+	_, err := c.QC.Client.SignalTask(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to stop task: %w", err)
 	}

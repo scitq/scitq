@@ -42,8 +42,14 @@ func TestOptunaLoop(t *testing.T) {
 	defer qclient.Close()
 	qc := qclient.Client
 
-	// Create workflow + step with quality scoring
-	wfID := createWorkflowViaCLI(t, c, "wf-optuna-loop")
+	// Create workflow with live=true (prevents auto-completion between trials)
+	liveFlag := true
+	wfResp, err := qc.CreateWorkflow(ctx, &pb.WorkflowRequest{
+		Name: "wf-optuna-loop",
+		Live: &liveFlag,
+	})
+	require.NoError(t, err)
+	wfID := wfResp.WorkflowId
 	qualityDef := `{"variables":{"score":"score: ([0-9.]+)","loss":"loss: ([0-9.]+)"},"formula":"score"}`
 	stepResp, err := qc.CreateStep(ctx, &pb.StepRequest{
 		WorkflowId:        &wfID,
@@ -103,6 +109,7 @@ func TestOptunaLoop(t *testing.T) {
 	t3Resp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "sleep 600",
 		Container: "alpine",
+		Shell:     strPtr("sh"),
 		StepId:    &stepID,
 		Status:    "P",
 	})

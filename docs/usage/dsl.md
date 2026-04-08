@@ -1160,6 +1160,114 @@ The CLI runner also supports these flags:
 python -m scitq2.runner my_workflow.py --opportunistic --untrusted qc
 ```
 
+## Quality scoring
+
+Steps can define quality extraction rules to score task output:
+
+```python
+step = workflow.Step(
+    name="train",
+    command=fr"train --lr 0.01 /input/data",
+    container="my_trainer",
+    quality=Quality(
+        variables={
+            "accuracy": r"accuracy: ([0-9.]+)",
+            "loss": r"final loss: ([0-9.]+)",
+        },
+        formula="accuracy",
+    ),
+)
+```
+
+Each regex is matched against the full stdout+stderr. The **last match** is taken (for iterative programs that output metrics per epoch). The formula is a simple arithmetic expression over variable names.
+
+Quality scores are stored on the task and accessible via the API.
+
+## Live mode and optimization
+
+The standard DSL is a **blueprint** — it defines all tasks upfront and exits. **Live mode** keeps the DSL running as a continuous workflow administration script, enabling dynamic task submission based on previous results.
+
+### Workflow live flag
+
+Live workflows set `live=True` at creation, which prevents auto-completion:
+
+```python
+workflow = Workflow(name="optuna_search", live=True, ...)
+```
+
+When all tasks in a normal workflow succeed, the workflow automatically transitions to status `S`. With `live=True`, the workflow stays in `R` until explicitly closed via `workflow update --status S`.
+
+### LiveContext
+
+The `LiveContext` class provides primitives for observing results and controlling execution:
+
+```python
+from scitq2 import *
+
+client = Client()
+ctx = LiveContext(client, poll_interval=5.0)
+
+# Block until a task completes, returns quality_score
+score = ctx.wait(task_id)
+
+# Wait for multiple tasks, returns [(task_id, score), ...]
+results = ctx.wait_all([task_id_1, task_id_2])
+
+# Non-blocking: read current quality_score (for pruning)
+current_score = ctx.observe(task_id)
+
+# Graceful stop (SIGTERM) — for pruning bad trials
+ctx.stop(task_id)
+
+# Hard kill (SIGKILL)
+ctx.kill(task_id)
+```
+
+### Optuna integration example
+
+```python
+from scitq2 import *
+import optuna
+
+def optimize():
+    client = Client()
+    ctx = LiveContext(client, poll_interval=2.0)
+    
+    wf_id = client.create_workflow("optuna_search", live=True, status="R")
+    step_id = client.create_step(wf_id, "train",
+        quality_definition='{"variables":{"score":"score: ([0-9.]+)"},"formula":"score"}')
+    
+    study = optuna.create_study(
+        direction="maximize",
+        storage="sqlite:///study.db",
+        load_if_exists=True,
+    )
+    
+    for _ in range(50):
+        trial = study.ask()
+        lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)
+        
+        task_id = client.submit_task(
+            step_id=step_id,
+            command=f'train --lr {lr} /input/data',
+            container="my_trainer",
+        )
+        
+        score = ctx.wait(task_id)
+        if score is not None:
+            study.tell(trial, score)
+        else:
+            study.tell(trial, state=optuna.trial.TrialState.FAIL)
+    
+    # Close the live workflow
+    client.update_workflow_status(workflow_id=wf_id, status="S")
+    print(f"Best: {study.best_params} → {study.best_value:.4f}")
+
+optimize()
+```
+
+For parallel trials with fan-out and pruning via SIGTERM, see the [optimization spec](../../specs/quality_scoring_and_optimization.md).
+
 ## Reference
 
 see [DSL Reference](../reference/python_dsl.md)
