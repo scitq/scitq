@@ -41,6 +41,10 @@ import (
 var serverStartMu sync.Mutex
 var cliMu sync.Mutex // protects os.Args in runCLICommand
 
+// Shared Python venv (created once, reused by all tests to avoid pip races)
+var sharedPythonVenv string
+var sharedPythonOnce sync.Once
+
 func captureOutput(f func()) string {
 	// Create a pipe to capture stdout
 	r, w, _ := os.Pipe()
@@ -249,10 +253,15 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	if err := os.MkdirAll(tempScriptRoot, 0o755); err != nil {
 		t.Fatalf("failed to create temp script root: %v", err)
 	}
-	tempPythonEnv := filepath.Join(baseTmp, "python")
-	if err := os.MkdirAll(tempPythonEnv, 0o755); err != nil {
-		t.Fatalf("failed to create temp python env root: %v", err)
-	}
+	// Use a shared Python venv to avoid pip races between parallel tests
+	sharedPythonOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "scitq-test-python-*")
+		if err != nil {
+			t.Fatalf("failed to create shared python dir: %v", err)
+		}
+		sharedPythonVenv = dir
+	})
+	tempPythonEnv := sharedPythonVenv
 
 	// Pick a free server port to avoid collisions between tests
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
