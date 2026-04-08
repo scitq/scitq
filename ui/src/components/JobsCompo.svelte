@@ -294,7 +294,7 @@
                 {job.action}
               {/if}
             </td>
-            <td>{job.workerId}</td>
+            <td title={job.flavorInfo || ''}>{job.workerName || job.workerId}</td>
             <td>
               <div
                 class="jobCompo-status-pill {getJobStatusClass(job.status)}"

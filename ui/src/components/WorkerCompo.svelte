@@ -768,6 +768,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   href="#/tasks?workerId={worker.workerId}"
                   data-testid={`worker-name-${worker.workerId}`}
                   class="workerCompo-clickable"
+                  title="{worker.flavor || 'unknown'}{worker.flavorCpu ? ` — ${worker.flavorCpu} CPU` : ''}{worker.flavorMem ? `, ${Math.round(worker.flavorMem)}GB mem` : ''}{worker.flavorDisk ? `, ${Math.round(worker.flavorDisk)}GB disk` : ''}"
                 >
                   {worker.name}
                   {#if worker.isPermanent}

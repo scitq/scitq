@@ -653,7 +653,19 @@ func (c *CLI) WorkerList() error {
 	fmt.Println("👷 Worker List:")
 	for _, worker := range res.Workers {
 		if c.Attr.Worker.List.Long {
-			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | Permanent: %t | IPv4: %s | IPv6: %s | Flavor: %s | Provider: %s | Region: %s | Workflow: %s | Step: %s\n",
+			cpuStr := ""
+			if worker.FlavorCpu != nil {
+				cpuStr = fmt.Sprintf(" | CPU: %d", *worker.FlavorCpu)
+			}
+			memStr := ""
+			if worker.FlavorMem != nil {
+				memStr = fmt.Sprintf(" | Mem: %dGB", int(*worker.FlavorMem))
+			}
+			diskStr := ""
+			if worker.FlavorDisk != nil {
+				diskStr = fmt.Sprintf(" | Disk: %dGB", int(*worker.FlavorDisk))
+			}
+			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | Permanent: %t | IPv4: %s | IPv6: %s | Flavor: %s%s%s%s | Provider: %s | Region: %s | Workflow: %s | Step: %s\n",
 				worker.WorkerId,
 				worker.Name,
 				worker.Concurrency,
@@ -663,6 +675,9 @@ func (c *CLI) WorkerList() error {
 				worker.Ipv4,
 				worker.Ipv6,
 				worker.Flavor,
+				cpuStr,
+				memStr,
+				diskStr,
 				worker.Provider,
 				worker.Region,
 				worker.GetWorkflowName(),

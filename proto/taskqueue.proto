@@ -206,6 +206,9 @@ message Worker {
     string recyclable_scope = 14;
     optional int32 workflow_id = 15;
     optional string workflow_name = 16;
+    optional int32 flavor_cpu = 17;
+    optional float flavor_mem = 18;
+    optional float flavor_disk = 19;
 }
 
 
@@ -400,15 +403,17 @@ message ListJobsRequest {
 
 message Job {
   int32 job_id = 1;
-  string status = 2;         
-  int32 flavor_id = 3;      
-  int32 retry = 4;          
-  int32 worker_id = 5;      
-  string action = 6;         
-  string created_at = 7;     
-  string modified_at = 8;    
-  int32 progression = 9;    
+  string status = 2;
+  int32 flavor_id = 3;
+  int32 retry = 4;
+  int32 worker_id = 5;
+  string action = 6;
+  string created_at = 7;
+  string modified_at = 8;
+  int32 progression = 9;
   string log = 10;
+  optional string worker_name = 11;
+  optional string flavor_info = 12; // e.g. "Standard_D8s_v3 — 8 CPU, 32GB mem"
 }
 
 message JobId {

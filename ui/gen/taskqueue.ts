@@ -322,6 +322,18 @@ export interface Worker {
      * @generated from protobuf field: optional string workflow_name = 16
      */
     workflowName?: string;
+    /**
+     * @generated from protobuf field: optional int32 flavor_cpu = 17
+     */
+    flavorCpu?: number;
+    /**
+     * @generated from protobuf field: optional float flavor_mem = 18
+     */
+    flavorMem?: number;
+    /**
+     * @generated from protobuf field: optional float flavor_disk = 19
+     */
+    flavorDisk?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -849,6 +861,14 @@ export interface Job {
      * @generated from protobuf field: string log = 10
      */
     log: string;
+    /**
+     * @generated from protobuf field: optional string worker_name = 11
+     */
+    workerName?: string;
+    /**
+     * @generated from protobuf field: optional string flavor_info = 12
+     */
+    flavorInfo?: string;
 }
 /**
  * @generated from protobuf message taskqueue.JobId
@@ -2880,7 +2900,10 @@ class Worker$Type extends MessageType<Worker> {
             { no: 13, name: "is_permanent", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 14, name: "recyclable_scope", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 15, name: "workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 16, name: "workflow_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 16, name: "workflow_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 17, name: "flavor_cpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 18, name: "flavor_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 19, name: "flavor_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -2954,6 +2977,15 @@ class Worker$Type extends MessageType<Worker> {
                 case /* optional string workflow_name */ 16:
                     message.workflowName = reader.string();
                     break;
+                case /* optional int32 flavor_cpu */ 17:
+                    message.flavorCpu = reader.int32();
+                    break;
+                case /* optional float flavor_mem */ 18:
+                    message.flavorMem = reader.float();
+                    break;
+                case /* optional float flavor_disk */ 19:
+                    message.flavorDisk = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3014,6 +3046,15 @@ class Worker$Type extends MessageType<Worker> {
         /* optional string workflow_name = 16; */
         if (message.workflowName !== undefined)
             writer.tag(16, WireType.LengthDelimited).string(message.workflowName);
+        /* optional int32 flavor_cpu = 17; */
+        if (message.flavorCpu !== undefined)
+            writer.tag(17, WireType.Varint).int32(message.flavorCpu);
+        /* optional float flavor_mem = 18; */
+        if (message.flavorMem !== undefined)
+            writer.tag(18, WireType.Bit32).float(message.flavorMem);
+        /* optional float flavor_disk = 19; */
+        if (message.flavorDisk !== undefined)
+            writer.tag(19, WireType.Bit32).float(message.flavorDisk);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4826,7 +4867,9 @@ class Job$Type extends MessageType<Job> {
             { no: 7, name: "created_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "modified_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "progression", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 10, name: "log", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 10, name: "log", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 11, name: "worker_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 12, name: "flavor_info", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Job>): Job {
@@ -4880,6 +4923,12 @@ class Job$Type extends MessageType<Job> {
                 case /* string log */ 10:
                     message.log = reader.string();
                     break;
+                case /* optional string worker_name */ 11:
+                    message.workerName = reader.string();
+                    break;
+                case /* optional string flavor_info */ 12:
+                    message.flavorInfo = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4922,6 +4971,12 @@ class Job$Type extends MessageType<Job> {
         /* string log = 10; */
         if (message.log !== "")
             writer.tag(10, WireType.LengthDelimited).string(message.log);
+        /* optional string worker_name = 11; */
+        if (message.workerName !== undefined)
+            writer.tag(11, WireType.LengthDelimited).string(message.workerName);
+        /* optional string flavor_info = 12; */
+        if (message.flavorInfo !== undefined)
+            writer.tag(12, WireType.LengthDelimited).string(message.flavorInfo);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

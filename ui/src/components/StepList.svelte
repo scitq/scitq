@@ -535,7 +535,7 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
               <td><a href="#/tasks?stepId={step.stepId}" class="workerCompo-clickable">{step.stepName}</a></td>
               <td>
                 {#each workersByStep.get(step.stepId) || [] as worker (worker.workerId)}
-                  <div class="worker-badge" title={`Worker ID: ${worker.workerId}`}>
+                  <div class="worker-badge" title={`${worker.flavor || 'unknown'}${worker.flavorCpu ? ` — ${worker.flavorCpu} CPU` : ''}${worker.flavorMem ? `, ${Math.round(worker.flavorMem)}GB mem` : ''}${worker.flavorDisk ? `, ${Math.round(worker.flavorDisk)}GB disk` : ''}`}>
                     <a href="#/tasks?workerId={worker.workerId}" class="workerCompo-clickable">{worker.name}</a>
                   </div>
                 {/each}

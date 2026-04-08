@@ -186,7 +186,7 @@ class EditStepCommandResponse(_message.Message):
     def __init__(self, edited_count: _Optional[int] = ..., new_task_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class Worker(_message.Message):
-    __slots__ = ("worker_id", "name", "concurrency", "prefetch", "status", "ipv4", "ipv6", "flavor", "provider", "region", "step_id", "step_name", "is_permanent", "recyclable_scope", "workflow_id", "workflow_name")
+    __slots__ = ("worker_id", "name", "concurrency", "prefetch", "status", "ipv4", "ipv6", "flavor", "provider", "region", "step_id", "step_name", "is_permanent", "recyclable_scope", "workflow_id", "workflow_name", "flavor_cpu", "flavor_mem", "flavor_disk")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
@@ -203,6 +203,9 @@ class Worker(_message.Message):
     RECYCLABLE_SCOPE_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_NAME_FIELD_NUMBER: _ClassVar[int]
+    FLAVOR_CPU_FIELD_NUMBER: _ClassVar[int]
+    FLAVOR_MEM_FIELD_NUMBER: _ClassVar[int]
+    FLAVOR_DISK_FIELD_NUMBER: _ClassVar[int]
     worker_id: int
     name: str
     concurrency: int
@@ -219,7 +222,10 @@ class Worker(_message.Message):
     recyclable_scope: str
     workflow_id: int
     workflow_name: str
-    def __init__(self, worker_id: _Optional[int] = ..., name: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., status: _Optional[str] = ..., ipv4: _Optional[str] = ..., ipv6: _Optional[str] = ..., flavor: _Optional[str] = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., step_id: _Optional[int] = ..., step_name: _Optional[str] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_id: _Optional[int] = ..., workflow_name: _Optional[str] = ...) -> None: ...
+    flavor_cpu: int
+    flavor_mem: float
+    flavor_disk: float
+    def __init__(self, worker_id: _Optional[int] = ..., name: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., status: _Optional[str] = ..., ipv4: _Optional[str] = ..., ipv6: _Optional[str] = ..., flavor: _Optional[str] = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., step_id: _Optional[int] = ..., step_name: _Optional[str] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_id: _Optional[int] = ..., workflow_name: _Optional[str] = ..., flavor_cpu: _Optional[int] = ..., flavor_mem: _Optional[float] = ..., flavor_disk: _Optional[float] = ...) -> None: ...
 
 class WorkersList(_message.Message):
     __slots__ = ("workers",)

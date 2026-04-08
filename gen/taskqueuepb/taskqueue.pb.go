@@ -952,6 +952,9 @@ type Worker struct {
 	RecyclableScope string                 `protobuf:"bytes,14,opt,name=recyclable_scope,json=recyclableScope,proto3" json:"recyclable_scope,omitempty"`
 	WorkflowId      *int32                 `protobuf:"varint,15,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	WorkflowName    *string                `protobuf:"bytes,16,opt,name=workflow_name,json=workflowName,proto3,oneof" json:"workflow_name,omitempty"`
+	FlavorCpu       *int32                 `protobuf:"varint,17,opt,name=flavor_cpu,json=flavorCpu,proto3,oneof" json:"flavor_cpu,omitempty"`
+	FlavorMem       *float32               `protobuf:"fixed32,18,opt,name=flavor_mem,json=flavorMem,proto3,oneof" json:"flavor_mem,omitempty"`
+	FlavorDisk      *float32               `protobuf:"fixed32,19,opt,name=flavor_disk,json=flavorDisk,proto3,oneof" json:"flavor_disk,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1096,6 +1099,27 @@ func (x *Worker) GetWorkflowName() string {
 		return *x.WorkflowName
 	}
 	return ""
+}
+
+func (x *Worker) GetFlavorCpu() int32 {
+	if x != nil && x.FlavorCpu != nil {
+		return *x.FlavorCpu
+	}
+	return 0
+}
+
+func (x *Worker) GetFlavorMem() float32 {
+	if x != nil && x.FlavorMem != nil {
+		return *x.FlavorMem
+	}
+	return 0
+}
+
+func (x *Worker) GetFlavorDisk() float32 {
+	if x != nil && x.FlavorDisk != nil {
+		return *x.FlavorDisk
+	}
+	return 0
 }
 
 type WorkersList struct {
@@ -2960,6 +2984,8 @@ type Job struct {
 	ModifiedAt    string                 `protobuf:"bytes,8,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`
 	Progression   int32                  `protobuf:"varint,9,opt,name=progression,proto3" json:"progression,omitempty"`
 	Log           string                 `protobuf:"bytes,10,opt,name=log,proto3" json:"log,omitempty"`
+	WorkerName    *string                `protobuf:"bytes,11,opt,name=worker_name,json=workerName,proto3,oneof" json:"worker_name,omitempty"`
+	FlavorInfo    *string                `protobuf:"bytes,12,opt,name=flavor_info,json=flavorInfo,proto3,oneof" json:"flavor_info,omitempty"` // e.g. "Standard_D8s_v3 — 8 CPU, 32GB mem"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3060,6 +3086,20 @@ func (x *Job) GetProgression() int32 {
 func (x *Job) GetLog() string {
 	if x != nil {
 		return x.Log
+	}
+	return ""
+}
+
+func (x *Job) GetWorkerName() string {
+	if x != nil && x.WorkerName != nil {
+		return *x.WorkerName
+	}
+	return ""
+}
+
+func (x *Job) GetFlavorInfo() string {
+	if x != nil && x.FlavorInfo != nil {
+		return *x.FlavorInfo
 	}
 	return ""
 }
@@ -8523,7 +8563,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x17EditStepCommandResponse\x12!\n" +
 	"\fedited_count\x18\x01 \x01(\x05R\veditedCount\x12 \n" +
 	"\fnew_task_ids\x18\x02 \x03(\x05R\n" +
-	"newTaskIds\"\x9d\x04\n" +
+	"newTaskIds\"\xb9\x05\n" +
 	"\x06Worker\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -8542,13 +8582,22 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10recyclable_scope\x18\x0e \x01(\tR\x0frecyclableScope\x12$\n" +
 	"\vworkflow_id\x18\x0f \x01(\x05H\x02R\n" +
 	"workflowId\x88\x01\x01\x12(\n" +
-	"\rworkflow_name\x18\x10 \x01(\tH\x03R\fworkflowName\x88\x01\x01B\n" +
+	"\rworkflow_name\x18\x10 \x01(\tH\x03R\fworkflowName\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"flavor_cpu\x18\x11 \x01(\x05H\x04R\tflavorCpu\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"flavor_mem\x18\x12 \x01(\x02H\x05R\tflavorMem\x88\x01\x01\x12$\n" +
+	"\vflavor_disk\x18\x13 \x01(\x02H\x06R\n" +
+	"flavorDisk\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_idB\f\n" +
 	"\n" +
 	"_step_nameB\x0e\n" +
 	"\f_workflow_idB\x10\n" +
-	"\x0e_workflow_name\":\n" +
+	"\x0e_workflow_nameB\r\n" +
+	"\v_flavor_cpuB\r\n" +
+	"\v_flavor_memB\x0e\n" +
+	"\f_flavor_disk\":\n" +
 	"\vWorkersList\x12+\n" +
 	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"J\n" +
 	"\x12ListWorkersRequest\x12$\n" +
@@ -8727,7 +8776,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05limit\x18\x01 \x01(\x05H\x00R\x05limit\x88\x01\x01\x12\x1b\n" +
 	"\x06offset\x18\x02 \x01(\x05H\x01R\x06offset\x88\x01\x01B\b\n" +
 	"\x06_limitB\t\n" +
-	"\a_offset\"\x90\x02\n" +
+	"\a_offset\"\xfc\x02\n" +
 	"\x03Job\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1b\n" +
@@ -8741,7 +8790,13 @@ const file_taskqueue_proto_rawDesc = "" +
 	"modifiedAt\x12 \n" +
 	"\vprogression\x18\t \x01(\x05R\vprogression\x12\x10\n" +
 	"\x03log\x18\n" +
-	" \x01(\tR\x03log\"\x1e\n" +
+	" \x01(\tR\x03log\x12$\n" +
+	"\vworker_name\x18\v \x01(\tH\x00R\n" +
+	"workerName\x88\x01\x01\x12$\n" +
+	"\vflavor_info\x18\f \x01(\tH\x01R\n" +
+	"flavorInfo\x88\x01\x01B\x0e\n" +
+	"\f_worker_nameB\x0e\n" +
+	"\f_flavor_info\"\x1e\n" +
 	"\x05JobId\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\".\n" +
 	"\bJobsList\x12\"\n" +
@@ -9725,6 +9780,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[35].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[36].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[40].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[41].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[47].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[58].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[62].OneofWrappers = []any{}

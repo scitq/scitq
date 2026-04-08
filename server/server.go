@@ -2493,19 +2493,26 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 
 	// Build base SQL query
 	query := `
-        SELECT 
-            job_id,
-            status,
-            COALESCE(flavor_id, 0) AS flavor_id,
-            retry,
-            COALESCE(worker_id, 0) AS worker_id,
-            action,
-            created_at,
-            modified_at,
-            progression,
-            COALESCE(log, '')
-        FROM job
-		ORDER BY job_id DESC
+        SELECT
+            j.job_id,
+            j.status,
+            COALESCE(j.flavor_id, 0) AS flavor_id,
+            j.retry,
+            COALESCE(j.worker_id, 0) AS worker_id,
+            j.action,
+            j.created_at,
+            j.modified_at,
+            j.progression,
+            COALESCE(j.log, ''),
+            w.worker_name,
+            CASE WHEN f.flavor_name IS NOT NULL
+                THEN f.flavor_name || ' — ' || f.cpu || ' CPU, ' || ROUND(f.mem::numeric) || 'GB mem'
+                ELSE NULL
+            END
+        FROM job j
+        LEFT JOIN worker w ON w.worker_id = j.worker_id
+        LEFT JOIN flavor f ON f.flavor_id = j.flavor_id
+		ORDER BY j.job_id DESC
     `
 
 	// Add pagination clauses
@@ -2530,6 +2537,7 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 	var jobs []*pb.Job
 	for rows.Next() {
 		var job pb.Job
+		var workerName, flavorInfo sql.NullString
 		err := rows.Scan(
 			&job.JobId,
 			&job.Status,
@@ -2541,11 +2549,15 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 			&job.ModifiedAt,
 			&job.Progression,
 			&job.Log,
+			&workerName,
+			&flavorInfo,
 		)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan job: %v", err)
 			continue
 		}
+		job.WorkerName = utils.NullStringToPtr(workerName)
+		job.FlavorInfo = utils.NullStringToPtr(flavorInfo)
 		jobs = append(jobs, &job)
 	}
 
@@ -3067,6 +3079,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			COALESCE(r.region_name, '') AS region_name, 
 			COALESCE(p.provider_name || '.' || p.config_name, '') AS provider,
 			COALESCE(f.flavor_name, '') AS flavor,
+			f.cpu, f.mem, f.disk,
 			w.step_id,
 			s.step_name,
 			w.is_permanent,
@@ -3103,14 +3116,29 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	for rows.Next() {
 		var worker pb.Worker
 		var stepId, workflowId sql.NullInt32
+		var flavorCpu sql.NullInt32
+		var flavorMem, flavorDisk sql.NullFloat64
 		var stepName, workflowName sql.NullString
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
-			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor, &stepId, &stepName,
+			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor,
+			&flavorCpu, &flavorMem, &flavorDisk,
+			&stepId, &stepName,
 			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan worker: %v", err)
 			continue
+		}
+		if flavorCpu.Valid {
+			worker.FlavorCpu = &flavorCpu.Int32
+		}
+		if flavorMem.Valid {
+			v := float32(flavorMem.Float64)
+			worker.FlavorMem = &v
+		}
+		if flavorDisk.Valid {
+			v := float32(flavorDisk.Float64)
+			worker.FlavorDisk = &v
 		}
 		if stepId.Valid {
 			worker.StepId = &stepId.Int32
