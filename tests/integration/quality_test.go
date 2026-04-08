@@ -47,15 +47,31 @@ func TestQualityScoring(t *testing.T) {
 	_, err = runCLICommand(c, []string{"workflow", "update", "--id", fmt.Sprintf("%d", wfID), "--status", "R"})
 	require.NoError(t, err)
 
-	// Register worker and assign to step
-	workerID := registerWorkerForTest(t, ctx, qc, "quality-worker", 1)
+	// Start worker client and assign to step after it registers
+	cleanupClient, _ := startClientForTest(t, serverAddr, "quality-worker", token, 1)
+	defer cleanupClient()
+
+	var workerID int32
+	require.Eventually(t, func() bool {
+		workers, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
+		if err != nil {
+			return false
+		}
+		for _, w := range workers.Workers {
+			if w.Name == "quality-worker" {
+				workerID = w.WorkerId
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 500*time.Millisecond, "worker should register")
 	_, err = runCLICommand(c, []string{"worker", "update", "--worker-id", fmt.Sprintf("%d", workerID), "--step-id", fmt.Sprintf("%d", stepID)})
 	require.NoError(t, err)
 
 	// Submit task that outputs quality metrics to stdout
 	// The command prints multiple iterations — quality extraction takes the LAST match
 	taskResp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command:   `echo "epoch 1: accuracy: 0.65, loss: 0.8" && echo "epoch 2: accuracy: 0.78, loss: 0.5" && echo "epoch 3: accuracy: 0.847, loss: 0.3"`,
+		Command:   `printf "epoch 1: accuracy: 0.65, loss: 0.8\nepoch 2: accuracy: 0.78, loss: 0.5\nepoch 3: accuracy: 0.847, loss: 0.3\n"`,
 		Container: "alpine",
 		Shell:     strPtr("sh"),
 		StepId:    &stepID,
@@ -63,10 +79,6 @@ func TestQualityScoring(t *testing.T) {
 	})
 	require.NoError(t, err)
 	taskID := taskResp.TaskId
-
-	// Start a worker client
-	cleanupClient, _ := startClientForTest(t, serverAddr, "quality-worker", token, 1)
-	defer cleanupClient()
 
 	// Wait for the task to succeed
 	require.Eventually(t, func() bool {

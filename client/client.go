@@ -177,7 +177,7 @@ func getScriptExtension(shell string) string {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -210,7 +210,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	// Add scripts folder for long commands
-	containerName := fmt.Sprintf("scitq-%d-task-%d", os.Getpid(), task.TaskId)
+	containerName := fmt.Sprintf("scitq-%s-task-%d", workerName, task.TaskId)
 	command := []string{"run", "--rm", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
 	option := ""
 	for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
@@ -473,7 +473,7 @@ func (w *WorkerConfig) fetchTasks(
 	for _, sig := range res.Signals {
 		sig := sig
 		go func() {
-			containerName := fmt.Sprintf("scitq-%d-task-%d", os.Getpid(), sig.TaskId)
+			containerName := fmt.Sprintf("scitq-%s-task-%d", w.Name, sig.TaskId)
 			if sig.Signal == "T" {
 				args := []string{"stop"}
 				if sig.GracePeriod != nil && *sig.GracePeriod > 0 {
@@ -653,6 +653,7 @@ func excuterThread(
 	um *UploadManager,
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
+	workerName string,
 ) {
 	var wg sync.WaitGroup
 
@@ -701,7 +702,7 @@ func excuterThread(
 			}
 			log.Printf("Available CPU threads estimated to %d, memory to %d GB", cpu, memGB)
 			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu, "mem_gb": memGB})
-			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB)
+			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName)
 
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
@@ -777,7 +778,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name)
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, um, taskWeights, activeTasks)
