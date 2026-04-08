@@ -14,6 +14,14 @@ scitq template list --server myserver:443 --token $TOKEN --json
 
 The token is a JWT valid for 24 hours. Store it for the duration of your session.
 
+### TLS certificate
+
+The Python DSL client auto-fetches the server's TLS certificate via `scitq cert` if the `scitq` binary is on PATH. If not, set it manually:
+
+```sh
+export SCITQ_SSL_CERTIFICATE=$(scitq cert --server myserver:50051)
+```
+
 ## Common workflows
 
 ### List and inspect templates

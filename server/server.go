@@ -87,6 +87,7 @@ type taskQueueServer struct {
 	stats             *StepStatsAgg // In-memory step/workflow stats aggregator
 	activeJobs        sync.Map      // jobID -> context.CancelFunc
 	rcloneRemotes     *pb.RcloneRemotes
+	pythonReady       chan struct{} // closed when Python DSL venv is bootstrapped
 }
 
 type TaskUpdateBroadcast struct {
@@ -197,6 +198,10 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 // Shutdown cleanly stops background goroutines launched by taskQueueServer.
 // It is safe to call multiple times.
 func (s *taskQueueServer) Shutdown() {
+	// Wait for async Python bootstrap to finish (prevents temp dir cleanup races)
+	if s.pythonReady != nil {
+		<-s.pythonReady
+	}
 	// cancel context-driven loops (recruiter, etc.)
 	if s.cancel != nil {
 		s.cancel()
@@ -5039,15 +5044,21 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		return fmt.Errorf("migration error: %v", err)
 	}
 
-	// Deploy Python DSL into the configured venv
-	log.Printf("🔧 Bootstrapping Python DSL environment at %s...", cfg.Scitq.ScriptVenv)
-	if err := python.Bootstrap(cfg.Scitq.ScriptVenv); err != nil {
-		log.Fatalf("❌ Python bootstrap failed: %v", err)
-	}
-	log.Printf("✅ Python DSL environment ready")
+	// Bootstrap Python DSL asynchronously (can take 30+ seconds on fresh install)
+	pythonReady := make(chan struct{})
+	go func() {
+		log.Printf("🔧 Bootstrapping Python DSL environment at %s...", cfg.Scitq.ScriptVenv)
+		if err := python.Bootstrap(cfg.Scitq.ScriptVenv); err != nil {
+			log.Printf("❌ Python bootstrap failed: %v", err)
+		} else {
+			log.Printf("✅ Python DSL environment ready")
+		}
+		close(pythonReady)
+	}()
 
 	// Create the main server instance
 	s := newTaskQueueServer(cfg, db, cfg.Scitq.LogRoot, ctx, cancel)
+	s.pythonReady = pythonReady
 
 	// Configure database connection pool settings for concurrency
 	db.SetMaxOpenConns(cfg.Scitq.MaxDBConcurrency * 2)

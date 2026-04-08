@@ -1240,7 +1240,7 @@ def optimize():
     
     wf_id = client.create_workflow("optuna_search", live=True, status="R")
     step_id = client.create_step(wf_id, "train",
-        quality_definition='{"variables":{"score":"score: ([0-9.]+)"},"formula":"score"}')
+        quality_definition='{"variables":{"auc":"best_auc: ([0-9.]+)"},"formula":"auc"}')
     
     study = optuna.create_study(
         direction="maximize",
@@ -1250,12 +1250,19 @@ def optimize():
     
     for _ in range(50):
         trial = study.ask()
-        lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)
+        mutation_pct = trial.suggest_int("mutation_pct", 5, 50)
+        k_penalty = trial.suggest_float("k_penalty", 1e-5, 1e-2, log=True)
         
         task_id = client.submit_task(
             step_id=step_id,
-            command=f'train --lr {lr} /input/data',
-            container="my_trainer",
+            command=(
+                f'cp /input/param.yaml /tmp/param.yaml'
+                f' && sed -i "s/mutation_non_null_chance_pct:.*/mutation_non_null_chance_pct: {mutation_pct}/" /tmp/param.yaml'
+                f' && sed -i "s/k_penalty:.*/k_penalty: {k_penalty}/" /tmp/param.yaml'
+                f' && gpredomics --config /tmp/param.yaml --csv-report'
+            ),
+            container="gpredomics:latest",
+            shell="sh",
         )
         
         score = ctx.wait(task_id)

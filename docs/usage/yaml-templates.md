@@ -730,18 +730,19 @@ params:
   data_dir:
     type: string
     required: true
+    help: URI to a folder containing one subfolder per dataset, each with param.yaml, Xtrain.tsv, Ytrain.tsv
   location:
     type: provider_region
     required: true
   n_trials:
     type: integer
-    default: 100
+    default: 50
   n_parallel:
     type: integer
     default: 5
 
 iterate:
-  name: sample
+  name: dataset
   source: uri
   uri: "{params.data_dir}"
   group_by: folder
@@ -757,20 +758,20 @@ optimize:
   n_parallel: "{params.n_parallel}"
   aggregation: mean
   step: train
-  storage: "sqlite:///optuna_{name}.db"
+  storage: "sqlite:///optuna_gpredomics.db"
   search_space:
-    lr:
-      type: float
-      low: 0.0001
-      high: 0.1
-      log: true
-    depth:
+    mutation_pct:
       type: int
-      low: 1
-      high: 10
-    algo:
+      low: 5
+      high: 50
+    population_size:
       type: categorical
-      choices: ["rf", "xgb", "svm"]
+      choices: [1000, 2000, 5000, 10000]
+    k_penalty:
+      type: float
+      low: 0.00001
+      high: 0.01
+      log: true
   pruning:
     enabled: true
     grace_period: 60
@@ -779,12 +780,24 @@ steps:
   - name: train
     container: gpredomics:latest
     command: |
-      gpredomics --lr {lr} --depth {depth} --algo {algo} /input/{SAMPLE}
+      cp /input/param.yaml /tmp/param.yaml
+      sed -i "s/mutation_non_null_chance_pct:.*/mutation_non_null_chance_pct: {mutation_pct}/" /tmp/param.yaml
+      sed -i "s/population_size:.*/population_size: {population_size}/" /tmp/param.yaml
+      sed -i "s/k_penalty:.*/k_penalty: {k_penalty}/" /tmp/param.yaml
+      gpredomics --config /tmp/param.yaml --csv-report
     quality:
       variables:
-        score: "best_score: ([0-9.]+)"
-      score: "score"
+        auc: "best_auc: ([0-9.]+)"
+      score: "auc"
 ```
+
+This template optimizes gpredomics hyperparameters across multiple datasets. Each trial:
+1. Copies the base `param.yaml` from the dataset's input folder
+2. Patches the target parameters via `sed`
+3. Runs gpredomics with the modified config
+4. Extracts the best AUC from stdout
+
+The `pruning.grace_period: 60` gives gpredomics 60 seconds to save state when a trial is stopped early (SIGTERM → clean exit).
 
 ### How it works
 

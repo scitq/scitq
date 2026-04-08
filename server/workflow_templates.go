@@ -241,6 +241,11 @@ func transformParamSchema(rawJSON string, cfg config.Config) (string, error) {
 }
 
 func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRequest) (*pb.TemplateRun, error) {
+	// Wait for Python DSL environment to be ready (bootstrapped async at startup)
+	if s.pythonReady != nil {
+		<-s.pythonReady
+	}
+
 	if req.WorkflowTemplateId == 0 {
 		return nil, fmt.Errorf("workflow_template_id is required")
 	}
