@@ -157,6 +157,8 @@ message Task {
     optional int32 download_duration = 28; // seconds spent downloading inputs
     optional int32 run_duration = 29;      // seconds spent running the command
     optional int32 upload_duration = 30;   // seconds spent uploading outputs
+    optional double quality_score = 31;    // quality score (higher is better)
+    optional string quality_vars = 32;     // JSON: extracted quality variables
 }
 
 message TaskList {
@@ -228,12 +230,17 @@ message TaskUpdateList {
     map<int32, TaskUpdate> updates = 1; // optional — can be empty
 }
 
+message TaskSignal {
+    int32 task_id = 1;
+    string signal = 2;  // "K" = SIGKILL (docker kill), "T" = SIGTERM (docker stop)
+}
+
 message TaskListAndOther {
     repeated Task tasks = 1;
     int32 concurrency = 2;
     TaskUpdateList updates = 3;
     repeated int32 active_tasks = 4;
-    repeated int32 kill_tasks = 5;  // tasks to docker kill on this worker
+    repeated TaskSignal signals = 6;  // tasks to signal on this worker
 }
 
 message TaskSignalRequest {
@@ -623,11 +630,13 @@ message Step {
     string workflow_name = 2;
     int32 workflow_id = 3;
     string name = 4;
+    optional string quality_definition = 5; // JSON: {"variables": {...}, "formula": "..."}
 }
 message StepRequest {
     optional string workflow_name = 1;
     optional int32 workflow_id = 2;
     string name = 3;
+    optional string quality_definition = 4; // JSON: {"variables": {...}, "formula": "..."}
 }
 message StepList {
     repeated Step steps = 1;

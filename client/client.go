@@ -469,14 +469,21 @@ func (w *WorkerConfig) fetchTasks(
 		return true
 	})
 
-	// Execute kill signals
-	for _, tid := range res.KillTasks {
-		tid := tid
+	// Execute signals (K=SIGKILL via docker kill, T=SIGTERM via docker stop)
+	for _, sig := range res.Signals {
+		sig := sig
 		go func() {
-			containerName := fmt.Sprintf("scitq-task-%d", tid)
-			log.Printf("🔪 Killing container %s (task %d)", containerName, tid)
-			if out, err := exec.Command("docker", "kill", containerName).CombinedOutput(); err != nil {
-				log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
+			containerName := fmt.Sprintf("scitq-task-%d", sig.TaskId)
+			if sig.Signal == "T" {
+				log.Printf("🛑 Stopping container %s (task %d, SIGTERM)", containerName, sig.TaskId)
+				if out, err := exec.Command("docker", "stop", containerName).CombinedOutput(); err != nil {
+					log.Printf("⚠️ docker stop %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
+				}
+			} else {
+				log.Printf("🔪 Killing container %s (task %d, SIGKILL)", containerName, sig.TaskId)
+				if out, err := exec.Command("docker", "kill", containerName).CombinedOutput(); err != nil {
+					log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
+				}
 			}
 		}()
 	}

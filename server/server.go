@@ -1067,6 +1067,12 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 	}
 
+	// Extract quality score on success (synchronous — must complete before the
+	// status is visible to polling clients, otherwise there's a race window)
+	if req.NewStatus == "S" {
+		s.extractQualityScore(req.TaskId)
+	}
+
 	var workerId int32
 	if workerID.Valid {
 		workerId = workerID.Int32
@@ -1098,6 +1104,59 @@ func getLogPath(taskID int32, logType string, logRoot string) string {
 // valid output. If any output is gone (stale), the reuse entry is invalidated, the
 // prerequisite is reset to P (so it actually runs), and the failed task is reset to W
 // (so it waits for the prerequisite and re-runs automatically).
+// extractQualityScore reads the step's quality_definition, runs regexes against
+// the task's stored stdout/stderr logs, evaluates the formula, and stores the result.
+func (s *taskQueueServer) extractQualityScore(taskID int32) {
+	// Get quality definition from the task's step
+	var qualityDefStr sql.NullString
+	err := s.db.QueryRow(`
+		SELECT s.quality_definition
+		FROM task t JOIN step s ON t.step_id = s.step_id
+		WHERE t.task_id = $1
+	`, taskID).Scan(&qualityDefStr)
+	if err != nil || !qualityDefStr.Valid || qualityDefStr.String == "" {
+		return // no quality definition
+	}
+
+	def, err := ParseQualityDefinition(qualityDefStr.String)
+	if err != nil {
+		log.Printf("⚠️ task %d: invalid quality definition: %v", taskID, err)
+		return
+	}
+
+	// Read stored logs
+	stdout := readLogFile(taskID, "stdout", s.logRoot)
+	stderr := readLogFile(taskID, "stderr", s.logRoot)
+
+	result, err := ExtractQuality(def, stdout, stderr)
+	if err != nil {
+		log.Printf("⚠️ task %d: quality extraction failed: %v", taskID, err)
+		return
+	}
+	if result == nil {
+		return // no variables matched
+	}
+
+	// Store quality score and vars
+	varsJSON, _ := json.Marshal(result.Vars)
+	_, err = s.db.Exec(`UPDATE task SET quality_score = $1, quality_vars = $2::jsonb WHERE task_id = $3`,
+		result.Score, string(varsJSON), taskID)
+	if err != nil {
+		log.Printf("⚠️ task %d: failed to store quality score: %v", taskID, err)
+		return
+	}
+	log.Printf("📊 task %d: quality score = %.4f (vars: %s)", taskID, result.Score, string(varsJSON))
+}
+
+func readLogFile(taskID int32, logType string, logRoot string) string {
+	path := getLogPath(taskID, logType, logRoot)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 func (s *taskQueueServer) checkStaleReuse(ctx context.Context, failedTaskID int32) {
 	// Find reuse-hit prerequisites of this failed task
 	rows, err := s.db.QueryContext(ctx, `
@@ -1372,8 +1431,8 @@ func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTask
 }
 
 func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequest) (*pb.Ack, error) {
-	if req.Signal != "K" {
-		return nil, fmt.Errorf("unsupported signal %q (only K for kill)", req.Signal)
+	if req.Signal != "K" && req.Signal != "T" {
+		return nil, fmt.Errorf("unsupported signal %q (K for kill, T for terminate)", req.Signal)
 	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE task SET signal = $1 WHERE task_id = $2 AND status IN ('R','D','O','C')`,
@@ -1384,7 +1443,8 @@ func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequ
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return nil, fmt.Errorf("task %d not found or not in a running state", req.TaskId)
 	}
-	log.Printf("🔪 Kill signal queued for task %d", req.TaskId)
+	sigName := map[string]string{"K": "SIGKILL", "T": "SIGTERM"}[req.Signal]
+	log.Printf("🔪 %s signal queued for task %d", sigName, req.TaskId)
 	return &pb.Ack{}, nil
 }
 
@@ -2764,7 +2824,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
             s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry,
 			EXTRACT(EPOCH FROM t.run_started_at)::bigint AS run_started_epoch,
 			t.publish,
-			t.download_duration, t.run_duration, t.upload_duration
+			t.download_duration, t.run_duration, t.upload_duration,
+			t.quality_score, t.quality_vars::text
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -2810,6 +2871,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			workerIDNull, stepIDNull, prevTaskID, wfIDNull, retryNull         sql.NullInt32
 			runStartTimeNull                                                  sql.NullInt64
 			downloadDur, runDur, uploadDur                                    sql.NullInt32
+			qualityScore                                                      sql.NullFloat64
+			qualityVars                                                       sql.NullString
 			retryCount                                                        int32
 			hidden                                                            bool
 		)
@@ -2838,6 +2901,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&downloadDur,
 			&runDur,
 			&uploadDur,
+			&qualityScore,
+			&qualityVars,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -2860,6 +2925,10 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		task.DownloadDuration = utils.NullInt32ToPtr(downloadDur)
 		task.RunDuration = utils.NullInt32ToPtr(runDur)
 		task.UploadDuration = utils.NullInt32ToPtr(uploadDur)
+		if qualityScore.Valid {
+			task.QualityScore = &qualityScore.Float64
+		}
+		task.QualityVars = utils.NullStringToPtr(qualityVars)
 
 		tasks = append(tasks, &task)
 	}
@@ -3029,20 +3098,21 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		log.Printf("⚠️ Worker %d did not send stats", req.WorkerId)
 	}
 
-	// Collect pending kill signals for this worker and clear them atomically
-	var killTaskIDs []int32
-	killRows, err := s.db.Query(`
+	// Collect pending signals for this worker and clear them atomically
+	var signals []*pb.TaskSignal
+	signalRows, err := s.db.Query(`
 		UPDATE task SET signal = NULL
 		WHERE worker_id = $1 AND signal IS NOT NULL AND status IN ('R','D','O','C')
-		RETURNING task_id
+		RETURNING task_id, signal
 	`, req.WorkerId)
 	if err == nil {
-		defer killRows.Close()
-		for killRows.Next() {
+		defer signalRows.Close()
+		for signalRows.Next() {
 			var tid int32
-			if killRows.Scan(&tid) == nil {
-				killTaskIDs = append(killTaskIDs, tid)
-				log.Printf("🔪 Sending kill signal for task %d to worker %d", tid, req.WorkerId)
+			var sig string
+			if signalRows.Scan(&tid, &sig) == nil {
+				signals = append(signals, &pb.TaskSignal{TaskId: tid, Signal: sig})
+				log.Printf("🔪 Sending %s signal for task %d to worker %d", sig, tid, req.WorkerId)
 			}
 		}
 	}
@@ -3052,7 +3122,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		ActiveTasks: activeTaskIDs,
 		Concurrency: concurrency,
 		Updates:     &pb.TaskUpdateList{Updates: taskUpdateList},
-		KillTasks:   killTaskIDs,
+		Signals:     signals,
 	}, nil
 }
 
@@ -4429,23 +4499,27 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 	var workflowID int32
 	var err error
 
+	// quality_definition is optional JSON
+	var qualityDef interface{} = nil
+	if req.QualityDefinition != nil {
+		qualityDef = *req.QualityDefinition
+	}
+
 	if req.WorkflowId != nil && *req.WorkflowId != 0 {
-		// Insert and RETURNING step_id, workflow_id
 		err = s.db.QueryRow(`
-			INSERT INTO step (step_name, workflow_id)
-			VALUES ($1, $2)
+			INSERT INTO step (step_name, workflow_id, quality_definition)
+			VALUES ($1, $2, $3::jsonb)
 			RETURNING step_id, workflow_id
-		`, req.Name, *req.WorkflowId).Scan(&stepID, &workflowID)
+		`, req.Name, *req.WorkflowId, qualityDef).Scan(&stepID, &workflowID)
 	} else if req.WorkflowName != nil {
-		// Insert using workflow_name, return both
 		err = s.db.QueryRow(`
 			WITH wf AS (
 				SELECT w.workflow_id FROM workflow w WHERE w.workflow_name = $1
 			)
-			INSERT INTO step (step_name, workflow_id)
-			SELECT $2, wf.workflow_id FROM wf
+			INSERT INTO step (step_name, workflow_id, quality_definition)
+			SELECT $2, wf.workflow_id, $3::jsonb FROM wf
 			RETURNING step_id, workflow_id
-		`, *req.WorkflowName, req.Name).Scan(&stepID, &workflowID)
+		`, *req.WorkflowName, req.Name, qualityDef).Scan(&stepID, &workflowID)
 	} else {
 		return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
 	}

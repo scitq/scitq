@@ -1,0 +1,3 @@
+ALTER TABLE task DROP COLUMN IF EXISTS quality_vars;
+ALTER TABLE task DROP COLUMN IF EXISTS quality_score;
+ALTER TABLE step DROP COLUMN IF EXISTS quality_definition;

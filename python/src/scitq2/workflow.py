@@ -5,11 +5,26 @@ from scitq2.language import Language, Raw, Shell
 from scitq2.recruit import WorkerPool
 from scitq2.uri import Resource
 from scitq2.constants import DEFAULT_TASK_STATUS, ACTIONS
+import json
 import os
 from itertools import count
 import sys
 from collections.abc import Iterable
 from abc import ABC, abstractmethod
+
+
+class Quality:
+    """Defines quality variable extraction and scoring for a Step.
+
+    Variables are regex patterns with one capture group, applied to task stdout/stderr.
+    Formula is an arithmetic expression combining variable names into a single score.
+    """
+    def __init__(self, variables: Dict[str, str], formula: str):
+        self.variables = variables  # name -> regex pattern
+        self.formula = formula      # e.g. "accuracy" or "(precision + recall) / 2"
+
+    def to_json(self) -> str:
+        return json.dumps({"variables": self.variables, "formula": self.formula})
 
 class Outputs:
     """Represents the declarative outputs of a Step, which can be used in other Steps.
@@ -417,7 +432,7 @@ class Step:
     """
 
     def __init__(self, name: str, workflow: "Workflow", worker_pool: Optional[WorkerPool] = None, task_spec: Optional[TaskSpec] = None,
-                 naming_strategy: callable = dot_join):
+                 naming_strategy: callable = dot_join, quality: Optional[Quality] = None):
         self.name = name
         self.tasks: List[Task] = []
         self.worker_pool = worker_pool
@@ -426,6 +441,7 @@ class Step:
         self.outputs_globs: Dict[str, str] = {}
         self.workflow = workflow
         self.naming_strategy = naming_strategy
+        self.quality = quality
 
     def add_task(
         self,
@@ -515,7 +531,8 @@ class Step:
 
     def compile(self, client: Scitq2Client, opportunistic: bool = False, untrusted: Optional[List[str]] = None):
         """Compile the Step into real scitq objects by calling appropriate gRPC functions. Called automatically during the template run phase."""
-        self.step_id = client.create_step(self.workflow.workflow_id, self.name)
+        quality_json = self.quality.to_json() if self.quality else None
+        self.step_id = client.create_step(self.workflow.workflow_id, self.name, quality_definition=quality_json)
 
         pool = self.worker_pool or self.workflow.worker_pool
         if pool:
@@ -620,6 +637,7 @@ class Workflow:
         skip_if_exists: Optional[bool] = None,
         retry: Optional[int] = None,
         accept_failure: bool = False,
+        quality: Optional[Quality] = None,
     ) -> Step:
         """Add a Step to the Workflow with a single Task.
         If the Step already exists with the same name, the Task is added to the existing Step.
@@ -646,7 +664,7 @@ class Workflow:
             skip_if_exists = self.skip_if_exists
         if retry is None:
             retry = self.retry
-        new_step = Step(name=name, workflow=self, worker_pool=worker_pool, task_spec=task_spec, naming_strategy=naming_strategy)
+        new_step = Step(name=name, workflow=self, worker_pool=worker_pool, task_spec=task_spec, naming_strategy=naming_strategy, quality=quality)
         if name in self._steps:
             existing = self._steps[name]
             if (existing.worker_pool != new_step.worker_pool or existing.task_spec != new_step.task_spec):

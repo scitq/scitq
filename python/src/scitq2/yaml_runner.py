@@ -751,6 +751,15 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     if 'accept_failure' in step_def:
         step_kwargs['accept_failure'] = step_def['accept_failure']
 
+    # Quality scoring
+    if 'quality' in step_def and isinstance(step_def['quality'], dict):
+        from scitq2.workflow import Quality
+        q_def = step_def['quality']
+        step_kwargs['quality'] = Quality(
+            variables=q_def.get('variables', {}),
+            formula=q_def.get('score', ''),
+        )
+
     # Depends on prep step for adhoc containers
     if prep_step:
         step_kwargs['depends'] = prep_step

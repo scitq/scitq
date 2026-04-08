@@ -124,7 +124,7 @@ def _handle_grpc_error(e: grpc.RpcError):
     sys.exit(1)
 
 
-def run(func: Callable):
+def run(func: Callable, live: bool = False):
     """
     Run a workflow function that may optionally take a Params class instance.
 
@@ -132,9 +132,13 @@ def run(func: Callable):
     - --params: Outputs the parameter schema as JSON.
     - --values: Parses values and runs the workflow.
     - --metadata: Extracts workflow metadata (static AST inspection).
+    - --live: Keep the DSL running for dynamic task submission (optimization loops).
     - No args:
         - If function takes no parameter, calls directly.
         - Otherwise, prints usage error.
+
+    When live=True (or --live flag), the workflow function receives a LiveContext
+    as its second argument: func(workflow, ctx) or func(params, workflow, ctx).
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", action="store_true", help="Print the parameter schema as JSON.")
@@ -146,6 +150,7 @@ def run(func: Callable):
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters.")
     parser.add_argument("--opportunistic", action="store_true", help="Enable opportunistic reuse of previous results.")
     parser.add_argument("--untrusted", type=str, default="", help="Comma-separated step names to force re-execute.")
+    parser.add_argument("--live", action="store_true", help="Keep DSL running for dynamic task submission.")
     args = parser.parse_args()
 
     try:

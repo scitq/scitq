@@ -87,7 +87,11 @@ type Attr struct {
 
 		Kill *struct {
 			ID int32 `arg:"--id,required" help:"Task ID to kill"`
-		} `arg:"subcommand:kill" help:"Send kill signal to a running task"`
+		} `arg:"subcommand:kill" help:"Send kill signal (SIGKILL) to a running task"`
+
+		Stop *struct {
+			ID int32 `arg:"--id,required" help:"Task ID to stop"`
+		} `arg:"subcommand:stop" help:"Send stop signal (SIGTERM) to a running task"`
 	} `arg:"subcommand:task" help:"Manage tasks"`
 
 	// Worker Commands (Sub-Subcommands)
@@ -611,6 +615,26 @@ func (c *CLI) TaskKill() error {
 		return nil
 	}
 	fmt.Printf("🔪 Kill signal sent for task %d\n", c.Attr.Task.Kill.ID)
+	return nil
+}
+
+// TaskStop sends a graceful stop signal (SIGTERM) to a running task.
+func (c *CLI) TaskStop() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.SignalTask(ctx, &pb.TaskSignalRequest{
+		TaskId: c.Attr.Task.Stop.ID,
+		Signal: "T",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to stop task: %w", err)
+	}
+
+	if c.jsonOut(map[string]any{"task_id": c.Attr.Task.Stop.ID, "signal": "T"}) {
+		return nil
+	}
+	fmt.Printf("🛑 Stop signal (SIGTERM) sent for task %d\n", c.Attr.Task.Stop.ID)
 	return nil
 }
 
@@ -2224,6 +2248,8 @@ func Run(c CLI) error {
 			err = c.TaskEdit()
 		case c.Attr.Task.Kill != nil:
 			err = c.TaskKill()
+		case c.Attr.Task.Stop != nil:
+			err = c.TaskStop()
 		}
 	// Worker commands
 	case c.Attr.Worker != nil:
