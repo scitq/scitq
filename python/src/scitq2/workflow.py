@@ -589,8 +589,10 @@ class Workflow:
                  naming_strategy: callable = dot_join, task_naming_strategy: callable = dot_join, provider: Optional[str] = None, region: Optional[str] = None,
                  container: Optional[str] = None, publish_root: Optional[str] = None,
                  resources: Optional[Union[Resource, str, List[Resource], List[str]]] = None,
-                 skip_if_exists: bool = False, retry: Optional[int] = None):
+                 skip_if_exists: bool = False, retry: Optional[int] = None,
+                 live: bool = False):
         self.name = name
+        self.live = live
         self.tag = tag
         self.description = description
         self._steps: Dict[str, Step] = {}
@@ -705,6 +707,7 @@ class Workflow:
                     name=candidate_name,
                     maximum_workers=1 if workflow_status == "D" else self.max_recruited,
                     status=workflow_status,
+                    live=self.live,
                 )
                 self.full_name = candidate_name
                 break

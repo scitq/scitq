@@ -36,9 +36,14 @@ This is useful to get coloration and feedback from IDE environment such as VSC, 
 
 ```sh
 export SCITQ_TOKEN=$(scitq login)
-export SCITQ_SSL_CERTIFICATE=$(scitq cert)
 source /path/to/my/venv/bin/activate
 python my_template.py --values '{"param1": "value1"}'
+```
+
+The Python client needs the server's TLS certificate to connect. If `scitq` is on PATH (which it is on any machine where scitq is installed), the certificate is fetched automatically via `scitq cert`. Otherwise, set it manually:
+
+```sh
+export SCITQ_SSL_CERTIFICATE=$(scitq cert)
 ```
 
 When run directly (outside the template engine), the workflow automatically starts in Running state so tasks get assigned immediately. The following flags are available:

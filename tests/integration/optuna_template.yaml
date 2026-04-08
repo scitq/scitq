@@ -1,0 +1,42 @@
+name: optuna_test
+version: 1.0.0
+description: Integration test for YAML optimize block
+
+params:
+  n_trials:
+    type: integer
+    default: 3
+
+iterate:
+  name: sample
+  source: list
+  values: ["A", "B"]
+
+worker_pool:
+  provider: local.local
+  region: local
+
+optimize:
+  method: optuna
+  direction: maximize
+  n_trials: "{params.n_trials}"
+  n_parallel: 1
+  aggregation: mean
+  step: train
+  search_space:
+    x:
+      type: float
+      low: 0.0
+      high: 1.0
+
+steps:
+  - name: train
+    container: alpine
+    language: sh
+    command: |
+      echo "training sample {SAMPLE} with x={x}"
+      echo "score: {x}"
+    quality:
+      variables:
+        score: "score: ([0-9.]+)"
+      score: "score"

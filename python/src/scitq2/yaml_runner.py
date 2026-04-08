@@ -826,6 +826,10 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
             wf_kwargs['provider'] = provider
             wf_kwargs['region'] = region
 
+    # Live mode for optimization workflows
+    if data.get('optimize'):
+        wf_kwargs['live'] = True
+
     workflow = Workflow(**wf_kwargs)
 
     # Resolve RESOURCE_ROOT from server if provider/region are set
@@ -861,6 +865,7 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         workflow_vars[var_name] = _resolve_field(var_expr, params, extra_vars=workflow_vars)
 
     # Classify steps
+    optimize_target = data.get('optimize', {}).get('step') if data.get('optimize') else None
     steps_def = data.get('steps', [])
     per_iter_steps = []
     oneoff_steps = []
@@ -895,6 +900,17 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         sys.exit(1)
     for i, itervar in enumerate(iterations):
         for step_def in per_iter_steps:
+            # Skip the optimize target step during iteration — tasks will be submitted by the optimization loop
+            if optimize_target and step_def.get('name') == optimize_target:
+                # Build once (first iteration) to create the step in step_map with quality/recruiter
+                if step_def.get('name') not in step_map:
+                    step = _build_step(workflow, step_def, step_map, params, itervar=itervar,
+                                       default_language=default_language, script_root=script_root,
+                                       pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
+                                       verbose=verbose)
+                    if step is not None:
+                        step_map[step.name] = step
+                continue
             step = _build_step(workflow, step_def, step_map, params, itervar=itervar,
                                default_language=default_language, script_root=script_root,
                                pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
@@ -965,6 +981,184 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         return None
 
     print(f"✅ Workflow '{workflow.full_name}' created (id={workflow.workflow_id})")
+
+    # Optimization loop (if optimize: block is present)
+    optimize_def = data.get('optimize')
+    if optimize_def and not dry_run:
+        return _run_optimize_loop(client, workflow, optimize_def, step_map,
+                                  per_iter_steps, iterations, params,
+                                  default_language, workflow_vars, pipeline_dir, script_root)
+
+    return workflow.workflow_id
+
+
+def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
+                       step_map: Dict[str, Step], per_iter_steps: list,
+                       iterations: list, params, default_language: str,
+                       workflow_vars: dict, pipeline_dir, script_root) -> int:
+    """Run an Optuna optimization loop driven by the YAML optimize: block."""
+    try:
+        import optuna
+    except ImportError:
+        print("❌ optuna is required for optimize: blocks. Install with: pip install optuna", file=sys.stderr)
+        sys.exit(1)
+
+    from scitq2.live import LiveContext
+
+    # Parse optimize config
+    direction = optimize_def.get('direction', 'maximize')
+    n_trials = int(_resolve_field(optimize_def.get('n_trials', 100), params, extra_vars=workflow_vars))
+    n_parallel = int(_resolve_field(optimize_def.get('n_parallel', 1), params, extra_vars=workflow_vars))
+    aggregation = optimize_def.get('aggregation', 'mean')
+    target_step_name = optimize_def.get('step')
+    search_space = optimize_def.get('search_space', {})
+    storage = optimize_def.get('storage')
+    study_name = optimize_def.get('study_name', f"scitq_{workflow.name}")
+
+    if not target_step_name:
+        print("❌ optimize.step is required (which step to optimize)", file=sys.stderr)
+        sys.exit(1)
+
+    # Find the target step definition
+    target_step_def = None
+    for sd in per_iter_steps:
+        if sd.get('name') == target_step_name:
+            target_step_def = sd
+            break
+    if target_step_def is None:
+        print(f"❌ optimize.step '{target_step_name}' not found in steps", file=sys.stderr)
+        sys.exit(1)
+
+    # Resolve storage path
+    if storage:
+        storage = str(_resolve_field(storage, params, extra_vars=workflow_vars))
+    else:
+        storage = f"sqlite:///optuna_{workflow.name}.db"
+
+    # Create Optuna study
+    study = optuna.create_study(
+        direction=direction,
+        storage=storage,
+        study_name=study_name,
+        load_if_exists=True,
+    )
+
+    ctx = LiveContext(client, poll_interval=2.0)
+
+    # Get the step's quality definition from the compiled step
+    target_step = step_map.get(target_step_name)
+    if target_step is None or target_step.step_id is None:
+        print(f"❌ Step '{target_step_name}' was not compiled (skipped by when:?)", file=sys.stderr)
+        sys.exit(1)
+    step_id = target_step.step_id
+
+    # Aggregation function
+    agg_funcs = {
+        'mean': lambda scores: sum(scores) / len(scores),
+        'median': lambda scores: sorted(scores)[len(scores) // 2],
+        'min': min,
+        'max': max,
+    }
+    agg_fn = agg_funcs.get(aggregation, agg_funcs['mean'])
+
+    # Pruning config
+    pruning_def = optimize_def.get('pruning', {})
+    pruning_enabled = pruning_def.get('enabled', False)
+    grace_period = pruning_def.get('grace_period', 10)
+
+    print(f"🔬 Starting optimization: {n_trials} trials, {n_parallel} parallel, {direction}", file=sys.stderr)
+    print(f"   Target step: {target_step_name}, aggregation: {aggregation}", file=sys.stderr)
+    print(f"   Storage: {storage}", file=sys.stderr)
+
+    # Get the command template from the step definition
+    cmd_template = target_step_def.get('command', '')
+    container = target_step_def.get('container', workflow.container or 'alpine')
+    shell = target_step_def.get('language', default_language)
+
+    completed_trials = 0
+    trial_offset = 0
+
+    while completed_trials < n_trials:
+        batch_size = min(n_parallel, n_trials - completed_trials)
+        trials = [study.ask() for _ in range(batch_size)]
+        trial_tasks = {}  # trial -> [task_ids]
+
+        for trial in trials:
+            # Suggest parameters from search space
+            suggested = {}
+            for param_name, param_def in search_space.items():
+                ptype = param_def.get('type', 'float')
+                if ptype == 'float':
+                    suggested[param_name] = trial.suggest_float(
+                        param_name,
+                        float(param_def['low']),
+                        float(param_def['high']),
+                        log=param_def.get('log', False),
+                    )
+                elif ptype == 'int':
+                    suggested[param_name] = trial.suggest_int(
+                        param_name,
+                        int(param_def['low']),
+                        int(param_def['high']),
+                    )
+                elif ptype == 'categorical':
+                    suggested[param_name] = trial.suggest_categorical(
+                        param_name,
+                        param_def['choices'],
+                    )
+
+            # Submit one task per iteration (sample) with suggested params
+            task_ids = []
+            for itervar in (iterations or [{}]):
+                # Build vars with suggested params + iteration vars + workflow vars
+                trial_vars = dict(workflow_vars)
+                trial_vars.update({k.upper(): str(v) for k, v in suggested.items()})
+                trial_vars.update({k.upper(): str(v) for k, v in itervar.items()})
+                # Also make lowercase versions available
+                trial_vars.update({k: str(v) for k, v in suggested.items()})
+
+                # Resolve command with trial vars
+                resolved_cmd = _resolve_field(cmd_template, params, itervar, extra_vars=trial_vars)
+
+                task_id = client.submit_task(
+                    step_id=step_id,
+                    command=str(resolved_cmd),
+                    container=str(_resolve_field(container, params, itervar, extra_vars=trial_vars)),
+                    shell=shell if shell != 'none' else None,
+                )
+                task_ids.append(task_id)
+
+            trial_tasks[trial.number] = (trial, task_ids)
+            print(f"  Trial {trial.number}: {suggested} → {len(task_ids)} task(s)", file=sys.stderr)
+
+        # Wait for all tasks and report results
+        for trial_num, (trial, task_ids) in trial_tasks.items():
+            results = ctx.wait_all(task_ids)
+            scores = [score for _, score in results if score is not None]
+
+            if scores:
+                trial_score = agg_fn(scores)
+                study.tell(trial, trial_score)
+                print(f"  Trial {trial.number}: score={trial_score:.4f} ({len(scores)}/{len(task_ids)} samples)", file=sys.stderr)
+            else:
+                study.tell(trial, state=optuna.trial.TrialState.FAIL)
+                print(f"  Trial {trial.number}: FAILED (no quality scores)", file=sys.stderr)
+
+            completed_trials += 1
+
+    # Report results
+    print(f"\n🏆 Optimization complete: {len(study.trials)} trials", file=sys.stderr)
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if completed:
+        print(f"   Best params: {study.best_params}", file=sys.stderr)
+        print(f"   Best score: {study.best_value:.4f}", file=sys.stderr)
+    else:
+        print("   No trials completed successfully", file=sys.stderr)
+
+    # Close the live workflow
+    client.update_workflow_status(workflow_id=workflow.workflow_id, status="S")
+    print(f"✅ Workflow '{workflow.full_name}' completed", file=sys.stderr)
+
     return workflow.workflow_id
 
 

@@ -715,7 +715,138 @@ Quality extraction runs when a task succeeds. Each regex is matched against the 
 
 The quality score and individual variables are stored on the task and returned by the API (`quality_score`, `quality_vars` in task list output and MCP).
 
-For optimization workflows, quality scoring is used with the [Python DSL live mode](dsl.md#live-mode-and-optimization) to implement Optuna-style hyperparameter search with parallel trials and pruning.
+For optimization workflows, quality scoring is used with the `optimize:` block (below) or the [Python DSL live mode](dsl.md#live-mode-and-optimization).
+
+## Optimization (`optimize:`)
+
+The `optimize:` block adds Optuna-driven hyperparameter search to a YAML template. It works with the `iterate:` block: for each trial, Optuna suggests parameter values which are substituted into the target step's command, and the step runs once per sample. The trial score is the aggregated quality across all samples.
+
+```yaml
+name: gpredomics_opt
+version: 1.0.0
+description: Hyperparameter optimization for gpredomics
+
+params:
+  data_dir:
+    type: string
+    required: true
+  location:
+    type: provider_region
+    required: true
+  n_trials:
+    type: integer
+    default: 100
+  n_parallel:
+    type: integer
+    default: 5
+
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.data_dir}"
+  group_by: folder
+
+worker_pool:
+  provider: "{params.location}"
+  cpu: ">= 8"
+  mem: ">= 30"
+
+optimize:
+  direction: maximize
+  n_trials: "{params.n_trials}"
+  n_parallel: "{params.n_parallel}"
+  aggregation: mean
+  step: train
+  storage: "sqlite:///optuna_{name}.db"
+  search_space:
+    lr:
+      type: float
+      low: 0.0001
+      high: 0.1
+      log: true
+    depth:
+      type: int
+      low: 1
+      high: 10
+    algo:
+      type: categorical
+      choices: ["rf", "xgb", "svm"]
+  pruning:
+    enabled: true
+    grace_period: 60
+
+steps:
+  - name: train
+    container: gpredomics:latest
+    command: |
+      gpredomics --lr {lr} --depth {depth} --algo {algo} /input/{SAMPLE}
+    quality:
+      variables:
+        score: "best_score: ([0-9.]+)"
+      score: "score"
+```
+
+### How it works
+
+1. The workflow is created in **live mode** (prevents auto-completion)
+2. The target step (`train`) is created with its quality definition and recruiter, but no tasks are submitted during the normal iteration loop
+3. The YAML runner enters an Optuna loop:
+   - Asks Optuna for `n_parallel` trial parameter sets
+   - For each trial, substitutes the suggested values (`{lr}`, `{depth}`, `{algo}`) into the command template and submits one task per sample
+   - Waits for all tasks to complete and extracts quality scores
+   - Aggregates scores across samples (mean, median, min, or max) and reports to Optuna
+   - Repeats until `n_trials` is reached
+4. The workflow is closed (status set to S)
+
+The Optuna study is persisted in `storage` (SQLite by default). If the process crashes and restarts, it resumes from the last completed trial (`load_if_exists=True`).
+
+### `optimize:` fields
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `direction` | `maximize` | `maximize` or `minimize` |
+| `n_trials` | `100` | Total number of trials |
+| `n_parallel` | `1` | Trials to run concurrently |
+| `aggregation` | `mean` | How to aggregate per-sample scores: `mean`, `median`, `min`, `max` |
+| `step` | (required) | Name of the step to optimize |
+| `storage` | `sqlite:///optuna_{name}.db` | Optuna study storage URL |
+| `study_name` | `scitq_{name}` | Optuna study name |
+| `search_space` | (required) | Parameter definitions (see below) |
+| `pruning.enabled` | `false` | Enable early stopping of bad trials |
+| `pruning.grace_period` | `10` | Seconds before SIGKILL after SIGTERM |
+
+### Search space parameter types
+
+```yaml
+search_space:
+  # Float parameter (continuous)
+  lr:
+    type: float
+    low: 0.0001
+    high: 0.1
+    log: true          # log-uniform distribution
+
+  # Integer parameter
+  depth:
+    type: int
+    low: 1
+    high: 10
+
+  # Categorical parameter
+  algo:
+    type: categorical
+    choices: ["rf", "xgb", "svm"]
+```
+
+Suggested values are available in the step command as `{param_name}` (lowercase) and `{PARAM_NAME}` (uppercase).
+
+### Prerequisites
+
+The `optuna` Python package must be installed in the server's DSL virtual environment:
+
+```sh
+pip install optuna
+```
 
 ## Opportunistic reuse
 

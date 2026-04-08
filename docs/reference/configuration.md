@@ -13,8 +13,8 @@
 |  | ScriptRunnerUser | `scitq.script_runner_user` | `nobody` | `string` | ScriptRunnerUser is the system user account under which scripts are executed. Running scripts as a non-privileged user enhances security. |
 |  | ClientBinaryPath | `scitq.client_binary_path` | `/usr/local/bin/scitq-client` | `string` | ClientBinaryPath is the filesystem path to the scitq client binary. This is used for automated client installation. |
 |  | ClientDownloadToken | `scitq.client_download_token` | `` | `string` | ClientDownloadToken is a secret token used to authorize client binary downloads. If not set, a random token is generated at startup. |
-|  | CertificateKey | `scitq.certificate_key` | `` | `string` | CertificateKey is the path or content of the TLS private key file for HTTPS. Required if you use your own certificates |
-|  | CertificatePem | `scitq.certificate_pem` | `` | `string` | CertificatePem is the path or content of the TLS certificate file for HTTPS. Required if you use your own certificates |
+|  | CertificateKey | `scitq.certificate_key` | `` | `string` | CertificateKey is the path or content of the TLS private key file for HTTPS. Required if you use your own certificates (e.g. Let's Encrypt) |
+|  | CertificatePem | `scitq.certificate_pem` | `` | `string` | CertificatePem is the path or content of the TLS certificate file for HTTPS. Required if you use your own certificates. The Python DSL client auto-fetches this cert via `scitq cert` when `scitq` is on PATH; set `SCITQ_SSL_CERTIFICATE` manually otherwise |
 |  | ServerName | `scitq.server_name` | `` | `string` | ServerName is the short name identifier for the server. |
 |  | ServerFQDN | `scitq.server_fqdn` | `` | `string` | ServerFQDN is the fully qualified domain name of the server. |
 |  | DockerRegistry | `scitq.docker_registry` | `` | `string` | DockerRegistry specifies the default container registry URL for pulling images. |

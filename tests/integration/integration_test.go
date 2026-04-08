@@ -316,7 +316,7 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	serverAddr = fmt.Sprintf("localhost:%d", serverPort)
 
 	// Wait for gRPC server readiness
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second) // Python venv bootstrap can be slow on CI
 	for {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", serverPort), 500*time.Millisecond)
 		if err == nil {

@@ -41,8 +41,21 @@ def load_tls_certificate() -> bytes:
     cert_string = os.environ.get("SCITQ_SSL_CERTIFICATE")
     if cert_string and "-----BEGIN CERTIFICATE-----" in cert_string:
         return cert_string.encode('utf-8')
-    else:
-        return DEFAULT_EMBEDDED_CERT
+    # Try fetching from server via scitq CLI (if on PATH)
+    import shutil, subprocess
+    scitq_bin = shutil.which("scitq")
+    if scitq_bin:
+        server = os.environ.get("SCITQ_SERVER", "localhost:50051")
+        try:
+            result = subprocess.run(
+                [scitq_bin, "cert", "--server", server],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and "-----BEGIN CERTIFICATE-----" in result.stdout:
+                return result.stdout.encode('utf-8')
+        except Exception:
+            pass
+    return DEFAULT_EMBEDDED_CERT
 
 class BearerAuth(grpc.AuthMetadataPlugin):
     """Adds a Bearer token to the gRPC metadata for authorization."""
