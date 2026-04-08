@@ -730,7 +730,7 @@ params:
   data_dir:
     type: string
     required: true
-    help: URI to a folder containing one subfolder per dataset, each with param.yaml, Xtrain.tsv, Ytrain.tsv
+    help: URI to a folder containing param.yaml, Xtrain.tsv, Ytrain.tsv
   location:
     type: provider_region
     required: true
@@ -740,12 +740,6 @@ params:
   n_parallel:
     type: integer
     default: 5
-
-iterate:
-  name: dataset
-  source: uri
-  uri: "{params.data_dir}"
-  group_by: folder
 
 worker_pool:
   provider: "{params.location}"
@@ -779,6 +773,7 @@ optimize:
 steps:
   - name: train
     container: gpredomics:latest
+    inputs: "{params.data_dir}"
     command: |
       cp /input/param.yaml /tmp/param.yaml
       sed -i "s/mutation_non_null_chance_pct:.*/mutation_non_null_chance_pct: {mutation_pct}/" /tmp/param.yaml
@@ -787,17 +782,16 @@ steps:
       gpredomics --config /tmp/param.yaml --csv-report
     quality:
       variables:
-        auc: "best_auc: ([0-9.]+)"
-      score: "auc"
+        train_auc: "QUALITY.*train_auc=([0-9.]+)"
+        test_auc: "QUALITY.*test_auc=([0-9.]+)"
+      score: "test_auc"
 ```
 
-This template optimizes gpredomics hyperparameters across multiple datasets. Each trial:
-1. Copies the base `param.yaml` from the dataset's input folder
-2. Patches the target parameters via `sed`
-3. Runs gpredomics with the modified config
-4. Extracts the best AUC from stdout
+Each trial copies the base `param.yaml` from the input data, patches the hyperparameters via `sed`, and runs gpredomics. The quality score (AUC) is extracted from stdout. With `n_parallel: 5`, five trials run simultaneously on different workers.
 
 The `pruning.grace_period: 60` gives gpredomics 60 seconds to save state when a trial is stopped early (SIGTERM → clean exit).
+
+For cross-dataset evaluation (one trial = same hyperparameters evaluated across multiple datasets), add an `iterate:` block — the trial score becomes the aggregated quality across all samples.
 
 ### How it works
 

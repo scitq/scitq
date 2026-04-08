@@ -1240,7 +1240,7 @@ def optimize():
     
     wf_id = client.create_workflow("optuna_search", live=True, status="R")
     step_id = client.create_step(wf_id, "train",
-        quality_definition='{"variables":{"auc":"best_auc: ([0-9.]+)"},"formula":"auc"}')
+        quality_definition='{"variables":{"train_auc":"QUALITY.*train_auc=([0-9.]+)","test_auc":"QUALITY.*test_auc=([0-9.]+)"},"formula":"test_auc"}')
     
     study = optuna.create_study(
         direction="maximize",
