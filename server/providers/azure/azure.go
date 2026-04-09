@@ -552,6 +552,31 @@ func (ap *AzureProvider) Delete(workerName, region string) error {
 	}
 	log.Printf("VM %s deleted successfully", vmName)
 
+	// Delete NIC then public IP explicitly to free the IP slot immediately
+	// (resource group deletion is slow and the IP stays allocated until it completes)
+	nicClient, err := createClient(func() (*armnetwork.InterfacesClient, error) {
+		return armnetwork.NewInterfacesClient(ap.az.SubscriptionID, cred, nil)
+	})
+	if err == nil {
+		nicName := workerName + "-nic"
+		nicPoller, err := nicClient.BeginDelete(ctx, rgName, nicName, nil)
+		if err == nil {
+			nicPoller.PollUntilDone(ctx, nil)
+			log.Printf("NIC %s deleted", nicName)
+		}
+	}
+	pipClient, err := createClient(func() (*armnetwork.PublicIPAddressesClient, error) {
+		return armnetwork.NewPublicIPAddressesClient(ap.az.SubscriptionID, cred, nil)
+	})
+	if err == nil {
+		pipName := workerName + "-nic-pip"
+		pipPoller, err := pipClient.BeginDelete(ctx, rgName, pipName, nil)
+		if err == nil {
+			pipPoller.PollUntilDone(ctx, nil)
+			log.Printf("Public IP %s deleted (freed slot)", pipName)
+		}
+	}
+
 	// Create the Resource Group client.
 	rgClient, err := createClient(func() (*armresources.ResourceGroupsClient, error) {
 		return armresources.NewResourceGroupsClient(ap.az.SubscriptionID, cred, nil)
