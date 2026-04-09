@@ -3858,6 +3858,11 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 
 func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
 	// --- Validation ---
+	if req.Protofilter != "" {
+		if _, err := protofilter.ParseProtofilter(req.Protofilter); err != nil {
+			return &pb.Ack{Success: false}, fmt.Errorf("invalid protofilter: %w", err)
+		}
+	}
 	if req.Concurrency == nil && req.CpuPerTask == nil && req.MemoryPerTask == nil && req.DiskPerTask == nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("either worker_concurrency or at least one of cpu_per_task/memory_per_task/disk_per_task must be set")
 	}
@@ -3950,6 +3955,11 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	defer tx.Rollback()
 	if req.Rounds != nil && *req.Rounds <= 0 {
 		return &pb.Ack{Success: false}, fmt.Errorf("rounds (number of rounds of execution desired to achieve the current load) must be strictly positive")
+	}
+	if req.Protofilter != nil && *req.Protofilter != "" {
+		if _, err := protofilter.ParseProtofilter(*req.Protofilter); err != nil {
+			return &pb.Ack{Success: false}, fmt.Errorf("invalid protofilter: %w", err)
+		}
 	}
 
 	clauses := []string{}
