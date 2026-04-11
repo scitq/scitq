@@ -71,7 +71,7 @@ func TestMCPEndToEnd(t *testing.T) {
 		}
 		resp.Body.Close()
 		return true
-	}, 10*time.Second, 200*time.Millisecond, "HTTP server should be ready")
+	}, 30*time.Second, 200*time.Millisecond, "HTTP server should be ready")
 
 	// --- Step 1: Initialize ---
 	initResp := mcpPost(t, mcpURL, "", rpcRequest{

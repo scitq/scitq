@@ -353,7 +353,9 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	// Function to send logs
+	var logWg sync.WaitGroup
 	sendLogs := func(reader io.Reader, stream pb.TaskQueue_SendTaskLogsClient, logType string) {
+		defer logWg.Done()
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -362,15 +364,16 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 				break
 			}
 		}
-		stream.CloseSend() // ✅ Ensure closure of log stream
 	}
 
 	// Stream logs concurrently
+	logWg.Add(2)
 	go sendLogs(stdout, stream, "stdout")
 	go sendLogs(stderr, stream, "stderr")
 
-	// Wait for task completion
+	// Wait for task completion, then wait for log goroutines to finish
 	err = cmd.Wait()
+	logWg.Wait()
 	stream.CloseSend()
 
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
