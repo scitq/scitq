@@ -1177,9 +1177,21 @@ func RecruiterCycle(
 			continue
 		}
 
-		// Try deploying if still needed
-		// Compute how many workers to deploy, rounding up
-		//howMany := (remainingTaskrate + recruiter.WorkerConcurrency - 1) / recruiter.WorkerConcurrency
+		// Pre-check: can ANY flavor fit in the quota? If not, skip deploy entirely.
+		canFitAny := false
+		for _, fr := range flavorRegionList {
+			ri, ok := regionInfoMap[fr.RegionID]
+			if ok && qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
+				canFitAny = true
+				break
+			}
+		}
+		if !canFitAny {
+			log.Printf("⚠️ Quota exhausted for all flavors in target regions — skipping cloud deploy for step=%d rank=%d",
+				recruiter.StepID, recruiter.Rank)
+			continue
+		}
+
 		log.Printf("⏱️ Timeout passed for step=%d rank=%d; attempting cloud deploy (need throughput=%d, worker concurrency=%d, launching workers for %d task rate)",
 			recruiter.StepID, recruiter.Rank, remainingTaskrate, recruiter.WorkerConcurrency, remainingTaskrate)
 
@@ -1333,6 +1345,21 @@ func DebugRecruitStep(
 		if wfc.Maximum != nil && wfc.Counter >= *wfc.Maximum {
 			log.Printf("⚠️ Workflow %d at maximum workers (%d) — skipping cloud deploy for step=%d rank=%d (recycling allowed)",
 				recruiter.WorkflowID, *wfc.Maximum, recruiter.StepID, recruiter.Rank)
+			continue
+		}
+
+		// Pre-check quota
+		canFitAny := false
+		for _, fr := range flavorRegionList {
+			ri, ok := regionInfoMap[fr.RegionID]
+			if ok && qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
+				canFitAny = true
+				break
+			}
+		}
+		if !canFitAny {
+			log.Printf("⚠️ Quota exhausted for all flavors — skipping debug deploy for step=%d rank=%d",
+				recruiter.StepID, recruiter.Rank)
 			continue
 		}
 
