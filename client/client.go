@@ -47,9 +47,11 @@ type WorkerConfig struct {
 	IsPermanent bool
 	Provider    *string
 	Region      *string
+	NoBare      bool // reject bare tasks
 }
 
-var lostTrackSeen sync.Map // map[int32]time.Time
+var lostTrackSeen sync.Map   // map[int32]time.Time
+var bareProcesses sync.Map   // map[int32]*os.Process — for signaling bare tasks
 
 // Track how long tasks have been locally active and whether they are executing
 var activeSince sync.Map    // map[int32]time.Time
@@ -177,7 +179,7 @@ func getScriptExtension(shell string) string {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string, noBare bool) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -209,91 +211,107 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return // ❌ Do not execute if task is marked as failed
 	}
 
-	// Add scripts folder for long commands
-	containerName := fmt.Sprintf("scitq-%s-task-%d", workerName, task.TaskId)
-	command := []string{"run", "--rm", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
-	option := ""
-	for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
-		if folder == "resource" || folder == "scripts" {
-			option = ":ro"
-		} else {
-			option = ""
-		}
-		command = append(command, "-v", store+"/tasks/"+fmt.Sprint(task.TaskId)+"/"+folder+":/"+folder+option)
-	}
-	command = append(command, "-v", filepath.Join(store, helperFolder)+":/builtin:ro")
+	taskDir := store + "/tasks/" + fmt.Sprint(task.TaskId)
+	isBare := task.Container == "bare"
 
-	if task.ContainerOptions != nil {
-		options := strings.Fields(*task.ContainerOptions)
-		command = append(command, options...)
+	// Reject bare tasks if -no-bare flag is set
+	if isBare && noBare {
+		message := fmt.Sprintf("Task %d rejected: bare execution disabled on this worker", task.TaskId)
+		log.Printf("❌ %s", message)
+		reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId})
+		task.Status = "F"
+		reporter.UpdateTask(task.TaskId, "V", message)
+		return
 	}
 
-	// Check if command is too long and needs script file
-	// Only use script files when shell is explicitly defined to avoid compatibility issues
-	useScriptFile := len(task.Command) > utils.MaxCommandLength && task.Shell != nil
+	var cmd *exec.Cmd
 
-	if useScriptFile {
-		// Create script file for long commands
-		scriptContent := task.Command
-		
-		// Determine appropriate file extension based on shell type
-		scriptExtension := getScriptExtension(*task.Shell)
-		scriptPath := filepath.Join(store, "tasks", fmt.Sprint(task.TaskId), "scripts", fmt.Sprintf("task_%d%s", task.TaskId, scriptExtension))
-		
-		// Ensure scripts directory exists
-		if err := os.MkdirAll(filepath.Dir(scriptPath), 0755); err != nil {
-			message := fmt.Sprintf("Failed to create scripts directory for task %d: %v", task.TaskId, err)
-			log.Printf("❌ %s", message)
-			reporter.Event("E", "task", message, map[string]any{
-				"task_id": task.TaskId,
-				"command": task.Command,
-			})
-			task.Status = "F"                              // Mark as failed
-			reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
-			return
-		}
-		
-		// Write script file
-		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
-			message := fmt.Sprintf("Failed to write script file for task %d: %v", task.TaskId, err)
-			log.Printf("❌ %s", message)
-			reporter.Event("E", "task", message, map[string]any{
-				"task_id": task.TaskId,
-				"command": task.Command,
-			})
-			task.Status = "F"                              // Mark as failed
-			reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
-			return
-		}
-		
-		// Use script file in docker command with the explicitly defined shell
-		command = append(command, task.Container, *task.Shell, "/scripts/task_"+fmt.Sprint(task.TaskId)+scriptExtension)
-		
-		log.Printf("📝 Using script file for long command (length: %d) with shell: %s (extension: %s)", len(task.Command), *task.Shell, scriptExtension)
-	} else {
-		// Original logic for normal commands (including long ones without explicit shell)
+	if isBare {
+		// Bare execution: run command directly without Docker
+		shell := "sh"
 		if task.Shell != nil {
-			command = append(command, task.Container, *task.Shell, "-c", task.Command)
-		} else {
-			args, err := shlex.Split(task.Command)
-			if err != nil {
-				message := fmt.Sprintf("Failed to analyze command %s: %v", task.Command, err)
+			shell = *task.Shell
+		}
+		cmd = exec.Command(shell, "-c", task.Command)
+		cmd.Dir = taskDir + "/tmp"
+		cmd.Env = append(os.Environ(),
+			"INPUT="+taskDir+"/input",
+			"OUTPUT="+taskDir+"/output",
+			"RESOURCE="+taskDir+"/resource",
+			"TEMP="+taskDir+"/tmp",
+			"SCRIPTS="+taskDir+"/scripts",
+			"BUILTIN="+filepath.Join(store, helperFolder),
+			fmt.Sprintf("CPU=%d", cpu),
+			fmt.Sprintf("THREADS=%d", cpu),
+			fmt.Sprintf("MEM=%d", memGB),
+		)
+		log.Printf("🛠️  Running bare command: %s -c %s", shell, task.Command)
+	} else {
+		// Docker execution: existing logic
+		containerName := fmt.Sprintf("scitq-%s-task-%d", workerName, task.TaskId)
+		command := []string{"run", "--rm", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
+		option := ""
+		for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
+			if folder == "resource" || folder == "scripts" {
+				option = ":ro"
+			} else {
+				option = ""
+			}
+			command = append(command, "-v", taskDir+"/"+folder+":/"+folder+option)
+		}
+		command = append(command, "-v", filepath.Join(store, helperFolder)+":/builtin:ro")
+
+		if task.ContainerOptions != nil {
+			options := strings.Fields(*task.ContainerOptions)
+			command = append(command, options...)
+		}
+
+		// Check if command is too long and needs script file
+		useScriptFile := len(task.Command) > utils.MaxCommandLength && task.Shell != nil
+
+		if useScriptFile {
+			scriptContent := task.Command
+			scriptExtension := getScriptExtension(*task.Shell)
+			scriptPath := filepath.Join(taskDir, "scripts", fmt.Sprintf("task_%d%s", task.TaskId, scriptExtension))
+			if err := os.MkdirAll(filepath.Dir(scriptPath), 0755); err != nil {
+				message := fmt.Sprintf("Failed to create scripts directory for task %d: %v", task.TaskId, err)
 				log.Printf("❌ %s", message)
-				reporter.Event("E", "task", message, map[string]any{
-					"task_id": task.TaskId,
-					"command": task.Command,
-				})
-				task.Status = "F"                              // Mark as failed
-				reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
+				reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId, "command": task.Command})
+				task.Status = "F"
+				reporter.UpdateTask(task.TaskId, "V", message)
 				return
 			}
-			command = append(command, task.Container)
-			command = append(command, args...)
+			if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
+				message := fmt.Sprintf("Failed to write script file for task %d: %v", task.TaskId, err)
+				log.Printf("❌ %s", message)
+				reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId, "command": task.Command})
+				task.Status = "F"
+				reporter.UpdateTask(task.TaskId, "V", message)
+				return
+			}
+			command = append(command, task.Container, *task.Shell, "/scripts/task_"+fmt.Sprint(task.TaskId)+scriptExtension)
+			log.Printf("📝 Using script file for long command (length: %d) with shell: %s (extension: %s)", len(task.Command), *task.Shell, scriptExtension)
+		} else {
+			if task.Shell != nil {
+				command = append(command, task.Container, *task.Shell, "-c", task.Command)
+			} else {
+				args, err := shlex.Split(task.Command)
+				if err != nil {
+					message := fmt.Sprintf("Failed to analyze command %s: %v", task.Command, err)
+					log.Printf("❌ %s", message)
+					reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId, "command": task.Command})
+					task.Status = "F"
+					reporter.UpdateTask(task.TaskId, "V", message)
+					return
+				}
+				command = append(command, task.Container)
+				command = append(command, args...)
+			}
 		}
-	}
 
-	log.Printf("🛠️  Running command: docker %s", strings.Join(command, " "))
-	cmd := exec.Command("docker", command...)
+		log.Printf("🛠️  Running command: docker %s", strings.Join(command, " "))
+		cmd = exec.Command("docker", command...)
+	}
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 
@@ -307,6 +325,12 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		task.Status = "F"                              // Mark as failed
 		reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
 		return
+	}
+
+	// Track bare processes for signal handling
+	if isBare && cmd.Process != nil {
+		bareProcesses.Store(task.TaskId, cmd.Process)
+		defer bareProcesses.Delete(task.TaskId)
 	}
 
 	// Open log stream
@@ -473,6 +497,30 @@ func (w *WorkerConfig) fetchTasks(
 	for _, sig := range res.Signals {
 		sig := sig
 		go func() {
+			// Check if this is a bare process
+			if proc, ok := bareProcesses.Load(sig.TaskId); ok {
+				p := proc.(*os.Process)
+				if sig.Signal == "T" {
+					log.Printf("🛑 Stopping bare task %d (SIGTERM)", sig.TaskId)
+					p.Signal(syscall.SIGTERM)
+					// Wait for grace period, then SIGKILL
+					grace := 10
+					if sig.GracePeriod != nil && *sig.GracePeriod > 0 {
+						grace = int(*sig.GracePeriod)
+					}
+					go func() {
+						time.Sleep(time.Duration(grace) * time.Second)
+						if _, stillRunning := bareProcesses.Load(sig.TaskId); stillRunning {
+							p.Kill()
+						}
+					}()
+				} else {
+					log.Printf("🔪 Killing bare task %d (SIGKILL)", sig.TaskId)
+					p.Kill()
+				}
+				return
+			}
+			// Docker container signal
 			containerName := fmt.Sprintf("scitq-%s-task-%d", w.Name, sig.TaskId)
 			if sig.Signal == "T" {
 				args := []string{"stop"}
@@ -654,6 +702,7 @@ func excuterThread(
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
 	workerName string,
+	noBare bool,
 ) {
 	var wg sync.WaitGroup
 
@@ -702,7 +751,7 @@ func excuterThread(
 			}
 			log.Printf("Available CPU threads estimated to %d, memory to %d GB", cpu, memGB)
 			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu, "mem_gb": memGB})
-			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName)
+			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName, noBare)
 
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
@@ -721,7 +770,7 @@ func excuterThread(
 }
 
 // / client launcher
-func Run(ctx context.Context, serverAddr string, concurrency int32, name, store, token string, isPermanent bool, provider *string, region *string) error {
+func Run(ctx context.Context, serverAddr string, concurrency int32, name, store, token string, isPermanent bool, provider *string, region *string, noBare ...bool) error {
 
 	// Ensure store directory exists
 	if err := os.MkdirAll(store, 0777); err != nil {
@@ -731,7 +780,8 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 		}
 		log.Printf("Using a temporary store.")
 	}
-	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token, IsPermanent: isPermanent, Provider: provider, Region: region}
+	noBareFlag := len(noBare) > 0 && noBare[0]
+	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token, IsPermanent: isPermanent, Provider: provider, Region: region, NoBare: noBareFlag}
 	taskWeights := &sync.Map{}
 	activeTasks := &sync.Map{}
 
@@ -778,7 +828,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare)
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, um, taskWeights, activeTasks)

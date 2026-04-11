@@ -38,7 +38,7 @@ func TestEnvVarsCPUMemThreads(t *testing.T) {
 	shell := "sh"
 	task, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "echo CPU=$CPU THREADS=$THREADS MEM=$MEM",
-		Container: "alpine",
+		Container: "bare",
 		Shell:     &shell,
 		Status:    "P",
 	})

@@ -71,19 +71,19 @@ func TestWorkflowCountersBasic(t *testing.T) {
 	// Submit 3 tasks: 2 will succeed, 1 will fail
 	shell := "sh"
 	task1, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command: "echo ok", Shell: &shell, Container: "alpine",
+		Command: "echo ok", Shell: &shell, Container: "bare",
 		Status: "P", StepId: &stepID,
 	})
 	require.NoError(t, err)
 
 	task2, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command: "echo ok", Shell: &shell, Container: "alpine",
+		Command: "echo ok", Shell: &shell, Container: "bare",
 		Status: "P", StepId: &stepID,
 	})
 	require.NoError(t, err)
 
 	task3, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command: "exit 1", Shell: &shell, Container: "alpine",
+		Command: "exit 1", Shell: &shell, Container: "bare",
 		Status: "P", StepId: &stepID,
 	})
 	require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestWorkflowCountersRetrying(t *testing.T) {
 	shell := "sh"
 	retry := int32(1)
 	_, err = qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command: "exit 1", Shell: &shell, Container: "alpine",
+		Command: "exit 1", Shell: &shell, Container: "bare",
 		Status: "P", StepId: &stepID, Retry: &retry,
 	})
 	require.NoError(t, err)
@@ -245,7 +245,7 @@ func TestWorkflowCountersRetrySuccess(t *testing.T) {
 	// Submit a task that fails, then manually retry with a command that succeeds
 	shell := "sh"
 	task, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command: "exit 1", Shell: &shell, Container: "alpine",
+		Command: "exit 1", Shell: &shell, Container: "bare",
 		Status: "P", StepId: &stepID,
 	})
 	require.NoError(t, err)

@@ -37,7 +37,7 @@ func TestRetryClonesHiddenParent(t *testing.T) {
 	// 4) Submit a task with retry=1
 	sub, err := qc.SubmitTask(mdCtx, &pb.TaskRequest{
 		Command:   "false", // will fail immediately
-		Container: "alpine",
+		Container: "bare",
 		Retry:     int32Ptr(1),
 		TaskName:  strPtr("retry-demo"),
 		Status:    "P",

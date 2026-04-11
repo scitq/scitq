@@ -71,7 +71,7 @@ func TestQualityScoring(t *testing.T) {
 	// The command prints multiple iterations — quality extraction takes the LAST match
 	taskResp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   `printf "epoch 1: accuracy: 0.65, loss: 0.8\nepoch 2: accuracy: 0.78, loss: 0.5\nepoch 3: accuracy: 0.847, loss: 0.3\n"`,
-		Container: "alpine",
+		Container: "bare",
 		Shell:     strPtr("sh"),
 		StepId:    &stepID,
 		Status:    "P",
@@ -141,7 +141,7 @@ func TestSignalStop(t *testing.T) {
 	// Submit a long-running task
 	taskResp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "sleep 300",
-		Container: "alpine",
+		Container: "bare",
 		Shell:     strPtr("sh"),
 		Status:    "P",
 	})

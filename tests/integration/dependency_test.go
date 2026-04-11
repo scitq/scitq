@@ -37,7 +37,7 @@ func TestTaskDependencyUnlocksNext(t *testing.T) {
 	// 4) Submit first task (A)
 	a, err := qc.SubmitTask(mdCtx, &pb.TaskRequest{
 		Command:   "echo A",
-		Container: "alpine",
+		Container: "bare",
 		TaskName:  strPtr("taskA"),
 		Status:    "P",
 	})
@@ -47,7 +47,7 @@ func TestTaskDependencyUnlocksNext(t *testing.T) {
 	// 5) Submit dependent task (B depends on A)
 	b, err := qc.SubmitTask(mdCtx, &pb.TaskRequest{
 		Command:    "echo B",
-		Container:  "alpine",
+		Container:  "bare",
 		TaskName:   strPtr("taskB"),
 		Status:     "W", // waiting due to dependency
 		Dependency: []int32{aID},

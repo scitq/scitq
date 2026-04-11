@@ -289,6 +289,26 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		}
 	}
 
+	// If task was submitted as W (has dependencies), check if all prerequisites
+	// are already S — promote to P immediately to avoid race with reuse hits
+	if initialStatus == "W" && len(req.Dependency) > 0 {
+		var allDone bool
+		s.db.QueryRowContext(ctx, `
+			SELECT NOT EXISTS (
+				SELECT 1
+				FROM task_dependencies d
+				JOIN task t ON d.prerequisite_task_id = t.task_id
+				WHERE d.dependent_task_id = $1
+				  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+			)
+		`, taskID).Scan(&allDone)
+		if allDone {
+			s.db.ExecContext(ctx, `UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, taskID)
+			initialStatus = "P"
+			log.Printf("✅ task %d promoted W→P at submit (all prerequisites already done)", taskID)
+		}
+	}
+
 	// Increment pending count in step stats aggregator
 	if workflowID.Valid && req.StepId != nil {
 		stepAgg := s.stats.data[workflowID.Int32][*req.StepId]

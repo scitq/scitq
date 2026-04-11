@@ -41,7 +41,7 @@ func TestEditAndRetryTask(t *testing.T) {
 	sub, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "this_command_does_not_exist",
 		Shell:     &shell,
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 		TaskName:  strPtr("edit-test"),
 	})
@@ -123,7 +123,7 @@ func TestEditStepCommand(t *testing.T) {
 		sub, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 			Command:   "cat /wrong/path/data.txt",
 			Shell:     &shell,
-			Container: "alpine",
+			Container: "bare",
 			Status:    "P",
 			StepId:    &stepID,
 			TaskName:  strPtr("step-edit-task"),
@@ -210,7 +210,7 @@ func TestEditStepCommandRegexp(t *testing.T) {
 	sub, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "bowtie2 -k 100 -x /ref/index_v1.2 -U input.fq",
 		Shell:     &shell,
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 		StepId:    &stepID,
 	})

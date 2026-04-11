@@ -87,7 +87,7 @@ func TestOptunaLoop(t *testing.T) {
 	// Trial 1: low score, multiple epochs (last regex match wins → 0.60)
 	t1Resp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   `printf "epoch 1: score: 0.40, loss: 0.8\nepoch 2: score: 0.55, loss: 0.5\nepoch 3: score: 0.60, loss: 0.3\n"`,
-		Container: "alpine",
+		Container: "bare",
 		Shell:     strPtr("sh"),
 		StepId:    &stepID,
 		Status:    "P",
@@ -97,7 +97,7 @@ func TestOptunaLoop(t *testing.T) {
 	// Trial 2: high score (optimal)
 	t2Resp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   `printf "score: 0.95, loss: 0.05\n"`,
-		Container: "alpine",
+		Container: "bare",
 		Shell:     strPtr("sh"),
 		StepId:    &stepID,
 		Status:    "P",
@@ -107,7 +107,7 @@ func TestOptunaLoop(t *testing.T) {
 	// Trial 3: long-running task for SIGTERM test (keeps workflow alive)
 	t3Resp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "sleep 600",
-		Container: "alpine",
+		Container: "bare",
 		Shell:     strPtr("sh"),
 		StepId:    &stepID,
 		Status:    "P",

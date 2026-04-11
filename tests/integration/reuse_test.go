@@ -74,7 +74,7 @@ func TestReuseHitSkipsTask(t *testing.T) {
 	outputDir1 := t.TempDir() + "/run1_output/"
 	task1, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "echo hello",
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 		Output:    &outputDir1,
 		ReuseKey:  strPtr(reuseKey),
@@ -92,7 +92,7 @@ func TestReuseHitSkipsTask(t *testing.T) {
 	outputDir2 := t.TempDir() + "/run2_output/"
 	task2, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "echo hello",
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 		Output:    &outputDir2,
 		ReuseKey:  strPtr(reuseKey),
@@ -143,7 +143,7 @@ func TestReusePromotesDependents(t *testing.T) {
 	outputDir := t.TempDir() + "/prep_output/"
 	prepTask, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "echo prep",
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 		Output:    &outputDir,
 		ReuseKey:  strPtr(reuseKey),
@@ -158,7 +158,7 @@ func TestReusePromotesDependents(t *testing.T) {
 	outputDir2 := t.TempDir() + "/prep2_output/"
 	prepTask2, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "echo prep",
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 		Output:    &outputDir2,
 		ReuseKey:  strPtr(reuseKey),
@@ -168,7 +168,7 @@ func TestReusePromotesDependents(t *testing.T) {
 	// Dependent task: starts as W, depends on prep task 2
 	depTask, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:    "echo downstream",
-		Container:  "alpine",
+		Container:  "bare",
 		Status:     "P",
 		Dependency: []int32{prepTask2.TaskId},
 	})
@@ -217,7 +217,7 @@ func TestReuseMissRunsNormally(t *testing.T) {
 
 	task, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "echo unique_" + t.Name(),
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 		ReuseKey:  strPtr(reuseKey),
 	})
@@ -255,7 +255,7 @@ func TestNoReuseKeyRunsNormally(t *testing.T) {
 
 	task, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 		Command:   "echo normal",
-		Container: "alpine",
+		Container: "bare",
 		Status:    "P",
 	})
 	require.NoError(t, err)

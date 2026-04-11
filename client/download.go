@@ -417,6 +417,10 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 		}
 	}
 
+	// Skip Docker pull for bare tasks (no container needed)
+	if task.Container == "bare" {
+		dm.ResourceMemory["docker:bare"] = FileMetadata{}
+	}
 	container := "docker:" + task.Container
 	if _, present := dm.ResourceMemory[container]; !present {
 		added := dm.addWaitingTask(container, task)
