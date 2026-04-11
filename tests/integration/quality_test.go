@@ -3,7 +3,6 @@ package integration_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +23,7 @@ func TestQualityScoring(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 	c.Attr.Token = token
 
 	qclient, err := lib.CreateClient(serverAddr, token)
@@ -131,7 +130,7 @@ func TestSignalStop(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 	_ = c // not used further
 
 	qclient, err := lib.CreateClient(serverAddr, token)

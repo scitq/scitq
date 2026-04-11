@@ -28,7 +28,7 @@ func TestRetryCLI(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 	require.NotEmpty(t, token)
 	c.Attr.Token = token
 

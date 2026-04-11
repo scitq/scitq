@@ -26,7 +26,7 @@ func TestWorkflowStatusTransitions(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 	c.Attr.Token = token
 
 	qclient, err := lib.CreateClient(serverAddr, token)

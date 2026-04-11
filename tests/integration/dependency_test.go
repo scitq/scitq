@@ -2,7 +2,6 @@ package integration_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +24,7 @@ func TestTaskDependencyUnlocksNext(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 	c.Attr.Token = token
 
 	// 3) gRPC client

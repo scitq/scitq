@@ -45,6 +45,18 @@ var cliMu sync.Mutex // protects os.Args in runCLICommand
 var sharedPythonVenv string
 var sharedPythonOnce sync.Once
 
+// extractToken finds a JWT token (eyJ...) in CLI output, which may contain
+// other text from concurrent goroutines (Python bootstrap, server logs).
+func extractToken(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "eyJ") {
+			return line
+		}
+	}
+	return strings.TrimSpace(output) // fallback
+}
+
 func captureOutput(f func()) string {
 	// Create a pipe to capture stdout
 	r, w, _ := os.Pipe()
@@ -396,7 +408,7 @@ func TestIntegration(t *testing.T) {
 	// login and recover token
 	output, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	assert.NoError(t, err)
-	token := strings.TrimSpace(output)
+	token := extractToken(output)
 	assert.NotEmpty(t, token)
 	c.Attr.Token = token
 

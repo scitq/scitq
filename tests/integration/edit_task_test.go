@@ -3,7 +3,6 @@ package integration_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +25,7 @@ func TestEditAndRetryTask(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, token)
 	require.NoError(t, err)
@@ -102,7 +101,7 @@ func TestEditStepCommand(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, token)
 	require.NoError(t, err)
@@ -192,7 +191,7 @@ func TestEditStepCommandRegexp(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	token := strings.TrimSpace(out)
+	token := extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, token)
 	require.NoError(t, err)
