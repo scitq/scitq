@@ -21,7 +21,7 @@ jobs:
           docker pull postgres:17-alpine
 
       - name: Build Go project
-        run: go build ./...
+        run: make copy-docs && go build ./...
 
       - name: Run Go tests
         run: make integration-test
