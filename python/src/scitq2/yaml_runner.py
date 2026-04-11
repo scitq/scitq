@@ -286,9 +286,11 @@ def _build_iterations(iterate_def, params) -> Tuple[List[Dict[str, Any]], Option
         resolved = _resolve_cond(iterate_def, params)
         if isinstance(resolved, dict):
             # The selected branch is the iterator definition
-            # Inherit 'name' from parent if not in branch
+            # Inherit 'name' and 'match' from parent if not in branch
             if 'name' not in resolved and 'name' in iterate_def:
                 resolved['name'] = iterate_def['name']
+            if 'match' not in resolved and 'match' in iterate_def:
+                resolved['match'] = iterate_def['match']
             return _build_iterations(resolved, params)
 
     # Product mode
@@ -308,14 +310,37 @@ def _build_iterations(iterate_def, params) -> Tuple[List[Dict[str, Any]], Option
     return items, source_type
 
 
+def _extract_named_file_groups(iter_def: dict) -> Dict[str, str]:
+    """Extract named file groups from an iterator definition.
+    Any key that isn't a known iterator key is treated as a named file group (glob pattern).
+    """
+    known_keys = {'name', 'source', 'start', 'end', 'step', 'values', 'file',
+                  'uri', 'group_by', 'filter', 'identifier', 'cond', 'mode', 'over',
+                  'match', 'where', '_is_first_step'}
+    groups = {}
+    for k, v in iter_def.items():
+        if k not in known_keys and isinstance(v, str):
+            groups[k] = v
+    return groups
+
+
 def _build_single_iterator(iter_def: dict, params) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Build iterations for a single iterator definition."""
     name = iter_def['name']
     source = iter_def.get('source', 'list')
     uname = name.upper()
 
+    # Extract named file groups (v2: fastqs: "*.f*q.gz", csvs: "*.csv", etc.)
+    named_groups = _extract_named_file_groups(iter_def)
+
     if source in ('uri', 'ena', 'sra'):
-        samples = _discover_samples(iter_def, params)
+        samples = _discover_samples(iter_def, params, named_groups=named_groups)
+        # Apply match: filter (sample name pattern)
+        match_pattern = iter_def.get('match')
+        if match_pattern:
+            import fnmatch
+            match_pattern = _resolve_refs(match_pattern, params)
+            samples = [s for s in samples if fnmatch.fnmatch(s.sample_accession, str(match_pattern))]
         items = []
         for sample in samples:
             d = {uname: sample.sample_accession, '_sample': sample, '_source': source}
@@ -342,34 +367,61 @@ def _build_single_iterator(iter_def: dict, params) -> Tuple[List[Dict[str, Any]]
         raise ValueError(f"Unknown iterator source: {source}")
 
 
-def _discover_samples(iter_def: dict, params) -> list:
-    """Discover samples from URI/ENA/SRA."""
+def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, str]] = None) -> list:
+    """Discover samples from URI/ENA/SRA.
+    named_groups: v2 named file groups (e.g. {'fastqs': '*.f*q.gz'}).
+    """
     source = iter_def.get('source', 'uri')
+
+    # Determine the file filter: v2 named groups take precedence over v1 filter:
+    # For URI source, use the first named group's glob (or fall back to filter:)
+    filter_glob = iter_def.get('filter')
+    if named_groups:
+        # Use the first named group as the primary filter for discovery
+        first_group_glob = next(iter(named_groups.values()))
+        filter_glob = first_group_glob
 
     if source == 'uri':
         from scitq2.uri import URI
         uri = _resolve_refs(iter_def.get('uri', ''), params)
         group_by = iter_def.get('group_by', 'folder')
-        filter_glob = iter_def.get('filter')
         if filter_glob:
-            filter_glob = _resolve_refs(filter_glob, params)
-        return URI.find(uri, group_by=group_by, filter=filter_glob,
+            filter_glob = _resolve_refs(str(filter_glob), params)
+        samples = URI.find(uri, group_by=group_by, filter=filter_glob,
                         field_map={"sample_accession": "folder.name", "fastqs": "file.uris"})
+        # Store named file groups on each sample (URI: generic 'files' default)
+        for sample in samples:
+            sample.file_groups = {k: sample.fastqs for k in named_groups} if named_groups else {'files': sample.fastqs}
+        return samples
     elif source == 'ena':
         from scitq2.biology import ENA, SampleFilter, S
         identifier = _resolve_refs(iter_def.get('identifier', ''), params)
         group_by = iter_def.get('group_by', 'sample_accession')
-        filter_def = iter_def.get('filter', {})
+        # v2: where: replaces dict-form filter:
+        filter_def = iter_def.get('where') or iter_def.get('filter', {})
         sf = None
         if filter_def and isinstance(filter_def, dict):
             conditions = [getattr(S, k) == v for k, v in filter_def.items()]
             sf = SampleFilter(*conditions) if conditions else None
-        return ENA(identifier=identifier, group_by=group_by, filter=sf)
+        samples = ENA(identifier=identifier, group_by=group_by, filter=sf)
+        for sample in samples:
+            if named_groups:
+                sample.file_groups = {k: sample.fastqs for k in named_groups}
+            else:
+                sample.file_groups = {'fastqs': sample.fastqs, 'files': sample.fastqs}
+        return samples
     elif source == 'sra':
         from scitq2.biology import SRA
         identifier = _resolve_refs(iter_def.get('identifier', ''), params)
         group_by = iter_def.get('group_by', 'sample_accession')
-        return SRA(identifier=identifier, group_by=group_by)
+        # v2: where: for SRA too
+        samples = SRA(identifier=identifier, group_by=group_by)
+        for sample in samples:
+            if named_groups:
+                sample.file_groups = {k: sample.fastqs for k in named_groups}
+            else:
+                sample.file_groups = {'fastqs': sample.fastqs, 'files': sample.fastqs}
+        return samples
     raise ValueError(f"Unknown sample source: {source}")
 
 
@@ -557,14 +609,41 @@ def _resolve_adhoc_container(step_def: dict, workflow, registry: str = "gmtscien
 # Step input resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = False):
-    """Resolve 'step_name.output_name' to an Output object, or pass through raw URIs."""
+def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = False,
+                    itervar: Optional[Dict] = None):
+    """Resolve 'step_name.output_name' or 'iterator.group' to inputs, or pass through raw URIs."""
     if not input_ref:
         return None
     # Raw URI — pass through as-is (e.g. "s3://bucket/path/", "azure://container/path/")
     if '://' in input_ref:
         return input_ref
     parts = input_ref.split('.')
+
+    # Check if this is an iterator reference (e.g. sample.fastqs or sample)
+    if itervar is not None and '_sample' in itervar:
+        sample = itervar['_sample']
+        iter_name = None
+        # Find the iterator name from itervar keys (the non-underscore key)
+        for k, v in itervar.items():
+            if not k.startswith('_'):
+                iter_name = k.lower()
+                break
+        if iter_name and parts[0].lower() == iter_name:
+            if len(parts) == 2:
+                # sample.fastqs — named file group
+                group_name = parts[1]
+                if hasattr(sample, 'file_groups') and group_name in sample.file_groups:
+                    return sample.file_groups[group_name]
+                # Fallback: check direct attribute (v1 compat: sample.fastqs)
+                if hasattr(sample, group_name):
+                    return getattr(sample, group_name)
+                raise ValueError(f"Iterator '{parts[0]}' has no file group '{group_name}' "
+                                 f"(available: {list(sample.file_groups.keys()) if hasattr(sample, 'file_groups') else ['fastqs']})")
+            elif len(parts) == 1:
+                # sample — all files (unnamed group / v1 filter:)
+                return sample.fastqs
+
+    # Step reference
     if len(parts) == 2:
         step_name, output_name = parts
         if step_name in step_map:
@@ -643,7 +722,7 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
                     kwargs[key] = _resolve_field(val, params, itervar)
             input_ref = step_def.get('inputs')
             if input_ref:
-                kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in)
+                kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in, itervar=itervar)
             if 'worker_pool' in step_def and isinstance(step_def['worker_pool'], dict):
                 kwargs['worker_pool'] = _build_worker_pool(step_def['worker_pool'], params)
             sample = itervar.get('_sample') if itervar else None
@@ -707,14 +786,15 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
         input_ref = _resolve_field(input_ref, params, itervar, step_fields=step_def, extra_vars=extra_vars)
         if isinstance(input_ref, list):
             # Multiple input references — resolve each and combine with +
-            resolved = [_resolve_inputs(ref.strip(), step_map, grouped=is_fan_in) for ref in input_ref]
+            resolved = [_resolve_inputs(ref.strip(), step_map, grouped=is_fan_in, itervar=itervar) for ref in input_ref]
             combined = resolved[0]
             for r in resolved[1:]:
                 combined = combined + r
             step_kwargs['inputs'] = combined
         elif isinstance(input_ref, str):
-            step_kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in)
+            step_kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in, itervar=itervar)
     elif sample is not None and step_def.get('_is_first_step'):
+        # v1 backward compat: implicit first step input from iterator
         step_kwargs['inputs'] = sample.fastqs
 
     # Resource
@@ -787,6 +867,9 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         print("❌ Missing or empty: steps", file=sys.stderr)
         sys.exit(1)
 
+    # YAML format version (default: 1 for backward compat)
+    yaml_format = int(data.get('format', 1))
+
     # Build params
     params_def = data.get('params', {})
     ParamsClass = _build_params_class(params_def)
@@ -844,7 +927,19 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
             pass  # no resource root configured — RESOURCE_ROOT will be empty
 
     # Build iterations
-    iterations, source_type = _build_iterations(data.get('iterate'), params)
+    iterate_raw = data.get('iterate')
+    if yaml_format >= 2 and iterate_raw:
+        # Reject filter: in format 2
+        def _check_filter_usage(d):
+            if isinstance(d, dict):
+                if 'filter' in d:
+                    print("❌ format 2: 'filter:' is not allowed — use named file groups (e.g. fastqs: \"*.f*q.gz\") "
+                          "and 'where:' for metadata filters", file=sys.stderr)
+                    sys.exit(1)
+                for v in d.values():
+                    _check_filter_usage(v)
+        _check_filter_usage(iterate_raw)
+    iterations, source_type = _build_iterations(iterate_raw, params)
 
     # Resolve workflow-level vars (available to all steps)
     # RESOURCE_ROOT and {NAME}_COUNT are auto-injected
@@ -890,9 +985,19 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         if step is not None:
             step_map[step.name] = step
 
-    # Mark first per-iteration step
-    if per_iter_steps:
+    # Mark first per-iteration step (format 1 only: implicit input from iterator)
+    if per_iter_steps and yaml_format < 2:
         per_iter_steps[0]['_is_first_step'] = True
+    # format 2: check all steps for /input/ without inputs:
+    if yaml_format >= 2:
+        for sd in per_iter_steps + oneoff_steps + fanin_steps:
+            if not sd.get('inputs'):
+                cmd = sd.get('command', '')
+                if isinstance(cmd, str) and ('/input/' in cmd or '/input ' in cmd):
+                    step_label = sd.get('name', sd.get('import', sd.get('module', '?')))
+                    print(f"❌ format 2: step '{step_label}' references /input/ but has no inputs:",
+                          file=sys.stderr)
+                    sys.exit(1)
 
     # Iteration loop
     if per_iter_steps and not iterations:

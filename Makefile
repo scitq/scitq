@@ -39,8 +39,12 @@ STATIC_LDFLAGS := $(LDFLAGS) -extldflags "-static"
 $(BINARY_DIR):
 	@mkdir -p $(BINARY_DIR)
 
-build-server: | $(BINARY_DIR)
+build-server: copy-docs | $(BINARY_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_SERVER) $(SRC_SERVER)
+
+copy-docs:
+	@mkdir -p server/docs
+	@cp docs/usage/cli.md docs/usage/yaml-templates.md docs/usage/dsl.md docs/usage/ai-integration.md docs/usage/ui.md docs/reference/configuration.md server/docs/
 
 build-client: | $(BINARY_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLIENT) $(SRC_CLIENT)

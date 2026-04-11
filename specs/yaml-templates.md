@@ -1110,3 +1110,32 @@ func readYAMLMetadata(path string) (string, string, int, error) {
 6. **Proto**: `DownloadTemplate` RPC (returns script content)
 7. **DB**: add `type` column to template table (`yaml`/`python`)
 8. **UI**: show both types in template list
+
+## Format 2 (implemented)
+
+The `format: 2` key at the top of a YAML template opts into the v2 engine:
+
+### Changes from format 1
+
+| Concern | format 1 | format 2 |
+|---|---|---|
+| File selection | `filter: "*.f*q.gz"` | Named groups: `fastqs: "*.f*q.gz"` |
+| Metadata filter (ENA/SRA) | `filter: { library_strategy: WGS }` | `where: { library_strategy: WGS }` |
+| Sample name filter | Baked into glob: `filter: "{params.filter:*}.f*q.gz"` | `match: "{params.filter:*}"` (separate) |
+| First step input | Implicit from iterator | `inputs: sample.fastqs` (explicit) |
+| `filter:` keyword | Accepted | Error |
+| `/input/` without `inputs:` | Silent | Error |
+
+### Default file groups by source
+
+- **URI**: `sample.files` (generic)
+- **ENA/SRA**: `sample.fastqs` (implicit, also accessible as `sample.files`)
+
+### Remaining TODO: workspace raw URI support
+
+Currently `workspace:` only accepts a `provider:region` pair which the server resolves via `local_workspaces`. If the value contains `://`, it should be used as-is:
+
+```yaml
+workspace: "azure://my-storage/project-workspace/"  # direct URI (proposed)
+workspace: "{params.location}"                       # provider:region (current)
+```

@@ -163,13 +163,22 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 		val, ok := h.sessions.Load(sessionID)
 		if !ok {
-			writeJSON(w, http.StatusNotFound, jsonrpcResponse{
-				JSONRPC: "2.0", ID: req.ID,
-				Error: &rpcError{Code: -32600, Message: "Session not found — send initialize first"},
-			})
-			return
+			// Session lost (server restart, timeout) — auto-recreate if Bearer token is present
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				session = &mcpSession{token: strings.TrimPrefix(authHeader, "Bearer ")}
+				h.sessions.Store(sessionID, session)
+				log.Printf("🔄 MCP session %s auto-restored from Bearer token", sessionID[:16])
+			} else {
+				writeJSON(w, http.StatusNotFound, jsonrpcResponse{
+					JSONRPC: "2.0", ID: req.ID,
+					Error: &rpcError{Code: -32600, Message: "Session not found — send initialize first"},
+				})
+				return
+			}
+		} else {
+			session = val.(*mcpSession)
 		}
-		session = val.(*mcpSession)
 	}
 
 	var result any
@@ -265,7 +274,56 @@ Prefetch is key to scitq performance but tricky to set right. Diagnose live:
 - Use task_logs to inspect stdout/stderr of failed tasks.
 - Use list_worker_events to check worker lifecycle issues (install failures, evictions).
 - Use retry_task or edit_and_retry_task to recover from failures.
-- Use kill_task to stop a stuck or runaway task.
+- Use kill_task to stop a stuck or runaway task, stop_task for graceful SIGTERM.
+
+## YAML template format (v2)
+
+New templates should use format: 2 at the top. Key differences from format 1:
+
+### Iterator named file groups
+Instead of filter:, declare named file groups on iterators and reference them explicitly:
+` + "`" + `yaml
+format: 2
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.data_dir}"
+  group_by: folder
+  fastqs: "*.f*q.gz"       # named file group
+  match: "{params.filter:*}" # filter which samples to include
+
+steps:
+  - name: process
+    inputs: sample.fastqs   # explicit reference
+` + "`" + `
+
+- URI source: declare named groups (e.g. fastqs:, csvs:). Default unnamed group is sample.files.
+- ENA/SRA sources: fastqs group is implicit (sample.fastqs and sample.files both work).
+- match: filters iterations by name pattern (all sources).
+- where: replaces filter: for ENA/SRA metadata filtering (e.g. where: {library_strategy: WGS}).
+- filter: is an error in format 2.
+
+### Quality scoring
+Steps can extract metrics from stdout/stderr:
+` + "`" + `yaml
+quality:
+  variables:
+    train_auc: "QUALITY.*train_auc=([0-9.]+)"
+    test_auc: "QUALITY.*test_auc=([0-9.]+)"
+  score: "test_auc"
+` + "`" + `
+
+### Optimization (Optuna)
+` + "`" + `yaml
+optimize:
+  direction: maximize
+  n_trials: 50
+  n_parallel: 5
+  step: train
+  search_space:
+    lr: {type: float, low: 0.0001, high: 0.1, log: true}
+    depth: {type: int, low: 1, high: 10}
+` + "`" + `
 
 Always call login first to authenticate before using other tools.`,
 		},
@@ -704,6 +762,18 @@ func (h *mcpHandler) listTools() []mcpTool {
 				},
 			},
 		},
+		// --- Documentation ---
+		{
+			Name:        "get_doc",
+			Description: "Get scitq documentation page. Available pages: cli, yaml-templates, dsl, ai-integration, configuration, ui.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"page": {Type: "string", Description: "Doc page name (e.g. yaml-templates, cli, dsl, ai-integration, configuration, ui)"},
+				},
+				Required: []string{"page"},
+			},
+		},
 	}
 }
 
@@ -805,6 +875,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolPruneWorkerEvents(authCtx, call.Arguments)
 	case "list_template_runs":
 		return h.toolListTemplateRuns(authCtx, call.Arguments)
+	case "get_doc":
+		return h.toolGetDoc(authCtx, call.Arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
 	}
@@ -1540,6 +1612,24 @@ func (h *mcpHandler) toolListTemplateRuns(ctx context.Context, args json.RawMess
 		return errorResult(err), nil
 	}
 	return jsonResult(res.Runs), nil
+}
+
+func (h *mcpHandler) toolGetDoc(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ Page string `json:"page"` }
+	json.Unmarshal(args, &p)
+	if p.Page == "" {
+		return textResult("Available pages: cli, yaml-templates, dsl, ai-integration, configuration, ui"), nil
+	}
+	// Sanitize: only allow known page names
+	allowed := map[string]bool{"cli": true, "yaml-templates": true, "dsl": true, "ai-integration": true, "configuration": true, "ui": true}
+	if !allowed[p.Page] {
+		return textResult(fmt.Sprintf("Unknown page %q. Available: cli, yaml-templates, dsl, ai-integration, configuration, ui", p.Page)), nil
+	}
+	data, err := embeddedDocs.ReadFile("docs/" + p.Page + ".md")
+	if err != nil {
+		return errorResult(fmt.Errorf("could not read doc page %q: %w", p.Page, err)), nil
+	}
+	return textResult(string(data)), nil
 }
 
 // --- Helpers ---

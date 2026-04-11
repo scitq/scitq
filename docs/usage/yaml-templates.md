@@ -5,6 +5,7 @@ YAML templates are a declarative alternative to the [Python DSL](dsl.md) for def
 ## Hello world
 
 ```yaml
+format: 2
 name: helloworld
 version: 1.0.0
 description: Minimal workflow example
@@ -50,6 +51,7 @@ scitq template run --name helloworld --param 'key=value'
 A YAML template has these top-level sections:
 
 ```yaml
+format: 2                  # YAML engine format (default: 1 for backward compat)
 name: my_workflow          # Required: unique template name
 version: 1.0.0             # Required: semantic version
 description: What it does   # Required: human-readable description
@@ -136,6 +138,7 @@ If `when:` is omitted, the constraint triggers when the parameter is truthy. Val
 Here is a complete template that processes multiple samples through a three-step pipeline: quality control, alignment, and a final compilation step:
 
 ```yaml
+format: 2
 name: simple_pipeline
 version: 1.0.0
 description: QC + alignment + compile
@@ -157,7 +160,7 @@ iterate:
   source: uri
   uri: "{params.bioproject}"
   group_by: folder
-  filter: "*.f*q.gz"
+  fastqs: "*.f*q.gz"
 
 worker_pool:
   provider: "{params.location}"
@@ -172,6 +175,7 @@ retry: 2
 steps:
   # Per-sample: quality control
   - import: genetic/fastp
+    inputs: sample.fastqs
 
   # Per-sample: alignment
   - name: align
@@ -216,7 +220,8 @@ iterate:
   source: uri           # Source type: uri, ena, sra, list, range
   uri: "{params.bioproject}"
   group_by: folder      # Group files by parent folder
-  filter: "*.f*q.gz"    # Glob filter for files
+  fastqs: "*.f*q.gz"    # Named file group (referenced as inputs: sample.fastqs)
+  match: "{params.filter:*}"  # Optional: filter which samples to include
 ```
 
 The iterator automatically injects:
@@ -224,18 +229,78 @@ The iterator automatically injects:
 - `{SAMPLE_COUNT}` — the total number of samples (usable in vars and worker_pool),
 - `{SAMPLES}` — comma-separated list of all sample names.
 
-Other sources:
+#### Named file groups
+
+Instead of a generic `filter:`, iterators declare **named file groups** — glob patterns that define what files each iteration provides. Steps reference them explicitly as `inputs: iterator_name.group_name`:
 
 ```yaml
-# Public data from ENA
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.data_dir}"
+  group_by: folder
+  fastqs: "*.f*q.gz"        # named file group
+
+steps:
+  - name: fastp
+    inputs: sample.fastqs    # explicit reference to the named group
+```
+
+Multiple named groups are supported:
+
+```yaml
+iterate:
+  name: dataset
+  source: uri
+  uri: "{params.data_dir}"
+  group_by: folder
+  csvs: "*.csv"
+  configs: "param.yaml"
+
+steps:
+  - name: train
+    inputs: dataset.csvs
+  - name: validate
+    inputs: dataset.configs
+```
+
+The legacy `filter:` syntax is still supported for backward compatibility but named groups are preferred for clarity.
+
+#### `match:` — filter iterations by name
+
+The `match:` key filters which iterations to include, based on the sample/folder name pattern:
+
+```yaml
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.bioproject}"
+  group_by: folder
+  fastqs: "*.f*q.gz"
+  match: "SRR123*"           # only process samples matching this pattern
+```
+
+This is separate from file selection (what files within each sample) and metadata filtering (ENA/SRA attributes). It works on all source types.
+
+#### `where:` — metadata filter (ENA/SRA)
+
+For ENA and SRA sources, `where:` filters iterations by metadata attributes:
+
+```yaml
 iterate:
   name: sample
   source: ena
   identifier: "PRJEB6070"
   group_by: sample_accession
-  filter:
+  where:
     library_strategy: WGS
+```
 
+ENA and SRA are FASTQ databases — a `fastqs` file group is provided implicitly (`inputs: sample.fastqs` works without declaring it). For URI sources, you must declare named groups explicitly, or use `inputs: sample.files` for the default unnamed group.
+
+#### Other sources
+
+```yaml
 # Simple list
 iterate:
   name: region
@@ -253,21 +318,32 @@ iterate:
 
 ### Conditional iterators
 
-When the data source depends on a parameter, use `cond:`:
+When the data source depends on a parameter, use `cond:`. The `match:` key is inherited by all branches:
 
 ```yaml
 iterate:
   name: sample
+  match: "{params.filter:*}"
   cond: "{params.data_source}"
   uri:
     source: uri
     uri: "{params.bioproject}"
     group_by: folder
-    filter: "*.f*q.gz"
+    fastqs: "*.f*q.gz"
   ena:
     source: ena
     identifier: "{params.bioproject}"
     group_by: sample_accession
+    fastqs: "*.f*q.gz"
+    where:
+      library_strategy: WGS
+  sra:
+    source: sra
+    identifier: "{params.bioproject}"
+    group_by: sample_accession
+    fastqs: "*.f*q.gz"
+    where:
+      library_strategy: WGS
 ```
 
 ### Three kinds of steps
@@ -340,7 +416,10 @@ worker_pool:
   disk: ">= 100"                  # Disk (GB) filter
   max_recruited: 10                # Maximum workers to recruit
   task_batches: 2                  # How many batches of tasks per worker
+  prefetch: 1                      # Tasks to download in advance per worker
 ```
+
+The `prefetch` setting controls how many tasks a worker prepares in advance while executing its current tasks. This is key for performance: without prefetch, there's idle time between tasks while inputs are downloaded. With `prefetch: 1`, the next task's inputs are downloaded during the current task's execution. Higher values help for very fast tasks with large inputs. See the [CLI recruiter documentation](cli.md#recruiter-create) for details on tuning prefetch.
 
 A step can override the workflow-level pool:
 
@@ -351,6 +430,22 @@ A step can override the workflow-level pool:
       max_recruited: 1
     grouped: true
 ```
+
+### Workspace
+
+The `workspace:` field specifies where task outputs are stored between steps. It takes a `provider:region` value (e.g. `azure.primary:swedencentral` or `openstack.ovh:GRA11`), typically matching the worker pool so data stays close to compute.
+
+```yaml
+workspace: "{params.location}"
+```
+
+Behind the scenes, the server resolves the provider:region pair into a concrete storage URI via the `local_workspaces` configuration in `scitq.yaml`. For example, `azure.primary:swedencentral` might map to `aznorth://workspace`. Task outputs are then stored at `{workspace_root}/{workflow_name}/{task_name}/`. This indirection means templates are portable — the same template works across providers without hardcoding storage paths.
+
+When a task has no `publish` path, its `/output/` directory is uploaded to the workspace. Downstream tasks download their inputs from there.
+
+When `publish` is defined, successful tasks upload to the publish path instead of the workspace. However, **failed tasks always upload to the workspace** (never to publish), so their output can be inspected for debugging.
+
+If omitted, task outputs are only stored locally on the worker and lost when it is destroyed. Multi-step workflows need either `workspace` or `publish` on every step so that downstream tasks can find their inputs. Using `workspace` is the standard approach; relying on `publish` alone works but is not recommended (publish is meant for final results, not intermediate data).
 
 ### Resources
 
@@ -722,6 +817,7 @@ For optimization workflows, quality scoring is used with the `optimize:` block (
 The `optimize:` block adds Optuna-driven hyperparameter search to a YAML template. It works with the `iterate:` block: for each trial, Optuna suggests parameter values which are substituted into the target step's command, and the step runs once per sample. The trial score is the aggregated quality across all samples.
 
 ```yaml
+format: 2
 name: gpredomics_opt
 version: 1.0.0
 description: Hyperparameter optimization for gpredomics

@@ -45,6 +45,9 @@ python/build/
 
 # svelte
 server/public/
+
+# embedded docs (copied from docs/ at build time)
+server/docs/
 version.ts
 
 /workflow
