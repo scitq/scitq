@@ -327,10 +327,11 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return
 	}
 
-	// Track bare processes for signal handling
+	// Track bare processes for signal handling (keyed by workerName:taskID to avoid cross-test collisions)
+	bareKey := fmt.Sprintf("%s:%d", workerName, task.TaskId)
 	if isBare && cmd.Process != nil {
-		bareProcesses.Store(task.TaskId, cmd.Process)
-		defer bareProcesses.Delete(task.TaskId)
+		bareProcesses.Store(bareKey, cmd.Process)
+		defer bareProcesses.Delete(bareKey)
 	}
 
 	// Open log stream
@@ -501,7 +502,8 @@ func (w *WorkerConfig) fetchTasks(
 		sig := sig
 		go func() {
 			// Check if this is a bare process
-			if proc, ok := bareProcesses.Load(sig.TaskId); ok {
+			bareKey := fmt.Sprintf("%s:%d", w.Name, sig.TaskId)
+			if proc, ok := bareProcesses.Load(bareKey); ok {
 				p := proc.(*os.Process)
 				if sig.Signal == "T" {
 					log.Printf("🛑 Stopping bare task %d (SIGTERM)", sig.TaskId)
@@ -513,7 +515,7 @@ func (w *WorkerConfig) fetchTasks(
 					}
 					go func() {
 						time.Sleep(time.Duration(grace) * time.Second)
-						if _, stillRunning := bareProcesses.Load(sig.TaskId); stillRunning {
+						if _, stillRunning := bareProcesses.Load(bareKey); stillRunning {
 							p.Kill()
 						}
 					}()
