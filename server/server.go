@@ -88,6 +88,7 @@ type taskQueueServer struct {
 	activeJobs        sync.Map      // jobID -> context.CancelFunc
 	rcloneRemotes     *pb.RcloneRemotes
 	pythonReady       chan struct{} // closed when Python DSL venv is bootstrapped
+	activeLogStreams   sync.Map     // taskID -> chan struct{} (closed when log stream ends)
 }
 
 type TaskUpdateBroadcast struct {
@@ -478,6 +479,21 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		log.Printf("🔔 Updating task %d status to %s (duration null)", req.TaskId, req.NewStatus)
 	} else {
 		log.Printf("🔔 Updating task %d status to %s (duration: %d)", req.TaskId, req.NewStatus, *req.Duration)
+	}
+
+	// Wait for log stream to finish before committing S/F status.
+	// The worker sends logs via streaming RPC, then status via unary RPC —
+	// the stream may still be flushing when the status update arrives.
+	// This guarantees stdout/stderr are fully on disk before the task is visible as S/F.
+	if req.NewStatus == "S" || req.NewStatus == "F" {
+		if ch, ok := s.activeLogStreams.Load(req.TaskId); ok {
+			select {
+			case <-ch.(chan struct{}):
+				// log stream finished
+			case <-time.After(5 * time.Second):
+				log.Printf("⚠️ task %d: timed out waiting for log stream to close", req.TaskId)
+			}
+		}
 	}
 
 	// Use new CTE and scan fields for aggregator
@@ -1094,8 +1110,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 	}
 
-	// Extract quality score on success (synchronous — must complete before the
-	// status is visible to polling clients, otherwise there's a race window)
+	// Extract quality score on success (logs guaranteed on disk by pre-CTE wait)
 	if req.NewStatus == "S" {
 		s.extractQualityScore(req.TaskId)
 	}
@@ -1134,7 +1149,6 @@ func getLogPath(taskID int32, logType string, logRoot string) string {
 // extractQualityScore reads the step's quality_definition, runs regexes against
 // the task's stored stdout/stderr logs, evaluates the formula, and stores the result.
 func (s *taskQueueServer) extractQualityScore(taskID int32) {
-	// Get quality definition from the task's step
 	var qualityDefStr sql.NullString
 	err := s.db.QueryRow(`
 		SELECT s.quality_definition
@@ -1142,7 +1156,7 @@ func (s *taskQueueServer) extractQualityScore(taskID int32) {
 		WHERE t.task_id = $1
 	`, taskID).Scan(&qualityDefStr)
 	if err != nil || !qualityDefStr.Valid || qualityDefStr.String == "" {
-		return // no quality definition
+		return
 	}
 
 	def, err := ParseQualityDefinition(qualityDefStr.String)
@@ -1151,27 +1165,18 @@ func (s *taskQueueServer) extractQualityScore(taskID int32) {
 		return
 	}
 
-	// Read stored logs (retry briefly if empty — log stream may still be flushing)
-	var stdout, stderr string
-	var result *QualityResult
-	for attempt := 0; attempt < 5; attempt++ {
-		stdout = readLogFile(taskID, "stdout", s.logRoot)
-		stderr = readLogFile(taskID, "stderr", s.logRoot)
-		result, err = ExtractQuality(def, stdout, stderr)
-		if err != nil {
-			log.Printf("⚠️ task %d: quality extraction failed: %v", taskID, err)
-			return
-		}
-		if result != nil {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
+	// Logs are guaranteed on disk by activeLogStreams wait in UpdateTaskStatus
+	stdout := readLogFile(taskID, "stdout", s.logRoot)
+	stderr := readLogFile(taskID, "stderr", s.logRoot)
+	result, err := ExtractQuality(def, stdout, stderr)
+	if err != nil {
+		log.Printf("⚠️ task %d: quality extraction failed: %v", taskID, err)
+		return
 	}
 	if result == nil {
-		return // no variables matched
+		return
 	}
 
-	// Store quality score and vars
 	varsJSON, _ := json.Marshal(result.Vars)
 	_, err = s.db.Exec(`UPDATE task SET quality_score = $1, quality_vars = $2::jsonb WHERE task_id = $3`,
 		result.Score, string(varsJSON), taskID)
@@ -1565,13 +1570,33 @@ func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepC
 }
 
 func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) error {
+	var taskID int32
+	var registered bool
 	for {
 		logEntry, err := stream.Recv()
 		if err != nil {
 			if err.Error() == "EOF" {
+				// Signal that log stream is done for this task
+				if registered {
+					if ch, ok := s.activeLogStreams.LoadAndDelete(taskID); ok {
+						close(ch.(chan struct{}))
+					}
+				}
 				return stream.SendAndClose(&pb.Ack{Success: true})
 			}
+			if registered {
+				if ch, ok := s.activeLogStreams.LoadAndDelete(taskID); ok {
+					close(ch.(chan struct{}))
+				}
+			}
 			return err
+		}
+		// Register log stream on first message
+		if !registered {
+			taskID = logEntry.TaskId
+			ch := make(chan struct{})
+			s.activeLogStreams.Store(taskID, ch)
+			registered = true
 		}
 		logPath := getLogPath(logEntry.TaskId, logEntry.LogType, s.logRoot)
 		file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)

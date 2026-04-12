@@ -86,15 +86,12 @@ func TestQualityScoring(t *testing.T) {
 			return false
 		}
 		for _, tk := range res.Tasks {
-			if tk.TaskId == taskID && tk.Status == "S" {
+			if tk.TaskId == taskID && tk.Status == "S" && tk.QualityScore != nil {
 				return true
 			}
 		}
 		return false
-	}, 30*time.Second, 500*time.Millisecond, "task should reach S")
-
-	// Give the async quality extraction a moment to complete
-	time.Sleep(1 * time.Second)
+	}, 30*time.Second, 500*time.Millisecond, "task should reach S with quality score")
 
 	// Verify quality score is populated
 	res, err := qc.ListTasks(ctx, &pb.ListTasksRequest{})

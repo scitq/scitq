@@ -114,24 +114,23 @@ func TestOptunaLoop(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for trials 1 and 2 to succeed
+	// Wait for trials 1 and 2 to succeed with quality scores
 	for _, tid := range []int32{t1Resp.TaskId, t2Resp.TaskId} {
 		tid := tid
 		require.Eventually(t, func() bool {
-			return getTask(t, ctx, qc, tid).Status == "S"
-		}, 30*time.Second, 500*time.Millisecond, fmt.Sprintf("task %d should succeed", tid))
+			tk := getTask(t, ctx, qc, tid)
+			return tk.Status == "S" && tk.QualityScore != nil
+		}, 30*time.Second, 500*time.Millisecond, fmt.Sprintf("task %d should succeed with quality score", tid))
 	}
 
 	// Verify trial 1 quality (last match: score: 0.60)
 	tk1 := getTask(t, ctx, qc, t1Resp.TaskId)
-	require.NotNil(t, tk1.QualityScore, "trial 1 should have quality_score")
 	require.InDelta(t, 0.60, *tk1.QualityScore, 0.001)
 	require.NotNil(t, tk1.QualityVars)
 	require.Contains(t, *tk1.QualityVars, `"loss"`)
 
 	// Verify trial 2 quality (score: 0.95)
 	tk2 := getTask(t, ctx, qc, t2Resp.TaskId)
-	require.NotNil(t, tk2.QualityScore, "trial 2 should have quality_score")
 	require.InDelta(t, 0.95, *tk2.QualityScore, 0.001)
 
 	// Verify "optimization": trial 2 score > trial 1 score
