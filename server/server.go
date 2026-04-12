@@ -163,6 +163,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 			}
 			return count > 0, time.Duration(extraSec) * time.Second
 		},
+		db,
 	)
 
 	workers, err := FetchWorkersForWatchdog(context.Background(), s.db)

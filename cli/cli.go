@@ -180,6 +180,22 @@ type Attr struct {
 			Rounds          int      `arg:"--rounds" help:"Number of rounds"`
 			Timeout         int      `arg:"--timeout" default:"10" help:"Timeout in seconds"`
 		} `arg:"subcommand:create" help:"Create a new recruiter"`
+		Update *struct {
+			StepId          int32    `arg:"--step-id,required" help:"Step ID"`
+			Rank            int32    `arg:"--rank,required" help:"Recruiter rank"`
+			Protofilter     *string  `arg:"--filter" help:"Updated filter (e.g. 'cpu>=12:mem>=30')"`
+			Concurrency     *int32   `arg:"--concurrency" help:"Updated concurrency"`
+			Prefetch        *int32   `arg:"--prefetch" help:"Updated prefetch"`
+			PrefetchPercent *int32   `arg:"--prefetch-percent" help:"Updated prefetch (as %% of concurrency)"`
+			CpuPerTask      *int32   `arg:"--cpu-per-task" help:"Updated CPU per task"`
+			MemoryPerTask   *float32 `arg:"--memory-per-task" help:"Updated memory per task (GB)"`
+			DiskPerTask     *float32 `arg:"--disk-per-task" help:"Updated disk per task (GB)"`
+			ConcurrencyMax  *int32   `arg:"--concurrency-max" help:"Updated max concurrency"`
+			ConcurrencyMin  *int32   `arg:"--concurrency-min" help:"Updated min concurrency"`
+			MaxWorkers      *int32   `arg:"--max-workers" help:"Updated max workers"`
+			Rounds          *int32   `arg:"--rounds" help:"Updated rounds"`
+			Timeout         *int32   `arg:"--timeout" help:"Updated timeout (seconds)"`
+		} `arg:"subcommand:update" help:"Update a recruiter"`
 		Delete *struct {
 			StepId int32 `arg:"--step-id,required" help:"Step ID to delete"`
 			Rank   int   `arg:"--rank,required" help:"Recruiter rank to delete"`
@@ -198,9 +214,10 @@ type Attr struct {
 			Status         string `arg:"--status" help:"Initial workflow status (P/R/Z/D/F/S). Default is P."`
 		} `arg:"subcommand:create" help:"Create a new workflow"`
 		Update *struct {
-			WorkflowId int32  `arg:"--id,required" help:"Workflow ID to update"`
-			Status     string `arg:"--status,required" help:"New workflow status (P/R/Z/D/F/S)"`
-		} `arg:"subcommand:update" help:"Update workflow status"`
+			WorkflowId     int32  `arg:"--id,required" help:"Workflow ID to update"`
+			Status         string `arg:"--status" help:"New workflow status (P/R/Z/D/F/S)"`
+			MaximumWorkers *int32 `arg:"--maximum-workers" help:"Maximum number of workers"`
+		} `arg:"subcommand:update" help:"Update a workflow"`
 		Delete *struct {
 			WorkflowId int32 `arg:"--id,required" help:"Workflow ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a workflow"`
@@ -1102,6 +1119,37 @@ func (c *CLI) RecruiterDelete() error {
 	return nil
 }
 
+func (c *CLI) RecruiterUpdate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	u := c.Attr.Recruiter.Update
+	req := &pb.RecruiterUpdate{
+		StepId:          u.StepId,
+		Rank:            u.Rank,
+		Protofilter:     u.Protofilter,
+		Concurrency:     u.Concurrency,
+		Prefetch:        u.Prefetch,
+		MaxWorkers:      u.MaxWorkers,
+		Rounds:          u.Rounds,
+		Timeout:         u.Timeout,
+		CpuPerTask:      u.CpuPerTask,
+		MemoryPerTask:   u.MemoryPerTask,
+		DiskPerTask:     u.DiskPerTask,
+		PrefetchPercent: u.PrefetchPercent,
+		ConcurrencyMin:  u.ConcurrencyMin,
+		ConcurrencyMax:  u.ConcurrencyMax,
+	}
+
+	_, err := c.QC.Client.UpdateRecruiter(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to update recruiter: %w", err)
+	}
+
+	fmt.Printf("✅ Recruiter step_id=%d rank=%d updated\n", u.StepId, u.Rank)
+	return nil
+}
+
 func (c *CLI) WorkflowList() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
@@ -1161,13 +1209,21 @@ func (c *CLI) WorkflowUpdateStatus() error {
 	defer cancel()
 
 	req := &pb.WorkflowStatusUpdate{
-		WorkflowId: c.Attr.Workflow.Update.WorkflowId,
-		Status:     c.Attr.Workflow.Update.Status,
+		WorkflowId:     c.Attr.Workflow.Update.WorkflowId,
+		Status:         c.Attr.Workflow.Update.Status,
+		MaximumWorkers: c.Attr.Workflow.Update.MaximumWorkers,
 	}
 	if _, err := c.QC.Client.UpdateWorkflowStatus(ctx, req); err != nil {
-		return fmt.Errorf("failed to update workflow status: %w", err)
+		return fmt.Errorf("failed to update workflow: %w", err)
 	}
-	fmt.Printf("✅ Updated workflow %d status to %s\n", req.WorkflowId, req.Status)
+	parts := []string{}
+	if req.Status != "" {
+		parts = append(parts, fmt.Sprintf("status=%s", req.Status))
+	}
+	if req.MaximumWorkers != nil {
+		parts = append(parts, fmt.Sprintf("maximum_workers=%d", *req.MaximumWorkers))
+	}
+	fmt.Printf("✅ Updated workflow %d: %s\n", req.WorkflowId, strings.Join(parts, ", "))
 	return nil
 }
 
@@ -2320,6 +2376,8 @@ func Run(c CLI) error {
 			return c.RecruiterCreate()
 		case c.Attr.Recruiter.Delete != nil:
 			return c.RecruiterDelete()
+		case c.Attr.Recruiter.Update != nil:
+			return c.RecruiterUpdate()
 		default:
 			return fmt.Errorf("no recruiter subcommand specified")
 		}

@@ -36,6 +36,7 @@ type Watchdog struct {
 	deleteWorker func(workerID int32) error
 	warmCheck    func(workerID int32) (bool, time.Duration) // (has A/C/O, extra delay)
 
+	db             *sql.DB
 	tickerInterval time.Duration
 }
 
@@ -44,6 +45,7 @@ func NewWatchdog(
 	updateWorker func(workerID int32, newStatus string) error,
 	deleteWorker func(workerID int32) error,
 	warmCheck func(workerID int32) (bool, time.Duration),
+	db *sql.DB,
 ) *Watchdog {
 	return &Watchdog{
 		idleTimeout:           idleTimeout,
@@ -53,6 +55,7 @@ func NewWatchdog(
 		updateWorker:          updateWorker,
 		deleteWorker:          deleteWorker,
 		warmCheck:             warmCheck,
+		db:                    db,
 		tickerInterval:        tickerInterval,
 	}
 }
@@ -157,12 +160,19 @@ func (w *Watchdog) Run(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(w.tickerInterval)
 	defer ticker.Stop()
 
+	resyncTicker := time.NewTicker(5 * time.Minute)
+	defer resyncTicker.Stop()
+
 	for {
 		select {
 		case <-ticker.C:
 			w.checkOffline()
 			w.checkIdle()
 			w.checkLongOffline()
+		case <-resyncTicker.C:
+			if w.db != nil {
+				w.ResyncActiveTasks(context.Background(), w.db)
+			}
 		case <-stopChan:
 			log.Println("[watchdog] stopping")
 			return
