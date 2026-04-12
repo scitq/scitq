@@ -233,6 +233,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			shell = *task.Shell
 		}
 		cmd = exec.Command(shell, "-c", task.Command)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own process group for clean signal delivery
 		cmd.Dir = taskDir + "/tmp"
 		cmd.Env = append(os.Environ(),
 			"INPUT="+taskDir+"/input",
@@ -377,7 +378,9 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	// to call Wait before all reads from the pipe have completed.").
 	logWg.Wait()
 	err = cmd.Wait()
-	stream.CloseSend()
+	// CloseAndRecv waits for the server to confirm all log messages are written,
+	// ensuring logs are on disk before we send the status update.
+	stream.CloseAndRecv()
 
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
 	sec := int32(time.Since(runStart).Seconds())
@@ -507,9 +510,10 @@ func (w *WorkerConfig) fetchTasks(
 			bareKey := fmt.Sprintf("%s:%d", w.Name, sig.TaskId)
 			if proc, ok := bareProcesses.Load(bareKey); ok {
 				p := proc.(*os.Process)
+				pgid := -p.Pid // negative PID = process group
 				if sig.Signal == "T" {
-					log.Printf("🛑 Stopping bare task %d (SIGTERM)", sig.TaskId)
-					p.Signal(syscall.SIGTERM)
+					log.Printf("🛑 Stopping bare task %d (SIGTERM to pgid %d)", sig.TaskId, p.Pid)
+					syscall.Kill(pgid, syscall.SIGTERM)
 					// Wait for grace period, then SIGKILL
 					grace := 10
 					if sig.GracePeriod != nil && *sig.GracePeriod > 0 {
@@ -518,12 +522,12 @@ func (w *WorkerConfig) fetchTasks(
 					go func() {
 						time.Sleep(time.Duration(grace) * time.Second)
 						if _, stillRunning := bareProcesses.Load(bareKey); stillRunning {
-							p.Kill()
+							syscall.Kill(pgid, syscall.SIGKILL)
 						}
 					}()
 				} else {
-					log.Printf("🔪 Killing bare task %d (SIGKILL)", sig.TaskId)
-					p.Kill()
+					log.Printf("🔪 Killing bare task %d (SIGKILL to pgid %d)", sig.TaskId, p.Pid)
+					syscall.Kill(pgid, syscall.SIGKILL)
 				}
 				return
 			}
