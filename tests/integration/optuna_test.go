@@ -117,9 +117,26 @@ func TestOptunaLoop(t *testing.T) {
 	// Wait for trials 1 and 2 to succeed with quality scores
 	for _, tid := range []int32{t1Resp.TaskId, t2Resp.TaskId} {
 		tid := tid
+		polls := 0
 		require.Eventually(t, func() bool {
-			tk := getTask(t, ctx, qc, tid)
-			return tk.Status == "S" && tk.QualityScore != nil
+			polls++
+			res, err := qc.ListTasks(ctx, &pb.ListTasksRequest{})
+			if err != nil {
+				t.Logf("[poll %d] ListTasks error: %v", polls, err)
+				return false
+			}
+			for _, tk := range res.Tasks {
+				if tk.TaskId == tid {
+					if polls%20 == 0 { // log every 10 seconds
+						t.Logf("[poll %d] task %d: status=%s quality=%v", polls, tid, tk.Status, tk.QualityScore)
+					}
+					return tk.Status == "S" && tk.QualityScore != nil
+				}
+			}
+			if polls%20 == 0 {
+				t.Logf("[poll %d] task %d not found in %d tasks", polls, tid, len(res.Tasks))
+			}
+			return false
 		}, 60*time.Second, 500*time.Millisecond, fmt.Sprintf("task %d should succeed with quality score", tid))
 	}
 

@@ -372,9 +372,11 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	go sendLogs(stdout, stream, "stdout")
 	go sendLogs(stderr, stream, "stderr")
 
-	// Wait for task completion, then wait for log goroutines to finish
-	err = cmd.Wait()
+	// Wait for log goroutines to finish reading stdout/stderr BEFORE cmd.Wait(),
+	// because cmd.Wait() closes the pipe read ends (Go docs: "It is thus incorrect
+	// to call Wait before all reads from the pipe have completed.").
 	logWg.Wait()
+	err = cmd.Wait()
 	stream.CloseSend()
 
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
