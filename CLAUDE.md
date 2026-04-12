@@ -11,6 +11,14 @@ cd python && ./venv/bin/python -m grpc_tools.protoc ... && sed -i '' 's/^import 
 
 After regenerating Python stubs, update `python/pyproject.toml` to match the `GRPC_GENERATED_VERSION` in `python/src/scitq2/pb/taskqueue_pb2_grpc.py`. The generated stubs enforce a minimum grpcio version at runtime.
 
+## Log stream synchronization
+
+Task logs (stdout/stderr) and status updates travel via separate gRPC calls. The client **must** call `stream.CloseAndRecv()` (not `CloseSend()`) after sending logs, blocking until the server confirms all lines are on disk, before sending the status update. Without this, the status update can arrive first, causing incomplete log files and flaky quality extraction. See `specs/log_stream_synchronization.md` for the full design. Key rules:
+
+- `logWg.Wait()` before `cmd.Wait()` (pipe read order)
+- `stream.CloseAndRecv()` before status update (log/status sequencing)
+- `Setpgid: true` + `syscall.Kill(-pid, sig)` for bare task signals (process group cleanup)
+
 ## Operating procedures
 
 See `AISOPs/` for standard operating procedures that govern AI behavior.
