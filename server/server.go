@@ -1151,14 +1151,21 @@ func (s *taskQueueServer) extractQualityScore(taskID int32) {
 		return
 	}
 
-	// Read stored logs
-	stdout := readLogFile(taskID, "stdout", s.logRoot)
-	stderr := readLogFile(taskID, "stderr", s.logRoot)
-
-	result, err := ExtractQuality(def, stdout, stderr)
-	if err != nil {
-		log.Printf("⚠️ task %d: quality extraction failed: %v", taskID, err)
-		return
+	// Read stored logs (retry briefly if empty — log stream may still be flushing)
+	var stdout, stderr string
+	var result *QualityResult
+	for attempt := 0; attempt < 5; attempt++ {
+		stdout = readLogFile(taskID, "stdout", s.logRoot)
+		stderr = readLogFile(taskID, "stderr", s.logRoot)
+		result, err = ExtractQuality(def, stdout, stderr)
+		if err != nil {
+			log.Printf("⚠️ task %d: quality extraction failed: %v", taskID, err)
+			return
+		}
+		if result != nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	if result == nil {
 		return // no variables matched

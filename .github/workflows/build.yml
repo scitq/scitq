@@ -1,6 +1,12 @@
 # .github/workflows/build.yml
 name: Build
-on: [push, pull_request]
+on:
+  push:
+    tags-ignore:
+      - '**'
+    branches:
+      - '**'
+  pull_request:
 
 jobs:
   build:
