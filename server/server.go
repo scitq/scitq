@@ -1165,13 +1165,21 @@ func (s *taskQueueServer) extractQualityScore(taskID int32) {
 		return
 	}
 
-	// Logs are guaranteed on disk by activeLogStreams wait in UpdateTaskStatus
-	stdout := readLogFile(taskID, "stdout", s.logRoot)
-	stderr := readLogFile(taskID, "stderr", s.logRoot)
-	result, err := ExtractQuality(def, stdout, stderr)
-	if err != nil {
-		log.Printf("⚠️ task %d: quality extraction failed: %v", taskID, err)
-		return
+	// Logs should be on disk (activeLogStreams wait ran first), but if the
+	// status RPC arrived before the log stream was registered we retry briefly.
+	var result *QualityResult
+	for attempt := 0; attempt < 3; attempt++ {
+		stdout := readLogFile(taskID, "stdout", s.logRoot)
+		stderr := readLogFile(taskID, "stderr", s.logRoot)
+		result, err = ExtractQuality(def, stdout, stderr)
+		if err != nil {
+			log.Printf("⚠️ task %d: quality extraction failed: %v", taskID, err)
+			return
+		}
+		if result != nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 	if result == nil {
 		return

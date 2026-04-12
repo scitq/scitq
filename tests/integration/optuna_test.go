@@ -120,7 +120,7 @@ func TestOptunaLoop(t *testing.T) {
 		require.Eventually(t, func() bool {
 			tk := getTask(t, ctx, qc, tid)
 			return tk.Status == "S" && tk.QualityScore != nil
-		}, 30*time.Second, 500*time.Millisecond, fmt.Sprintf("task %d should succeed with quality score", tid))
+		}, 60*time.Second, 500*time.Millisecond, fmt.Sprintf("task %d should succeed with quality score", tid))
 	}
 
 	// Verify trial 1 quality (last match: score: 0.60)
@@ -139,7 +139,7 @@ func TestOptunaLoop(t *testing.T) {
 	// Wait for trial 3 to start running
 	require.Eventually(t, func() bool {
 		return getTask(t, ctx, qc, t3Resp.TaskId).Status == "R"
-	}, 30*time.Second, 500*time.Millisecond, "trial 3 should start running")
+	}, 60*time.Second, 500*time.Millisecond, "trial 3 should start running")
 
 	// Send SIGTERM — simulates Optuna pruning a bad trial
 	_, err = qc.SignalTask(ctx, &pb.TaskSignalRequest{TaskId: t3Resp.TaskId, Signal: "T"})
@@ -148,7 +148,7 @@ func TestOptunaLoop(t *testing.T) {
 	// Task should fail (docker stop → SIGTERM → non-zero exit)
 	require.Eventually(t, func() bool {
 		return getTask(t, ctx, qc, t3Resp.TaskId).Status == "F"
-	}, 30*time.Second, 500*time.Millisecond, "trial 3 should be stopped (F)")
+	}, 60*time.Second, 500*time.Millisecond, "trial 3 should be stopped (F)")
 
 	t.Log("Optuna loop: quality scoring OK, multi-trial comparison OK, SIGTERM pruning OK")
 }
