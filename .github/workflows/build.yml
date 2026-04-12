@@ -19,15 +19,123 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Verify Docker availability
-        run: docker version
-
-      - name: Pre-pull base Docker images
-        run: |
-          docker pull postgres:17-alpine
-
       - name: Build Go project
         run: make copy-docs && go build ./...
 
-      - name: Run Go tests
-        run: make integration-test
+  test-core:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pre-pull Docker images
+        run: docker pull postgres:17-alpine
+
+      - name: Core tests
+        run: make copy-docs && cd tests/integration && go test -v -run 'TestIntegration$|TestTaskDependency|TestWorkflowStatus|TestFreeWorkers|TestRetryClonesHiddenParent|TestRetryCLI|TestMCPEndToEnd|TestTaskStdoutStderr' ./...
+
+  test-reuse-skip:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pre-pull Docker images
+        run: docker pull postgres:17-alpine
+
+      - name: Reuse and skip tests
+        run: make copy-docs && cd tests/integration && go test -v -run 'TestReuse|TestSkipIfExists|TestForceRunTask|TestPublishOnly' ./...
+
+  test-edit-quality:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pre-pull Docker images
+        run: docker pull postgres:17-alpine
+
+      - name: Edit, quality, optuna, signal tests
+        run: make copy-docs && cd tests/integration && go test -v -run 'TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestOptunaLoop|TestSignalStop|TestEnvVars|TestWorkflowCounters' ./...
+
+  test-fetch:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pre-pull Docker images
+        run: docker pull postgres:17-alpine
+
+      - name: Fetch integration test
+        run: make copy-docs && cd tests/integration && go test -v -run 'TestFetchIntegration' ./...
+
+  test-recruitment:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pre-pull Docker images
+        run: docker pull postgres:17-alpine
+
+      - name: Recruitment tests
+        run: make copy-docs && cd tests/integration && go test -v -timeout 300s -run 'TestRecruitmentCycle|TestLongRecruiter' ./...
+
+  test-all:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pre-pull Docker images
+        run: docker pull postgres:17-alpine
+
+      - name: Run uncovered tests (catch-all for new tests)
+        run: |
+          make copy-docs
+          COVERED="TestIntegration|TestTaskDependency|TestWorkflowStatus|TestFreeWorkers|TestRetryClonesHiddenParent|TestRetryCLI|TestMCPEndToEnd|TestTaskStdoutStderr|TestReuse|TestSkipIfExists|TestForceRunTask|TestPublishOnly|TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestOptunaLoop|TestSignalStop|TestEnvVars|TestWorkflowCounters|TestFetchIntegration|TestRecruitmentCycle|TestLongRecruiter"
+          ALL=$(cd tests/integration && grep -h '^func Test' *_test.go | sed 's/func \(Test[a-zA-Z0-9_]*\).*/\1/' | sort -u)
+          UNCOVERED=""
+          for t in $ALL; do
+            if ! echo "$t" | grep -qE "$COVERED"; then
+              UNCOVERED="$UNCOVERED|$t"
+            fi
+          done
+          UNCOVERED="${UNCOVERED#|}"
+          if [ -n "$UNCOVERED" ]; then
+            echo "Running uncovered tests: $UNCOVERED"
+            cd tests/integration && go test -v -run "$UNCOVERED" ./...
+          else
+            echo "All tests are covered by named jobs"
+          fi
