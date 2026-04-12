@@ -22,7 +22,7 @@ func Bootstrap(venvPath string) error {
 			return fmt.Errorf("failed to create parent directory for venv: %w", err)
 		}
 
-		fmt.Printf("Creating Python venv at %s...\n", venvPath)
+		fmt.Fprintf(os.Stderr, "Creating Python venv at %s...\n", venvPath)
 		// Ensure Python is available
 		if _, err := exec.LookPath("python3"); err != nil {
 			return fmt.Errorf("python3 not found in PATH")
@@ -45,22 +45,22 @@ func Bootstrap(venvPath string) error {
 	// 4. Ensure pip exists and install the embedded package (with dependencies)
 	pip := filepath.Join(venvPath, "bin", "pip")
 	if _, err := os.Stat(pip); os.IsNotExist(err) {
-		fmt.Println("Installing pip in venv...")
+		fmt.Fprintln(os.Stderr, "Installing pip in venv...")
 		if err := exec.Command(venvPython, "-m", "ensurepip").Run(); err != nil {
 			return fmt.Errorf("failed to install pip: %w", err)
 		}
 	}
 
 	// Make sure pip, setuptools, and wheel exist and are up to date
-	fmt.Println("Ensuring pip and setuptools in venv...")
+	fmt.Fprintln(os.Stderr, "Ensuring pip and setuptools in venv...")
 	upgrade := exec.Command(venvPython, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
-	upgrade.Stdout, upgrade.Stderr = os.Stdout, os.Stderr
+	upgrade.Stdout, upgrade.Stderr = os.Stderr, os.Stderr
 	if err := upgrade.Run(); err != nil {
 		return fmt.Errorf("failed to ensure pip/setuptools: %w", err)
 	}
 
 	cmd := exec.Command(pip, "install", "--upgrade", "--no-build-isolation", tmpDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("pip install scitq2 failed: %w", err)
 	}
@@ -71,7 +71,7 @@ func Bootstrap(venvPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to import scitq2 or grpc: %v\nOutput:\n%s", err, checkOut)
 	}
-	fmt.Print(string(checkOut))
+	fmt.Fprint(os.Stderr, string(checkOut))
 	return nil
 }
 
