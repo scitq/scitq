@@ -153,7 +153,7 @@ async function retryTaskClick(taskId: number) {
           <th>Status</th>
           <th>Duration</th>
           <th>stdout/stderr</th>
-          <th>Output</th>
+          <th>Output / Publish</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -182,7 +182,14 @@ async function retryTaskClick(taskId: number) {
                 {/each}
               </div>
             </td>
-            <td>{task.output}</td>
+            <td>
+              {#if task.output}
+                <div class:task-dimmed={task.status === 'S' && task.publish}>{task.output}</div>
+              {/if}
+              {#if task.publish}
+                <div class="task-publish" class:task-dimmed={task.status === 'F'}>{task.publish}</div>
+              {/if}
+            </td>
             
             <!-- Action Buttons -->
             <td class="workerCompo-actions">
@@ -207,5 +214,12 @@ async function retryTaskClick(taskId: number) {
     border: 1px solid red;
     margin: 8px 0;
     border-radius: 4px;
+  }
+  .task-dimmed {
+    opacity: 0.4;
+  }
+  .task-publish {
+    font-size: 0.85em;
+    color: var(--color-accent, #3b82f6);
   }
 </style>

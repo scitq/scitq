@@ -46,23 +46,22 @@
   let acting = new Set<number>();
   
   /**
-   * Current display mode ('table' or 'charts')
-   * @type {'table' | 'charts'}
+   * Per-worker display mode ('table' or 'charts'), keyed by workerId.
+   * Workers not in the map have stats collapsed (no stats shown).
    */
-  let displayMode: 'table' | 'charts' = 'table';
-  
+  let workerDisplayMode: Record<number, 'table' | 'charts'> = {};
+
   /**
    * Flag indicating if data has been loaded
    * @type {boolean}
    */
   let hasLoaded = false;
-  
-  
+
+
   /**
-   * Flag to show/hide advanced metrics
-   * @type {boolean}
+   * Per-worker advanced metrics toggle, keyed by workerId.
    */
-  let showAdvancedMetrics = false;
+  let workerAdvancedMetrics: Record<number, boolean> = {};
 
   // Chart data
   /**
@@ -722,8 +721,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       <table class="listTable workerCompo-table">
         <thead>
           <tr>
-            {#if displayMode === 'table'}
-              <!-- Table mode - show all columns -->
+            <!-- Table-mode columns always shown; stats content is per-worker -->
               <th>Name</th>
               <th>Wf.Step</th>
               <th>Scope</th>
@@ -738,12 +736,8 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
               <th>CPU</th>
               <th>Mem</th>
               <th>Disk Usage</th>
-              {#if showAdvancedMetrics}
-                <th>Disk R/W</th>
-                <th>Network Sent/Recv</th>
-              {/if}
               <th>Actions</th>
-            {:else}
+            {#if false}
               <th>Name</th>
               <th>Wf.Step</th>
               <th>Scope</th>
@@ -768,7 +762,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   href="#/tasks?workerId={worker.workerId}"
                   data-testid={`worker-name-${worker.workerId}`}
                   class="workerCompo-clickable"
-                  title="{worker.flavor || 'unknown'}{worker.flavorCpu ? ` — ${worker.flavorCpu} CPU` : ''}{worker.flavorMem ? `, ${Math.round(worker.flavorMem)}GB mem` : ''}{worker.flavorDisk ? `, ${Math.round(worker.flavorDisk)}GB disk` : ''}"
+                  title="{worker.flavor || 'unknown'}{worker.flavorCpu ? ` — ${worker.flavorCpu} CPU` : ''}{worker.flavorMem ? `, ${Math.round(worker.flavorMem)}GB mem` : ''}{worker.flavorDisk ? `, ${Math.round(worker.flavorDisk)}GB disk` : ''}{worker.region ? ` (${worker.region})` : ''}"
                 >
                   {worker.name}
                   {#if worker.isPermanent}
@@ -948,9 +942,9 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                 {displayTasksCount(worker.workerId,'I','Z','X')}
               </td>
 
-            <!-- Conditional columns based on display mode -->
-            {#if workersStatsMap[worker.workerId]}
-              {#if displayMode === 'table'}
+            <!-- Per-worker stats: only show when this worker is expanded -->
+            {#if workerDisplayMode[worker.workerId] && workersStatsMap[worker.workerId]}
+              {#if workerDisplayMode[worker.workerId] === 'table'}
                 <!-- Table mode -->
                 <td title={`IOWait: ${workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%\n` + (workersStatsMap[worker.workerId]?.numCpus > 0 ? `Load/CPU: ${((workersStatsMap[worker.workerId]?.load1Min ?? 0) / workersStatsMap[worker.workerId].numCpus * 100).toFixed(0)}% (${workersStatsMap[worker.workerId].numCpus} CPUs)` : `Load: ${workersStatsMap[worker.workerId]?.load1Min?.toFixed(1) ?? 'N/A'}`)}>
                   {workersStatsMap[worker.workerId]?.cpuUsagePercent?.toFixed(1) ?? 'N/A'}%
@@ -966,7 +960,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                     {/each}
                   </div>
                 </td>
-                {#if showAdvancedMetrics}
+                {#if workerAdvancedMetrics[worker.workerId]}
                   <!-- Disk R/W column -->
                   <td>
                     {#if workersStatsMap[worker.workerId].diskIo}
@@ -1129,12 +1123,11 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   </div>
                 </td>
               {/if}
+            {:else if workerDisplayMode[worker.workerId]}
+              <td colspan="3">No statistics available</td>
             {:else}
-              {#if showAdvancedMetrics}
-                <td colspan="5">No statistics available</td>
-              {:else}
-                <td colspan="3">No statistics available</td>
-              {/if}
+              <!-- Collapsed: empty stats cells -->
+              <td></td><td></td><td></td>
             {/if}
 
               <td class="workerCompo-actions">
@@ -1151,24 +1144,23 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   </button>
                 </div>
                 <div class="action-row">
-                    {#if displayMode == 'charts'}
-                      <button data-testid={`table-worker-${worker.workerId}`} class="btn-action" on:click={() => displayMode = 'table'} title="Numbers">
+                    {#if workerDisplayMode[worker.workerId] === 'charts'}
+                      <button data-testid={`table-worker-${worker.workerId}`} class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'table'; workerDisplayMode = workerDisplayMode; }} title="Numbers">
                         <FileDigit />
                       </button>
-                    {:else if displayMode == 'table'}
-                      <button data-testid={`charts-worker-${worker.workerId}`} class="btn-action"  on:click={() => displayMode = 'charts'} title="Charts">
+                      <button class="btn-action" on:click={() => { delete workerDisplayMode[worker.workerId]; workerDisplayMode = workerDisplayMode; }} title="Collapse stats">
+                        <ChevronUp/>
+                      </button>
+                    {:else if workerDisplayMode[worker.workerId] === 'table'}
+                      <button data-testid={`charts-worker-${worker.workerId}`} class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'charts'; workerDisplayMode = workerDisplayMode; }} title="Charts">
                         <BarChart/>
                       </button>
-                      <button class="btn-action" 
-                      on:click={() => showAdvancedMetrics = !showAdvancedMetrics}
-                      title={showAdvancedMetrics ? 'Hide advanced metrics' : 'Show advanced metrics'}
-                      data-testid={showAdvancedMetrics ? 'hide-advanced-metrics' : 'advanced-metrics'}
-                      >
-                        {#if showAdvancedMetrics}
-                          <ChevronUp/>
-                        {:else}
-                          <ChevronDown/>
-                        {/if}
+                      <button class="btn-action" on:click={() => { delete workerDisplayMode[worker.workerId]; workerDisplayMode = workerDisplayMode; }} title="Collapse stats">
+                        <ChevronUp/>
+                      </button>
+                    {:else}
+                      <button class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'table'; workerDisplayMode = workerDisplayMode; }} title="Show stats">
+                        <ChevronDown/>
                       </button>
                     {/if}
                 </div>

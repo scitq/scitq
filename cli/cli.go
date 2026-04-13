@@ -61,6 +61,7 @@ type Attr struct {
 			Command    string `arg:"--command" help:"Filter tasks by command substring"`
 			Limit      int32  `arg:"--limit" default:"20" help:"Limit the number of tasks returned"`
 			Offset     int32  `arg:"--offset" help:"Offset for pagination of tasks"`
+			Long       bool   `arg:"-l,--long" help:"Show all task fields"`
 		} `arg:"subcommand:list" help:"List all tasks"`
 
 		Stdout *struct {
@@ -467,29 +468,99 @@ func (c *CLI) TaskList() error {
 
 	fmt.Println("📋 Task List:")
 	for _, task := range res.Tasks {
-		var name string
-		if task.TaskName != nil {
-			name = " | Name: " + *task.TaskName
+		if c.Attr.Task.List.Long {
+			// Long format: show all fields
+			fmt.Printf("🆔 ID: %d\n", task.TaskId)
+			if task.TaskName != nil {
+				fmt.Printf("   Name:      %s\n", *task.TaskName)
+			}
+			fmt.Printf("   Status:    %s\n", task.Status)
+			fmt.Printf("   Command:   %s\n", task.Command)
+			fmt.Printf("   Container: %s\n", task.Container)
+			if task.Shell != nil {
+				fmt.Printf("   Shell:     %s\n", *task.Shell)
+			}
+			if task.StepId != nil {
+				fmt.Printf("   Step:      %d\n", *task.StepId)
+			}
+			if task.WorkerId != nil {
+				fmt.Printf("   Worker:    %d\n", *task.WorkerId)
+			}
+			if task.WorkflowId != nil {
+				fmt.Printf("   Workflow:  %d\n", *task.WorkflowId)
+			}
+			if len(task.Input) > 0 {
+				fmt.Printf("   Input:     %s\n", strings.Join(task.Input, ", "))
+			}
+			if task.Output != nil {
+				fmt.Printf("   Output:    %s\n", *task.Output)
+			}
+			if task.Publish != nil {
+				fmt.Printf("   Publish:   %s\n", *task.Publish)
+			}
+			if len(task.Resource) > 0 {
+				fmt.Printf("   Resource:  %s\n", strings.Join(task.Resource, ", "))
+			}
+			if task.Weight != nil {
+				fmt.Printf("   Weight:    %.2f\n", *task.Weight)
+			}
+			if task.RetryCount > 0 {
+				fmt.Printf("   Retries:   %d\n", task.RetryCount)
+			}
+			if task.DownloadDuration != nil {
+				fmt.Printf("   Download:  %s\n", formatDuration(float32(*task.DownloadDuration)))
+			}
+			if task.RunDuration != nil && *task.RunDuration > 0 {
+				fmt.Printf("   Run:       %s\n", formatDuration(float32(*task.RunDuration)))
+			} else if task.RunStartTime != nil && task.Status == "R" {
+				elapsed := time.Since(time.Unix(*task.RunStartTime, 0))
+				fmt.Printf("   Running:   %s\n", formatDuration(float32(elapsed.Seconds())))
+			}
+			if task.UploadDuration != nil {
+				fmt.Printf("   Upload:    %s\n", formatDuration(float32(*task.UploadDuration)))
+			}
+			if task.QualityScore != nil {
+				fmt.Printf("   Quality:   %.4f\n", *task.QualityScore)
+			}
+			if task.QualityVars != nil {
+				fmt.Printf("   QualVars:  %s\n", *task.QualityVars)
+			}
+			if task.ReuseKey != nil {
+				fmt.Printf("   ReuseKey:  %s\n", *task.ReuseKey)
+			}
+			if task.Hidden {
+				fmt.Printf("   Hidden:    true\n")
+			}
+			if task.PreviousTaskId != nil {
+				fmt.Printf("   Previous:  %d\n", *task.PreviousTaskId)
+			}
+			fmt.Println()
 		} else {
-			name = ""
+			// Short format
+			var name string
+			if task.TaskName != nil {
+				name = " | Name: " + *task.TaskName
+			} else {
+				name = ""
+			}
+			retries := ""
+			if task.RetryCount > 0 {
+				retries = fmt.Sprintf(" | Retries: %d", task.RetryCount)
+			}
+			hidden := ""
+			if c.Attr.Task.List.ShowHidden {
+				hidden = fmt.Sprintf(" | Hidden: %t", task.Hidden)
+			}
+			duration := ""
+			if task.RunDuration != nil && *task.RunDuration > 0 {
+				duration = fmt.Sprintf(" | Duration: %s", formatDuration(float32(*task.RunDuration)))
+			} else if task.RunStartTime != nil && task.Status == "R" {
+				elapsed := time.Since(time.Unix(*task.RunStartTime, 0))
+				duration = fmt.Sprintf(" | Running: %s", formatDuration(float32(elapsed.Seconds())))
+			}
+			fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s%s%s%s\n",
+				task.TaskId, name, task.Command, task.Container, task.Status, retries, duration, hidden)
 		}
-		retries := ""
-		if task.RetryCount > 0 {
-			retries = fmt.Sprintf(" | Retries: %d", task.RetryCount)
-		}
-		hidden := ""
-		if c.Attr.Task.List.ShowHidden {
-			hidden = fmt.Sprintf(" | Hidden: %t", task.Hidden)
-		}
-		duration := ""
-		if task.RunDuration != nil && *task.RunDuration > 0 {
-			duration = fmt.Sprintf(" | Duration: %s", formatDuration(float32(*task.RunDuration)))
-		} else if task.RunStartTime != nil && task.Status == "R" {
-			elapsed := time.Since(time.Unix(*task.RunStartTime, 0))
-			duration = fmt.Sprintf(" | Running: %s", formatDuration(float32(elapsed.Seconds())))
-		}
-		fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s%s%s%s\n",
-			task.TaskId, name, task.Command, task.Container, task.Status, retries, duration, hidden)
 	}
 	return nil
 }

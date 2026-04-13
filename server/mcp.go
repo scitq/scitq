@@ -1042,33 +1042,57 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 	}
 	// Return summary (without full command text which can be huge)
 	type taskSummary struct {
-		TaskID           int32  `json:"task_id"`
-		TaskName         string `json:"task_name,omitempty"`
-		Status           string `json:"status"`
-		StepID           int32  `json:"step_id,omitempty"`
-		WorkerID         int32  `json:"worker_id,omitempty"`
-		WorkflowID       int32  `json:"workflow_id,omitempty"`
-		Container        string `json:"container"`
-		RetryCount       int32  `json:"retry_count,omitempty"`
-		DownloadDuration int32  `json:"download_duration,omitempty"`
-		RunDuration      int32  `json:"run_duration,omitempty"`
-		UploadDuration   int32  `json:"upload_duration,omitempty"`
+		TaskID           int32    `json:"task_id"`
+		TaskName         string   `json:"task_name,omitempty"`
+		Status           string   `json:"status"`
+		Command          string   `json:"command"`
+		Container        string   `json:"container"`
+		Shell            string   `json:"shell,omitempty"`
+		StepID           int32    `json:"step_id,omitempty"`
+		WorkerID         int32    `json:"worker_id,omitempty"`
+		WorkflowID       int32    `json:"workflow_id,omitempty"`
+		Input            []string `json:"input,omitempty"`
+		Output           string   `json:"output,omitempty"`
+		Publish          string   `json:"publish,omitempty"`
+		Resource         []string `json:"resource,omitempty"`
+		Weight           float64  `json:"weight,omitempty"`
+		RetryCount       int32    `json:"retry_count,omitempty"`
+		DownloadDuration int32    `json:"download_duration,omitempty"`
+		RunDuration      int32    `json:"run_duration,omitempty"`
+		UploadDuration   int32    `json:"upload_duration,omitempty"`
+		QualityScore     *float64 `json:"quality_score,omitempty"`
+		QualityVars      string   `json:"quality_vars,omitempty"`
+		ReuseKey         string   `json:"reuse_key,omitempty"`
+		Hidden           bool     `json:"hidden,omitempty"`
+		PreviousTaskID   int32    `json:"previous_task_id,omitempty"`
 	}
 	summaries := make([]taskSummary, 0, len(res.Tasks))
 	for _, t := range res.Tasks {
 		s := taskSummary{
 			TaskID:     t.TaskId,
 			Status:     t.Status,
+			Command:    t.Command,
 			Container:  t.Container,
+			Input:      t.Input,
+			Resource:   t.Resource,
 			RetryCount: t.RetryCount,
+			Hidden:     t.Hidden,
 		}
 		if t.TaskName != nil { s.TaskName = *t.TaskName }
+		if t.Shell != nil { s.Shell = *t.Shell }
 		if t.StepId != nil { s.StepID = *t.StepId }
 		if t.WorkerId != nil { s.WorkerID = *t.WorkerId }
 		if t.WorkflowId != nil { s.WorkflowID = *t.WorkflowId }
+		if t.Output != nil { s.Output = *t.Output }
+		if t.Publish != nil { s.Publish = *t.Publish }
+		if t.Weight != nil { s.Weight = *t.Weight }
 		if t.DownloadDuration != nil { s.DownloadDuration = *t.DownloadDuration }
 		if t.RunDuration != nil { s.RunDuration = *t.RunDuration }
 		if t.UploadDuration != nil { s.UploadDuration = *t.UploadDuration }
+		if t.QualityScore != nil { s.QualityScore = t.QualityScore }
+		if t.QualityVars != nil { s.QualityVars = *t.QualityVars }
+		if t.ReuseKey != nil { s.ReuseKey = *t.ReuseKey }
+		if t.PreviousTaskId != nil { s.PreviousTaskID = *t.PreviousTaskId }
 		summaries = append(summaries, s)
 	}
 	return jsonResult(summaries), nil
