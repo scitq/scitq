@@ -107,6 +107,7 @@ func (s *taskQueueServer) scriptRunner(
 	env := []string{
 		fmt.Sprintf("SCITQ_SERVER=%s:%d", serverName, s.cfg.Scitq.Port),
 		fmt.Sprintf("SCITQ_TOKEN=%s", authToken),
+		fmt.Sprintf("SCITQ_SCRIPT_ROOT=%s", s.cfg.Scitq.ScriptRoot),
 	}
 	if templateRunID != 0 {
 		env = append(env, fmt.Sprintf("SCITQ_TEMPLATE_RUN_ID=%d", templateRunID))

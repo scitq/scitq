@@ -29,6 +29,8 @@ def type_name(typ: type) -> str:
 
 def parser(typ: type, value: Any) -> Any:
     """Parse a value to the specified type, handling custom types."""
+    if typ is bool and isinstance(value, str):
+        return value.lower() in ('true', 'yes', '1')
     return getattr(typ,"parse",typ)(value)
 
 class Path(str):
