@@ -942,9 +942,9 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                 {displayTasksCount(worker.workerId,'I','Z','X')}
               </td>
 
-            <!-- Per-worker stats: only show when this worker is expanded -->
-            {#if workerDisplayMode[worker.workerId] && workersStatsMap[worker.workerId]}
-              {#if workerDisplayMode[worker.workerId] === 'table'}
+            <!-- Per-worker stats: table by default, charts when toggled -->
+            {#if workersStatsMap[worker.workerId]}
+              {#if workerDisplayMode[worker.workerId] !== 'charts'}
                 <!-- Table mode -->
                 <td title={`IOWait: ${workersStatsMap[worker.workerId]?.iowaitPercent?.toFixed(1) ?? 'N/A'}%\n` + (workersStatsMap[worker.workerId]?.numCpus > 0 ? `Load/CPU: ${((workersStatsMap[worker.workerId]?.load1Min ?? 0) / workersStatsMap[worker.workerId].numCpus * 100).toFixed(0)}% (${workersStatsMap[worker.workerId].numCpus} CPUs)` : `Load: ${workersStatsMap[worker.workerId]?.load1Min?.toFixed(1) ?? 'N/A'}`)}>
                   {workersStatsMap[worker.workerId]?.cpuUsagePercent?.toFixed(1) ?? 'N/A'}%
@@ -1123,11 +1123,8 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   </div>
                 </td>
               {/if}
-            {:else if workerDisplayMode[worker.workerId]}
-              <td colspan="3">No statistics available</td>
             {:else}
-              <!-- Collapsed: empty stats cells -->
-              <td></td><td></td><td></td>
+              <td colspan="3">No statistics available</td>
             {/if}
 
               <td class="workerCompo-actions">
@@ -1148,19 +1145,9 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                       <button data-testid={`table-worker-${worker.workerId}`} class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'table'; workerDisplayMode = workerDisplayMode; }} title="Numbers">
                         <FileDigit />
                       </button>
-                      <button class="btn-action" on:click={() => { delete workerDisplayMode[worker.workerId]; workerDisplayMode = workerDisplayMode; }} title="Collapse stats">
-                        <ChevronUp/>
-                      </button>
-                    {:else if workerDisplayMode[worker.workerId] === 'table'}
+                    {:else}
                       <button data-testid={`charts-worker-${worker.workerId}`} class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'charts'; workerDisplayMode = workerDisplayMode; }} title="Charts">
                         <BarChart/>
-                      </button>
-                      <button class="btn-action" on:click={() => { delete workerDisplayMode[worker.workerId]; workerDisplayMode = workerDisplayMode; }} title="Collapse stats">
-                        <ChevronUp/>
-                      </button>
-                    {:else}
-                      <button class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'table'; workerDisplayMode = workerDisplayMode; }} title="Show stats">
-                        <ChevronDown/>
                       </button>
                     {/if}
                 </div>
