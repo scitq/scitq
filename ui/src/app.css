@@ -131,6 +131,11 @@ body{
   color: #ffeb3b;
 }
 
+.btn-permanent-active svg {
+  color: #e6b800;
+  fill: #e6b800;
+}
+
 /* === Tables === */
 .listTable {
   width: auto;

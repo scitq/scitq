@@ -386,6 +386,10 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 
 	reused := map[int32]bool{}
 	for _, h := range hits {
+		// Save original output before overwriting
+		var originalOutput sql.NullString
+		tx.QueryRow(`SELECT output FROM task WHERE task_id = $1`, h.taskID).Scan(&originalOutput)
+
 		_, err = tx.Exec(`UPDATE task SET status = 'S', reuse_hit = true, reuse_original_output = output, output = $2 WHERE task_id = $1 AND status = 'P'`, h.taskID, h.outputPath)
 		if err != nil {
 			log.Printf("⚠️ reuse-check: failed to update task %d: %v", h.taskID, err)
@@ -393,6 +397,45 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 		}
 		log.Printf("♻️ reuse hit for task %d (key=%s…), reusing output from task %d", h.taskID, h.reuseKey[:12], h.originalTaskID)
 		reused[h.taskID] = true
+
+		// Update step stats aggregator: P → S
+		if h.stepID.Valid {
+			var wfID int32
+			tx.QueryRow(`SELECT workflow_id FROM step WHERE step_id = $1`, h.stepID.Int32).Scan(&wfID)
+			if wfID != 0 {
+				s.stats.mu.Lock()
+				if _, ok := s.stats.data[wfID]; ok {
+					if stepAgg, ok := s.stats.data[wfID][h.stepID.Int32]; ok {
+						stepAgg.Pending--
+						stepAgg.Succeeded++
+					}
+				}
+				s.stats.mu.Unlock()
+			}
+		}
+
+		// Redirect dependent tasks' inputs: replace old output prefix with reused output prefix
+		if originalOutput.Valid && originalOutput.String != h.outputPath {
+			oldPrefix := strings.TrimSuffix(originalOutput.String, "/")
+			newPrefix := strings.TrimSuffix(h.outputPath, "/")
+			res, redirectErr := tx.Exec(`
+				UPDATE task SET input = array(
+					SELECT REPLACE(elem, $2, $3)
+					FROM unnest(input) AS elem
+				)
+				FROM task_dependencies d
+				WHERE d.prerequisite_task_id = $1
+				  AND task.task_id = d.dependent_task_id
+				  AND task.status IN ('W','P')
+				  AND EXISTS (SELECT 1 FROM unnest(task.input) e WHERE e LIKE $2 || '%')
+			`, h.taskID, oldPrefix, newPrefix)
+			if redirectErr != nil {
+				log.Printf("⚠️ reuse: input redirect failed for task %d: %v", h.taskID, redirectErr)
+			} else {
+				n, _ := res.RowsAffected()
+				log.Printf("♻️ reuse: redirected %d dependent inputs: %s → %s", n, oldPrefix, newPrefix)
+			}
+		}
 
 		ws.EmitWS("task", h.taskID, "status", struct {
 			TaskId int32  `json:"taskId"`
@@ -434,12 +477,94 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 					)
 				`, depID).Scan(&allDone)
 				if allDone {
+					// Before promoting, fix inputs from reuse-hit prerequisites
+					s.redirectReuseInputs(tx, depID)
 					tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, depID)
 					log.Printf("♻️ reuse: promoted task %d to P (dependencies resolved)", depID)
 				}
 			}
 		}
 		s.triggerAssign()
+	}
+}
+
+// redirectReuseInputs fixes input paths of a dependent task when its prerequisites
+// are reuse hits with changed output paths. Called at W→P promotion time,
+// when all tasks exist in the DB.
+func (s *taskQueueServer) redirectReuseInputs(tx *sql.Tx, depTaskID int32) {
+	// Find prerequisites that are reuse hits with changed output
+	rows, err := tx.Query(`
+		SELECT t.reuse_original_output, t.output
+		FROM task_dependencies d
+		JOIN task t ON d.prerequisite_task_id = t.task_id
+		WHERE d.dependent_task_id = $1
+		  AND t.reuse_hit = true
+		  AND t.reuse_original_output IS NOT NULL
+		  AND t.reuse_original_output <> t.output
+	`, depTaskID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var origOutput, newOutput string
+		if rows.Scan(&origOutput, &newOutput) != nil {
+			continue
+		}
+		oldPrefix := strings.TrimSuffix(origOutput, "/")
+		newPrefix := strings.TrimSuffix(newOutput, "/")
+		res, err := tx.Exec(`
+			UPDATE task SET input = array(
+				SELECT REPLACE(elem, $1, $2)
+				FROM unnest(input) AS elem
+			)
+			WHERE task_id = $3
+			  AND EXISTS (SELECT 1 FROM unnest(input) e WHERE e LIKE $1 || '%')
+		`, oldPrefix, newPrefix, depTaskID)
+		if err != nil {
+			log.Printf("⚠️ reuse: input redirect failed for dependent task %d: %v", depTaskID, err)
+		} else if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("♻️ reuse: redirected task %d inputs: %s → %s", depTaskID, oldPrefix, newPrefix)
+		}
+	}
+}
+
+// redirectReuseInputsDB is like redirectReuseInputs but uses s.db directly (no transaction).
+func (s *taskQueueServer) redirectReuseInputsDB(ctx context.Context, depTaskID int32) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.reuse_original_output, t.output
+		FROM task_dependencies d
+		JOIN task t ON d.prerequisite_task_id = t.task_id
+		WHERE d.dependent_task_id = $1
+		  AND t.reuse_hit = true
+		  AND t.reuse_original_output IS NOT NULL
+		  AND t.reuse_original_output <> t.output
+	`, depTaskID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var origOutput, newOutput string
+		if rows.Scan(&origOutput, &newOutput) != nil {
+			continue
+		}
+		oldPrefix := strings.TrimSuffix(origOutput, "/")
+		newPrefix := strings.TrimSuffix(newOutput, "/")
+		res, err := s.db.ExecContext(ctx, `
+			UPDATE task SET input = array(
+				SELECT REPLACE(elem, $1, $2)
+				FROM unnest(input) AS elem
+			)
+			WHERE task_id = $3
+			  AND EXISTS (SELECT 1 FROM unnest(input) e WHERE e LIKE $1 || '%')
+		`, oldPrefix, newPrefix, depTaskID)
+		if err != nil {
+			log.Printf("⚠️ reuse: input redirect failed for dependent task %d: %v", depTaskID, err)
+		} else if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("♻️ reuse: redirected task %d inputs: %s → %s", depTaskID, oldPrefix, newPrefix)
+		}
 	}
 }
 

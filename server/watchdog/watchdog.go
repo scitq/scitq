@@ -81,6 +81,11 @@ func (w *Watchdog) WorkerRegistered(workerID int32, isPermanent bool) {
 	w.offlineSince.Delete(workerID)
 	w.lastStatus.Store(workerID, "R")
 	w.isPermanent.Store(workerID, isPermanent)
+	// Initialize idle tracking so checkIdle can monitor this worker
+	if _, loaded := w.activeTasks.LoadOrStore(workerID, 0); !loaded {
+		w.idleStatus.Store(workerID, IdleStatusBornIdle)
+		w.lastNotIdle.Store(workerID, now)
+	}
 	log.Printf("[watchdog] worker %d registered as Running", workerID)
 }
 
@@ -125,6 +130,12 @@ func (w *Watchdog) WorkerDeleted(workerID int32) {
 	w.offlineSince.Delete(workerID)
 
 	log.Printf("[watchdog] cleaned up memory for deleted worker %d", workerID)
+}
+
+// SetPermanent updates the cached permanent flag for a worker.
+func (w *Watchdog) SetPermanent(workerID int32, isPermanent bool) {
+	w.isPermanent.Store(workerID, isPermanent)
+	log.Printf("[watchdog] worker %d permanent flag set to %v", workerID, isPermanent)
 }
 
 // Called when a worker accepts a task (Assigned ➔ Accepted)

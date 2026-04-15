@@ -1119,6 +1119,7 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
     search_space = optimize_def.get('search_space', {})
     storage = optimize_def.get('storage')
     study_name = optimize_def.get('study_name', f"scitq_{workflow.name}")
+    seed = optimize_def.get('seed')
 
     if not target_step_name:
         print("❌ optimize.step is required (which step to optimize)", file=sys.stderr)
@@ -1141,11 +1142,16 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
         storage = f"sqlite:///optuna_{workflow.name}.db"
 
     # Create Optuna study
+    sampler = None
+    if seed is not None:
+        seed = int(_resolve_field(seed, params, extra_vars=workflow_vars))
+        sampler = optuna.samplers.TPESampler(seed=seed)
     study = optuna.create_study(
         direction=direction,
         storage=storage,
         study_name=study_name,
         load_if_exists=True,
+        sampler=sampler,
     )
 
     ctx = LiveContext(client, poll_interval=2.0)

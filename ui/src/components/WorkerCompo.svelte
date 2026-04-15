@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
-  import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp } from 'lucide-svelte';
+  import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
   import { WorkerStats } from '../../gen/taskqueue';
@@ -765,9 +765,6 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   title="{worker.flavor || 'unknown'}{worker.flavorCpu ? ` — ${worker.flavorCpu} CPU` : ''}{worker.flavorMem ? `, ${Math.round(worker.flavorMem)}GB mem` : ''}{worker.flavorDisk ? `, ${Math.round(worker.flavorDisk)}GB disk` : ''}{worker.region ? ` (${worker.region})` : ''}"
                 >
                   {worker.name}
-                  {#if worker.isPermanent}
-                    <span title="Permanent worker" style="margin-left:4px; color:#e6b800;">★</span>
-                  {/if}
                 </a>
               </td>
               <td class="workerCompo-wfstep">
@@ -1138,6 +1135,17 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   <button class="btn-action" title="Restart"><RefreshCw /></button>
                   <button class="btn-action" title="Delete" on:click={() => { deleteWorker(worker.workerId); }} data-testid={`delete-worker-${worker.workerId}`} disabled={acting.has(worker.workerId)}>
                     <Trash />
+                  </button>
+                  <button
+                    class="btn-action"
+                    class:btn-permanent-active={worker.isPermanent}
+                    title={worker.isPermanent ? 'Unset permanent' : 'Set permanent'}
+                    on:click={async () => {
+                      await updateWorkerConfig(worker.workerId, { isPermanent: !worker.isPermanent });
+                      worker.isPermanent = !worker.isPermanent;
+                    }}
+                  >
+                    <Star />
                   </button>
                 </div>
                 <div class="action-row">

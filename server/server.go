@@ -305,6 +305,8 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 			)
 		`, taskID).Scan(&allDone)
 		if allDone {
+			// Fix inputs from reuse-hit prerequisites before promoting
+			s.redirectReuseInputsDB(ctx, taskID)
 			s.db.ExecContext(ctx, `UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, taskID)
 			initialStatus = "P"
 			log.Printf("✅ task %d promoted W→P at submit (all prerequisites already done)", taskID)
@@ -932,7 +934,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					retry, is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, previous_task_id, retry_count,
-					task_name, publish
+					task_name, publish, reuse_key
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -941,7 +943,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					GREATEST(retry - 1, 0), is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, task_id, retry_count + 1,
-					task_name, publish
+					task_name, publish, reuse_key
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id
@@ -2332,6 +2334,11 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	// Notify watchdog of permanent flag change
+	if req.IsPermanent != nil && s.watchdog != nil {
+		s.watchdog.SetPermanent(req.GetWorkerId(), req.GetIsPermanent())
+	}
+
 	s.triggerAssign()
 	return &pb.Ack{Success: true}, nil
 }
@@ -2439,6 +2446,11 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit transaction: %v", err)
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Notify watchdog of permanent flag change
+	if req.IsPermanent != nil && s.watchdog != nil {
+		s.watchdog.SetPermanent(req.GetWorkerId(), req.GetIsPermanent())
 	}
 
 	s.triggerAssign()

@@ -171,7 +171,17 @@ func (s *taskQueueServer) processJob(job Job) error {
 
 		err := provider.Delete(job.WorkerName, job.Region)
 		if err != nil {
-			return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
+			// Delete failed — check if the instance is actually gone at provider level
+			instances, listErr := provider.List(job.Region)
+			if listErr == nil {
+				if _, stillExists := instances[job.WorkerName]; !stillExists {
+					log.Printf("♻️ worker %s delete returned error but instance is gone at provider level, proceeding", job.WorkerName)
+					err = nil // instance is gone, proceed with DB cleanup
+				}
+			}
+			if err != nil {
+				return fmt.Errorf("failed to delete worker %s: %v", job.WorkerName, err)
+			}
 		}
 		// Provider undeploy succeeded, now finalize deletion in DB via server.DeleteWorker with undeployed=true
 		if _, derr := s.DeleteWorker(context.Background(), &pb.WorkerDeletion{WorkerId: job.WorkerID, Undeployed: proto.Bool(true)}); derr != nil {

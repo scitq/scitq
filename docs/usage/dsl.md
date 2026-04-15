@@ -462,8 +462,8 @@ def MetaPhlAnWorkflow(params: Params):
                     (params.paired,
                         fr"""
                         . /builtin/std.sh
-                        _para seqtk sample -s42 /input/{sample.sample_accession}.1.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.1.fastq.gz
-                        _para seqtk sample -s42 /input/{sample.sample_accession}.2.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.2.fastq.gz
+                        _para 'seqtk sample -s42 /input/{sample.sample_accession}.1.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.1.fastq.gz'
+                        _para 'seqtk sample -s42 /input/{sample.sample_accession}.2.fastq.gz {params.depth} | pigz > /output/{sample.sample_accession}.2.fastq.gz'
                         _wait
                         """),
                     default= 
@@ -790,7 +790,7 @@ _para task2
 _wait
 ```
 
-_wait will fail if task1 or task2 fails. 
+`_wait` will fail if task1 or task2 fails. 
 
 This will also work as expected :
 
@@ -799,6 +799,25 @@ This will also work as expected :
 _para zcat /input/*1.f*q.gz > /tmp/read1.fastq
 _para zcat /input/*2.f*q.gz > /tmp/read2.fastq
 _wait
+```
+
+**Important: pipes (`|`) with `_para`** — the shell parses pipes before `_para` sees them, so `_para cmd1 | cmd2` does NOT background the whole pipeline. `_para` only tracks `cmd1`, while `cmd2` runs as a separate foreground process. This means `_wait` cannot detect if `cmd1` fails. To fix this, pass the entire pipeline as a single quoted string — when `_para` receives a single argument, it uses `eval` to interpret it, correctly backgrounding the whole pipeline:
+
+```sh
+# WRONG — _para only tracks seqtk, pigz runs separately, failure is silent
+_para seqtk sample -s42 input.fq.gz 20000000 | pigz > output.fq.gz
+
+# CORRECT — single string, _para evals the full pipeline as one background job
+_para 'seqtk sample -s$SEED input.fq.gz $DEPTH | pigz > output.fq.gz'
+```
+
+Both single and double quotes work. Shell variables (`$SEED`, `$DEPTH`) are accessible in both cases: `_para` runs in a forked subshell (`&`) which inherits all variables from the parent — no `export` is needed. With single quotes, variables are expanded by `eval` at execution time; with double quotes, they are expanded before `_para` receives the string. The result is the same.
+
+Simple redirects (`>`, `<`) without pipes are fine as multiple arguments since they are handled within the same process:
+
+```sh
+# This works — no pipe, redirect is fine
+_para zcat /input/*1.f*q.gz > /tmp/read1.fastq
 ```
 
 This will work in most shells, like bash, but also alpine sh (busybox) or debian sh (dash) or zsh. You can see the code of `std.sh` in client/helpers.go.

@@ -5,8 +5,8 @@ command:
   true: |
     . /builtin/std.sh
 
-    _para seqtk sample -s{SEED} /input/{SAMPLE}.1.fastq.gz {DEPTH} | pigz > /output/{SAMPLE}.1.fastq.gz
-    _para seqtk sample -s{SEED} /input/{SAMPLE}.2.fastq.gz {DEPTH} | pigz > /output/{SAMPLE}.2.fastq.gz
+    _para 'seqtk sample -s{SEED} /input/{SAMPLE}.1.fastq.gz {DEPTH} | pigz > /output/{SAMPLE}.1.fastq.gz'
+    _para 'seqtk sample -s{SEED} /input/{SAMPLE}.2.fastq.gz {DEPTH} | pigz > /output/{SAMPLE}.2.fastq.gz'
     _wait
   false: |
     . /builtin/std.sh

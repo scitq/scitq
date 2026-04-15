@@ -50,7 +50,11 @@ _para() {
   _scitq_tab=$(echo -e "\t")
   _scitq_nl=$(echo -e "\n")
   _scitq_cmd=$(echo "$*"|sed -e 's/ /🧬/g' -e "s/$_scitq_tab/🦀/g" -e "s/$_scitq_nl/💥/g")
-  "$@" &
+  if [ $# -eq 1 ]; then
+    eval "$1" &
+  else
+    "$@" &
+  fi
   _scitq_pid=$!
   _SCITQ_CMDS="${_SCITQ_CMDS} ${_scitq_cmd}🔥$_scitq_pid"
 }

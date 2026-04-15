@@ -914,6 +914,7 @@ The Optuna study is persisted in `storage` (SQLite by default). If the process c
 | `step` | (required) | Name of the step to optimize |
 | `storage` | `sqlite:///optuna_{name}.db` | Optuna study storage URL |
 | `study_name` | `scitq_{name}` | Optuna study name |
+| `seed` | (none) | Random seed for the TPE sampler (makes trials reproducible) |
 | `search_space` | (required) | Parameter definitions (see below) |
 | `pruning.enabled` | `false` | Enable early stopping of bad trials |
 | `pruning.grace_period` | `10` | Seconds before SIGKILL after SIGTERM |
