@@ -269,6 +269,10 @@ Prefetch is key to scitq performance but tricky to set right. Diagnose live:
 3. **Prefetch shortage**: if there are no large resources but tasks are quick (seconds to a few minutes), time is lost between tasks on download/preparation. Increase prefetch so the next task is ready before the current one finishes.
 4. The right prefetch depends on task speed, input size, and worker disk capacity. It can be adjusted live via update_worker (prefetch is per-worker), but should also be updated in the YAML template for future runs.
 
+### Performance optimization
+For detailed guidance on worker sizing, prefetch, transfer costs, and resource locality, use get_doc with page "optimization".
+Key rules: large workers (32 CPU) + task_spec (cpu: 8) + prefetch: 1 + workspace matching worker region + {RESOURCE_ROOT} for reference data.
+
 ### Troubleshooting
 - Use task_status_counts to get a quick overview of workflow progress.
 - Use task_logs to inspect stdout/stderr of failed tasks.
@@ -765,11 +769,11 @@ func (h *mcpHandler) listTools() []mcpTool {
 		// --- Documentation ---
 		{
 			Name:        "get_doc",
-			Description: "Get scitq documentation page. Available pages: cli, yaml-templates, dsl, ai-integration, configuration, ui.",
+			Description: "Get scitq documentation page. Available pages: cli, yaml-templates, dsl, ai-integration, configuration, ui, optimization.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"page": {Type: "string", Description: "Doc page name (e.g. yaml-templates, cli, dsl, ai-integration, configuration, ui)"},
+					"page": {Type: "string", Description: "Doc page name (e.g. yaml-templates, cli, dsl, ai-integration, configuration, ui, optimization)"},
 				},
 				Required: []string{"page"},
 			},

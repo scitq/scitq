@@ -44,7 +44,7 @@ build-server: copy-docs | $(BINARY_DIR)
 
 copy-docs:
 	@mkdir -p server/docs
-	@cp docs/usage/cli.md docs/usage/yaml-templates.md docs/usage/dsl.md docs/usage/ai-integration.md docs/usage/ui.md docs/reference/configuration.md server/docs/
+	@cp docs/usage/cli.md docs/usage/yaml-templates.md docs/usage/dsl.md docs/usage/ai-integration.md docs/usage/ui.md docs/usage/optimization.md docs/reference/configuration.md server/docs/
 
 build-client: | $(BINARY_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLIENT) $(SRC_CLIENT)
