@@ -194,6 +194,20 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 		}
 	}()
 
+	// Periodic live quality extraction for running tasks
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.extractLiveQuality()
+			case <-s.stopWatchdog:
+				return
+			}
+		}
+	}()
+
 	return s
 }
 
@@ -1195,6 +1209,30 @@ func (s *taskQueueServer) extractQualityScore(taskID int32) {
 		return
 	}
 	log.Printf("📊 task %d: quality score = %.4f (vars: %s)", taskID, result.Score, string(varsJSON))
+}
+
+// extractLiveQuality periodically extracts quality scores for running tasks
+// that have a quality definition. This enables live quality monitoring for Optuna pruning.
+func (s *taskQueueServer) extractLiveQuality() {
+	rows, err := s.db.Query(`
+		SELECT t.task_id
+		FROM task t
+		JOIN step s ON t.step_id = s.step_id
+		WHERE t.status = 'R'
+		  AND s.quality_definition IS NOT NULL
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var taskID int32
+		if rows.Scan(&taskID) != nil {
+			continue
+		}
+		s.extractQualityScore(taskID)
+	}
 }
 
 func readLogFile(taskID int32, logType string, logRoot string) string {
