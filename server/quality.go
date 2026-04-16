@@ -15,14 +15,22 @@ import (
 
 // QualityDefinition is the JSON structure stored in step.quality_definition.
 type QualityDefinition struct {
-	Variables map[string]string `json:"variables"` // name -> regex pattern (one capture group)
-	Formula   string            `json:"formula"`   // arithmetic expression over variable names
+	Variables  map[string]string   `json:"variables"`            // name -> regex pattern (one capture group)
+	Formula    string              `json:"formula,omitempty"`    // single-objective formula (backward compat)
+	Objectives []ObjectiveDefinition `json:"objectives,omitempty"` // multi-objective: list of {formula, direction}
 }
 
-// QualityResult holds extracted variables and computed score.
+// ObjectiveDefinition defines one objective in a multi-objective quality definition.
+type ObjectiveDefinition struct {
+	Formula   string `json:"formula"`
+	Direction string `json:"direction"` // "maximize" or "minimize"
+}
+
+// QualityResult holds extracted variables and computed scores.
 type QualityResult struct {
-	Vars  map[string]float64 `json:"vars"`
-	Score float64            `json:"score"`
+	Vars   map[string]float64 `json:"vars"`
+	Score  float64            `json:"score"`            // primary score (first objective, or single formula)
+	Scores []float64          `json:"scores,omitempty"` // all objective scores (multi-objective only)
 }
 
 // ExtractQuality runs quality variable regexes against log text and evaluates the formula.
@@ -57,6 +65,20 @@ func ExtractQuality(def *QualityDefinition, stdout, stderr string) (*QualityResu
 		return nil, nil // no variables matched
 	}
 
+	// Multi-objective: evaluate each objective's formula
+	if len(def.Objectives) > 0 {
+		scores := make([]float64, 0, len(def.Objectives))
+		for _, obj := range def.Objectives {
+			s, err := evalFormula(obj.Formula, vars)
+			if err != nil {
+				return nil, fmt.Errorf("objective formula %q evaluation failed: %w", obj.Formula, err)
+			}
+			scores = append(scores, s)
+		}
+		return &QualityResult{Vars: vars, Score: scores[0], Scores: scores}, nil
+	}
+
+	// Single-objective (backward compat)
 	score, err := evalFormula(def.Formula, vars)
 	if err != nil {
 		return nil, fmt.Errorf("quality formula evaluation failed: %w", err)

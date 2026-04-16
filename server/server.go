@@ -1201,7 +1201,12 @@ func (s *taskQueueServer) extractQualityScore(taskID int32) {
 		return
 	}
 
-	varsJSON, _ := json.Marshal(result.Vars)
+	// Store vars + scores (multi-objective) in quality_vars JSON
+	varsData := map[string]any{"vars": result.Vars}
+	if len(result.Scores) > 0 {
+		varsData["scores"] = result.Scores
+	}
+	varsJSON, _ := json.Marshal(varsData)
 	_, err = s.db.Exec(`UPDATE task SET quality_score = $1, quality_vars = $2::jsonb WHERE task_id = $3`,
 		result.Score, string(varsJSON), taskID)
 	if err != nil {

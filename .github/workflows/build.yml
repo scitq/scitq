@@ -71,7 +71,7 @@ jobs:
         run: docker pull postgres:17-alpine
 
       - name: Edit, quality, optuna, signal tests
-        run: make copy-docs && cd tests/integration && go test -v -run 'TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestOptunaLoop|TestSignalStop|TestEnvVars|TestWorkflowCounters' ./...
+        run: make copy-docs && cd tests/integration && go test -v -run 'TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestMultiObjectiveQuality|TestOptunaLoop|TestSignalStop|TestLiveQualityMonitoring|TestEnvVars|TestWorkflowCounters|TestPermanentWorkerProtection' ./...
 
   test-fetch:
     needs: build
@@ -124,7 +124,7 @@ jobs:
       - name: Run uncovered tests (catch-all for new tests)
         run: |
           make copy-docs
-          COVERED="TestIntegration|TestTaskDependency|TestWorkflowStatus|TestFreeWorkers|TestRetryClonesHiddenParent|TestRetryCLI|TestMCPEndToEnd|TestTaskStdoutStderr|TestReuse|TestSkipIfExists|TestForceRunTask|TestPublishOnly|TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestOptunaLoop|TestSignalStop|TestEnvVars|TestWorkflowCounters|TestFetchIntegration|TestRecruitmentCycle|TestLongRecruiter"
+          COVERED="TestIntegration|TestTaskDependency|TestWorkflowStatus|TestFreeWorkers|TestRetryClonesHiddenParent|TestRetryCLI|TestMCPEndToEnd|TestTaskStdoutStderr|TestReuse|TestSkipIfExists|TestForceRunTask|TestPublishOnly|TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestMultiObjectiveQuality|TestOptunaLoop|TestSignalStop|TestEnvVars|TestWorkflowCounters|TestFetchIntegration|TestRecruitmentCycle|TestLongRecruiter|TestLiveQualityMonitoring|TestPermanentWorkerProtection"
           ALL=$(cd tests/integration && grep -h '^func Test' *_test.go | sed 's/func \(Test[a-zA-Z0-9_]*\).*/\1/' | sort -u)
           UNCOVERED=""
           for t in $ALL; do

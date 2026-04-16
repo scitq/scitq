@@ -435,3 +435,125 @@ Steps 1-2 are standalone and useful immediately. Steps 3-5 deliver the core opti
 5. **Optuna as a library, not a service.** Optuna runs inside the DSL process, not as a separate server. Its study storage (SQLite or PostgreSQL) provides persistence. This keeps the architecture simple.
 
 6. **Pruning is graceful.** Uses SIGTERM (`docker stop --time <grace>`) so programs can save state and exit cleanly. The grace period defaults to 10 seconds but is configurable per signal (via `--grace` on CLI, `grace_period` in MCP/gRPC). For programs like gpredomics that need more time, set a higher value (e.g. 60s).
+
+## 6. Multi-objective optimization
+
+### Motivation
+
+Single-objective optimization (e.g., maximize test AUC) leads to overfitting: Optuna selects hyperparameters that maximize test performance at the expense of generalization. In practice, users care about **multiple metrics simultaneously** — typically train AUC and test AUC. A good trial has high test AUC AND a small train-test gap (low overfitting).
+
+Optuna natively supports multi-objective optimization via Pareto-optimal trial selection. scitq should expose this.
+
+### Quality definition changes
+
+The quality definition already supports multiple variables. The change is in how they map to Optuna objectives:
+
+```yaml
+quality:
+  variables:
+    train_auc: "train_auc: ([0-9.]+)"
+    test_auc: "test_auc: ([0-9.]+)"
+  objectives:
+    - formula: "test_auc"
+      direction: maximize
+    - formula: "test_auc - train_auc"
+      direction: maximize    # maximize negative gap = minimize overfitting
+```
+
+When `objectives` is present (list), it replaces the single `score`/`formula` field. Each objective has its own formula and direction. The `quality_score` field on the task stores the **first** objective (for backward compatibility and display), while `quality_vars` stores all extracted variables.
+
+When `objectives` is absent, the existing single-formula behavior is preserved (`score:` or `formula:` field).
+
+### Optuna integration
+
+Single-objective:
+```python
+study = optuna.create_study(direction="maximize")
+study.tell(trial, score)
+```
+
+Multi-objective:
+```python
+study = optuna.create_study(directions=["maximize", "maximize"])
+study.tell(trial, [test_auc, test_auc - train_auc])
+```
+
+The YAML `optimize:` block changes:
+
+```yaml
+optimize:
+  step: train
+  n_trials: 100
+  n_parallel: 5
+  # Single objective (existing)
+  # direction: maximize
+  # aggregation: mean
+
+  # Multi-objective (new)
+  directions:
+    - maximize     # first objective: test_auc
+    - maximize     # second objective: minimize overfitting (maximize negative gap)
+  aggregation: mean  # applied per-objective across samples
+```
+
+When `directions` (list) is present, it replaces `direction` (string). Each direction corresponds to an objective in the quality definition's `objectives` list.
+
+### Pareto front results
+
+With multi-objective optimization, there is no single "best" trial. Instead, Optuna returns a **Pareto front** — the set of trials where no other trial is better in all objectives simultaneously.
+
+```python
+# Single-objective
+print(f"Best: {study.best_params} → {study.best_value}")
+
+# Multi-objective
+for trial in study.best_trials:
+    print(f"Pareto: {trial.params} → {trial.values}")
+```
+
+The YAML runner reports the Pareto front at the end of the optimization loop.
+
+### Aggregation
+
+Each objective is aggregated independently across samples. With `aggregation: mean`:
+- Objective 1: `mean(test_auc across samples)`
+- Objective 2: `mean((test_auc - train_auc) across samples)`
+
+### Formula evaluation
+
+The existing `evalFormula` function already supports arithmetic expressions. Each objective's formula is evaluated against the same `quality_vars` dict. No code change needed for formula evaluation — only the loop that calls it.
+
+### DSL integration
+
+```python
+study = optuna.create_study(directions=["maximize", "maximize"])
+
+# Quality definition with multiple objectives
+step = workflow.Step(
+    name="train",
+    quality=Quality(
+        variables={
+            "train_auc": r"train_auc: ([0-9.]+)",
+            "test_auc": r"test_auc: ([0-9.]+)",
+        },
+        objectives=[
+            {"formula": "test_auc", "direction": "maximize"},
+            {"formula": "test_auc - train_auc", "direction": "maximize"},
+        ],
+    ),
+)
+
+# After trial completes
+vars = task.quality_vars  # {"train_auc": 0.95, "test_auc": 0.87}
+obj1 = eval_formula("test_auc", vars)          # 0.87
+obj2 = eval_formula("test_auc - train_auc", vars)  # -0.08
+study.tell(trial, [obj1, obj2])
+```
+
+### Implementation notes
+
+1. **Backward compatible**: single `formula`/`score` field still works. `objectives` is optional.
+2. **quality_score stores first objective**: for display, sorting, and the existing live quality monitoring.
+3. **All objectives computed from quality_vars**: the extraction step is unchanged — same regex extraction. The difference is in how formulas are evaluated and reported to Optuna.
+4. **Pruning with multi-objective**: Optuna's built-in `trial.should_prune()` API doesn't support multi-objective studies. However, **manual pruning** works: observe intermediate quality of running tasks and SIGTERM trials where the primary objective is clearly poor (e.g., test AUC below the 25th percentile of completed trials). The trial is then reported as FAIL. This covers the main use case: stopping exploration of a parameter set after a few deceptive fold results.
+5. **Seed support**: `seed:` field on the optimize block sets `TPESampler(seed=N)` for reproducibility. For multi-objective, uses `NSGAIISampler(seed=N)` (Optuna's default multi-objective sampler).

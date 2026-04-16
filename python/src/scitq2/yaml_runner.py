@@ -835,10 +835,12 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     if 'quality' in step_def and isinstance(step_def['quality'], dict):
         from scitq2.workflow import Quality
         q_def = step_def['quality']
-        step_kwargs['quality'] = Quality(
-            variables=q_def.get('variables', {}),
-            formula=q_def.get('score', ''),
-        )
+        q_kwargs = {'variables': q_def.get('variables', {})}
+        if 'objectives' in q_def:
+            q_kwargs['objectives'] = q_def['objectives']
+        else:
+            q_kwargs['formula'] = q_def.get('score', '')
+        step_kwargs['quality'] = Quality(**q_kwargs)
 
     # Depends on prep step for adhoc containers
     if prep_step:
@@ -1097,6 +1099,30 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     return workflow.workflow_id
 
 
+def _extract_task_scores(ctx, task_id: int, n_objectives: int):
+    """Extract per-objective scores from a task's quality_vars JSON.
+    Returns list of floats (one per objective), or None if unavailable."""
+    t = ctx._get_task(task_id)
+    if t is None or t.status != "S":
+        return None
+    qv = getattr(t, "quality_vars", None)
+    if not qv:
+        return None
+    try:
+        import json
+        data = json.loads(qv)
+        scores = data.get("scores")
+        if scores and len(scores) >= n_objectives:
+            return scores[:n_objectives]
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    # Fallback: single quality_score as sole objective
+    qs = getattr(t, "quality_score", None)
+    if qs is not None and n_objectives == 1:
+        return [qs]
+    return None
+
+
 def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
                        step_map: Dict[str, Step], per_iter_steps: list,
                        iterations: list, params, default_language: str,
@@ -1105,13 +1131,15 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
     try:
         import optuna
     except ImportError:
-        print("❌ optuna is required for optimize: blocks. Install with: pip install optuna", file=sys.stderr)
+        print("❌ optuna is required for optimize: blocks. Install with: pip install scitq2[optuna]", file=sys.stderr)
         sys.exit(1)
 
     from scitq2.live import LiveContext
 
     # Parse optimize config
-    direction = optimize_def.get('direction', 'maximize')
+    directions = optimize_def.get('directions')  # multi-objective: list of "maximize"/"minimize"
+    direction = optimize_def.get('direction', 'maximize')  # single-objective
+    multi_objective = directions is not None
     n_trials = int(_resolve_field(optimize_def.get('n_trials', 100), params, extra_vars=workflow_vars))
     n_parallel = int(_resolve_field(optimize_def.get('n_parallel', 1), params, extra_vars=workflow_vars))
     aggregation = optimize_def.get('aggregation', 'mean')
@@ -1145,14 +1173,21 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
     sampler = None
     if seed is not None:
         seed = int(_resolve_field(seed, params, extra_vars=workflow_vars))
-        sampler = optuna.samplers.TPESampler(seed=seed)
-    study = optuna.create_study(
-        direction=direction,
+        if multi_objective:
+            sampler = optuna.samplers.NSGAIISampler(seed=seed)
+        else:
+            sampler = optuna.samplers.TPESampler(seed=seed)
+    study_kwargs = dict(
         storage=storage,
         study_name=study_name,
         load_if_exists=True,
         sampler=sampler,
     )
+    if multi_objective:
+        study_kwargs['directions'] = directions
+    else:
+        study_kwargs['direction'] = direction
+    study = optuna.create_study(**study_kwargs)
 
     ctx = LiveContext(client, poll_interval=2.0)
 
@@ -1177,8 +1212,11 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
     pruning_enabled = pruning_def.get('enabled', False)
     grace_period = pruning_def.get('grace_period', 10)
 
-    print(f"🔬 Starting optimization: {n_trials} trials, {n_parallel} parallel, {direction}", file=sys.stderr)
+    dir_label = str(directions) if multi_objective else direction
+    print(f"🔬 Starting optimization: {n_trials} trials, {n_parallel} parallel, {dir_label}", file=sys.stderr)
     print(f"   Target step: {target_step_name}, aggregation: {aggregation}", file=sys.stderr)
+    if multi_objective:
+        print(f"   Multi-objective: {len(directions)} objectives", file=sys.stderr)
     print(f"   Storage: {storage}", file=sys.stderr)
 
     # Get the command template from the step definition
@@ -1245,15 +1283,37 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
         # Wait for all tasks and report results
         for trial_num, (trial, task_ids) in trial_tasks.items():
             results = ctx.wait_all(task_ids)
-            scores = [score for _, score in results if score is not None]
 
-            if scores:
-                trial_score = agg_fn(scores)
-                study.tell(trial, trial_score)
-                print(f"  Trial {trial.number}: score={trial_score:.4f} ({len(scores)}/{len(task_ids)} samples)", file=sys.stderr)
+            if multi_objective:
+                # Collect per-objective score lists from quality_vars JSON
+                n_obj = len(directions)
+                obj_scores = [[] for _ in range(n_obj)]  # obj_scores[i] = scores across samples
+                n_valid = 0
+                for tid, _ in results:
+                    task_scores = _extract_task_scores(ctx, tid, n_obj)
+                    if task_scores:
+                        n_valid += 1
+                        for i, s in enumerate(task_scores):
+                            obj_scores[i].append(s)
+
+                if n_valid > 0:
+                    aggregated = [agg_fn(obj_scores[i]) for i in range(n_obj)]
+                    study.tell(trial, aggregated)
+                    label = ", ".join(f"{v:.4f}" for v in aggregated)
+                    print(f"  Trial {trial.number}: scores=[{label}] ({n_valid}/{len(task_ids)} samples)", file=sys.stderr)
+                else:
+                    study.tell(trial, state=optuna.trial.TrialState.FAIL)
+                    print(f"  Trial {trial.number}: FAILED (no quality scores)", file=sys.stderr)
             else:
-                study.tell(trial, state=optuna.trial.TrialState.FAIL)
-                print(f"  Trial {trial.number}: FAILED (no quality scores)", file=sys.stderr)
+                # Single-objective: use quality_score directly
+                scores = [score for _, score in results if score is not None]
+                if scores:
+                    trial_score = agg_fn(scores)
+                    study.tell(trial, trial_score)
+                    print(f"  Trial {trial.number}: score={trial_score:.4f} ({len(scores)}/{len(task_ids)} samples)", file=sys.stderr)
+                else:
+                    study.tell(trial, state=optuna.trial.TrialState.FAIL)
+                    print(f"  Trial {trial.number}: FAILED (no quality scores)", file=sys.stderr)
 
             completed_trials += 1
 
@@ -1261,8 +1321,14 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
     print(f"\n🏆 Optimization complete: {len(study.trials)} trials", file=sys.stderr)
     completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
     if completed:
-        print(f"   Best params: {study.best_params}", file=sys.stderr)
-        print(f"   Best score: {study.best_value:.4f}", file=sys.stderr)
+        if multi_objective:
+            print(f"   Pareto front: {len(study.best_trials)} trials", file=sys.stderr)
+            for bt in study.best_trials[:5]:  # show top 5
+                label = ", ".join(f"{v:.4f}" for v in bt.values)
+                print(f"     {bt.params} → [{label}]", file=sys.stderr)
+        else:
+            print(f"   Best params: {study.best_params}", file=sys.stderr)
+            print(f"   Best score: {study.best_value:.4f}", file=sys.stderr)
     else:
         print("   No trials completed successfully", file=sys.stderr)
 

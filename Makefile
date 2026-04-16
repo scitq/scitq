@@ -232,7 +232,7 @@ ifndef VENV
 endif
 	$(PYTHON) -m venv --clear $(VENV)
 	$(VENV)/bin/python -m pip install --upgrade pip
-	$(VENV)/bin/python -m pip install -e ./python
+	$(VENV)/bin/python -m pip install -e "./python[optuna]"
 
 dsl-doc: venv
 	@echo "Generating Python DSL..."

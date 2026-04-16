@@ -17,14 +17,36 @@ class Quality:
     """Defines quality variable extraction and scoring for a Step.
 
     Variables are regex patterns with one capture group, applied to task stdout/stderr.
-    Formula is an arithmetic expression combining variable names into a single score.
+
+    Single-objective (backward compatible):
+        Quality(variables={"auc": r"auc: ([0-9.]+)"}, formula="auc")
+
+    Multi-objective:
+        Quality(
+            variables={"train_auc": r"train_auc: ([0-9.]+)", "test_auc": r"test_auc: ([0-9.]+)"},
+            objectives=[
+                {"formula": "test_auc", "direction": "maximize"},
+                {"formula": "test_auc - train_auc", "direction": "maximize"},
+            ],
+        )
     """
-    def __init__(self, variables: Dict[str, str], formula: str):
-        self.variables = variables  # name -> regex pattern
-        self.formula = formula      # e.g. "accuracy" or "(precision + recall) / 2"
+    def __init__(self, variables: Dict[str, str], formula: str = None,
+                 objectives: list = None):
+        self.variables = variables
+        if objectives and formula:
+            raise ValueError("Cannot specify both 'formula' and 'objectives'")
+        if not objectives and not formula:
+            raise ValueError("Must specify either 'formula' or 'objectives'")
+        self.formula = formula
+        self.objectives = objectives  # list of {"formula": str, "direction": str}
 
     def to_json(self) -> str:
-        return json.dumps({"variables": self.variables, "formula": self.formula})
+        d = {"variables": self.variables}
+        if self.objectives:
+            d["objectives"] = self.objectives
+        else:
+            d["formula"] = self.formula
+        return json.dumps(d)
 
 class Outputs:
     """Represents the declarative outputs of a Step, which can be used in other Steps.

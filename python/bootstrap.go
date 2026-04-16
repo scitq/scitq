@@ -59,7 +59,7 @@ func Bootstrap(venvPath string) error {
 		return fmt.Errorf("failed to ensure pip/setuptools: %w", err)
 	}
 
-	cmd := exec.Command(pip, "install", "--upgrade", "--no-build-isolation", tmpDir)
+	cmd := exec.Command(pip, "install", "--upgrade", "--no-build-isolation", tmpDir+"[optuna]")
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("pip install scitq2 failed: %w", err)

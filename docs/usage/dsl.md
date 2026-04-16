@@ -1205,6 +1205,21 @@ step = workflow.Step(
 
 Each regex is matched against the full stdout+stderr. The **last match** is taken (for iterative programs that output metrics per epoch). The formula is a simple arithmetic expression over variable names.
 
+For multi-objective optimization, use `objectives` instead of `formula`:
+
+```python
+quality=Quality(
+    variables={
+        "train_auc": r"train_auc: ([0-9.]+)",
+        "test_auc": r"test_auc: ([0-9.]+)",
+    },
+    objectives=[
+        {"formula": "test_auc", "direction": "maximize"},
+        {"formula": "test_auc - train_auc", "direction": "maximize"},
+    ],
+)
+```
+
 Quality scores are stored on the task and accessible via the API.
 
 ## Live mode and optimization

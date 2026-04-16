@@ -806,7 +806,25 @@ steps:
       score: "accuracy"
 ```
 
-Quality extraction runs when a task succeeds. Each regex is matched against the full stdout+stderr, and the **last match** is taken (supporting iterative programs that output metrics per epoch). The score formula is a simple arithmetic expression over variable names (`+`, `-`, `*`, `/`, parentheses).
+Quality extraction runs when a task succeeds (and periodically during execution for live monitoring). Each regex is matched against the full stdout+stderr, and the **last match** is taken (supporting iterative programs that output metrics per epoch). The score formula is a simple arithmetic expression over variable names (`+`, `-`, `*`, `/`, parentheses).
+
+### Multi-objective quality
+
+For multi-objective optimization (e.g., maximizing test AUC while minimizing overfitting), use `objectives` instead of `score`:
+
+```yaml
+    quality:
+      variables:
+        train_auc: "train_auc: ([0-9.]+)"
+        test_auc: "test_auc: ([0-9.]+)"
+      objectives:
+        - formula: "test_auc"
+          direction: maximize
+        - formula: "test_auc - train_auc"
+          direction: maximize    # maximize negative gap = minimize overfitting
+```
+
+Each objective has its own formula and direction. The primary `quality_score` on the task stores the first objective. All objective scores are available in `quality_vars`.
 
 The quality score and individual variables are stored on the task and returned by the API (`quality_score`, `quality_vars` in task list output and MCP).
 
@@ -907,17 +925,49 @@ The Optuna study is persisted in `storage` (SQLite by default). If the process c
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `direction` | `maximize` | `maximize` or `minimize` |
+| `direction` | `maximize` | Single-objective: `maximize` or `minimize` |
+| `directions` | (none) | Multi-objective: list of `maximize`/`minimize` (one per objective in quality definition). Replaces `direction` |
 | `n_trials` | `100` | Total number of trials |
 | `n_parallel` | `1` | Trials to run concurrently |
-| `aggregation` | `mean` | How to aggregate per-sample scores: `mean`, `median`, `min`, `max` |
+| `aggregation` | `mean` | How to aggregate per-sample scores: `mean`, `median`, `min`, `max`. Applied per-objective for multi-objective |
 | `step` | (required) | Name of the step to optimize |
 | `storage` | `sqlite:///optuna_{name}.db` | Optuna study storage URL |
 | `study_name` | `scitq_{name}` | Optuna study name |
-| `seed` | (none) | Random seed for the TPE sampler (makes trials reproducible) |
+| `seed` | (none) | Random seed for the sampler (TPESampler for single-objective, NSGAIISampler for multi-objective) |
 | `search_space` | (required) | Parameter definitions (see below) |
 | `pruning.enabled` | `false` | Enable early stopping of bad trials |
 | `pruning.grace_period` | `10` | Seconds before SIGKILL after SIGTERM |
+
+### Multi-objective example
+
+To simultaneously maximize test performance and minimize overfitting:
+
+```yaml
+steps:
+  - name: train
+    quality:
+      variables:
+        train_auc: "train_auc: ([0-9.]+)"
+        test_auc: "test_auc: ([0-9.]+)"
+      objectives:
+        - formula: "test_auc"
+          direction: maximize
+        - formula: "test_auc - train_auc"
+          direction: maximize
+
+optimize:
+  step: train
+  directions:
+    - maximize     # test_auc
+    - maximize     # test_auc - train_auc (minimize overfitting)
+  n_trials: 100
+  n_parallel: 5
+  search_space:
+    lr: { type: float, low: 0.0001, high: 0.1, log: true }
+    depth: { type: int, low: 1, high: 10 }
+```
+
+Multi-objective optimization returns a **Pareto front** instead of a single best trial — the set of trials where no other trial is better in all objectives simultaneously. The YAML runner reports the Pareto front at the end.
 
 ### Search space parameter types
 
