@@ -355,10 +355,12 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 // promoteWaitingTasks promotes W→P for tasks whose prerequisites are all terminal.
 // This catches tasks that were submitted after a concurrent reuse/skip tx committed.
 func (s *taskQueueServer) promoteWaitingTasks(tx *sql.Tx) {
+	// Only check recently submitted W tasks (race window is a few seconds)
 	rows, err := tx.Query(`
 		SELECT t.task_id
 		FROM task t
 		WHERE t.status = 'W'
+		  AND t.created_at > NOW() - INTERVAL '30 seconds'
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM task_dependencies d
