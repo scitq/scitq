@@ -12,6 +12,9 @@ dependencies = [
     "pyyaml>=6.0"
 ]
 
+[project.optional-dependencies]
+optuna = ["optuna>=3.0"]
+
 [project.urls]
 "Homepage" = "https://github.com/scitq/scitq"
 
