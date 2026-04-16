@@ -60,6 +60,10 @@ func (s *taskQueueServer) assignPendingTasks() {
 		log.Printf("⚠️ Failed to count pending tasks: %v", err)
 		return
 	}
+	// Promote W→P: check waiting tasks whose prerequisites are all done.
+	// This catches tasks submitted after a concurrent reuse/skip tx committed.
+	s.promoteWaitingTasks(tx)
+
 	if pendingTaskCount == 0 {
 		return
 	}
@@ -344,6 +348,44 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 				}
 			}
 		}
+		s.triggerAssign()
+	}
+}
+
+// promoteWaitingTasks promotes W→P for tasks whose prerequisites are all terminal.
+// This catches tasks that were submitted after a concurrent reuse/skip tx committed.
+func (s *taskQueueServer) promoteWaitingTasks(tx *sql.Tx) {
+	rows, err := tx.Query(`
+		SELECT t.task_id
+		FROM task t
+		WHERE t.status = 'W'
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_dependencies d
+			JOIN task dep ON d.prerequisite_task_id = dep.task_id
+			WHERE d.dependent_task_id = t.task_id
+			  AND NOT (dep.status = 'S' OR (dep.status = 'F' AND d.accept_failure AND dep.retry = 0))
+		  )
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var toPromote []int32
+	for rows.Next() {
+		var tid int32
+		if rows.Scan(&tid) == nil {
+			toPromote = append(toPromote, tid)
+		}
+	}
+
+	for _, tid := range toPromote {
+		s.redirectReuseInputs(tx, tid)
+		tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, tid)
+		log.Printf("✅ promoted task %d W→P (prerequisites resolved)", tid)
+	}
+	if len(toPromote) > 0 {
 		s.triggerAssign()
 	}
 }
