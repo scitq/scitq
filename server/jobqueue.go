@@ -134,7 +134,7 @@ func (s *taskQueueServer) processJob(job Job) error {
 		// Create the worker
 		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region, job.JobID)
 		if err != nil {
-			return fmt.Errorf("failed to create worker %s: %v", job.WorkerName, err)
+			return fmt.Errorf("failed to create worker %s: %w", job.WorkerName, err)
 		}
 		_, err = s.db.Exec("UPDATE worker SET ipv4=$1, status='I' WHERE worker_id=$2 AND deleted_at IS NULL", IPaddress, job.WorkerID)
 		if err != nil {

@@ -154,30 +154,48 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 			return // already wrote response
 		}
 	default:
+		authHeader := r.Header.Get("Authorization")
+		hasBearer := strings.HasPrefix(authHeader, "Bearer ")
+
 		if sessionID == "" {
-			writeJSON(w, http.StatusBadRequest, jsonrpcResponse{
-				JSONRPC: "2.0", ID: req.ID,
-				Error: &rpcError{Code: -32600, Message: "Missing Mcp-Session-Id header"},
-			})
-			return
-		}
-		val, ok := h.sessions.Load(sessionID)
-		if !ok {
-			// Session lost (server restart, timeout) — auto-recreate if Bearer token is present
-			authHeader := r.Header.Get("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				session = &mcpSession{token: strings.TrimPrefix(authHeader, "Bearer ")}
-				h.sessions.Store(sessionID, session)
-				log.Printf("🔄 MCP session %s auto-restored from Bearer token", sessionID[:16])
-			} else {
-				writeJSON(w, http.StatusNotFound, jsonrpcResponse{
+			// No session ID — auto-initialize from Bearer token (resilient reconnect)
+			if !hasBearer {
+				writeJSON(w, http.StatusBadRequest, jsonrpcResponse{
 					JSONRPC: "2.0", ID: req.ID,
-					Error: &rpcError{Code: -32600, Message: "Session not found — send initialize first"},
+					Error: &rpcError{Code: -32600, Message: "Missing Mcp-Session-Id header (or Authorization: Bearer token)"},
 				})
 				return
 			}
+			sessionID = generateSessionID()
+			session = &mcpSession{token: strings.TrimPrefix(authHeader, "Bearer ")}
+			h.sessions.Store(sessionID, session)
+			log.Printf("🔄 MCP session %s auto-created from Bearer token (no prior session)", sessionID[:16])
 		} else {
-			session = val.(*mcpSession)
+			val, ok := h.sessions.Load(sessionID)
+			if !ok {
+				// Session lost (server restart, timeout) — auto-recreate if Bearer token is present
+				if hasBearer {
+					session = &mcpSession{token: strings.TrimPrefix(authHeader, "Bearer ")}
+					h.sessions.Store(sessionID, session)
+					log.Printf("🔄 MCP session %s auto-restored from Bearer token", sessionID[:16])
+				} else {
+					writeJSON(w, http.StatusNotFound, jsonrpcResponse{
+						JSONRPC: "2.0", ID: req.ID,
+						Error: &rpcError{Code: -32600, Message: "Session not found — send initialize first"},
+					})
+					return
+				}
+			} else {
+				session = val.(*mcpSession)
+				// Keep session token in sync with Bearer header — fresh tokens override
+				// stale ones after re-login (so an expired JWT doesn't hang around).
+				if hasBearer {
+					newToken := strings.TrimPrefix(authHeader, "Bearer ")
+					if newToken != "" && newToken != session.token {
+						session.token = newToken
+					}
+				}
+			}
 		}
 	}
 
