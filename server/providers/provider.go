@@ -14,3 +14,10 @@ type Provider interface {
 // an instance-count limit (e.g. Azure PublicIPCountLimitReached).
 // The job queue uses this to learn the limit and stop further attempts.
 var ErrInstanceLimitReached = errors.New("instance limit reached")
+
+// ErrUnsupportedFlavor is returned when a deployment fails because the
+// selected flavor/VM-size is permanently incompatible with the provider
+// configuration (e.g. Azure confidential-compute VMs requiring a specific
+// securityType that scitq does not set). The job queue uses this to blacklist
+// the flavor for that provider/region so the recruiter skips it.
+var ErrUnsupportedFlavor = errors.New("unsupported flavor")

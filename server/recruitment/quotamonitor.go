@@ -24,8 +24,9 @@ type RegionalUsage struct {
 }
 
 type QuotaManager struct {
-	Quotas map[string]RegionalQuota // keyed by region/provider
-	Usage  sync.Map                 // key = region/provider string, value = RegionalUsage
+	Quotas     map[string]RegionalQuota // keyed by region/provider
+	Usage      sync.Map                 // key = region/provider string, value = RegionalUsage
+	BadFlavors sync.Map                 // key = region/provider/flavorName, value = bool (blacklisted)
 }
 
 func quotaKey(region, provider string) string {
@@ -117,6 +118,29 @@ func (qm *QuotaManager) RegisterInstanceLimit(region, provider string) {
 	quota.MaxInstances = usage.Instances
 	qm.Quotas[key] = quota
 	log.Printf("⚠️ QuotaManager: learned instance limit for %s/%s: %d (from deployment failure)", region, provider, usage.Instances)
+}
+
+// BlacklistFlavor marks a flavor as permanently incompatible with the given
+// provider/region (e.g. Azure BadRequest on VM size). The recruiter will skip
+// this flavor when selecting candidates for deployment.
+func (qm *QuotaManager) BlacklistFlavor(region, provider, flavorName string) {
+	if flavorName == "" {
+		return
+	}
+	k := provider + "/" + region + "/" + flavorName
+	qm.BadFlavors.Store(k, true)
+	log.Printf("⚠️ QuotaManager: blacklisted flavor %s in %s/%s (permanent provider error)", flavorName, provider, region)
+}
+
+// IsFlavorBlacklisted returns true if the flavor was previously blacklisted
+// for this provider/region via BlacklistFlavor.
+func (qm *QuotaManager) IsFlavorBlacklisted(region, provider, flavorName string) bool {
+	if flavorName == "" {
+		return false
+	}
+	k := provider + "/" + region + "/" + flavorName
+	_, ok := qm.BadFlavors.Load(k)
+	return ok
 }
 
 // NewQuotaManager builds a QuotaManager from the loaded configuration.

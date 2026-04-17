@@ -99,6 +99,12 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 				if err := s.updateJobStatus(job.JobID, "F"); err != nil {
 					log.Printf("⚠️ Failed to update job status to failed: %v", err)
 				}
+			} else if errors.Is(err, providers.ErrUnsupportedFlavor) {
+				log.Printf("🚫 Job %d: flavor %s unsupported in %s/%s — blacklisting, not retrying", job.JobID, job.Flavor, job.Region, job.ProviderName)
+				s.qm.BlacklistFlavor(job.Region, job.ProviderName, job.Flavor)
+				if err := s.updateJobStatus(job.JobID, "F"); err != nil {
+					log.Printf("⚠️ Failed to update job status to failed: %v", err)
+				}
 			} else if job.Retry > 0 {
 				job.Retry--
 				s.addJob(job) // Retry job

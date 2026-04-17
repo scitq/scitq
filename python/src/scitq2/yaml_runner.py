@@ -1169,14 +1169,32 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
     else:
         storage = f"sqlite:///optuna_{workflow.name}.db"
 
-    # Create Optuna study
-    sampler = None
+    # Create Optuna study with configurable sampler
+    sampler_name = optimize_def.get('sampler', 'tpe')
+    sampler_opts = optimize_def.get('sampler_options', {})
     if seed is not None:
         seed = int(_resolve_field(seed, params, extra_vars=workflow_vars))
-        if multi_objective:
-            sampler = optuna.samplers.NSGAIISampler(seed=seed)
-        else:
-            sampler = optuna.samplers.TPESampler(seed=seed)
+        sampler_opts.setdefault('seed', seed)
+
+    SAMPLERS = {
+        'tpe': optuna.samplers.TPESampler,
+        'cmaes': optuna.samplers.CmaEsSampler,
+        'random': optuna.samplers.RandomSampler,
+        'qmc': optuna.samplers.QMCSampler,
+        'nsgaii': optuna.samplers.NSGAIISampler,
+        'nsgaiii': getattr(optuna.samplers, 'NSGAIIISampler', None),
+    }
+    sampler_cls = SAMPLERS.get(sampler_name.lower())
+    if sampler_cls is None:
+        print(f"❌ Unknown sampler: {sampler_name}. Available: {', '.join(k for k, v in SAMPLERS.items() if v)}", file=sys.stderr)
+        sys.exit(1)
+
+    # Multi-objective defaults
+    if multi_objective and sampler_name.lower() == 'tpe':
+        sampler_cls = optuna.samplers.NSGAIISampler  # TPE doesn't support multi-objective
+
+    sampler = sampler_cls(**sampler_opts)
+
     study_kwargs = dict(
         storage=storage,
         study_name=study_name,

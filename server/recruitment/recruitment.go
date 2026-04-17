@@ -377,6 +377,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
 
 type FlavorDetail struct {
 	FlavorID int32
+	Name     string
 	RegionID int32
 	Cpu      int32
 	Memory   float64
@@ -417,9 +418,10 @@ func fetchRecruiterFlavors(
 	var unionQueries []string
 	for _, p := range parts {
 		unionQueries = append(unionQueries, fmt.Sprintf(`
-			SELECT 
+			SELECT
 				%[1]d AS step_id, %[2]d AS rank,
 				f.flavor_id,
+				f.flavor_name,
 				r.region_id,
 				r.region_name,
 				p.provider_name||'.'||p.config_name as provider,
@@ -456,13 +458,15 @@ func fetchRecruiterFlavors(
 		var mem, cost, disk float64
 		var regionName string
 		var provider string
+		var flavorName string
 		var available bool
-		if err := rows.Scan(&stepID, &rank, &flavorID, &regionID, &regionName, &provider, &providerID, &cpu, &mem, &disk, &cost, &available); err != nil {
+		if err := rows.Scan(&stepID, &rank, &flavorID, &flavorName, &regionID, &regionName, &provider, &providerID, &cpu, &mem, &disk, &cost, &available); err != nil {
 			return nil, nil, nil, err
 		}
 		key := RecruiterKey{StepID: stepID, Rank: rank}
 		flavorDetail := FlavorDetail{
 			FlavorID: flavorID,
+			Name:     flavorName,
 			RegionID: regionID,
 			Cpu:      cpu,
 			Memory:   mem,
@@ -953,6 +957,10 @@ func deployWorkers(
 				continue
 			}
 
+			if qm.IsFlavorBlacklisted(ri.Name, ri.Provider, fr.Name) {
+				log.Printf("⚠️ Skipping blacklisted flavor %s in %s/%s", fr.Name, ri.Provider, ri.Name)
+				continue
+			}
 			if qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
 				selected = fr
 				regionInfo = ri
@@ -1181,7 +1189,13 @@ func RecruiterCycle(
 		canFitAny := false
 		for _, fr := range flavorRegionList {
 			ri, ok := regionInfoMap[fr.RegionID]
-			if ok && qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
+			if !ok {
+				continue
+			}
+			if qm.IsFlavorBlacklisted(ri.Name, ri.Provider, fr.Name) {
+				continue
+			}
+			if qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
 				canFitAny = true
 				break
 			}
@@ -1352,7 +1366,13 @@ func DebugRecruitStep(
 		canFitAny := false
 		for _, fr := range flavorRegionList {
 			ri, ok := regionInfoMap[fr.RegionID]
-			if ok && qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
+			if !ok {
+				continue
+			}
+			if qm.IsFlavorBlacklisted(ri.Name, ri.Provider, fr.Name) {
+				continue
+			}
+			if qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
 				canFitAny = true
 				break
 			}

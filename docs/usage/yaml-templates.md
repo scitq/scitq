@@ -933,10 +933,36 @@ The Optuna study is persisted in `storage` (SQLite by default). If the process c
 | `step` | (required) | Name of the step to optimize |
 | `storage` | `sqlite:///optuna_{name}.db` | Optuna study storage URL |
 | `study_name` | `scitq_{name}` | Optuna study name |
-| `seed` | (none) | Random seed for the sampler (TPESampler for single-objective, NSGAIISampler for multi-objective) |
+| `seed` | (none) | Random seed for the sampler (makes trials reproducible) |
+| `sampler` | `tpe` | Sampling algorithm: `tpe`, `cmaes`, `random`, `qmc`, `nsgaii`. See below |
+| `sampler_options` | `{}` | Extra kwargs passed to the sampler constructor (e.g. `{multivariate: true, n_startup_trials: 20}`) |
 | `search_space` | (required) | Parameter definitions (see below) |
 | `pruning.enabled` | `false` | Enable early stopping of bad trials |
 | `pruning.grace_period` | `10` | Seconds before SIGKILL after SIGTERM |
+
+### Samplers
+
+| Name | Algorithm | Best for |
+|------|-----------|----------|
+| `tpe` | Tree-structured Parzen Estimator (default) | General purpose, mixed parameter types |
+| `cmaes` | Covariance Matrix Adaptation | Continuous parameters, smooth landscapes |
+| `random` | Uniform random | Baseline, large search spaces |
+| `qmc` | Quasi-Monte Carlo | Systematic coverage, few trials |
+| `nsgaii` | NSGA-II genetic algorithm | Multi-objective (auto-selected when `directions` is set) |
+
+If `tpe` seems to wander in unproductive regions, try `cmaes` for continuous parameters or increase exploration with `sampler_options: {n_startup_trials: 20, multivariate: true}`.
+
+Example:
+```yaml
+optimize:
+  step: train
+  sampler: cmaes
+  seed: 42
+  n_trials: 100
+  search_space:
+    lr: { type: float, low: 0.0001, high: 0.1, log: true }
+    depth: { type: int, low: 1, high: 10 }
+```
 
 ### Multi-objective example
 

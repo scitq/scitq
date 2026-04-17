@@ -96,8 +96,31 @@ func isInstanceLimitError(err error) bool {
 	return strings.Contains(s, "PublicIPCountLimitReached")
 }
 
+// isUnsupportedFlavorError checks if an Azure error indicates the selected
+// VM size/flavor is permanently incompatible with the current configuration
+// (e.g. confidential-compute VMs like Standard_DC*ads_v5 that require a
+// specific securityType we don't set).
+func isUnsupportedFlavorError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) {
+		if respErr.StatusCode == 400 && respErr.ErrorCode == "BadRequest" {
+			s := err.Error()
+			// Known permanent failure messages for unsupported VM sizes
+			if strings.Contains(s, "is not supported for creation of VMs") ||
+				strings.Contains(s, "security type") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // retry executes fn up to 'attempts' times with exponential backoff.
-// If the error is a non-transient instance limit, it stops immediately.
+// If the error is a non-transient (instance limit or unsupported flavor),
+// it stops immediately.
 func retry(fn func() error, attempts int, delay time.Duration) error {
 	var err error
 	for i := 0; i < attempts; i++ {
@@ -107,6 +130,10 @@ func retry(fn func() error, attempts int, delay time.Duration) error {
 		if isInstanceLimitError(err) {
 			log.Printf("Error during processing: %v (instance limit — not retrying)", err)
 			return fmt.Errorf("%w: %v", providers.ErrInstanceLimitReached, err)
+		}
+		if isUnsupportedFlavorError(err) {
+			log.Printf("Error during processing: %v (unsupported flavor — not retrying)", err)
+			return fmt.Errorf("%w: %v", providers.ErrUnsupportedFlavor, err)
 		}
 		log.Printf("Error during processing: %v, retrying", err)
 		time.Sleep(delay * time.Duration(i+1))
