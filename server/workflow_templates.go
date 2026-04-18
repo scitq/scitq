@@ -276,7 +276,13 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 	// 🏃 Actually run the script
 	authToken := extractTokenFromContext(ctx)
 	timeout := time.Duration(s.cfg.Scitq.GRPCDSLTimeout) * time.Second
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	// Detach the subprocess from the client's RPC context — a client that gives
+	// up waiting (e.g. MCP 60s timeout on a large template materialising thousands
+	// of tasks) would otherwise kill the script mid-submission and leave a half-
+	// built workflow in DB. Parent to the server's shutdown context instead, so
+	// the only things that cancel the subprocess are real server shutdown or the
+	// configured GRPCDSLTimeout.
+	runCtx, cancel := context.WithTimeout(s.ctx, timeout)
 	defer cancel()
 	// Detect script type from stored path
 	var scriptPath string
@@ -303,14 +309,20 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		authToken,
 	)
 
+	// Use a non-canceled context for the finalize/cleanup DB writes. If we fail
+	// because the client disconnected, `ctx` is already Done — using it would
+	// silently no-op the cleanup and leave orphaned partial state behind.
+	finalizeCtx, finalizeCancel := context.WithTimeout(s.ctx, 30*time.Second)
+	defer finalizeCancel()
+
 	if runErr != nil || exitCode != 0 {
 		errMsg := fmt.Sprintf("script failed (exit=%d): \n %s \n %s", exitCode, stdout, stderr)
 		log.Printf("⚠️ RunTemplate script error: %s", errMsg)
 
-		_, _ = s.db.ExecContext(ctx, `
+		_, _ = s.db.ExecContext(finalizeCtx, `
 			UPDATE template_run SET error_message = $1, status = 'F' WHERE template_run_id = $2
 		`, errMsg, templateRunId)
-		_, _ = s.db.ExecContext(ctx, `
+		_, _ = s.db.ExecContext(finalizeCtx, `
 			DELETE FROM workflow WHERE workflow_id = (SELECT workflow_id FROM template_run WHERE template_run_id = $1)
 		`, templateRunId)
 
@@ -324,21 +336,21 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		}, nil
 	} else {
 		var err error
-		_, err = s.db.ExecContext(ctx, `
+		_, err = s.db.ExecContext(finalizeCtx, `
 			UPDATE template_run SET status = 'S' WHERE template_run_id = $1
 		`, templateRunId)
 		if err != nil {
 			log.Printf("⚠️ failed to update template_run status: %v", err)
 		}
 		var workflowID sql.NullInt32
-		err = s.db.QueryRowContext(ctx, `
+		err = s.db.QueryRowContext(finalizeCtx, `
 			SELECT workflow_id FROM template_run WHERE template_run_id = $1
 		`, templateRunId).Scan(&workflowID)
 
 		if err != nil {
 			msg := fmt.Sprintf("⚠️ failed to load workflow_id for template_run: %v", err)
 			log.Println(msg)
-			_, _ = s.db.ExecContext(ctx, `
+			_, _ = s.db.ExecContext(finalizeCtx, `
 				UPDATE template_run SET status = 'F', error_message = $1 WHERE template_run_id = $2
 			`, msg, templateRunId)
 
@@ -355,7 +367,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		if !workflowID.Valid {
 			msg := "⚠️ workflow_id is NULL — cannot activate tasks"
 			log.Println(msg)
-			_, _ = s.db.ExecContext(ctx, `
+			_, _ = s.db.ExecContext(finalizeCtx, `
 						UPDATE template_run SET status = 'F', error_message = $1 WHERE template_run_id = $2
 					`, msg, templateRunId)
 
@@ -369,13 +381,13 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 			}, nil
 		}
 
-		_, err = s.db.ExecContext(ctx, `
+		_, err = s.db.ExecContext(finalizeCtx, `
 			UPDATE workflow SET status = 'R' WHERE workflow_id = $1
 		`, workflowID.Int32)
 		if err != nil {
 			msg := fmt.Sprintf("⚠️ failed to update workflow status: %v", err)
 			log.Println(msg)
-			_, _ = s.db.ExecContext(ctx, `
+			_, _ = s.db.ExecContext(finalizeCtx, `
 				UPDATE template_run SET status = 'F', error_message = $1 WHERE template_run_id = $2
 			`, msg, templateRunId)
 			return &pb.TemplateRun{
