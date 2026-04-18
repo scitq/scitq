@@ -68,7 +68,7 @@ func workerAuthInterceptor(expectedToken string, db *sql.DB) grpc.UnaryServerInt
 		} else {
 			if tokens[0] != "Bearer "+expectedToken {
 				if strings.HasPrefix(tokens[0], "Bearer ") {
-					session_id := strings.TrimPrefix(tokens[0], "Bearer ")
+					session_id := strings.TrimSpace(strings.TrimPrefix(tokens[0], "Bearer "))
 
 					// Look up session in DB (Login stores JWT as session_id)
 					var (

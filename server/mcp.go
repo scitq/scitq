@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/internal/version"
@@ -167,7 +168,7 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			sessionID = generateSessionID()
-			session = &mcpSession{token: strings.TrimPrefix(authHeader, "Bearer ")}
+			session = &mcpSession{token: strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))}
 			h.sessions.Store(sessionID, session)
 			log.Printf("🔄 MCP session %s auto-created from Bearer token (no prior session)", sessionID[:16])
 		} else {
@@ -175,7 +176,7 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				// Session lost (server restart, timeout) — auto-recreate if Bearer token is present
 				if hasBearer {
-					session = &mcpSession{token: strings.TrimPrefix(authHeader, "Bearer ")}
+					session = &mcpSession{token: strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))}
 					h.sessions.Store(sessionID, session)
 					log.Printf("🔄 MCP session %s auto-restored from Bearer token", sessionID[:16])
 				} else {
@@ -190,7 +191,7 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 				// Keep session token in sync with Bearer header — fresh tokens override
 				// stale ones after re-login (so an expired JWT doesn't hang around).
 				if hasBearer {
-					newToken := strings.TrimPrefix(authHeader, "Bearer ")
+					newToken := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 					if newToken != "" && newToken != session.token {
 						session.token = newToken
 					}
@@ -825,6 +826,12 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 
 	// Resolve session token to authenticated user context
 	authCtx := h.resolveSessionContext(ctx, session.token)
+	if GetUserFromContext(authCtx) == nil {
+		return &toolResult{
+			Content: []contentBlock{{Type: "text", Text: "Authentication failed: invalid or expired token. Call the login tool to refresh."}},
+			IsError: true,
+		}, nil
+	}
 
 	switch call.Name {
 	case "list_templates":
@@ -1724,6 +1731,22 @@ func (h *mcpHandler) resolveSessionContext(ctx context.Context, token string) co
 		userID := int(claims["user_id"].(float64))
 		username, _ := claims["username"].(string)
 		isAdmin, _ := claims["is_admin"].(bool)
+
+		// Ensure the JWT is also registered as a session so subsequent gRPC calls
+		// (e.g. from the script runner subprocess during RunTemplate pre-flight)
+		// are accepted by the gRPC auth interceptor, which only knows DB sessions.
+		// Use the JWT's exp claim for the DB expiry; skip if missing.
+		if expRaw, ok := claims["exp"].(float64); ok {
+			expAt := time.Unix(int64(expRaw), 0)
+			if _, dberr := h.server.db.Exec(
+				`INSERT INTO scitq_user_session (user_id, session_id, expires_at)
+				 VALUES ($1, $2, $3)
+				 ON CONFLICT (session_id) DO NOTHING`,
+				userID, token, expAt); dberr != nil {
+				log.Printf("MCP: failed to register JWT as session: %v", dberr)
+			}
+		}
+
 		return context.WithValue(ctx, userContextKey, &AuthenticatedUser{
 			UserID:   userID,
 			Username: username,

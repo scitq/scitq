@@ -925,8 +925,35 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         try:
             resource_root = client.get_resource_root(
                 provider=wf_kwargs['provider'], region=wf_kwargs['region'])
-        except Exception:
-            pass  # no resource root configured — RESOURCE_ROOT will be empty
+        except Exception as e:
+            err_str = str(e)
+            if 'UNAUTHENTICATED' in err_str or 'invalid session' in err_str:
+                print(f"⚠️ {{RESOURCE_ROOT}} lookup failed: authentication rejected by server. "
+                      f"SCITQ_TOKEN may be invalid or expired.",
+                      file=sys.stderr)
+            elif 'NotFound' in err_str or 'not found' in err_str.lower():
+                print(f"⚠️ {{RESOURCE_ROOT}} will be empty: no local_resources configured for "
+                      f"{wf_kwargs['provider']}:{wf_kwargs['region']} "
+                      f"(check scitq.yaml). Resources using {{RESOURCE_ROOT}} will resolve to invalid paths.",
+                      file=sys.stderr)
+            else:
+                print(f"⚠️ {{RESOURCE_ROOT}} lookup failed for "
+                      f"{wf_kwargs['provider']}:{wf_kwargs['region']}. "
+                      f"Resources using {{RESOURCE_ROOT}} will resolve to invalid paths.",
+                      file=sys.stderr)
+            print(f"   (server error: {e})", file=sys.stderr)
+    elif 'workspace' in data:
+        print(f"⚠️ {{RESOURCE_ROOT}} will be empty: workspace: did not resolve to a provider:region pair. "
+              f"Resources using {{RESOURCE_ROOT}} will resolve to invalid paths.",
+              file=sys.stderr)
+    else:
+        # No workspace at all — only warn if resources use {RESOURCE_ROOT}
+        _uses_resource_root = any('{RESOURCE_ROOT}' in str(sd.get('resource', ''))
+                                   for sd in data.get('steps', []))
+        if _uses_resource_root:
+            print(f"⚠️ {{RESOURCE_ROOT}} will be empty: no 'workspace:' directive in the template. "
+                  f"Add workspace: \"{{params.location}}\" (or similar) to enable {{RESOURCE_ROOT}}.",
+                  file=sys.stderr)
 
     # Build iterations
     iterate_raw = data.get('iterate')
