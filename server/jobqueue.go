@@ -95,7 +95,7 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 			// Instance limit errors are non-transient: learn the limit and don't retry
 			if errors.Is(err, providers.ErrInstanceLimitReached) {
 				log.Printf("🚫 Job %d: instance limit reached for %s/%s — not retrying", job.JobID, job.Region, job.ProviderName)
-				s.qm.RegisterInstanceLimit(job.Region, job.ProviderName)
+				s.qm.RegisterInstanceLimit(s.db, job.Region, job.ProviderName)
 				if err := s.updateJobStatus(job.JobID, "F"); err != nil {
 					log.Printf("⚠️ Failed to update job status to failed: %v", err)
 				}

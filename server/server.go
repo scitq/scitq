@@ -5255,6 +5255,9 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		defer s.Shutdown()
 
 		s.qm = *recruitment.NewQuotaManager(&cfg)
+		if err := s.qm.ReconcileFromDB(s.db); err != nil {
+			log.Printf("⚠️ QuotaManager reconcile from DB failed: %v (starting with empty usage)", err)
+		}
 		recruitment.StartRecruiterLoop(s.ctx, s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval)
 
 		if err := s.checkProviders(); err != nil {

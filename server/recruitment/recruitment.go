@@ -172,11 +172,15 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
+            AND (r.maximum_workers IS NULL OR COALESCE(wagg.current_workers, 0) < r.maximum_workers)
+            AND (wf.maximum_workers IS NULL OR (
+                SELECT COUNT(*) FROM worker w2
+                WHERE w2.deleted_at IS NULL
+                  AND w2.step_id IN (SELECT step_id FROM step WHERE workflow_id = wf.workflow_id)
+            ) < wf.maximum_workers)
         ORDER BY
             r.step_id, r.rank
     `
-	//			AND (wf.maximum_workers IS NULL OR COUNT(w.worker_id) < wf.maximum_workers)
-	//			AND (r.maximum_workers  IS NULL OR COUNT(w.worker_id) < r.maximum_workers)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -330,6 +334,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
+            AND (r.maximum_workers IS NULL OR COALESCE(wagg.current_workers, 0) < r.maximum_workers)
         ORDER BY
             r.step_id, r.rank
     `
