@@ -48,6 +48,7 @@
    */
   onMount(async () => {
     workflows = await getWorkFlow(undefined, WORKFLOWS_CHUNK_SIZE, 0);
+    hasMoreWorkflows = workflows.length === WORKFLOWS_CHUNK_SIZE;
     workers = await getWorkers();
     workersPerStepId = mapWorkersToStepIds(workers);
     console.log('Loaded workers:', workers);
@@ -55,6 +56,26 @@
     // Subscribe to workflow + step-stats events
     unsubscribeWS = wsClient.subscribeWithTopics({ workflow: [], 'step-stats': [] }, handleMessage);
   });
+
+  /**
+   * Fetches the next page of workflows and appends them to the list.
+   * Uses the current workflows.length as the offset, so it naturally picks
+   * up where the last chunk left off even after WebSocket inserts/deletes.
+   */
+  async function loadMoreWorkflows() {
+    if (isLoading || !hasMoreWorkflows) return;
+    isLoading = true;
+    try {
+      const next = await getWorkFlow(undefined, WORKFLOWS_CHUNK_SIZE, workflows.length);
+      // Filter out any overlap caused by concurrent deletions/insertions.
+      const seen = new Set(workflows.map(w => w.workflowId));
+      const fresh = next.filter(w => !seen.has(w.workflowId));
+      workflows = [...workflows, ...fresh];
+      hasMoreWorkflows = next.length === WORKFLOWS_CHUNK_SIZE;
+    } finally {
+      isLoading = false;
+    }
+  }
 
 
 
@@ -207,13 +228,49 @@
     {/if}
 
     <!-- Scrollable workflow list container -->
-    <div 
-      class="workflow-list-scroll-container" 
-      bind:this={listContainer} 
+    <div
+      class="workflow-list-scroll-container"
+      bind:this={listContainer}
       on:scroll={handleScroll}
     >
       <WorkflowList {workflows} workersPerStepId={workersPerStepId} />
+
+      {#if workflows.length > 0 && hasMoreWorkflows}
+        <div class="load-more-row">
+          <button
+            class="load-more-btn"
+            on:click={loadMoreWorkflows}
+            disabled={isLoading}
+            data-testid="wf-load-more"
+          >
+            {isLoading ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      {/if}
     </div>
 
   </div>
 </div>
+
+<style>
+  .load-more-row {
+    display: flex;
+    justify-content: center;
+    padding: 0.75rem 0 1.5rem;
+  }
+  .load-more-btn {
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--border-color, #d0d0d0);
+    border-radius: 6px;
+    background: var(--surface-bg, #fff);
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .load-more-btn:hover:not(:disabled) {
+    background: var(--surface-hover, #f5f5f5);
+  }
+  .load-more-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+</style>
