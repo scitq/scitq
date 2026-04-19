@@ -260,14 +260,17 @@
   }
   .load-more-btn {
     padding: 0.4rem 1rem;
-    border: 1px solid var(--border-color, #d0d0d0);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
-    background: var(--surface-bg, #fff);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
     cursor: pointer;
     font-size: 0.9rem;
   }
   .load-more-btn:hover:not(:disabled) {
-    background: var(--surface-hover, #f5f5f5);
+    background: var(--primary-color);
+    color: var(--primary-text);
+    border-color: var(--primary-color);
   }
   .load-more-btn:disabled {
     opacity: 0.6;
