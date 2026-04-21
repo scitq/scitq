@@ -6,6 +6,16 @@ command:
     . /builtin/std.sh
     . /builtin/bio.sh
 
+    # Verify input gzip integrity before processing. Without this, a partially
+    # downloaded FASTQ (e.g. rclone left a truncated .gz on disk) can decode
+    # silently: zcat on multi-member gzip streams stops at the break and exits
+    # 0, fastp reads what it got and writes a short-but-valid output — the
+    # task passes while the result is truncated. `gzip -t` walks every member
+    # and checks CRC/isize, so any truncation fails the task loudly here.
+    for f in /input/*.f*q.gz; do
+        gzip -t "$f"
+    done
+
     _find_pairs /input/*.f*q.gz
     _para zcat $READS1 > /tmp/read1.fastq
     _para zcat $READS2 > /tmp/read2.fastq
@@ -21,6 +31,12 @@ command:
         --out2 /output/{SAMPLE}.2.fastq.gz
   false: |
     . /builtin/std.sh
+
+    # See paired branch for the rationale. Same defence against silently
+    # truncated input gzip streams.
+    for f in /input/*.f*q.gz; do
+        gzip -t "$f"
+    done
 
     zcat /input/*.f*q.gz > /tmp/read.fastq
     fastp \

@@ -100,7 +100,11 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			COUNT(*) FILTER (WHERE t.status IN ('C','D','O')) AS accepted,
 			COUNT(*) FILTER (WHERE t.status = 'R') AS running,
 			COUNT(*) FILTER (WHERE t.status IN ('U','V')) AS uploading,
-			COUNT(*) FILTER (WHERE t.status = 'S') AS succeeded,
+			-- Succeeded must mirror Total's NOT hidden filter: a manual retry of
+			-- an S task hides the original without changing its status, so an
+			-- unfiltered COUNT would persistently show Succeeded > Total until
+			-- someone rebuilds the aggregator from scratch.
+			COUNT(*) FILTER (WHERE t.status = 'S' AND NOT t.hidden) AS succeeded,
 			COUNT(*) FILTER (WHERE t.status = 'F' AND t.hidden) AS failed,
 			COUNT(*) FILTER (WHERE t.status = 'F' AND NOT t.hidden) AS reallyfailed,
 			COUNT(*) FILTER (WHERE NOT t.hidden AND t.previous_task_id IS NOT NULL AND t.status NOT IN ('S','F')) AS retrying,

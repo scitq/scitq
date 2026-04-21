@@ -1326,11 +1326,12 @@ func (s *taskQueueServer) checkStaleReuse(ctx context.Context, failedTaskID int3
 
 func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTaskRequest, resumeStatus string, requireDebug bool) (*pb.TaskResponse, error) {
 	var (
-		oldID    = req.TaskId
-		newID    int32
-		wfID     sql.NullInt32
-		stepID   sql.NullInt32
-		wfStatus sql.NullString
+		oldID         = req.TaskId
+		newID         int32
+		wfID          sql.NullInt32
+		stepID        sql.NullInt32
+		wfStatus      sql.NullString
+		oldTaskStatus sql.NullString
 	)
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1345,8 +1346,9 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 	//  - hide old task
 	err = tx.QueryRowContext(ctx, `
 		WITH validated AS (
-			SELECT 
-				t.task_id, t.retry, t.step_id, s.workflow_id, w.status
+			SELECT
+				t.task_id, t.retry, t.step_id, s.workflow_id, w.status AS wf_status,
+				t.status AS task_status
 			FROM task t
 			LEFT JOIN step s ON t.step_id = s.step_id
 			LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
@@ -1378,9 +1380,9 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 			WHERE task_id = (SELECT task_id FROM validated)
 			RETURNING TRUE
 		)
-		SELECT v.workflow_id, v.step_id, v.status, c.task_id
+		SELECT v.workflow_id, v.step_id, v.wf_status, v.task_status, c.task_id
 		FROM validated v, cloned c;
-	`, oldID, req.Retry).Scan(&wfID, &stepID, &wfStatus, &newID)
+	`, oldID, req.Retry).Scan(&wfID, &stepID, &wfStatus, &oldTaskStatus, &newID)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task %d not found, not failed, or not retryable", oldID)
@@ -1430,14 +1432,47 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		return nil, fmt.Errorf("failed to commit retry transaction: %w", err)
 	}
 
-	// Update step aggregator
+	// Update step aggregator. The retried task may have been in any visible
+	// state — commonly F (the original reason retry exists) but also S when a
+	// user manually retries a successful task. We must decrement whichever
+	// bucket the old task was counted in, otherwise Succeeded (or Accepted,
+	// Running, …) drifts upward by one per manual retry and persists even
+	// after the 5-minute Reconcile (since Reconcile historically didn't filter
+	// hidden rows out of Succeeded).
 	if wfID.Valid && stepID.Valid {
 		s.stats.mu.Lock()
 		if wfmap, ok := s.stats.data[wfID.Int32]; ok {
 			if stepAgg, ok := wfmap[stepID.Int32]; ok {
-				if stepAgg.ReallyFailed > 0 {
-					stepAgg.ReallyFailed--
-					stepAgg.Failed++
+				switch oldTaskStatus.String {
+				case "F":
+					if stepAgg.ReallyFailed > 0 {
+						stepAgg.ReallyFailed--
+						stepAgg.Failed++
+					}
+				case "S":
+					if stepAgg.Succeeded > 0 {
+						stepAgg.Succeeded--
+					}
+				case "A", "C", "D", "O":
+					if stepAgg.Accepted > 0 {
+						stepAgg.Accepted--
+					}
+				case "R":
+					if stepAgg.Running > 0 {
+						stepAgg.Running--
+					}
+				case "U", "V":
+					if stepAgg.Uploading > 0 {
+						stepAgg.Uploading--
+					}
+				case "W":
+					if stepAgg.Waiting > 0 {
+						stepAgg.Waiting--
+					}
+				case "P", "I":
+					if stepAgg.Pending > 0 {
+						stepAgg.Pending--
+					}
 				}
 				stepAgg.Pending++
 				stepAgg.Retrying++
