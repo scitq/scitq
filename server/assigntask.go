@@ -69,7 +69,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 
 	// Opportunistic reuse: check pending tasks with reuse_key against task_reuse store (DB-only, no I/O)
-	s.reuseCheckTasks(tx)
+	reuseEvents := s.reuseCheckTasks(tx)
 
 	// Skip-if-exists: check all pending tasks with the flag before worker assignment
 	s.skipExistingTasks(tx)
@@ -162,6 +162,19 @@ func (s *taskQueueServer) assignPendingTasks() {
 	taskRows.Close()
 
 	// Assign tasks
+	// Collect (workflowID, stepID) pairs whose stats we need to adjust, so we
+	// can apply them *after* tx.Commit succeeds. Mutating stats before commit
+	// and then having the tx roll back is a known drift source (Pending can
+	// go negative). Same for the WebSocket deltas — don't broadcast P→A until
+	// the DB actually shows A.
+	type assignedEvent struct {
+		taskID     int32
+		workerID   int32
+		workflowID int32
+		stepID     int32
+	}
+	var assigned []assignedEvent
+
 	for stepID, _ := range stepSlots {
 		// Match step_id
 		for _, workerID := range stepWorkerMap[stepID] {
@@ -170,10 +183,14 @@ func (s *taskQueueServer) assignPendingTasks() {
 			taskCount := min(available, len(stepPendingTasks[stepID]))
 			pendingTasks := stepPendingTasks[stepID][:taskCount]
 
+			// AND status = 'P' guard: without it, a task that another
+			// goroutine already moved to A would still appear in RETURNING,
+			// and we'd wrongly decrement Pending again.
 			rows, err := tx.Query(`
 				UPDATE task t
 				SET status = 'A', worker_id = $1
 				WHERE task_id = ANY($2)
+				  AND status = 'P'
 				RETURNING task_id, step_id, (
 				SELECT workflow_id FROM step s WHERE s.step_id = t.step_id
 				)
@@ -192,22 +209,13 @@ func (s *taskQueueServer) assignPendingTasks() {
 					continue
 				}
 				if stepID.Valid && workflowID.Valid {
-					agg := s.stats.data[workflowID.Int32][stepID.Int32]
-					agg.Pending--
-					agg.Accepted++
-					ws.EmitWS("step-stats", workflowID.Int32, "delta", map[string]any{
-						"workflowId": workflowID.Int32,
-						"stepId":     stepID.Int32,
-						"taskId":     tid,
-						"oldStatus":  "P",
-						"newStatus":  "A",
+					assigned = append(assigned, assignedEvent{
+						taskID:     tid,
+						workerID:   workerID,
+						workflowID: workflowID.Int32,
+						stepID:     stepID.Int32,
 					})
 				}
-				ws.EmitWS("task", tid, "status", map[string]any{
-					"oldStatus": "P",
-					"status":    "A",
-					"workerId":  workerID,
-				})
 			}
 			rows.Close()
 			log.Printf("\u2705 Assigned %d tasks to worker %d", taskNum, workerID)
@@ -223,6 +231,46 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit task assignment: %v", err)
+		// Commit failed — do NOT apply the buffered stats/WS updates.
+		return
+	}
+
+	// Commit succeeded — now it's safe to adjust in-memory stats and broadcast.
+	for _, a := range assigned {
+		s.stats.Adjust(a.workflowID, a.stepID, func(agg *StepAgg) {
+			agg.Pending--
+			agg.Accepted++
+		})
+		ws.EmitWS("step-stats", a.workflowID, "delta", map[string]any{
+			"workflowId": a.workflowID,
+			"stepId":     a.stepID,
+			"taskId":     a.taskID,
+			"oldStatus":  "P",
+			"newStatus":  "A",
+		})
+		ws.EmitWS("task", a.taskID, "status", map[string]any{
+			"oldStatus": "P",
+			"status":    "A",
+			"workerId":  a.workerID,
+		})
+	}
+	// Apply reuse-hit events from reuseCheckTasks (P→S) post-commit.
+	for _, e := range reuseEvents {
+		s.stats.Adjust(e.WorkflowID, e.StepID, func(agg *StepAgg) {
+			agg.Pending--
+			agg.Succeeded++
+		})
+		ws.EmitWS("step-stats", e.WorkflowID, "delta", map[string]any{
+			"workflowId": e.WorkflowID,
+			"stepId":     e.StepID,
+			"taskId":     e.TaskID,
+			"oldStatus":  "P",
+			"newStatus":  "S",
+		})
+		ws.EmitWS("task", e.TaskID, "status", struct {
+			TaskId int32  `json:"taskId"`
+			Status string `json:"status"`
+		}{TaskId: e.TaskID, Status: "S"})
 	}
 }
 
@@ -392,9 +440,23 @@ func (s *taskQueueServer) promoteWaitingTasks(tx *sql.Tx) {
 	}
 }
 
+// reuseHitEvent describes a task that actually transitioned P→S via reuse
+// (i.e. the UPDATE affected a row). The caller should apply the in-memory
+// stats adjustment and broadcast the WS event only after the outer
+// transaction has been committed successfully — otherwise a rollback would
+// leave counters skewed (the classic source of negative Pending).
+type reuseHitEvent struct {
+	TaskID     int32
+	WorkflowID int32
+	StepID     int32
+}
+
 // reuseCheckTasks checks pending tasks with a reuse_key and promotes them to S
-// if a matching entry exists in task_reuse (opportunistic reuse).
-func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
+// if a matching entry exists in task_reuse (opportunistic reuse). Returns the
+// set of tasks whose UPDATE actually fired (status was still 'P'); the caller
+// is responsible for applying stats/WS changes post-commit.
+func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
+	var events []reuseHitEvent
 	rows, err := tx.Query(`
 		SELECT t.task_id, t.reuse_key, t.step_id, tr.output_path, tr.task_id AS original_task_id
 		FROM task t
@@ -404,7 +466,7 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 	`)
 	if err != nil {
 		log.Printf("⚠️ reuse-check: failed to query: %v", err)
-		return
+		return events
 	}
 	defer rows.Close()
 
@@ -425,7 +487,7 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 	}
 
 	if len(hits) == 0 {
-		return
+		return events
 	}
 
 	reused := map[int32]bool{}
@@ -434,27 +496,33 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 		var originalOutput sql.NullString
 		tx.QueryRow(`SELECT output FROM task WHERE task_id = $1`, h.taskID).Scan(&originalOutput)
 
-		_, err = tx.Exec(`UPDATE task SET status = 'S', reuse_hit = true, reuse_original_output = output, output = $2 WHERE task_id = $1 AND status = 'P'`, h.taskID, h.outputPath)
+		res, err := tx.Exec(`UPDATE task SET status = 'S', reuse_hit = true, reuse_original_output = output, output = $2 WHERE task_id = $1 AND status = 'P'`, h.taskID, h.outputPath)
 		if err != nil {
 			log.Printf("⚠️ reuse-check: failed to update task %d: %v", h.taskID, err)
+			continue
+		}
+		// RowsAffected guard: if the task was no longer 'P' (raced with another
+		// path), the UPDATE hits zero rows. Without this check we'd still do
+		// Pending--;Succeeded++ below, which is the main source of negative
+		// Pending counters observed on long workflows.
+		if n, _ := res.RowsAffected(); n == 0 {
+			log.Printf("ℹ️ reuse-check: task %d already transitioned, skipping", h.taskID)
 			continue
 		}
 		log.Printf("♻️ reuse hit for task %d (key=%s…), reusing output from task %d", h.taskID, h.reuseKey[:12], h.originalTaskID)
 		reused[h.taskID] = true
 
-		// Update step stats aggregator: P → S
+		// Defer the stats/WS update until after the outer tx.Commit — until
+		// then the change isn't durable and shouldn't be reflected in-memory.
 		if h.stepID.Valid {
 			var wfID int32
 			tx.QueryRow(`SELECT workflow_id FROM step WHERE step_id = $1`, h.stepID.Int32).Scan(&wfID)
 			if wfID != 0 {
-				s.stats.mu.Lock()
-				if _, ok := s.stats.data[wfID]; ok {
-					if stepAgg, ok := s.stats.data[wfID][h.stepID.Int32]; ok {
-						stepAgg.Pending--
-						stepAgg.Succeeded++
-					}
-				}
-				s.stats.mu.Unlock()
+				events = append(events, reuseHitEvent{
+					TaskID:     h.taskID,
+					WorkflowID: wfID,
+					StepID:     h.stepID.Int32,
+				})
 			}
 		}
 
@@ -481,10 +549,9 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 			}
 		}
 
-		ws.EmitWS("task", h.taskID, "status", struct {
-			TaskId int32  `json:"taskId"`
-			Status string `json:"status"`
-		}{TaskId: h.taskID, Status: "S"})
+		// Note: the "task status=S" WS event is emitted post-commit (see caller
+		// applying reuseEvents) so clients only see the state change once it's
+		// durable in the DB.
 	}
 
 	// Promote W→P for dependents (same logic as skipExistingTasks)
@@ -530,6 +597,7 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) {
 		}
 		s.triggerAssign()
 	}
+	return events
 }
 
 // redirectReuseInputs fixes input paths of a dependent task when its prerequisites
@@ -670,9 +738,10 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 	}
 
 	if workflowID.Valid {
-		agg := s.stats.data[workflowID.Int32][stepID.Int32]
-		agg.Pending--
-		agg.Accepted++
+		s.stats.Adjust(workflowID.Int32, stepID.Int32, func(agg *StepAgg) {
+			agg.Pending--
+			agg.Accepted++
+		})
 		ws.EmitWS("step-stats", workflowID.Int32, "delta", map[string]any{
 			"workflowId": workflowID.Int32,
 			"stepId":     stepID.Int32,

@@ -254,6 +254,33 @@ func (a *StepStatsAgg) EnsureStep(workflowID, stepID int32) {
 	}
 }
 
+// Adjust runs fn with the StepAgg for (workflowID, stepID) while holding the
+// aggregator mutex. It lazily creates any missing map entries so call sites
+// don't need to care about initialisation order. This is the canonical way
+// to mutate counters from anywhere outside UpdateTaskStatus; using it
+// eliminates the two classes of drift caused by unlocked direct map access:
+//   - races with concurrent writers (int32 increments are not atomic)
+//   - updates to a StepAgg that Reconcile has just orphaned by swapping data
+func (a *StepStatsAgg) Adjust(workflowID, stepID int32, fn func(*StepAgg)) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.data == nil {
+		a.data = make(map[int32]map[int32]*StepAgg)
+	}
+	if _, ok := a.data[workflowID]; !ok {
+		a.data[workflowID] = make(map[int32]*StepAgg)
+	}
+	agg, ok := a.data[workflowID][stepID]
+	if !ok {
+		agg = NewStepAgg()
+		a.data[workflowID][stepID] = agg
+	}
+	fn(agg)
+}
+
 // RemoveStep deletes a step entry by its stepID, scanning all workflows to locate it.
 func (a *StepStatsAgg) RemoveStep(stepID int32) int32 {
 	a.mu.Lock()

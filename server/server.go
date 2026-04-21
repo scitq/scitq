@@ -329,24 +329,25 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 
 	// Increment pending count in step stats aggregator
 	if workflowID.Valid && req.StepId != nil {
-		stepAgg := s.stats.data[workflowID.Int32][*req.StepId]
-		switch initialStatus {
-		case "W":
-			stepAgg.Waiting++
-		case "P", "I":
-			stepAgg.Pending++
-		case "C", "D", "O":
-			stepAgg.Accepted++
-		case "R":
-			stepAgg.Running++
-		case "U", "V":
-			stepAgg.Uploading++
-		case "S":
-			stepAgg.Succeeded++
-		case "F":
-			stepAgg.Failed++
-		}
-		stepAgg.Total++
+		s.stats.Adjust(workflowID.Int32, *req.StepId, func(stepAgg *StepAgg) {
+			switch initialStatus {
+			case "W":
+				stepAgg.Waiting++
+			case "P", "I":
+				stepAgg.Pending++
+			case "C", "D", "O":
+				stepAgg.Accepted++
+			case "R":
+				stepAgg.Running++
+			case "U", "V":
+				stepAgg.Uploading++
+			case "S":
+				stepAgg.Succeeded++
+			case "F":
+				stepAgg.Failed++
+			}
+			stepAgg.Total++
+		})
 		// Emit step-stats delta event for new task
 		if workflowID.Valid && req.StepId != nil {
 			ws.EmitWS("step-stats", workflowID.Int32, "delta", map[string]any{
