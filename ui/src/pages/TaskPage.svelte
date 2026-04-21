@@ -260,17 +260,27 @@ async function handleWebSocketMessage(message) {
   }
 
   /**
-   * Updates task list based on URL filters
-   * @async
+   * Synchronously syncs the JS filter state with the URL hash. Kept separate
+   * from updateTasksFromUrl so we can call it before any awaits in onMount —
+   * otherwise a user clicking a status tab while workers/workflows are still
+   * loading would rebuild the hash from undefined state and silently drop
+   * filters like workflowId.
    */
-  async function updateTasksFromUrl() {
+  function syncFiltersFromUrl() {
     const filters = getFiltersFromUrl();
-
     selectedWorkerId = filters.workerId ?? undefined;
     selectedWfId = filters.workflowId ?? undefined;
     selectedStepId = filters.stepId ?? undefined;
     selectedStatus = filters.status ?? undefined;
     showHidden = filters.showHidden ?? false;
+  }
+
+  /**
+   * Updates task list based on URL filters
+   * @async
+   */
+  async function updateTasksFromUrl() {
+    syncFiltersFromUrl();
 
     // Load steps if workflow is selected
     if (selectedWfId !== undefined) {
@@ -659,6 +669,13 @@ async function handleWebSocketMessage(message) {
    */
   onMount(async () => {
     try {
+      // Pull filters from the URL *synchronously* so any button the user
+      // clicks during the async data loads below already sees them. Without
+      // this, handleStatusClick would rebuild the hash from undefined state
+      // and drop e.g. workflowId — the bug where a quick click on a status
+      // tab turns a filtered list into a global one.
+      syncFiltersFromUrl();
+
       // Parallel data loading
       const [workersData, workflowsData] = await Promise.all([
         getWorkers(),
