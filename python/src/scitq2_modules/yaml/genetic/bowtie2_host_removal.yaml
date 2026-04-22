@@ -1,4 +1,5 @@
 name: humanfilter
+version: "1.0.0"
 container: gmtscience/bowtie2:2.5.4
 language: bash
 resource: "{RESOURCE_ROOT}/chm13v2.0.tgz|untar"

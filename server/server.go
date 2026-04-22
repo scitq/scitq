@@ -5300,6 +5300,10 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 			log.Fatalf("failed to check providers: %v", err)
 		}
 
+		// Phase 1 module library migration: move legacy on-disk private
+		// modules into the module table. Idempotent — safe to leave wired.
+		s.importLegacyOnDiskModules()
+
 		s.startJobQueue()
 		s.startFlavorStatsJobs()
 		s.startOrphanCleanup()

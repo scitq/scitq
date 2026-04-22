@@ -1,0 +1,2 @@
+ALTER TABLE template_run DROP COLUMN IF EXISTS module_pins;
+DROP TABLE IF EXISTS module;

@@ -44,5 +44,6 @@ nav:
   - Reference:
       - DB Schema: reference/db-schema.md
       - Configuration: reference/configuration.md
+      - Module Library: reference/module-library.md
       - Glossary: reference/glossary.md
   - Troubleshooting: troubleshooting.md

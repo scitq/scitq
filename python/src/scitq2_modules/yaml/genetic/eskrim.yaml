@@ -1,4 +1,5 @@
 name: eskrim
+version: "1.0.0"
 container: quay.io/biocontainers/eskrim:1.0.9--pyhdfd78af_1
 command: |
   cd /output && eskrim -i /input/*.f*q.gz \

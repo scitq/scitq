@@ -1,4 +1,5 @@
 name: metaphlan
+version: "1.0.0"
 vars:
   METAPHLAN_VERSION: "4.1"
   METAPHLAN_DB_FLAG:

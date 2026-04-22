@@ -681,52 +681,123 @@ scitq template download --id 42
 
 ### `module`
 
-Modules are reusable YAML step definitions used by [YAML templates](yaml-templates.md). Private modules are stored on the server and resolved automatically when a template references them with `module: my_module.yaml`.
+Modules are reusable YAML step definitions used by [YAML templates](yaml-templates.md). They live in a server-side **versioned library** shared between bundled modules (shipped with scitq) and user-uploaded modules. Templates reference a module with `import: <path>[@<version>]`. See the [Module Library reference](../reference/module-library.md) for the full model.
 
 #### `module upload`
 
-Uploads a private module YAML file to the server.
+Uploads a YAML module to the server library. The YAML content must carry a top-level `version:` field.
 
 ```sh
-scitq module upload --path <file> [--force]
+scitq module upload --path <file> [--as <namespace/path>] [--force]
 ```
 
 Options:
-- `--path` (required): path to the module YAML file.
-- `--force`: overwrite an existing module with the same filename.
-
-Example:
-
-```sh
-scitq module upload --path modules/biomscope_align.yaml
-scitq module upload --path modules/biomscope_align.yaml --force
-```
-
-#### `module list`
-
-Lists all private modules available on the server.
-
-```sh
-scitq module list
-```
-
-#### `module download`
-
-Downloads a private module from the server.
-
-```sh
-scitq module download --name <filename> [-o <output_file>]
-```
-
-Options:
-- `--name` (required): the module filename.
-- `-o` / `--output`: save to file instead of printing to stdout.
+- `--path` (required): local path to the module YAML file.
+- `--as`: server-side namespace path (e.g. `internal/my_alignment`). Defaults to the filename without extension.
+- `--force`: overwrite an existing row at the same `(path, version)`. A `bundled` row overwritten this way becomes `forked`.
 
 Examples:
 
 ```sh
-scitq module download --name biomscope_align.yaml
-scitq module download --name biomscope_align.yaml -o modules/biomscope_align.yaml
+# Flat path (derived from filename)
+scitq module upload --path modules/biomscope_align.yaml
+
+# Namespaced path
+scitq module upload --path modules/biomscope_align.yaml --as internal/biomscope_align
+
+# In-place edit of an existing (path, version)
+scitq module upload --path modules/biomscope_align.yaml --as internal/biomscope_align --force
+```
+
+#### `module list`
+
+Lists modules in the library. Output includes an origin marker per row (📚 bundled, 👤 local, 🍴 forked).
+
+```sh
+scitq module list [--tree] [--versions <path>] [--latest]
+```
+
+Options:
+- `--tree`: group rows by folder prefix.
+- `--versions <path>`: show every version at a single path.
+- `--latest`: show only the highest version per path.
+
+Examples:
+
+```sh
+scitq module list
+scitq module list --tree
+scitq module list --versions genetic/fastp
+scitq module list --latest
+```
+
+#### `module download`
+
+Fetches module content by reference. Prints to stdout unless `-o` is given.
+
+```sh
+scitq module download --name <ref> [-o <output_file>]
+```
+
+`<ref>` is one of:
+- `genetic/fastp` — highest version at this path
+- `genetic/fastp@latest` — same, explicit
+- `genetic/fastp@1.0.0` — exact version
+
+Examples:
+
+```sh
+scitq module download --name internal/biomscope_align
+scitq module download --name genetic/fastp@1.0.0 -o /tmp/fastp.yaml
+```
+
+#### `module origin`
+
+Prints provenance for a module version.
+
+```sh
+scitq module origin <ref>
+```
+
+Output shows the origin (`bundled` / `local` / `forked`), content SHA, bundled SHA (on forks), description, uploader, and flags a fork as outdated if a newer `bundled` row has shipped since the fork.
+
+```sh
+scitq module origin genetic/fastp
+scitq module origin genetic/fastp@1.0.0-site
+```
+
+#### `module fork` (admin)
+
+Clones a module row into a new `(path, version)` with `origin=forked`. Typical flow: fork → download → edit → upload `--force`.
+
+```sh
+scitq module fork <ref> --new-version <version>
+```
+
+Example:
+
+```sh
+scitq module fork genetic/fastp@1.0.0 --new-version 1.0.0-site
+```
+
+#### `module upgrade` (admin)
+
+Seeds or updates bundled rows in the library from the installed `scitq2_modules` package. Dry-run by default; `--apply` commits.
+
+```sh
+scitq module upgrade [--apply]
+```
+
+Output diff columns: `<path> <version> <action> <detail>` where action is one of `bundled (new)`, `bundled  up-to-date`, `forked   keep (local edits detected)`, `CONFLICT …`, `skipped (no version)`.
+
+Examples:
+
+```sh
+# Review pending changes
+scitq module upgrade
+
+# Commit
+scitq module upgrade --apply
 ```
 
 

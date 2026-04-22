@@ -525,43 +525,170 @@ def _find_public_module_dir() -> str:
     return os.path.join(base, 'yaml')
 
 
-def _load_public_import(import_name: str) -> dict:
-    """Load a public module by name. Searches scitq2_modules/yaml/ with auto-extension.
-    e.g. 'genetic/fastp' -> scitq2_modules/yaml/genetic/fastp.yaml
+def _split_module_ref(ref: str) -> Tuple[str, Optional[str]]:
+    """Split 'genetic/fastp@1.2.0' → ('genetic/fastp', '1.2.0').
+    'genetic/fastp' or 'genetic/fastp@latest' → ('genetic/fastp', None).
+    Strips a trailing .yaml/.yml from the path part for tolerance.
     """
+    version: Optional[str] = None
+    path = ref
+    if '@' in ref:
+        path, version = ref.rsplit('@', 1)
+        if version == 'latest':
+            version = None
+    for ext in ('.yaml', '.yml'):
+        if path.endswith(ext):
+            path = path[: -len(ext)]
+            break
+    return path, version
+
+
+# Cached gRPC client for server-side module lookups. Reused across calls in
+# the same runner process; lazily constructed so dry-runs without a server
+# reachable fall back to package-only resolution cleanly.
+_module_client = None
+_module_client_failed = False
+
+
+def _module_server_client():
+    """Return a Scitq2Client configured for server-side module fetches, or
+    None if no server is reachable / configured. Result is cached."""
+    global _module_client, _module_client_failed
+    if _module_client is not None:
+        return _module_client
+    if _module_client_failed:
+        return None
+    if not os.environ.get('SCITQ_SERVER') or not os.environ.get('SCITQ_TOKEN'):
+        _module_client_failed = True
+        return None
+    try:
+        from scitq2.grpc_client import Scitq2Client
+        _module_client = Scitq2Client()
+        return _module_client
+    except Exception as e:
+        print(f"⚠️ module library: cannot connect to server for module fetch ({e}); falling back to local package",
+              file=sys.stderr)
+        _module_client_failed = True
+        return None
+
+
+# Pins accumulator: the yaml_runner records every (ref, path, version) it
+# resolves via the module library so a follow-up RPC can snapshot them into
+# template_run.module_pins. Populated as _load_module* resolve references.
+_resolved_module_pins: list = []
+
+
+def _load_module_from_server(path: str, version: Optional[str]) -> Optional[dict]:
+    """Try to fetch a module's YAML content from the server-side library.
+    Returns parsed dict on success, None on any failure (missing module,
+    no server, auth error, etc.) — the caller falls back to its local
+    search strategy.
+    """
+    client = _module_server_client()
+    if client is None:
+        return None
+    ref = path if not version else f"{path}@{version}"
+    try:
+        import taskqueue_pb2  # type: ignore  # noqa: F401 — just ensures the module is importable
+    except ImportError:
+        pass
+    try:
+        from scitq2.pb import taskqueue_pb2 as pb
+        resp = client.stub.DownloadModule(pb.DownloadModuleRequest(filename=ref))
+    except Exception:
+        # Not-found / auth / network — fall through to local search. Keep
+        # quiet here because missing-on-server is a legitimate outcome for
+        # bare `import: genetic/fastp` when the server hasn't been seeded
+        # with bundled modules yet (Phase 3).
+        return None
+    if not resp or not resp.content:
+        return None
+    resolved_name = resp.filename or ref
+    resolved_version = version
+    if '@' in resolved_name:
+        _, resolved_version = resolved_name.rsplit('@', 1)
+    _resolved_module_pins.append({
+        'ref': ref,
+        'path': path,
+        'version': resolved_version,
+        'source': 'server',
+    })
+    return yaml.safe_load(resp.content)
+
+
+def _load_public_import(import_name: str) -> dict:
+    """Load a public module by reference. Tries the server-side library
+    first (authoritative when deployed), then falls back to the
+    `scitq2_modules/yaml/` tree shipped with the installed Python package.
+    Accepts `path` or `path@version`.
+    """
+    path, version = _split_module_ref(import_name)
+
+    mod = _load_module_from_server(path, version)
+    if mod is not None:
+        return mod
+
+    # Package fallback — no versioning here, just the shipped copy.
     base_dir = _find_public_module_dir()
-    # Try with .yaml extension, then without (in case already has extension)
     for ext in ('.yaml', '.yml', ''):
-        path = os.path.join(base_dir, import_name + ext)
-        if os.path.exists(path):
-            with open(path) as f:
-                return yaml.safe_load(f)
-    raise FileNotFoundError(f"Public module not found: {import_name} (searched in {base_dir})")
+        full = os.path.join(base_dir, path + ext)
+        if os.path.exists(full):
+            with open(full) as f:
+                data = yaml.safe_load(f)
+            # Record a pin pointing at the package fallback for diagnostics;
+            # version is whatever the file declares (may be None).
+            _resolved_module_pins.append({
+                'ref': import_name,
+                'path': path,
+                'version': (data or {}).get('version'),
+                'source': 'package',
+            })
+            return data
+    raise FileNotFoundError(
+        f"Public module not found: {import_name} (tried server library, then package at {base_dir})"
+    )
 
 
 def _load_private_module(module_path: str, pipeline_dir: Optional[str] = None,
                          script_root: Optional[str] = None) -> dict:
-    """Load a private module by path. Searches: relative to pipeline, server modules, env path.
-    Auto-detects .yaml extension.
+    """Load a private module by path. Tries the server-side library first
+    (matches the public-import behaviour), then falls back to local file
+    search so direct `python -m scitq2.yaml_runner ...` invocations keep
+    working without a server. Accepts `path` or `path@version`.
     """
+    path, version = _split_module_ref(module_path)
+
+    mod = _load_module_from_server(path, version)
+    if mod is not None:
+        return mod
+
+    # Local filesystem fallback — unchanged from pre-library behaviour.
     candidates = []
-    for path_base in [module_path]:
-        if pipeline_dir:
-            candidates.append(os.path.join(pipeline_dir, path_base))
-            candidates.append(os.path.join(pipeline_dir, 'modules', path_base))
-        candidates.append(path_base)
-        if script_root:
-            candidates.append(os.path.join(script_root, 'modules', path_base))
-        module_path_env = os.environ.get('SCITQ_YAML_MODULE_PATH')
-        if module_path_env:
-            candidates.append(os.path.join(module_path_env, path_base))
+    if pipeline_dir:
+        candidates.append(os.path.join(pipeline_dir, module_path))
+        candidates.append(os.path.join(pipeline_dir, 'modules', module_path))
+    candidates.append(module_path)
+    if script_root:
+        candidates.append(os.path.join(script_root, 'modules', module_path))
+    module_path_env = os.environ.get('SCITQ_YAML_MODULE_PATH')
+    if module_path_env:
+        candidates.append(os.path.join(module_path_env, module_path))
 
-    for path in candidates:
-        if os.path.exists(path):
-            with open(path) as f:
-                return yaml.safe_load(f)
+    for cand in candidates:
+        if os.path.exists(cand):
+            with open(cand) as f:
+                data = yaml.safe_load(f)
+            _resolved_module_pins.append({
+                'ref': module_path,
+                'path': path,
+                'version': (data or {}).get('version'),
+                'source': 'filesystem',
+            })
+            return data
 
-    raise FileNotFoundError(f"Private module not found: {module_path} (searched: {candidates})")
+    raise FileNotFoundError(
+        f"Private module not found: {module_path} (tried server library, then local paths: {candidates})"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1116,6 +1243,11 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
 
     print(f"✅ Workflow '{workflow.full_name}' created (id={workflow.workflow_id})")
 
+    # Flush module pins into template_run.module_pins so replays can use the
+    # exact same module content. Only meaningful when the runner is invoked
+    # as a server subprocess (SCITQ_TEMPLATE_RUN_ID set by scriptRunner).
+    _flush_module_pins(client)
+
     # Optimization loop (if optimize: block is present)
     optimize_def = data.get('optimize')
     if optimize_def and not dry_run:
@@ -1124,6 +1256,31 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
                                   default_language, workflow_vars, pipeline_dir, script_root)
 
     return workflow.workflow_id
+
+
+def _flush_module_pins(client) -> None:
+    """Persist `_resolved_module_pins` into template_run.module_pins. No-op
+    when not running as a template subprocess (no template_run_id env var)
+    or when nothing was resolved via the module library."""
+    run_id_str = os.environ.get('SCITQ_TEMPLATE_RUN_ID')
+    if not run_id_str:
+        return
+    if not _resolved_module_pins:
+        return
+    try:
+        template_run_id = int(run_id_str)
+    except ValueError:
+        return
+    try:
+        from scitq2.pb import taskqueue_pb2 as pb
+        client.stub.UpdateTemplateRun(pb.UpdateTemplateRunRequest(
+            template_run_id=template_run_id,
+            module_pins=json.dumps(_resolved_module_pins),
+        ))
+    except Exception as e:
+        # Non-fatal: pin recording is best-effort. Log and continue.
+        print(f"⚠️ module pins: failed to record {len(_resolved_module_pins)} pin(s): {e}",
+              file=sys.stderr)
 
 
 def _extract_task_scores(ctx, task_id: int, n_objectives: int):
@@ -1388,16 +1545,72 @@ def _run_optimize_loop(client, workflow: Workflow, optimize_def: dict,
 # CLI
 # ---------------------------------------------------------------------------
 
+def _list_bundled_modules():
+    """Walk the installed scitq2_modules/yaml tree and print one JSON object
+    per module to stdout. Each object carries enough for the server to seed
+    the module_library table: path, version, description, content_sha256,
+    content_base64. Used by `scitq module upgrade` (the server shells out
+    to this to locate and read the bundled modules inside its Python venv,
+    so it doesn't have to guess the site-packages path)."""
+    import base64
+    import hashlib
+    base_dir = _find_public_module_dir()
+    if not os.path.isdir(base_dir):
+        return
+    for root, _dirs, files in os.walk(base_dir):
+        for fn in files:
+            if not (fn.endswith('.yaml') or fn.endswith('.yml')):
+                continue
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, base_dir)
+            # Strip extension for the logical path
+            path = rel
+            for ext in ('.yaml', '.yml'):
+                if path.endswith(ext):
+                    path = path[: -len(ext)]
+                    break
+            # Normalise path separators to forward slashes so Windows-built
+            # venvs still produce canonical module paths.
+            path = path.replace(os.sep, '/')
+            with open(full, 'rb') as f:
+                content = f.read()
+            # Parse version and description
+            try:
+                data = yaml.safe_load(content) or {}
+            except Exception:
+                data = {}
+            version = data.get('version')
+            description = data.get('description')
+            if isinstance(description, str) and ('\n' in description):
+                description = description.split('\n', 1)[0]
+            print(json.dumps({
+                'path': path,
+                'version': version,
+                'description': description,
+                'content_sha256': hashlib.sha256(content).hexdigest(),
+                'content_base64': base64.b64encode(content).decode('ascii'),
+            }))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run a YAML scitq pipeline")
-    parser.add_argument("input", help="YAML pipeline file")
+    parser.add_argument("input", nargs='?', help="YAML pipeline file")
     parser.add_argument("--values", type=str, help="JSON parameter values")
     parser.add_argument("--params", action="store_true", help="Print parameter schema as JSON")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters")
     parser.add_argument("--standalone", action="store_true", default=True)
     parser.add_argument("--verbose", action="store_true", help="Print step decisions to stderr")
+    parser.add_argument("--list-bundled", action="store_true", dest="list_bundled",
+                        help="Emit JSON lines describing bundled modules (for server-side module upgrade)")
     args = parser.parse_args()
+
+    if args.list_bundled:
+        _list_bundled_modules()
+        return
+
+    if not args.input:
+        parser.error("input YAML file is required unless --list-bundled is given")
 
     with open(args.input) as f:
         data = yaml.safe_load(f)

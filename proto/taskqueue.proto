@@ -77,7 +77,11 @@ service TaskQueue {
     // Module system
     rpc UploadModule(UploadModuleRequest) returns (Ack);
     rpc ListModules(google.protobuf.Empty) returns (ModuleList);
+    rpc ListModulesFiltered(ModuleListFilter) returns (ModuleList);
     rpc DownloadModule(DownloadModuleRequest) returns (FileContent);
+    rpc UpgradeBundledModules(UpgradeBundledModulesRequest) returns (UpgradeBundledModulesResponse);
+    rpc GetModuleOrigin(ModuleOriginRequest) returns (ModuleOriginResponse);
+    rpc ForkModule(ForkModuleRequest) returns (Ack);
     rpc GetWorkspaceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
     rpc GetResourceRoot(WorkspaceRootRequest) returns (WorkspaceRootResponse);
     rpc RegisterSpecifications(ResourceSpec) returns (Ack);
@@ -814,6 +818,10 @@ message UpdateTemplateRunRequest {
   int32 template_run_id = 1;
   optional int32 workflow_id = 2;
   optional string error_message = 3;
+  // JSON-encoded array of pin objects (see specs/module_library.md).
+  // The yaml_runner snapshots the concrete (path, version) it resolved
+  // for each `import:` so replays can use identical module content.
+  optional string module_pins = 4;
 }
 
 message WorkspaceRootRequest {
@@ -844,11 +852,81 @@ message UploadModuleRequest {
 }
 
 message ModuleList {
+  // Flat list of `path@version` strings. Kept for backward compatibility.
   repeated string modules = 1;
+  // Structured view — populated by newer callers. Old callers can ignore it.
+  repeated ModuleEntry entries = 2;
+}
+
+message ModuleEntry {
+  string path = 1;
+  string version = 2;
+  string origin = 3;      // "bundled" | "local" | "forked"
+  string description = 4;
+}
+
+// Filter for ListModulesFiltered. All fields optional: an empty request
+// returns the same data as `ListModules` (all rows).
+message ModuleListFilter {
+  // Restrict results to one module path (e.g. 'genetic/fastp') — returns
+  // every version at that path. Matches the `scitq module list
+  // --versions X` use case.
+  optional string path = 1;
+  // If true, return only the highest-ordered version per path.
+  optional bool latest_only = 2;
 }
 
 message DownloadModuleRequest {
   string filename = 1;
+}
+
+// `scitq module upgrade` seeds/updates bundled YAML modules in the server-side
+// module library from the installed scitq2_modules Python package.
+// See specs/module_library.md.
+message UpgradeBundledModulesRequest {
+  // If false (default), the server returns the diff the upgrade would apply
+  // without touching the DB. If true, the changes are committed.
+  bool apply = 1;
+}
+
+message UpgradeBundledModulesResponse {
+  // Human-readable multi-line report of the scanned bundled modules and the
+  // action taken (or that would be taken in dry-run).
+  string report = 1;
+  // Summary counters — useful for scripted callers that don't want to parse
+  // the text report.
+  int32 inserted = 2;         // bundled rows newly inserted
+  int32 forks_preserved = 3;  // existing origin=F rows left alone
+  int32 conflicts = 4;        // same (path,version) re-shipped with different bytes
+  int32 skipped = 5;          // bundled modules without a version field
+  int32 up_to_date = 6;       // bundled rows already present with matching content
+}
+
+// Single-row origin lookup. `version` is optional — empty means "latest".
+message ModuleOriginRequest {
+  string path = 1;
+  string version = 2;
+}
+
+message ModuleOriginResponse {
+  string path = 1;
+  string version = 2;
+  string origin = 3;          // "bundled" | "local" | "forked"
+  string content_sha256 = 4;
+  string bundled_sha256 = 5;  // set on forked rows; the pre-fork content hash
+  string description = 6;
+  string uploaded_at = 7;     // RFC3339
+  string uploaded_by = 8;     // username, empty if unknown or system-seeded
+  bool fork_is_outdated = 9;  // true if a newer bundled content at the same path has shipped since the fork
+}
+
+// Create a new forked row by cloning a bundled module to a new version.
+// Content is taken from the source row; caller typically follows up with
+// `scitq module download` + edit + `scitq module upload --force`.
+message ForkModuleRequest {
+  string source_path = 1;
+  string source_version = 2;  // optional; empty → latest bundled at source_path
+  string new_version = 3;     // required; rejected if already present
 }
 
 message FileContent {

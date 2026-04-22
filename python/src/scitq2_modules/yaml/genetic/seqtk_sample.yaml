@@ -1,4 +1,5 @@
 name: seqtk
+version: "1.0.0"
 container: gmtscience/seqtk:1.4
 command:
   cond: PAIRED

@@ -148,9 +148,12 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 | `download_template` | Download template source code |
 | `list_template_runs` | List template execution runs |
 | **Modules** | |
-| `list_modules` | List private YAML modules |
-| `upload_module` | Upload a YAML module |
-| `download_module` | Download a YAML module |
+| `list_modules` | List YAML modules in the library (flat `path@version`, plus structured `entries` with origin / description) |
+| `upload_module` | Upload a YAML module (path may contain slashes; `version:` field required in the YAML) |
+| `download_module` | Download a module by `path`, `path@version`, or `path@latest` |
+| `module_origin` | Show provenance of a module version: origin (`bundled`/`local`/`forked`), content SHA, uploader, fork-outdated flag |
+| `fork_module` | Admin: clone a module row to a new local version |
+| `upgrade_modules` | Admin: seed/update bundled modules from the installed scitq2 package (`apply=true` to commit) |
 | **Workflows** | |
 | `list_workflows` | List workflows |
 | `update_workflow_status` | Pause, resume, or debug a workflow |

@@ -621,11 +621,46 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "download_module",
-			Description: "Download a private YAML module from the server.",
+			Description: "Download a YAML module from the server's module library. Accepts 'path', 'path@version', or 'path@latest'.",
 			InputSchema: inputSchema{
 				Type:     "object",
-				Properties: map[string]schemaProperty{"name": {Type: "string", Description: "Module filename"}},
+				Properties: map[string]schemaProperty{"name": {Type: "string", Description: "Module reference (e.g. 'genetic/fastp' or 'genetic/fastp@1.2.0')"}},
 				Required: []string{"name"},
+			},
+		},
+		{
+			Name:        "upgrade_modules",
+			Description: "Admin: seed/update bundled modules in the library from the installed scitq2 package. Dry-run by default; pass apply=true to commit.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"apply": {Type: "boolean", Description: "Commit the changes (default false = dry-run)"},
+				},
+			},
+		},
+		{
+			Name:        "module_origin",
+			Description: "Show provenance of a module version: origin (bundled/local/forked), content hash, uploader, and a flag if a forked row has been outpaced by a newer bundled version.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"name":    {Type: "string", Description: "Module path (e.g. 'genetic/fastp')"},
+					"version": {Type: "string", Description: "Version string; omit or 'latest' for the highest version at the path"},
+				},
+				Required: []string{"name"},
+			},
+		},
+		{
+			Name:        "fork_module",
+			Description: "Admin: clone a module row into a new (path, new_version) local fork. Typical flow: fork → download → edit → upload --force.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"source_path":    {Type: "string", Description: "Source module path (e.g. 'genetic/fastp')"},
+					"source_version": {Type: "string", Description: "Source version; omit or 'latest' for the highest version"},
+					"new_version":    {Type: "string", Description: "Version string for the new fork row (must not already exist at this path)"},
+				},
+				Required: []string{"source_path", "new_version"},
 			},
 		},
 		{
@@ -878,6 +913,12 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolListModules(authCtx)
 	case "upload_module":
 		return h.toolUploadModule(authCtx, call.Arguments)
+	case "upgrade_modules":
+		return h.toolUpgradeModules(authCtx, call.Arguments)
+	case "module_origin":
+		return h.toolModuleOrigin(authCtx, call.Arguments)
+	case "fork_module":
+		return h.toolForkModule(authCtx, call.Arguments)
 	case "download_module":
 		return h.toolDownloadModule(authCtx, call.Arguments)
 	case "edit_and_retry_task":
@@ -1442,6 +1483,47 @@ func (h *mcpHandler) toolDownloadModule(ctx context.Context, args json.RawMessag
 	return &toolResult{
 		Content: []contentBlock{{Type: "text", Text: string(res.Content)}},
 	}, nil
+}
+
+func (h *mcpHandler) toolUpgradeModules(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ Apply bool `json:"apply"` }
+	json.Unmarshal(args, &p)
+	resp, err := h.server.UpgradeBundledModules(ctx, &pb.UpgradeBundledModulesRequest{Apply: p.Apply})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(resp.Report), nil
+}
+
+func (h *mcpHandler) toolModuleOrigin(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	json.Unmarshal(args, &p)
+	resp, err := h.server.GetModuleOrigin(ctx, &pb.ModuleOriginRequest{Path: p.Name, Version: p.Version})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(resp), nil
+}
+
+func (h *mcpHandler) toolForkModule(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		SourcePath    string `json:"source_path"`
+		SourceVersion string `json:"source_version"`
+		NewVersion    string `json:"new_version"`
+	}
+	json.Unmarshal(args, &p)
+	_, err := h.server.ForkModule(ctx, &pb.ForkModuleRequest{
+		SourcePath:    p.SourcePath,
+		SourceVersion: p.SourceVersion,
+		NewVersion:    p.NewVersion,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Forked %s@%s → %s@%s", p.SourcePath, p.SourceVersion, p.SourcePath, p.NewVersion)), nil
 }
 
 func (h *mcpHandler) toolEditAndRetryTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {

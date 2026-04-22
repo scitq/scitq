@@ -88,7 +88,11 @@ const (
 	TaskQueue_DeleteTemplateRun_FullMethodName         = "/taskqueue.TaskQueue/DeleteTemplateRun"
 	TaskQueue_UploadModule_FullMethodName              = "/taskqueue.TaskQueue/UploadModule"
 	TaskQueue_ListModules_FullMethodName               = "/taskqueue.TaskQueue/ListModules"
+	TaskQueue_ListModulesFiltered_FullMethodName       = "/taskqueue.TaskQueue/ListModulesFiltered"
 	TaskQueue_DownloadModule_FullMethodName            = "/taskqueue.TaskQueue/DownloadModule"
+	TaskQueue_UpgradeBundledModules_FullMethodName     = "/taskqueue.TaskQueue/UpgradeBundledModules"
+	TaskQueue_GetModuleOrigin_FullMethodName           = "/taskqueue.TaskQueue/GetModuleOrigin"
+	TaskQueue_ForkModule_FullMethodName                = "/taskqueue.TaskQueue/ForkModule"
 	TaskQueue_GetWorkspaceRoot_FullMethodName          = "/taskqueue.TaskQueue/GetWorkspaceRoot"
 	TaskQueue_GetResourceRoot_FullMethodName           = "/taskqueue.TaskQueue/GetResourceRoot"
 	TaskQueue_RegisterSpecifications_FullMethodName    = "/taskqueue.TaskQueue/RegisterSpecifications"
@@ -174,7 +178,11 @@ type TaskQueueClient interface {
 	// Module system
 	UploadModule(ctx context.Context, in *UploadModuleRequest, opts ...grpc.CallOption) (*Ack, error)
 	ListModules(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ModuleList, error)
+	ListModulesFiltered(ctx context.Context, in *ModuleListFilter, opts ...grpc.CallOption) (*ModuleList, error)
 	DownloadModule(ctx context.Context, in *DownloadModuleRequest, opts ...grpc.CallOption) (*FileContent, error)
+	UpgradeBundledModules(ctx context.Context, in *UpgradeBundledModulesRequest, opts ...grpc.CallOption) (*UpgradeBundledModulesResponse, error)
+	GetModuleOrigin(ctx context.Context, in *ModuleOriginRequest, opts ...grpc.CallOption) (*ModuleOriginResponse, error)
+	ForkModule(ctx context.Context, in *ForkModuleRequest, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkspaceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
 	GetResourceRoot(ctx context.Context, in *WorkspaceRootRequest, opts ...grpc.CallOption) (*WorkspaceRootResponse, error)
 	RegisterSpecifications(ctx context.Context, in *ResourceSpec, opts ...grpc.CallOption) (*Ack, error)
@@ -896,10 +904,50 @@ func (c *taskQueueClient) ListModules(ctx context.Context, in *emptypb.Empty, op
 	return out, nil
 }
 
+func (c *taskQueueClient) ListModulesFiltered(ctx context.Context, in *ModuleListFilter, opts ...grpc.CallOption) (*ModuleList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ModuleList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListModulesFiltered_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) DownloadModule(ctx context.Context, in *DownloadModuleRequest, opts ...grpc.CallOption) (*FileContent, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FileContent)
 	err := c.cc.Invoke(ctx, TaskQueue_DownloadModule_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) UpgradeBundledModules(ctx context.Context, in *UpgradeBundledModulesRequest, opts ...grpc.CallOption) (*UpgradeBundledModulesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpgradeBundledModulesResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_UpgradeBundledModules_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) GetModuleOrigin(ctx context.Context, in *ModuleOriginRequest, opts ...grpc.CallOption) (*ModuleOriginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ModuleOriginResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_GetModuleOrigin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ForkModule(ctx context.Context, in *ForkModuleRequest, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_ForkModule_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1070,7 +1118,11 @@ type TaskQueueServer interface {
 	// Module system
 	UploadModule(context.Context, *UploadModuleRequest) (*Ack, error)
 	ListModules(context.Context, *emptypb.Empty) (*ModuleList, error)
+	ListModulesFiltered(context.Context, *ModuleListFilter) (*ModuleList, error)
 	DownloadModule(context.Context, *DownloadModuleRequest) (*FileContent, error)
+	UpgradeBundledModules(context.Context, *UpgradeBundledModulesRequest) (*UpgradeBundledModulesResponse, error)
+	GetModuleOrigin(context.Context, *ModuleOriginRequest) (*ModuleOriginResponse, error)
+	ForkModule(context.Context, *ForkModuleRequest) (*Ack, error)
 	GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
 	GetResourceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error)
 	RegisterSpecifications(context.Context, *ResourceSpec) (*Ack, error)
@@ -1295,8 +1347,20 @@ func (UnimplementedTaskQueueServer) UploadModule(context.Context, *UploadModuleR
 func (UnimplementedTaskQueueServer) ListModules(context.Context, *emptypb.Empty) (*ModuleList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListModules not implemented")
 }
+func (UnimplementedTaskQueueServer) ListModulesFiltered(context.Context, *ModuleListFilter) (*ModuleList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListModulesFiltered not implemented")
+}
 func (UnimplementedTaskQueueServer) DownloadModule(context.Context, *DownloadModuleRequest) (*FileContent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DownloadModule not implemented")
+}
+func (UnimplementedTaskQueueServer) UpgradeBundledModules(context.Context, *UpgradeBundledModulesRequest) (*UpgradeBundledModulesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpgradeBundledModules not implemented")
+}
+func (UnimplementedTaskQueueServer) GetModuleOrigin(context.Context, *ModuleOriginRequest) (*ModuleOriginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetModuleOrigin not implemented")
+}
+func (UnimplementedTaskQueueServer) ForkModule(context.Context, *ForkModuleRequest) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ForkModule not implemented")
 }
 func (UnimplementedTaskQueueServer) GetWorkspaceRoot(context.Context, *WorkspaceRootRequest) (*WorkspaceRootResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceRoot not implemented")
@@ -2545,6 +2609,24 @@ func _TaskQueue_ListModules_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ListModulesFiltered_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ModuleListFilter)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListModulesFiltered(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListModulesFiltered_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListModulesFiltered(ctx, req.(*ModuleListFilter))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_DownloadModule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DownloadModuleRequest)
 	if err := dec(in); err != nil {
@@ -2559,6 +2641,60 @@ func _TaskQueue_DownloadModule_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).DownloadModule(ctx, req.(*DownloadModuleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_UpgradeBundledModules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpgradeBundledModulesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).UpgradeBundledModules(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_UpgradeBundledModules_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).UpgradeBundledModules(ctx, req.(*UpgradeBundledModulesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_GetModuleOrigin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ModuleOriginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetModuleOrigin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetModuleOrigin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetModuleOrigin(ctx, req.(*ModuleOriginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ForkModule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForkModuleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ForkModule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ForkModule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ForkModule(ctx, req.(*ForkModuleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2993,8 +3129,24 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TaskQueue_ListModules_Handler,
 		},
 		{
+			MethodName: "ListModulesFiltered",
+			Handler:    _TaskQueue_ListModulesFiltered_Handler,
+		},
+		{
 			MethodName: "DownloadModule",
 			Handler:    _TaskQueue_DownloadModule_Handler,
+		},
+		{
+			MethodName: "UpgradeBundledModules",
+			Handler:    _TaskQueue_UpgradeBundledModules_Handler,
+		},
+		{
+			MethodName: "GetModuleOrigin",
+			Handler:    _TaskQueue_GetModuleOrigin_Handler,
+		},
+		{
+			MethodName: "ForkModule",
+			Handler:    _TaskQueue_ForkModule_Handler,
 		},
 		{
 			MethodName: "GetWorkspaceRoot",

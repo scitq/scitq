@@ -375,10 +375,30 @@ class TaskQueueStub(object):
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=taskqueue__pb2.ModuleList.FromString,
                 _registered_method=True)
+        self.ListModulesFiltered = channel.unary_unary(
+                '/taskqueue.TaskQueue/ListModulesFiltered',
+                request_serializer=taskqueue__pb2.ModuleListFilter.SerializeToString,
+                response_deserializer=taskqueue__pb2.ModuleList.FromString,
+                _registered_method=True)
         self.DownloadModule = channel.unary_unary(
                 '/taskqueue.TaskQueue/DownloadModule',
                 request_serializer=taskqueue__pb2.DownloadModuleRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.FileContent.FromString,
+                _registered_method=True)
+        self.UpgradeBundledModules = channel.unary_unary(
+                '/taskqueue.TaskQueue/UpgradeBundledModules',
+                request_serializer=taskqueue__pb2.UpgradeBundledModulesRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.UpgradeBundledModulesResponse.FromString,
+                _registered_method=True)
+        self.GetModuleOrigin = channel.unary_unary(
+                '/taskqueue.TaskQueue/GetModuleOrigin',
+                request_serializer=taskqueue__pb2.ModuleOriginRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.ModuleOriginResponse.FromString,
+                _registered_method=True)
+        self.ForkModule = channel.unary_unary(
+                '/taskqueue.TaskQueue/ForkModule',
+                request_serializer=taskqueue__pb2.ForkModuleRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
         self.GetWorkspaceRoot = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetWorkspaceRoot',
@@ -844,7 +864,31 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListModulesFiltered(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def DownloadModule(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpgradeBundledModules(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetModuleOrigin(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ForkModule(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1248,10 +1292,30 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=taskqueue__pb2.ModuleList.SerializeToString,
             ),
+            'ListModulesFiltered': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListModulesFiltered,
+                    request_deserializer=taskqueue__pb2.ModuleListFilter.FromString,
+                    response_serializer=taskqueue__pb2.ModuleList.SerializeToString,
+            ),
             'DownloadModule': grpc.unary_unary_rpc_method_handler(
                     servicer.DownloadModule,
                     request_deserializer=taskqueue__pb2.DownloadModuleRequest.FromString,
                     response_serializer=taskqueue__pb2.FileContent.SerializeToString,
+            ),
+            'UpgradeBundledModules': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpgradeBundledModules,
+                    request_deserializer=taskqueue__pb2.UpgradeBundledModulesRequest.FromString,
+                    response_serializer=taskqueue__pb2.UpgradeBundledModulesResponse.SerializeToString,
+            ),
+            'GetModuleOrigin': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetModuleOrigin,
+                    request_deserializer=taskqueue__pb2.ModuleOriginRequest.FromString,
+                    response_serializer=taskqueue__pb2.ModuleOriginResponse.SerializeToString,
+            ),
+            'ForkModule': grpc.unary_unary_rpc_method_handler(
+                    servicer.ForkModule,
+                    request_deserializer=taskqueue__pb2.ForkModuleRequest.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
             'GetWorkspaceRoot': grpc.unary_unary_rpc_method_handler(
                     servicer.GetWorkspaceRoot,
@@ -3146,6 +3210,33 @@ class TaskQueue(object):
             _registered_method=True)
 
     @staticmethod
+    def ListModulesFiltered(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ListModulesFiltered',
+            taskqueue__pb2.ModuleListFilter.SerializeToString,
+            taskqueue__pb2.ModuleList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def DownloadModule(request,
             target,
             options=(),
@@ -3162,6 +3253,87 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/DownloadModule',
             taskqueue__pb2.DownloadModuleRequest.SerializeToString,
             taskqueue__pb2.FileContent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpgradeBundledModules(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/UpgradeBundledModules',
+            taskqueue__pb2.UpgradeBundledModulesRequest.SerializeToString,
+            taskqueue__pb2.UpgradeBundledModulesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetModuleOrigin(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/GetModuleOrigin',
+            taskqueue__pb2.ModuleOriginRequest.SerializeToString,
+            taskqueue__pb2.ModuleOriginResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ForkModule(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ForkModule',
+            taskqueue__pb2.ForkModuleRequest.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
             options,
             channel_credentials,
             insecure,

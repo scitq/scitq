@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +45,11 @@ func (s *taskQueueServer) UpdateTemplateRun(ctx context.Context, req *pb.UpdateT
 	if req.ErrorMessage != nil {
 		sets = append(sets, fmt.Sprintf("error_message = $%d", i))
 		args = append(args, *req.ErrorMessage)
+		i++
+	}
+	if req.ModulePins != nil {
+		sets = append(sets, fmt.Sprintf("module_pins = $%d::jsonb", i))
+		args = append(args, *req.ModulePins)
 		i++
 	}
 
@@ -928,70 +936,626 @@ func (s *taskQueueServer) DownloadTemplate(ctx context.Context, req *pb.Download
 	}, nil
 }
 
-// UploadModule stores a private module YAML file in the modules directory.
-func (s *taskQueueServer) UploadModule(ctx context.Context, req *pb.UploadModuleRequest) (*pb.Ack, error) {
-	if req.Filename == "" {
-		return nil, fmt.Errorf("filename is required")
-	}
-	if filepath.Base(req.Filename) != req.Filename {
-		return nil, fmt.Errorf("filename must not contain directory separators")
+// ---------------------------------------------------------------------------
+// Module library (versioned YAML modules store — see specs/module_library.md)
+// ---------------------------------------------------------------------------
+
+// UpgradeBundledModules seeds/updates the `module` table from the bundled
+// YAML modules shipped with the installed scitq2_modules Python package.
+// See specs/module_library.md for rules. This is the server-side backend
+// of `scitq module upgrade`.
+//
+// The server does not walk the Python site-packages directly; instead, it
+// invokes `python -m scitq2.yaml_runner --list-bundled` inside the
+// configured venv, which prints one JSON object per bundled module:
+//
+//	{"path", "version", "description", "content_sha256", "content_base64"}
+//
+// The server then matches each entry against the `module` table and applies
+// seeding logic, returning a human report plus summary counters. Dry-run
+// by default; `apply=true` commits the writes.
+func (s *taskQueueServer) UpgradeBundledModules(ctx context.Context, req *pb.UpgradeBundledModulesRequest) (*pb.UpgradeBundledModulesResponse, error) {
+	if u := GetUserFromContext(ctx); u == nil || !u.IsAdmin {
+		return nil, fmt.Errorf("admin privileges required to upgrade bundled modules")
 	}
 
-	modulesDir := filepath.Join(s.cfg.Scitq.ScriptRoot, "modules")
-	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create modules directory: %w", err)
+	venvPython := filepath.Join(s.cfg.Scitq.ScriptVenv, "bin", "python")
+	cmd := exec.CommandContext(ctx, venvPython, "-m", "scitq2.yaml_runner", "--list-bundled")
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to enumerate bundled modules: %w", err)
 	}
 
-	targetPath := filepath.Join(modulesDir, req.Filename)
-	if !req.Force {
-		if _, err := os.Stat(targetPath); err == nil {
-			return nil, fmt.Errorf("module '%s' already exists (use --force to overwrite)", req.Filename)
+	type bundledEntry struct {
+		Path          string `json:"path"`
+		Version       any    `json:"version"`
+		Description   any    `json:"description"`
+		ContentSha256 string `json:"content_sha256"`
+		ContentBase64 string `json:"content_base64"`
+	}
+
+	var reportLines []string
+	var inserted, forksPreserved, conflicts, skipped, upToDate int32
+
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var e bundledEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			reportLines = append(reportLines, fmt.Sprintf("? (unparseable line) parse-error  %v", err))
+			continue
+		}
+		versionStr, _ := e.Version.(string)
+		descStr, _ := e.Description.(string)
+		if versionStr == "" {
+			skipped++
+			reportLines = append(reportLines, fmt.Sprintf("%-40s (no version)         skipped  add `version: \"x.y.z\"` to the YAML to seed", e.Path))
+			continue
+		}
+		if versionStr == "latest" {
+			skipped++
+			reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s skipped  reserved version alias", e.Path, versionStr))
+			continue
+		}
+
+		content, err := base64.StdEncoding.DecodeString(e.ContentBase64)
+		if err != nil {
+			reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s error    %v", e.Path, versionStr, err))
+			continue
+		}
+
+		var existingOrigin sql.NullString
+		var existingSha sql.NullString
+		err = s.db.QueryRowContext(ctx,
+			`SELECT origin, content_sha FROM module WHERE path=$1 AND version=$2`,
+			e.Path, versionStr).Scan(&existingOrigin, &existingSha)
+		if err == sql.ErrNoRows {
+			if req.Apply {
+				_, err = s.db.ExecContext(ctx, `
+					INSERT INTO module (path, version, content, content_sha, origin, bundled_sha, description)
+					VALUES ($1, $2, $3, $4, 'B', $4, $5)
+				`, e.Path, versionStr, content, e.ContentSha256, descStr)
+				if err != nil {
+					reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s error    %v", e.Path, versionStr, err))
+					continue
+				}
+			}
+			inserted++
+			reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s bundled  new", e.Path, versionStr))
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to check module %s@%s: %w", e.Path, versionStr, err)
+		}
+
+		switch existingOrigin.String {
+		case "F":
+			forksPreserved++
+			reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s forked   keep (local edits detected)", e.Path, versionStr))
+		case "B":
+			if existingSha.String == e.ContentSha256 {
+				upToDate++
+				reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s bundled  up-to-date", e.Path, versionStr))
+			} else {
+				conflicts++
+				reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s CONFLICT same (path,version) re-shipped with different bytes (packaging bug? not overwritten)", e.Path, versionStr))
+			}
+		case "L":
+			conflicts++
+			reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s CONFLICT local upload collides with a bundled version number (not overwritten)", e.Path, versionStr))
+		default:
+			reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s ?        unexpected origin=%s", e.Path, versionStr, existingOrigin.String))
 		}
 	}
 
-	if err := os.WriteFile(targetPath, req.Content, 0o644); err != nil {
-		return nil, fmt.Errorf("failed to write module file: %w", err)
+	// Footer
+	footer := fmt.Sprintf("\n%d inserted, %d forks preserved, %d conflicts, %d skipped, %d up-to-date.",
+		inserted, forksPreserved, conflicts, skipped, upToDate)
+	if !req.Apply {
+		footer += "\n(dry-run — re-run with --apply to write)"
 	}
 
-	log.Printf("📦 Module uploaded: %s (%d bytes)", req.Filename, len(req.Content))
+	return &pb.UpgradeBundledModulesResponse{
+		Report:         strings.Join(reportLines, "\n") + footer,
+		Inserted:       inserted,
+		ForksPreserved: forksPreserved,
+		Conflicts:      conflicts,
+		Skipped:        skipped,
+		UpToDate:       upToDate,
+	}, nil
+}
+
+// GetModuleOrigin returns provenance metadata for a single module row.
+// Accepts `path` with an optional `version`; empty version resolves to
+// the highest-ordered row at that path.
+func (s *taskQueueServer) GetModuleOrigin(ctx context.Context, req *pb.ModuleOriginRequest) (*pb.ModuleOriginResponse, error) {
+	path, err := normalizeModulePath(req.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		version, originCode, contentSha string
+		bundledSha, description         sql.NullString
+		uploadedAt                      time.Time
+		uploadedBy                      sql.NullInt32
+	)
+	if req.Version == "" || req.Version == "latest" {
+		err = s.db.QueryRowContext(ctx, `
+			SELECT version, origin, content_sha, bundled_sha, description, uploaded_at, uploaded_by
+			  FROM module
+			 WHERE path = $1
+			 ORDER BY version DESC
+			 LIMIT 1
+		`, path).Scan(&version, &originCode, &contentSha, &bundledSha, &description, &uploadedAt, &uploadedBy)
+	} else {
+		version = req.Version
+		err = s.db.QueryRowContext(ctx, `
+			SELECT origin, content_sha, bundled_sha, description, uploaded_at, uploaded_by
+			  FROM module
+			 WHERE path = $1 AND version = $2
+		`, path, req.Version).Scan(&originCode, &contentSha, &bundledSha, &description, &uploadedAt, &uploadedBy)
+	}
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("module %q not found", req.Path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch module origin: %w", err)
+	}
+
+	// Resolve uploaded_by → username (best-effort; empty on failure).
+	var username string
+	if uploadedBy.Valid {
+		_ = s.db.QueryRowContext(ctx, `SELECT username FROM scitq_user WHERE user_id = $1`, uploadedBy.Int32).Scan(&username)
+	}
+
+	// "fork is outdated" heuristic: a forked row whose path has a newer
+	// bundled row with different bundled_sha256 from ours is a candidate
+	// for review.
+	forkOutdated := false
+	if originCode == "F" && bundledSha.Valid {
+		var latestBundledSha sql.NullString
+		_ = s.db.QueryRowContext(ctx, `
+			SELECT content_sha FROM module
+			 WHERE path = $1 AND origin = 'B' AND version > $2
+			 ORDER BY version DESC LIMIT 1
+		`, path, version).Scan(&latestBundledSha)
+		if latestBundledSha.Valid && latestBundledSha.String != bundledSha.String {
+			forkOutdated = true
+		}
+	}
+
+	originLabel := map[string]string{"B": "bundled", "L": "local", "F": "forked"}[originCode]
+
+	return &pb.ModuleOriginResponse{
+		Path:            path,
+		Version:         version,
+		Origin:          originLabel,
+		ContentSha256:   contentSha,
+		BundledSha256:   bundledSha.String,
+		Description:     description.String,
+		UploadedAt:      uploadedAt.UTC().Format(time.RFC3339),
+		UploadedBy:      username,
+		ForkIsOutdated:  forkOutdated,
+	}, nil
+}
+
+// ForkModule clones a source module row to a new (path, new_version) row
+// with origin='F'. Typical flow: admin forks a bundled module so they can
+// `download` + edit + `upload --force` with a site-specific change, keeping
+// the bundled row intact for future `module upgrade` reconciliation.
+func (s *taskQueueServer) ForkModule(ctx context.Context, req *pb.ForkModuleRequest) (*pb.Ack, error) {
+	if u := GetUserFromContext(ctx); u == nil || !u.IsAdmin {
+		return nil, fmt.Errorf("admin privileges required to fork a module")
+	}
+	path, err := normalizeModulePath(req.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	if req.NewVersion == "" {
+		return nil, fmt.Errorf("new_version is required")
+	}
+	if req.NewVersion == "latest" {
+		return nil, fmt.Errorf("'latest' is a reserved version alias")
+	}
+
+	// Load source row
+	var srcVersion, srcContentSha string
+	var srcContent []byte
+	var srcDescription sql.NullString
+	if req.SourceVersion == "" || req.SourceVersion == "latest" {
+		err = s.db.QueryRowContext(ctx, `
+			SELECT version, content, content_sha, description FROM module
+			 WHERE path = $1 ORDER BY version DESC LIMIT 1
+		`, path).Scan(&srcVersion, &srcContent, &srcContentSha, &srcDescription)
+	} else {
+		srcVersion = req.SourceVersion
+		err = s.db.QueryRowContext(ctx, `
+			SELECT content, content_sha, description FROM module
+			 WHERE path = $1 AND version = $2
+		`, path, req.SourceVersion).Scan(&srcContent, &srcContentSha, &srcDescription)
+	}
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("source module %s@%s not found", path, req.SourceVersion)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load source module: %w", err)
+	}
+
+	var uploadedBy *uint32
+	if u := GetUserFromContext(ctx); u != nil {
+		uid := uint32(u.UserID)
+		uploadedBy = &uid
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO module (path, version, content, content_sha, origin, bundled_sha, description, uploaded_by)
+		VALUES ($1, $2, $3, $4, 'F', $4, $5, $6)
+	`, path, req.NewVersion, srcContent, srcContentSha, srcDescription, uploadedBy)
+	if err != nil {
+		// Most likely: unique violation on (path, new_version) — surface cleanly.
+		return nil, fmt.Errorf("failed to create fork %s@%s: %w", path, req.NewVersion, err)
+	}
+	log.Printf("📦 Module forked: %s@%s → %s@%s (origin=F)", path, srcVersion, path, req.NewVersion)
 	return &pb.Ack{Success: true}, nil
 }
 
-// ListModules returns the filenames of all private modules on the server.
-func (s *taskQueueServer) ListModules(ctx context.Context, _ *emptypb.Empty) (*pb.ModuleList, error) {
+// importLegacyOnDiskModules migrates pre-library private modules living as
+// flat files in `{script_root}/modules/*.yaml` into the `module` table. Runs
+// once at server startup; any module already present in the DB is left
+// alone, so repeated invocations are idempotent and safe to leave wired
+// after migration is complete.
+//
+// Legacy modules had no version field; we import them as `0.0.0` so they
+// stay addressable. Subsequent uploads should bump to a real version.
+func (s *taskQueueServer) importLegacyOnDiskModules() {
 	modulesDir := filepath.Join(s.cfg.Scitq.ScriptRoot, "modules")
 	entries, err := os.ReadDir(modulesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &pb.ModuleList{}, nil
+			return
 		}
-		return nil, fmt.Errorf("failed to list modules: %w", err)
+		log.Printf("⚠️ module migration: cannot read %s: %v", modulesDir, err)
+		return
 	}
-	var names []string
+	imported := 0
 	for _, e := range entries {
-		if !e.IsDir() {
-			names = append(names, e.Name())
+		if e.IsDir() {
+			continue
 		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+		path, err := normalizeModulePath(name)
+		if err != nil {
+			log.Printf("⚠️ module migration: skipping %q (%v)", name, err)
+			continue
+		}
+
+		fullPath := filepath.Join(modulesDir, name)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			log.Printf("⚠️ module migration: cannot read %s: %v", fullPath, err)
+			continue
+		}
+		version := extractModuleVersion(content)
+		if version == "" {
+			version = "0.0.0"
+		}
+		if version == "latest" {
+			log.Printf("⚠️ module migration: skipping %q (has reserved version 'latest')", name)
+			continue
+		}
+
+		// Skip if already present (idempotent).
+		var exists int
+		err = s.db.QueryRow(`SELECT 1 FROM module WHERE path=$1 AND version=$2`, path, version).Scan(&exists)
+		if err == nil {
+			continue
+		}
+		if err != sql.ErrNoRows {
+			log.Printf("⚠️ module migration: check failed for %s@%s: %v", path, version, err)
+			continue
+		}
+
+		sha := sha256.Sum256(content)
+		shaHex := hex.EncodeToString(sha[:])
+		description := extractModuleDescription(content)
+		if _, err := s.db.Exec(`
+			INSERT INTO module (path, version, content, content_sha, origin, description)
+			VALUES ($1, $2, $3, $4, 'L', $5)
+		`, path, version, content, shaHex, description); err != nil {
+			log.Printf("⚠️ module migration: insert failed for %s@%s: %v", path, version, err)
+			continue
+		}
+		imported++
 	}
-	return &pb.ModuleList{Modules: names}, nil
+	if imported > 0 {
+		log.Printf("📦 Migrated %d legacy on-disk module(s) into the module table", imported)
+	}
 }
 
-// DownloadModule returns the content of a private module file.
-func (s *taskQueueServer) DownloadModule(ctx context.Context, req *pb.DownloadModuleRequest) (*pb.FileContent, error) {
-	if req.Filename == "" {
-		return nil, fmt.Errorf("filename is required")
+
+// normalizeModulePath validates and canonicalises the namespace path of a
+// module. The on-the-wire `filename` field may be `my_aligner`,
+// `my_aligner.yaml`, `genetic/my_aligner`, or `genetic/my_aligner.yaml`. We
+// strip the extension and reject traversal / absolute paths / empty segments.
+func normalizeModulePath(filename string) (string, error) {
+	if filename == "" {
+		return "", fmt.Errorf("filename is required")
 	}
-	if filepath.Base(req.Filename) != req.Filename {
-		return nil, fmt.Errorf("filename must not contain directory separators")
+	name := filename
+	for _, ext := range []string{".yaml", ".yml"} {
+		if strings.HasSuffix(name, ext) {
+			name = strings.TrimSuffix(name, ext)
+			break
+		}
+	}
+	if strings.HasPrefix(name, "/") {
+		return "", fmt.Errorf("module path must be relative (got %q)", filename)
+	}
+	for _, seg := range strings.Split(name, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", fmt.Errorf("invalid module path %q", filename)
+		}
+	}
+	return name, nil
+}
+
+// parseModulePathVersion parses a reference of the form `path` or
+// `path@version`. An empty version string means "latest".
+func parseModulePathVersion(ref string) (string, string, error) {
+	path := ref
+	version := ""
+	if idx := strings.LastIndex(ref, "@"); idx >= 0 {
+		path = ref[:idx]
+		version = ref[idx+1:]
+	}
+	norm, err := normalizeModulePath(path)
+	if err != nil {
+		return "", "", err
+	}
+	return norm, version, nil
+}
+
+// extractModuleVersion pulls the `version:` field from the YAML content.
+// Keeps this deliberately simple (regex on the top-level key) instead of
+// hauling in a YAML parser — modules with an inline `version:` inside a
+// nested block would be unusual and can be addressed later.
+func extractModuleVersion(content []byte) string {
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "version:") {
+			v := strings.TrimSpace(strings.TrimPrefix(trimmed, "version:"))
+			v = strings.Trim(v, `"'`)
+			return v
+		}
+	}
+	return ""
+}
+
+// extractModuleDescription does the same for `description:` (best-effort,
+// single-line only; multi-line descriptions just yield "").
+func extractModuleDescription(content []byte) string {
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "description:") {
+			v := strings.TrimSpace(strings.TrimPrefix(trimmed, "description:"))
+			v = strings.Trim(v, `"'`)
+			if strings.HasPrefix(v, "|") || strings.HasPrefix(v, ">") {
+				return "" // block scalar — skip for now
+			}
+			return v
+		}
+	}
+	return ""
+}
+
+// UploadModule stores a YAML module in the DB-backed module library.
+//
+// Backward-compat notes:
+//   - `filename` now accepts slashes (e.g. `genetic/fastp` or
+//     `genetic/fastp.yaml`). Flat names (the pre-library behaviour) keep
+//     working unchanged.
+//   - The YAML content MUST include a top-level `version:` field. Legacy
+//     uploads without it are rejected with a clear error — the caller can
+//     add `version: "0.0.1"` to their YAML and retry.
+//   - `force=true` overwrites an existing (path, version) row in place;
+//     `force=false` rejects duplicates. This mirrors the old "refuse
+//     without --force" semantic, now scoped to (path, version).
+func (s *taskQueueServer) UploadModule(ctx context.Context, req *pb.UploadModuleRequest) (*pb.Ack, error) {
+	path, err := normalizeModulePath(req.Filename)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.Content) == 0 {
+		return nil, fmt.Errorf("module content is empty")
+	}
+	version := extractModuleVersion(req.Content)
+	if version == "" {
+		return nil, fmt.Errorf("module %q has no top-level 'version:' field — required by the module library", path)
+	}
+	if version == "latest" {
+		return nil, fmt.Errorf("'latest' is a reserved version alias; use a concrete version string")
 	}
 
-	modulePath := filepath.Join(s.cfg.Scitq.ScriptRoot, "modules", req.Filename)
-	content, err := os.ReadFile(modulePath)
+	sha := sha256.Sum256(req.Content)
+	shaHex := hex.EncodeToString(sha[:])
+	description := extractModuleDescription(req.Content)
+
+	var uploadedBy *uint32
+	if u := GetUserFromContext(ctx); u != nil {
+		uid := uint32(u.UserID)
+		uploadedBy = &uid
+	}
+
+	// Existing row?
+	var existingOrigin sql.NullString
+	err = s.db.QueryRowContext(ctx,
+		`SELECT origin FROM module WHERE path = $1 AND version = $2`,
+		path, version).Scan(&existingOrigin)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to check existing module: %w", err)
+	}
+	if err == nil {
+		if !req.Force {
+			return nil, fmt.Errorf("module %q version %q already exists (use --force to overwrite)", path, version)
+		}
+		// Overwriting: preserve 'B' as 'F' to reflect local edit of a bundled row.
+		newOrigin := existingOrigin.String
+		if newOrigin == "B" {
+			newOrigin = "F"
+		} else if newOrigin == "" {
+			newOrigin = "L"
+		}
+		_, err = s.db.ExecContext(ctx, `
+			UPDATE module
+			   SET content=$1, content_sha=$2, origin=$3, uploaded_at=NOW(),
+			       uploaded_by=$4, description=$5
+			 WHERE path=$6 AND version=$7
+		`, req.Content, shaHex, newOrigin, uploadedBy, description, path, version)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update module %q@%q: %w", path, version, err)
+		}
+		log.Printf("📦 Module updated: %s@%s (%d bytes, origin=%s)", path, version, len(req.Content), newOrigin)
+		return &pb.Ack{Success: true}, nil
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO module (path, version, content, content_sha, origin, uploaded_by, description)
+		VALUES ($1, $2, $3, $4, 'L', $5, $6)
+	`, path, version, req.Content, shaHex, uploadedBy, description)
 	if err != nil {
-		return nil, fmt.Errorf("module '%s' not found: %w", req.Filename, err)
+		return nil, fmt.Errorf("failed to insert module %q@%q: %w", path, version, err)
+	}
+	log.Printf("📦 Module uploaded: %s@%s (%d bytes, origin=L)", path, version, len(req.Content))
+	return &pb.Ack{Success: true}, nil
+}
+
+// ListModules returns every (path, version) row. Populates both the legacy
+// flat `modules` string list and the structured `entries`. Old clients
+// reading only `modules` keep working unchanged.
+func (s *taskQueueServer) ListModules(ctx context.Context, _ *emptypb.Empty) (*pb.ModuleList, error) {
+	return s.listModulesCore(ctx, "", false)
+}
+
+// ListModulesFiltered is the v2 surface taking an optional path filter and
+// a latest-only flag. Backs `scitq module list --versions X` and `--latest`.
+func (s *taskQueueServer) ListModulesFiltered(ctx context.Context, req *pb.ModuleListFilter) (*pb.ModuleList, error) {
+	pathFilter := ""
+	if req.Path != nil {
+		p, err := normalizeModulePath(*req.Path)
+		if err != nil {
+			return nil, err
+		}
+		pathFilter = p
+	}
+	latestOnly := false
+	if req.LatestOnly != nil {
+		latestOnly = *req.LatestOnly
+	}
+	return s.listModulesCore(ctx, pathFilter, latestOnly)
+}
+
+func (s *taskQueueServer) listModulesCore(ctx context.Context, pathFilter string, latestOnly bool) (*pb.ModuleList, error) {
+	query := `
+		SELECT path, version, origin, COALESCE(description, '')
+		  FROM module
+	`
+	args := []any{}
+	if pathFilter != "" {
+		query += " WHERE path = $1"
+		args = append(args, pathFilter)
+	}
+	query += " ORDER BY path, version"
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list modules: %w", err)
+	}
+	defer rows.Close()
+
+	originLabel := map[string]string{"B": "bundled", "L": "local", "F": "forked"}
+	var entries []*pb.ModuleEntry
+	var names []string
+	for rows.Next() {
+		var path, version, origin, description string
+		if err := rows.Scan(&path, &version, &origin, &description); err != nil {
+			return nil, fmt.Errorf("failed to scan module row: %w", err)
+		}
+		entries = append(entries, &pb.ModuleEntry{
+			Path:        path,
+			Version:     version,
+			Origin:      originLabel[origin],
+			Description: description,
+		})
+		names = append(names, path+"@"+version)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// latest_only: keep only the highest-ordered version per path (rows are
+	// already sorted ascending, so the last occurrence of each path wins).
+	if latestOnly {
+		keep := make(map[string]int)
+		for i, e := range entries {
+			keep[e.Path] = i
+		}
+		newEntries := make([]*pb.ModuleEntry, 0, len(keep))
+		newNames := make([]string, 0, len(keep))
+		for i, e := range entries {
+			if keep[e.Path] == i {
+				newEntries = append(newEntries, e)
+				newNames = append(newNames, names[i])
+			}
+		}
+		entries = newEntries
+		names = newNames
+	}
+
+	return &pb.ModuleList{Modules: names, Entries: entries}, nil
+}
+
+// DownloadModule fetches module bytes from the library. Accepts:
+//   - `genetic/fastp@1.2.0` — path + exact version
+//   - `genetic/fastp@latest` or `genetic/fastp` — highest version
+//   - bare `fastp` — legacy flat path, highest version
+func (s *taskQueueServer) DownloadModule(ctx context.Context, req *pb.DownloadModuleRequest) (*pb.FileContent, error) {
+	path, version, err := parseModulePathVersion(req.Filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var content []byte
+	var resolvedVersion string
+	if version == "" || version == "latest" {
+		err = s.db.QueryRowContext(ctx, `
+			SELECT content, version FROM module
+			 WHERE path = $1
+			 ORDER BY version DESC
+			 LIMIT 1
+		`, path).Scan(&content, &resolvedVersion)
+	} else {
+		err = s.db.QueryRowContext(ctx, `
+			SELECT content, version FROM module
+			 WHERE path = $1 AND version = $2
+		`, path, version).Scan(&content, &resolvedVersion)
+	}
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("module %q not found", req.Filename)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load module %q: %w", req.Filename, err)
 	}
 	return &pb.FileContent{
-		Filename: req.Filename,
+		Filename: path + "@" + resolvedVersion,
 		Content:  content,
 	}, nil
 }

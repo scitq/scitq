@@ -307,17 +307,35 @@ type Attr struct {
 	// Module commands
 	Module *struct {
 		Upload *struct {
-			Path  string `arg:"--path,required" help:"Path to the module YAML file"`
-			Force bool   `arg:"--force" help:"Overwrite existing module"`
-		} `arg:"subcommand:upload" help:"Upload a private module to the server"`
+			Path  string  `arg:"--path,required" help:"Path to the module YAML file"`
+			As    *string `arg:"--as" help:"Namespace path to register the module under (defaults to the filename without extension, e.g. 'genetic/fastp')"`
+			Force bool    `arg:"--force" help:"Overwrite an existing module at the same (path, version)"`
+		} `arg:"subcommand:upload" help:"Upload a YAML module to the server's module library"`
 
-		List *struct{} `arg:"subcommand:list" help:"List private modules on the server"`
+		List *struct {
+			Tree     bool    `arg:"--tree" help:"Group the list by folder (namespace tree view)"`
+			Versions *string `arg:"--versions" help:"Show every version at this path (e.g. --versions genetic/fastp)"`
+			Latest   bool    `arg:"--latest" help:"Show only the highest version per path"`
+		} `arg:"subcommand:list" help:"List modules in the server library"`
 
 		Download *struct {
-			Name   string  `arg:"--name,required" help:"Module filename to download"`
+			Name   string  `arg:"--name,required" help:"Module reference (e.g. 'genetic/fastp' or 'genetic/fastp@1.2.0')"`
 			Output *string `arg:"--output,-o" help:"Output file path (default: stdout)"`
-		} `arg:"subcommand:download" help:"Download a private module"`
-	} `arg:"subcommand:module" help:"Manage private YAML modules"`
+		} `arg:"subcommand:download" help:"Download a module by name (optionally @version)"`
+
+		Upgrade *struct {
+			Apply bool `arg:"--apply" help:"Write changes to the DB (default: dry-run — only show the diff)"`
+		} `arg:"subcommand:upgrade" help:"Seed/update bundled modules from the installed scitq2 package (admin-only)"`
+
+		Origin *struct {
+			Name string `arg:"positional,required" help:"Module reference (e.g. 'genetic/fastp' or 'genetic/fastp@1.2.0')"`
+		} `arg:"subcommand:origin" help:"Show provenance of a module version (bundled / local / forked, content hash, uploader)"`
+
+		Fork *struct {
+			Source     string `arg:"positional,required" help:"Source reference (e.g. 'genetic/fastp@1.0.0'; bare name forks the latest)"`
+			NewVersion string `arg:"--new-version,required" help:"Version of the forked row (e.g. '1.0.0-site')"`
+		} `arg:"subcommand:fork" help:"Clone a module version into a new local fork (admin-only)"`
+	} `arg:"subcommand:module" help:"Manage YAML modules (versioned library, bundled + local)"`
 
 	// (Workflow) Template run commands
 	Run *struct {
@@ -1749,7 +1767,14 @@ func (c *CLI) ModuleUpload() error {
 	if err != nil {
 		return fmt.Errorf("failed to read module file: %w", err)
 	}
+
+	// --as wins, otherwise derive from the local filename (so
+	// `scitq module upload --path modules/genetic/fastp.yaml` still works
+	// as a flat upload without an explicit namespace).
 	filename := filepath.Base(c.Attr.Module.Upload.Path)
+	if c.Attr.Module.Upload.As != nil && *c.Attr.Module.Upload.As != "" {
+		filename = *c.Attr.Module.Upload.As
+	}
 
 	_, err = c.QC.Client.UploadModule(ctx, &pb.UploadModuleRequest{
 		Filename: filename,
@@ -1764,29 +1789,182 @@ func (c *CLI) ModuleUpload() error {
 	return nil
 }
 
+func (c *CLI) ModuleUpgrade() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	resp, err := c.QC.Client.UpgradeBundledModules(ctx, &pb.UpgradeBundledModulesRequest{
+		Apply: c.Attr.Module.Upgrade.Apply,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upgrade bundled modules: %w", err)
+	}
+
+	if c.jsonOut(resp) {
+		return nil
+	}
+
+	if resp.Report != "" {
+		fmt.Println(resp.Report)
+	}
+	return nil
+}
+
+func (c *CLI) ModuleOrigin() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	ref := c.Attr.Module.Origin.Name
+	path := ref
+	version := ""
+	if idx := strings.LastIndex(ref, "@"); idx >= 0 {
+		path = ref[:idx]
+		version = ref[idx+1:]
+	}
+
+	resp, err := c.QC.Client.GetModuleOrigin(ctx, &pb.ModuleOriginRequest{
+		Path:    path,
+		Version: version,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to fetch module origin: %w", err)
+	}
+
+	if c.jsonOut(resp) {
+		return nil
+	}
+
+	fmt.Printf("📦 %s@%s\n", resp.Path, resp.Version)
+	fmt.Printf("   origin:      %s\n", resp.Origin)
+	fmt.Printf("   sha256:      %s\n", resp.ContentSha256)
+	if resp.BundledSha256 != "" {
+		fmt.Printf("   bundled sha: %s\n", resp.BundledSha256)
+	}
+	if resp.Description != "" {
+		fmt.Printf("   description: %s\n", resp.Description)
+	}
+	fmt.Printf("   uploaded:    %s", resp.UploadedAt)
+	if resp.UploadedBy != "" {
+		fmt.Printf(" by %s", resp.UploadedBy)
+	}
+	fmt.Println()
+	if resp.ForkIsOutdated {
+		fmt.Println("   ⚠️  a newer bundled version exists at this path — consider rebasing this fork")
+	}
+	return nil
+}
+
+func (c *CLI) ModuleFork() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	source := c.Attr.Module.Fork.Source
+	sourcePath := source
+	sourceVersion := ""
+	if idx := strings.LastIndex(source, "@"); idx >= 0 {
+		sourcePath = source[:idx]
+		sourceVersion = source[idx+1:]
+	}
+
+	_, err := c.QC.Client.ForkModule(ctx, &pb.ForkModuleRequest{
+		SourcePath:    sourcePath,
+		SourceVersion: sourceVersion,
+		NewVersion:    c.Attr.Module.Fork.NewVersion,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to fork module: %w", err)
+	}
+
+	fmt.Printf("🍴 Forked %s into %s@%s\n", source, sourcePath, c.Attr.Module.Fork.NewVersion)
+	return nil
+}
+
 func (c *CLI) ModuleList() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	resp, err := c.QC.Client.ListModules(ctx, &emptypb.Empty{})
+	filter := &pb.ModuleListFilter{}
+	if c.Attr.Module.List.Versions != nil {
+		v := *c.Attr.Module.List.Versions
+		filter.Path = &v
+	}
+	if c.Attr.Module.List.Latest {
+		latest := true
+		filter.LatestOnly = &latest
+	}
+	resp, err := c.QC.Client.ListModulesFiltered(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to list modules: %w", err)
 	}
 
-	if c.jsonOut(resp.Modules) {
+	if c.jsonOut(resp) {
 		return nil
 	}
 
-	if len(resp.Modules) == 0 {
+	if len(resp.Entries) == 0 {
 		fmt.Println("No modules found.")
 		return nil
 	}
 
+	// --tree: indent by namespace path prefix. Simple per-row display with
+	// a common-prefix heading when it saves space.
+	if c.Attr.Module.List.Tree {
+		printModuleTree(resp.Entries)
+		return nil
+	}
+
 	fmt.Println("📦 Modules:")
-	for _, name := range resp.Modules {
-		fmt.Printf("  - %s\n", name)
+	for _, e := range resp.Entries {
+		label := fmt.Sprintf("%s@%s", e.Path, e.Version)
+		marker := ""
+		switch e.Origin {
+		case "forked":
+			marker = " 🍴"
+		case "local":
+			marker = " 👤"
+		case "bundled":
+			marker = " 📚"
+		}
+		if e.Description != "" {
+			fmt.Printf("  - %-50s%s  %s\n", label, marker, e.Description)
+		} else {
+			fmt.Printf("  - %-50s%s\n", label, marker)
+		}
 	}
 	return nil
+}
+
+// printModuleTree renders entries grouped by directory prefix. Entries are
+// expected to arrive in (path, version) sorted order — the server returns
+// them that way — so a single linear walk suffices.
+func printModuleTree(entries []*pb.ModuleEntry) {
+	originMarker := map[string]string{"bundled": "📚", "local": "👤", "forked": "🍴"}
+	lastDir := ""
+	for _, e := range entries {
+		dir := ""
+		leaf := e.Path
+		if idx := strings.LastIndex(e.Path, "/"); idx >= 0 {
+			dir = e.Path[:idx]
+			leaf = e.Path[idx+1:]
+		}
+		if dir != lastDir {
+			if dir == "" {
+				fmt.Println("📂 (root)")
+			} else {
+				fmt.Printf("📂 %s/\n", dir)
+			}
+			lastDir = dir
+		}
+		marker := originMarker[e.Origin]
+		if marker == "" {
+			marker = "?"
+		}
+		if e.Description != "" {
+			fmt.Printf("   %s %s@%s  %s\n", marker, leaf, e.Version, e.Description)
+		} else {
+			fmt.Printf("   %s %s@%s\n", marker, leaf, e.Version)
+		}
+	}
 }
 
 func (c *CLI) ModuleDownload() error {
@@ -2506,6 +2684,12 @@ func Run(c CLI) error {
 			err = c.ModuleList()
 		case c.Attr.Module.Download != nil:
 			err = c.ModuleDownload()
+		case c.Attr.Module.Upgrade != nil:
+			err = c.ModuleUpgrade()
+		case c.Attr.Module.Origin != nil:
+			err = c.ModuleOrigin()
+		case c.Attr.Module.Fork != nil:
+			err = c.ModuleFork()
 		}
 	case c.Attr.Run != nil:
 		switch {

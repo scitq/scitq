@@ -1,4 +1,5 @@
 name: multiqc
+version: "1.0.0"
 container: ewels/multiqc:latest
 command: |
   cd /input

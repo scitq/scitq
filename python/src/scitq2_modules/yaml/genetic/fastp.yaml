@@ -1,4 +1,5 @@
 name: fastp
+version: "1.0.0"
 container: staphb/fastp:1.0.1
 command:
   cond: PAIRED

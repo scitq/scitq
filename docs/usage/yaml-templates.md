@@ -605,11 +605,9 @@ This is cleaner than wrapping steps in conditionals — the step simply doesn't 
 
 ## Modules
 
-Modules are reusable step definitions. There are two kinds:
+Modules are reusable step definitions. scitq keeps them in a **server-side versioned library** that is shared between bundled modules (shipped with scitq) and user-uploaded modules — see [Module library reference](../reference/module-library.md) for the full surface.
 
-### Public modules (`import:`)
-
-Shipped with the scitq2 Python package. They encapsulate common bioinformatics tools:
+Reference a module from a step with `import:`:
 
 ```yaml
 steps:
@@ -620,44 +618,89 @@ steps:
     inputs: humanfilter.fastqs
 ```
 
-Public modules provide sensible defaults for container, command, outputs, and task_spec. You can override any field:
+Modules resolve in this order:
+
+1. Server library, at `path` (highest version) or `path@version` if pinned.
+2. Installed `scitq2_modules` Python package (fallback for offline/dev runs).
+
+### Pinning a version
+
+If you want reproducibility or need to pin a specific release, append `@version`:
+
+```yaml
+steps:
+  - import: genetic/fastp@1.0.0
+  - import: genetic/bowtie2_host_removal@latest   # same as no @
+```
+
+`latest` is a magic alias for "highest-ordered version in the library at the moment of resolution"; every actual template run records the concrete version it resolved in `template_run.module_pins` so a replay is reproducible even after a later library upgrade.
+
+### Overriding fields
+
+Module fields can be overridden at the call site. Any field in the `import:` block shadows the module's:
 
 ```yaml
   - import: genetic/fastp
     task_spec:
-      cpu: 8        # Override the default CPU allocation
+      cpu: 8        # Override the module's default CPU allocation
 ```
 
-### Private modules (`module:`)
-
-Project-specific modules stored on the server. Upload and manage them with the CLI:
+### Managing modules from the CLI
 
 ```sh
-scitq module upload --path modules/my_alignment.yaml
+# Upload a project-specific module. --as sets the server-side path;
+# it defaults to the filename without extension if omitted.
+scitq module upload --path modules/my_alignment.yaml --as internal/my_alignment
+
+# List and inspect
 scitq module list
-scitq module download --name my_alignment.yaml -o local_copy.yaml
+scitq module list --tree                       # grouped by folder
+scitq module list --versions internal/my_alignment
+scitq module origin internal/my_alignment@1.0.0
+
+# Download
+scitq module download --name internal/my_alignment -o local_copy.yaml
+
+# Admin: seed/refresh bundled modules from the installed scitq2 package
+scitq module upgrade                           # dry-run
+scitq module upgrade --apply                   # commit
+
+# Admin: fork a bundled module to make a site-specific variant
+scitq module fork genetic/fastp@1.0.0 --new-version 1.0.0-site
 ```
 
-Reference them in your template:
+### Writing a private module
 
-```yaml
-  - module: my_alignment.yaml
-    inputs: fastp.fastqs
-    vars:
-      CATALOG: "igc2"
-```
-
-A private module is a YAML file with the same fields as an inline step (name, container, command, outputs, etc.). It can itself import a public module to add deployment-specific knowledge:
+A module file is a YAML file with the same fields as an inline step (name, container, command, outputs, task_spec, vars, …) plus a required `version:` field. A module can itself import another module to add deployment-specific knowledge:
 
 ```yaml
 # modules/my_metaphlan.yaml
-import: genetic/metaphlan      # Inherit from public module
+name: my_metaphlan
+version: "1.0.0"
+import: genetic/metaphlan      # Inherit from a library module
 vars:
   METAPHLAN_RESOURCE:           # Add local resource paths
     cond: METAPHLAN_VERSION
     "4.1": "{RESOURCE_ROOT}/metaphlan/metaphlan4.1.tgz|untar"
 resource: "{METAPHLAN_RESOURCE}"
 ```
+
+Once uploaded:
+
+```sh
+scitq module upload --path modules/my_metaphlan.yaml --as internal/my_metaphlan
+```
+
+reference it the same way as any library module:
+
+```yaml
+  - import: internal/my_metaphlan
+    inputs: fastp.fastqs
+    vars:
+      METAPHLAN_VERSION: "4.1"
+```
+
+> The legacy `module:` keyword (pre-library) still resolves as a synonym for `import:`, so existing templates keep working unchanged.
 
 ### Module-level vars
 
