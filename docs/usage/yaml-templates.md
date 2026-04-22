@@ -174,7 +174,7 @@ retry: 2
 
 steps:
   # Per-sample: quality control
-  - import: genetic/fastp
+  - import: genomics/fastp
     inputs: sample.fastqs
 
   # Per-sample: alignment
@@ -360,7 +360,7 @@ Steps declare their inputs using dot notation: `step_name.output_name`.
 
 ```yaml
 steps:
-  - import: genetic/fastp
+  - import: genomics/fastp
     # No inputs: first step gets sample files automatically
 
   - name: align
@@ -611,10 +611,10 @@ Reference a module from a step with `import:`:
 
 ```yaml
 steps:
-  - import: genetic/fastp
-  - import: genetic/bowtie2_host_removal
+  - import: genomics/fastp
+  - import: metagenomics/bowtie2_host_removal
     inputs: fastp.fastqs
-  - import: genetic/seqtk_sample
+  - import: genomics/seqtk_sample
     inputs: humanfilter.fastqs
 ```
 
@@ -629,8 +629,8 @@ If you want reproducibility or need to pin a specific release, append `@version`
 
 ```yaml
 steps:
-  - import: genetic/fastp@1.0.0
-  - import: genetic/bowtie2_host_removal@latest   # same as no @
+  - import: genomics/fastp@1.0.0
+  - import: metagenomics/bowtie2_host_removal@latest   # same as no @
 ```
 
 `latest` is a magic alias for "highest-ordered version in the library at the moment of resolution"; every actual template run records the concrete version it resolved in `template_run.module_pins` so a replay is reproducible even after a later library upgrade.
@@ -640,7 +640,7 @@ steps:
 Module fields can be overridden at the call site. Any field in the `import:` block shadows the module's:
 
 ```yaml
-  - import: genetic/fastp
+  - import: genomics/fastp
     task_spec:
       cpu: 8        # Override the module's default CPU allocation
 ```
@@ -666,7 +666,7 @@ scitq module upgrade                           # dry-run
 scitq module upgrade --apply                   # commit
 
 # Admin: fork a bundled module to make a site-specific variant
-scitq module fork genetic/fastp@1.0.0 --new-version 1.0.0-site
+scitq module fork genomics/fastp@1.0.0 --new-version 1.0.0-site
 ```
 
 ### Writing a private module
@@ -677,7 +677,7 @@ A module file is a YAML file with the same fields as an inline step (name, conta
 # modules/my_metaphlan.yaml
 name: my_metaphlan
 version: "1.0.0"
-import: genetic/metaphlan      # Inherit from a library module
+import: metagenomics/metaphlan      # Inherit from a library module
 vars:
   METAPHLAN_RESOURCE:           # Add local resource paths
     cond: METAPHLAN_VERSION
@@ -740,10 +740,10 @@ Prerequisites are usually wired implicitly via `inputs:` — referencing a previ
 
 ```yaml
 steps:
-  - import: genetic/meteor2_catalog          # one-off setup: downloads a catalog,
+  - import: metagenomics/meteor2_catalog          # one-off setup: downloads a catalog,
                                               # publishes to {RESOURCE_ROOT}/meteor2/<name>/
 
-  - import: genetic/meteor2
+  - import: metagenomics/meteor2
     inputs: fastp.fastqs                     # data dep on the upstream QC step
     depends: meteor2_catalog                 # pure ordering dep: don't start the
                                               # per-sample profiler until the catalog
@@ -767,11 +767,11 @@ Module authors can declare companion modules that should always accompany theirs
 The practical effect: a template author writes the compute step once and everything else falls into place.
 
 ```yaml
-# scitq2_modules/yaml/genetic/meteor2.yaml  (library module)
+# scitq2_modules/yaml/metagenomics/meteor2.yaml  (library module)
 name: meteor2
 version: "1.0.0"
 requires:
-  - genetic/meteor2_catalog          # pull in the companion setup module
+  - metagenomics/meteor2_catalog          # pull in the companion setup module
 resource: "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/"
 command: …
 ```
@@ -780,9 +780,9 @@ A template that wants meteor2 profiling therefore only needs:
 
 ```yaml
 steps:
-  - import: genetic/fastp
+  - import: genomics/fastp
     inputs: sample.fastqs
-  - import: genetic/meteor2          # catalog auto-injected + depends auto-wired
+  - import: metagenomics/meteor2          # catalog auto-injected + depends auto-wired
     inputs: fastp.fastqs
 ```
 
@@ -790,10 +790,10 @@ Behind the scenes the runner rewrites this to the equivalent of:
 
 ```yaml
 steps:
-  - import: genetic/fastp
+  - import: genomics/fastp
     inputs: sample.fastqs
-  - import: genetic/meteor2_catalog
-  - import: genetic/meteor2
+  - import: metagenomics/meteor2_catalog
+  - import: metagenomics/meteor2
     inputs: fastp.fastqs
     depends: meteor2_catalog
 ```

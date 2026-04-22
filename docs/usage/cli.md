@@ -727,7 +727,7 @@ Examples:
 ```sh
 scitq module list
 scitq module list --tree
-scitq module list --versions genetic/fastp
+scitq module list --versions genomics/fastp
 scitq module list --latest
 ```
 
@@ -740,15 +740,15 @@ scitq module download --name <ref> [-o <output_file>]
 ```
 
 `<ref>` is one of:
-- `genetic/fastp` — highest version at this path
-- `genetic/fastp@latest` — same, explicit
-- `genetic/fastp@1.0.0` — exact version
+- `genomics/fastp` — highest version at this path
+- `genomics/fastp@latest` — same, explicit
+- `genomics/fastp@1.0.0` — exact version
 
 Examples:
 
 ```sh
 scitq module download --name internal/biomscope_align
-scitq module download --name genetic/fastp@1.0.0 -o /tmp/fastp.yaml
+scitq module download --name genomics/fastp@1.0.0 -o /tmp/fastp.yaml
 ```
 
 #### `module origin`
@@ -762,8 +762,8 @@ scitq module origin <ref>
 Output shows the origin (`bundled` / `local` / `forked`), content SHA, bundled SHA (on forks), description, uploader, and flags a fork as outdated if a newer `bundled` row has shipped since the fork.
 
 ```sh
-scitq module origin genetic/fastp
-scitq module origin genetic/fastp@1.0.0-site
+scitq module origin genomics/fastp
+scitq module origin genomics/fastp@1.0.0-site
 ```
 
 #### `module fork` (admin)
@@ -777,7 +777,7 @@ scitq module fork <ref> --new-version <version>
 Example:
 
 ```sh
-scitq module fork genetic/fastp@1.0.0 --new-version 1.0.0-site
+scitq module fork genomics/fastp@1.0.0 --new-version 1.0.0-site
 ```
 
 #### `module upgrade` (admin)

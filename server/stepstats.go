@@ -140,7 +140,10 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 
 			-- running tasks as separate arrays
 			array_agg(t.task_id) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS running_task_ids,
-			array_agg(EXTRACT(EPOCH FROM t.run_started_at)::bigint) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS running_task_times
+			array_agg(EXTRACT(EPOCH FROM t.run_started_at)::bigint) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS running_task_times,
+
+			-- in-flight retry clones so RetryingSet can decrement Retrying when they finish
+			COALESCE(array_agg(t.task_id) FILTER (WHERE NOT t.hidden AND t.previous_task_id IS NOT NULL AND t.status NOT IN ('S','F')), '{}') AS retrying_task_ids
 		FROM step s
 		LEFT JOIN task t ON t.step_id = s.step_id
 		GROUP BY s.workflow_id, s.step_id
@@ -166,6 +169,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			startEpoch, endEpoch                                  sql.NullInt64
 			runningIDs                                            pq.Int64Array
 			runningTimes                                          pq.Int64Array
+			retryingIDs                                           pq.Int64Array
 		)
 		if err := rows.Scan(
 			&workflowID,
@@ -178,6 +182,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			&startEpoch, &endEpoch,
 			&runningIDs,
 			&runningTimes,
+			&retryingIDs,
 		); err != nil {
 			log.Printf("Step stats reconstruction error: could not parse line : %v", err)
 			continue
@@ -189,6 +194,12 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 		if agg.data[workflowID] == nil {
 			agg.data[workflowID] = make(map[int32]*StepAgg)
 		}
+		retryingSet := make(map[int32]bool, len(retryingIDs))
+		for _, id := range retryingIDs {
+			if id > 0 {
+				retryingSet[int32(id)] = true
+			}
+		}
 		sagg := &StepAgg{
 			Waiting:      waiting,
 			Pending:      pending,
@@ -199,7 +210,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			Failed:       failed,
 			ReallyFailed: reallyfailed,
 			Retrying:     retrying,
-			RetryingSet:  make(map[int32]bool),
+			RetryingSet:  retryingSet,
 			Total:        total,
 			Download:     Accumulator{Count: dlCount, Sum: dlSum, Min: dlMin, Max: dlMax},
 			Upload:       Accumulator{Count: upCount, Sum: upSum, Min: upMin, Max: upMax},

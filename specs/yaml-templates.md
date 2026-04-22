@@ -354,7 +354,7 @@ The template never hardcodes `azure://` or `s3://` — it's all resolved from th
 With `{RESOURCE_ROOT}`, modules can have sensible defaults:
 
 ```yaml
-# genetic/bowtie2_host_removal.yaml — host reference defaults to chm13v2.0
+# metagenomics/bowtie2_host_removal.yaml — host reference defaults to chm13v2.0
 name: humanfilter
 container: gmtscience/bowtie2:2.5.4
 language: bash
@@ -372,7 +372,7 @@ The template doesn't need to specify the resource at all — the default works:
 
 ```yaml
 steps:
-  - import: genetic/bowtie2_host_removal    # uses default chm13v2.0 from RESOURCE_ROOT
+  - import: metagenomics/bowtie2_host_removal    # uses default chm13v2.0 from RESOURCE_ROOT
     inputs: fastp.fastqs
     paired: "{PAIRED}"
 ```
@@ -382,7 +382,7 @@ steps:
 With `{RESOURCE_ROOT}` and catalog-name-based convention, the biomscope pipeline collapses from separate align/species/function/oral modules to a single parameterized module:
 
 ```yaml
-# genetic/biomscope_align.yaml — works for both igc2 and oral
+# metagenomics/biomscope_align.yaml — works for both igc2 and oral
 name: biomscope
 container: 3jfz1gy8.gra7.container-registry.ovh.net/library/metagen_rust:1.0.0
 language: bash
@@ -403,13 +403,13 @@ The template uses it twice — once for gut, once for oral:
 
 ```yaml
 steps:
-  - import: genetic/biomscope_align
+  - import: metagenomics/biomscope_align
     inputs: seqtk.fastqs
     vars:
       CATALOG: "igc2"
       CATALOG_LABEL: "catalog"
 
-  - import: genetic/biomscope_align
+  - import: metagenomics/biomscope_align
     when: "{params.oral}"
     inputs: seqtk.fastqs
     vars:
@@ -908,7 +908,7 @@ A private module can import a public module and extend it with installation-spec
 
 ```yaml
 # workflow/modules/metaphlan.yaml (private — knows where resources live)
-import: genetic/metaphlan
+import: metagenomics/metaphlan
 vars:
   METAPHLAN_RESOURCE:
     cond: METAPHLAN_VERSION
@@ -918,7 +918,7 @@ vars:
 resource: "{METAPHLAN_RESOURCE}"
 ```
 
-The public module (`genetic/metaphlan`) defines the command, container, and version-specific flags. The private module adds which resources to use for this particular installation. The template just says:
+The public module (`metagenomics/metaphlan`) defines the command, container, and version-specific flags. The private module adds which resources to use for this particular installation. The template just says:
 
 ```yaml
   - module: metaphlan.yaml

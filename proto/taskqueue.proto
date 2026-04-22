@@ -868,7 +868,7 @@ message ModuleEntry {
 // Filter for ListModulesFiltered. All fields optional: an empty request
 // returns the same data as `ListModules` (all rows).
 message ModuleListFilter {
-  // Restrict results to one module path (e.g. 'genetic/fastp') — returns
+  // Restrict results to one module path (e.g. 'genomics/fastp') — returns
   // every version at that path. Matches the `scitq module list
   // --versions X` use case.
   optional string path = 1;

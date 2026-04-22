@@ -1376,7 +1376,9 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 			RETURNING task_id
 		),
 		hidden AS (
-			UPDATE task SET hidden = TRUE, modified_at = NOW()
+			-- Clear worker_id so a hidden-but-still-'A' row isn't handed back
+			-- to its old worker on subsequent PingAndTakeNewTasks calls.
+			UPDATE task SET hidden = TRUE, worker_id = NULL, modified_at = NOW()
 			WHERE task_id = (SELECT task_id FROM validated)
 			RETURNING TRUE
 		)
@@ -1475,7 +1477,15 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 					}
 				}
 				stepAgg.Pending++
-				stepAgg.Retrying++
+				// If the old task was itself a retry clone already counted in
+				// Retrying, swap it out for the new one rather than double-
+				// counting. Otherwise this is the first retry in the chain so
+				// Retrying grows by one.
+				if stepAgg.RetryingSet[oldID] {
+					delete(stepAgg.RetryingSet, oldID)
+				} else {
+					stepAgg.Retrying++
+				}
 				stepAgg.RetryingSet[newID] = true
 			}
 		}
@@ -3192,7 +3202,10 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		return nil, fmt.Errorf("failed to fetch worker concurrency for worker %d: %w", req.WorkerId, err)
 	}
 
-	// 2️⃣ Fetch tasks (assigned and running), now include weight column
+	// 2️⃣ Fetch tasks (assigned and running), now include weight column.
+	// Exclude hidden rows: retryTaskInternal hides the old row without
+	// clearing its status/worker_id, so a hidden 'A' task would keep being
+	// returned on every ping, trapping the client in a no-sleep loop.
 	rows, err := s.db.Query(`
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
@@ -3200,6 +3213,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 			status, weight, publish
 		FROM task
 		WHERE worker_id = $1
+		  AND NOT hidden
 		  AND status IN ('A', 'C', 'D', 'R', 'U', 'V')
 	`, req.WorkerId)
 	if err != nil {

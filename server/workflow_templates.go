@@ -444,23 +444,89 @@ type ParamSpec struct {
 
 // extractYAMLMetadata parses a YAML template and returns JSON metadata
 // (name, version, description) without executing any code.
+//
+// Handles all three common `description:` shapes:
+//
+//	description: single-line value
+//	description: "quoted value"
+//	description: >             # folded block — newlines become spaces
+//	  first line
+//	  second line
+//	description: |             # literal block — newlines preserved
+//	  line one
+//	  line two
 func extractYAMLMetadata(content []byte) (string, error) {
-	// Parse only top-level fields (no leading whitespace)
 	meta := map[string]string{}
-	for _, line := range strings.Split(string(content), "\n") {
-		// Top-level fields start at column 0 (no indentation)
+	lines := strings.Split(string(content), "\n")
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		// Top-level fields start at column 0 (no indentation, not a comment,
+		// not a list item).
 		if len(line) == 0 || line[0] == ' ' || line[0] == '\t' || line[0] == '#' || line[0] == '-' {
 			continue
 		}
 		for _, key := range []string{"name", "version", "description"} {
-			if strings.HasPrefix(line, key+":") {
-				val := strings.TrimSpace(strings.TrimPrefix(line, key+":"))
-				val = strings.Trim(val, `"'`)
-				meta[key] = val
+			if !strings.HasPrefix(line, key+":") {
+				continue
+			}
+			val := strings.TrimSpace(strings.TrimPrefix(line, key+":"))
+
+			// Block scalar indicators — consume indented continuation lines
+			// until we hit a top-level line or EOF. `>` folds newlines to
+			// spaces (except blank lines → newline), `|` keeps newlines.
+			if val == ">" || val == "|" || strings.HasPrefix(val, ">-") || strings.HasPrefix(val, "|-") {
+				folded := val == ">" || strings.HasPrefix(val, ">-")
+				var parts []string
+				for j := i + 1; j < len(lines); j++ {
+					next := lines[j]
+					if len(next) == 0 {
+						// Blank line: in folded mode emits a hard newline,
+						// in literal mode emits an empty line.
+						parts = append(parts, "")
+						continue
+					}
+					if next[0] != ' ' && next[0] != '\t' {
+						// Hit a top-level key — block ended.
+						break
+					}
+					parts = append(parts, strings.TrimSpace(next))
+				}
+				var body string
+				if folded {
+					// Fold: join non-empty runs with single spaces, preserve
+					// blank-line boundaries as newlines.
+					var sb strings.Builder
+					prevBlank := false
+					for idx, p := range parts {
+						if p == "" {
+							if !prevBlank && sb.Len() > 0 {
+								sb.WriteByte('\n')
+							}
+							prevBlank = true
+							continue
+						}
+						if sb.Len() > 0 && !prevBlank {
+							sb.WriteByte(' ')
+						}
+						sb.WriteString(p)
+						prevBlank = false
+						_ = idx
+					}
+					body = sb.String()
+				} else {
+					body = strings.Join(parts, "\n")
+				}
+				meta[key] = strings.TrimSpace(body)
 				break
 			}
+
+			// Regular single-line value.
+			meta[key] = strings.Trim(val, `"'`)
+			break
 		}
 	}
+
 	if meta["name"] == "" {
 		return "", fmt.Errorf("YAML template missing 'name' field")
 	}

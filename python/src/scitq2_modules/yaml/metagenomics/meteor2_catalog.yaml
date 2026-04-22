@@ -1,7 +1,7 @@
 name: meteor2_catalog
-version: "1.0.0"
+version: "1.0.2"
 description: "Download and cache a meteor2 reference catalog in the workspace resource tree (runs once per workspace, idempotent)"
-container: quay.io/biocontainers/meteor:2.0.0--py_0
+container: quay.io/biocontainers/meteor:2.0.22--pyhdfd78af_0
 language: bash
 
 # One-off setup step: runs once per workflow regardless of iteration count.
@@ -25,8 +25,8 @@ command: |
   # Fetch the named catalog into /output — scitq uploads /output to the
   # publish URI above at task completion.
   meteor download \
-      --catalog {params.meteor2_catalog} \
-      --output-dir /output/
+      -i {params.meteor2_catalog} \
+      -o /output/
 
 outputs:
   catalog: "*"

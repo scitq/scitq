@@ -12,16 +12,16 @@ This page is the reference. For day-to-day usage in workflow templates see [Modu
 
 Each module row is identified by a pair:
 
-- **`path`** — forward-slash namespace path, no leading slash, no extension. Example: `genetic/fastp`, `internal/my_aligner`, `hello`.
+- **`path`** — forward-slash namespace path, no leading slash, no extension. Example: `genomics/fastp`, `internal/my_aligner`, `hello`.
 - **`version`** — tolerant semver. Leading `MAJOR.MINOR.PATCH` optionally followed by a `-<suffix>`. Examples: `1.2.3`, `1.1.0-rc1`, `1.0.0-site`. Ordering is numeric on `MAJOR.MINOR.PATCH`, then lexicographic on suffix, with suffix-less versions sorting higher (`1.1.0` > `1.1.0-rc1`). Every new upload must bump at least `PATCH`. `latest` is a reserved alias (see below) and cannot be used as a concrete version.
 
 In templates you can omit the version (same as `@latest`) or pin it:
 
 ```yaml
 steps:
-  - import: genetic/fastp              # highest version in the library
-  - import: genetic/fastp@latest       # same thing, explicit
-  - import: genetic/fastp@1.0.0        # pinned
+  - import: genomics/fastp              # highest version in the library
+  - import: genomics/fastp@latest       # same thing, explicit
+  - import: genomics/fastp@1.0.0        # pinned
 ```
 
 ### Origin
@@ -57,7 +57,7 @@ When a template is executed server-side, every resolution is recorded in the JSO
 
 ```json
 [
-  {"ref": "genetic/fastp", "path": "genetic/fastp", "version": "1.0.0", "source": "server"},
+  {"ref": "genomics/fastp", "path": "genomics/fastp", "version": "1.0.0", "source": "server"},
   {"ref": "internal/my_aligner@1.2.3", "path": "internal/my_aligner", "version": "1.2.3", "source": "server"}
 ]
 ```
@@ -95,10 +95,10 @@ Bundled modules that ship a *new* version for an existing path just get a new ro
 ### Site-specific fork (`module fork`)
 
 ```sh
-scitq module fork genetic/fastp@1.0.0 --new-version 1.0.0-site
-scitq module download --name genetic/fastp@1.0.0-site -o /tmp/fastp-site.yaml
+scitq module fork genomics/fastp@1.0.0 --new-version 1.0.0-site
+scitq module download --name genomics/fastp@1.0.0-site -o /tmp/fastp-site.yaml
 # … edit /tmp/fastp-site.yaml …
-scitq module upload --path /tmp/fastp-site.yaml --as genetic/fastp --force
+scitq module upload --path /tmp/fastp-site.yaml --as genomics/fastp --force
 ```
 
 The fork starts as a copy of the source row with `origin=forked` and `bundled_sha = <source sha>`. Subsequent `--force` uploads keep it marked `forked`. `module origin` will flag a fork as *outdated* if a newer `bundled` row has shipped since the fork (`fork_is_outdated` field).

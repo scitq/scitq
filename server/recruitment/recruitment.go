@@ -126,7 +126,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
                 step_id,
                 COUNT(*) AS current_workers,
                 SUM(concurrency) AS potential_taskrate, -- total capacity
-                SUM(GREATEST(concurrency - load, 0)) AS free_taskrate     -- capacity left (what we actually need)
+                FLOOR(SUM(GREATEST(concurrency - load, 0)))::int AS free_taskrate     -- capacity left (what we actually need)
             FROM worker_load
             GROUP BY step_id
         )
@@ -173,11 +173,11 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
             AND (r.maximum_workers IS NULL OR COALESCE(wagg.current_workers, 0) < r.maximum_workers)
-            AND (wf.maximum_workers IS NULL OR (
-                SELECT COUNT(*) FROM worker w2
-                WHERE w2.deleted_at IS NULL
-                  AND w2.step_id IN (SELECT step_id FROM step WHERE workflow_id = wf.workflow_id)
-            ) < wf.maximum_workers)
+        -- Note: wf.maximum_workers is intentionally NOT checked here. A recruiter
+        -- at its workflow's worker cap must still be listed so existing idle
+        -- workers from other steps can be recycled into it. The cap is enforced
+        -- only on the cloud-deploy path (see "Enforce workflow-level maximum
+        -- before cloud deploy" below).
         ORDER BY
             r.step_id, r.rank
     `
@@ -286,7 +286,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
                 step_id,
                 COUNT(*) AS current_workers,
                 SUM(concurrency) AS potential_taskrate,
-                SUM(GREATEST(concurrency - load, 0)) AS free_taskrate
+                FLOOR(SUM(GREATEST(concurrency - load, 0)))::int AS free_taskrate
             FROM worker_load
             GROUP BY step_id
         )

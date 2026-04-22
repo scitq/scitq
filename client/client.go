@@ -51,6 +51,7 @@ type WorkerConfig struct {
 }
 
 var lostTrackSeen sync.Map   // map[int32]time.Time
+var orphanSeen sync.Map      // map[int32]time.Time — tasks client thinks active but server has dropped
 var bareProcesses sync.Map   // map[int32]*os.Process — for signaling bare tasks
 
 // Track how long tasks have been locally active and whether they are executing
@@ -494,10 +495,50 @@ func (w *WorkerConfig) fetchTasks(
 		}
 	}
 
+	// 3) Reverse direction: for any task the client still believes is active
+	//    but that the server no longer reports (neither as an incoming 'A'
+	//    task nor in ActiveTasks), assume the server dropped it (hidden by
+	//    edit_and_retry_task, deleted workflow, reassigned, etc.) and kill
+	//    the local container. Debounce by one extra fetch cycle to tolerate
+	//    the natural race where a freshly-assigned task hasn't yet appeared
+	//    in the server's response.
+	serverKnownSet := make(map[int32]struct{}, len(res.Tasks)+len(serverActiveTasks))
+	for _, t := range res.Tasks {
+		serverKnownSet[t.TaskId] = struct{}{}
+	}
+	for tid := range serverActiveTasks {
+		serverKnownSet[tid] = struct{}{}
+	}
 	activeTasks.Range(func(key, _ any) bool {
 		taskID := key.(int32)
-		if _, known := serverActiveTasks[taskID]; !known {
-			log.Printf("⚠️ Client believes task %d is active but server did not mention it. Will wait.", taskID)
+		if _, known := serverKnownSet[taskID]; known {
+			orphanSeen.Delete(taskID)
+			return true
+		}
+		if v, ok := orphanSeen.Load(taskID); ok {
+			first := v.(time.Time)
+			if now.Sub(first) >= 3*time.Second {
+				containerName := fmt.Sprintf("scitq-%s-task-%d", w.Name, taskID)
+				log.Printf("🧹 Orphan task %d: server stopped tracking it — killing container %s", taskID, containerName)
+				reporter.Event("W", "task", fmt.Sprintf("orphan task %d killed (server stopped tracking)", taskID), map[string]any{
+					"task_id":   taskID,
+					"component": "fetchTasks.orphan",
+				})
+				if out, err := exec.Command("docker", "kill", containerName).CombinedOutput(); err != nil {
+					log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
+				}
+				bareKey := fmt.Sprintf("%s:%d", w.Name, taskID)
+				if proc, ok := bareProcesses.Load(bareKey); ok {
+					p := proc.(*os.Process)
+					_ = syscall.Kill(-p.Pid, syscall.SIGKILL)
+				}
+				activeTasks.Delete(taskID)
+				activeSince.Delete(taskID)
+				orphanSeen.Delete(taskID)
+			}
+		} else {
+			orphanSeen.Store(taskID, now)
+			log.Printf("⏳ Task %d active locally but server didn't mention it; will kill if still orphan on next ping.", taskID)
 		}
 		return true
 	})

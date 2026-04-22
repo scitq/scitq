@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -297,8 +298,9 @@ func (az *Azure) GetMetrics() error {
 	for _, region := range az.Regions {
 		regionFilters = append(regionFilters, fmt.Sprintf("armRegionName eq '%s'", region))
 	}
-	query := fmt.Sprintf("https://prices.azure.com/api/retail/prices?currencyCode='EUR'&$filter= serviceName eq 'Virtual Machines' and priceType eq 'Consumption' and contains(meterName, 'Spot') and (%s)",
+	filter := fmt.Sprintf("serviceName eq 'Virtual Machines' and priceType eq 'Consumption' and contains(meterName, 'Spot') and (%s)",
 		strings.Join(regionFilters, " or "))
+	query := "https://prices.azure.com/api/retail/prices?currencyCode='EUR'&$filter=" + url.QueryEscape(filter)
 
 	//var retainMetricsKeys []string
 	// Loop over pages.

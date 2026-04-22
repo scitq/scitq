@@ -155,13 +155,13 @@ worker_pool:
 workspace: "{params.location}"
 
 steps:
-  - import: genetic/fastp
+  - import: genomics/fastp
     inputs: sample.fastqs
 
-  - import: genetic/bowtie2_host_removal
+  - import: metagenomics/bowtie2_host_removal
     inputs: fastp.fastqs
 
-  - import: genetic/seqtk_sample
+  - import: genomics/seqtk_sample
     inputs: humanfilter.fastqs
 ```
 

@@ -526,8 +526,8 @@ def _find_public_module_dir() -> str:
 
 
 def _split_module_ref(ref: str) -> Tuple[str, Optional[str]]:
-    """Split 'genetic/fastp@1.2.0' → ('genetic/fastp', '1.2.0').
-    'genetic/fastp' or 'genetic/fastp@latest' → ('genetic/fastp', None).
+    """Split 'genomics/fastp@1.2.0' → ('genomics/fastp', '1.2.0').
+    'genomics/fastp' or 'genomics/fastp@latest' → ('genomics/fastp', None).
     Strips a trailing .yaml/.yml from the path part for tolerance.
     """
     version: Optional[str] = None
@@ -598,7 +598,7 @@ def _load_module_from_server(path: str, version: Optional[str]) -> Optional[dict
     except Exception:
         # Not-found / auth / network — fall through to local search. Keep
         # quiet here because missing-on-server is a legitimate outcome for
-        # bare `import: genetic/fastp` when the server hasn't been seeded
+        # bare `import: genomics/fastp` when the server hasn't been seeded
         # with bundled modules yet (Phase 3).
         return None
     if not resp or not resp.content:
@@ -1130,7 +1130,7 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     if outputs_def or publish:
         out_kwargs = dict(outputs_def) if isinstance(outputs_def, dict) else {}
         if publish:
-            out_kwargs['publish'] = True if publish is True else _resolve_field(publish, params, itervar)
+            out_kwargs['publish'] = True if publish is True else _resolve_field(publish, params, itervar, extra_vars=extra_vars)
         step_kwargs['outputs'] = Outputs(**out_kwargs)
 
     # TaskSpec
@@ -1318,13 +1318,32 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     # Classify steps
     optimize_target = data.get('optimize', {}).get('step') if data.get('optimize') else None
     steps_def = data.get('steps', [])
+
+    # For steps that import/module into another YAML file, flags like
+    # `per_sample: false` or `grouped: true` may live inside the imported
+    # module, not on the step_def itself. Peek into the module so the
+    # classifier honours them.
+    _classify_cache: Dict[str, Optional[dict]] = {}
+    def _classify_flag(step_def: dict, flag: str):
+        if flag in step_def:
+            return step_def[flag]
+        ref = step_def.get('import') or step_def.get('module')
+        if not isinstance(ref, str) or ref.endswith('.yaml') or ref.endswith('.yml'):
+            return None
+        if ref not in _classify_cache:
+            _classify_cache[ref] = _load_module_by_ref(
+                ref, pipeline_dir=pipeline_dir,
+                script_root=os.environ.get('SCITQ_SCRIPT_ROOT'))
+        mod = _classify_cache[ref]
+        return mod.get(flag) if mod else None
+
     per_iter_steps = []
     oneoff_steps = []
     fanin_steps = []
     for step_def in steps_def:
-        if step_def.get('grouped'):
+        if _classify_flag(step_def, 'grouped'):
             fanin_steps.append(step_def)
-        elif step_def.get('per_sample') is False:
+        elif _classify_flag(step_def, 'per_sample') is False:
             oneoff_steps.append(step_def)
         else:
             per_iter_steps.append(step_def)
@@ -1396,7 +1415,15 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         for step in workflow.steps:
             step.worker_pool = None
 
-    # Pre-flight: validate that all resources exist
+    # Pre-flight: validate that all resources exist.
+    # Resources produced by a publish: step in this workflow are exempt — they
+    # may not exist yet on first run (the publishing step creates them) and
+    # skip_if_exists will pick them up on subsequent runs.
+    produced = set()
+    for step in workflow.steps:
+        for task in step.tasks:
+            if task.publish:
+                produced.add(task.publish.rstrip('/'))
     seen_resources = set()
     missing = []
     for step in workflow.steps:
@@ -1406,6 +1433,8 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
                 if uri in seen_resources:
                     continue
                 seen_resources.add(uri)
+                if uri.rstrip('/') in produced:
+                    continue
                 try:
                     info = client.fetch_info(uri)
                     if not info.is_file and not info.is_dir:

@@ -1,0 +1,41 @@
+name: meteor2
+version: "1.0.2"
+description: "Taxonomic / functional profiling of metagenomic reads against a meteor2 catalog (meteor 2.0.22 3-stage pipeline: fastq → mapping → profile)"
+container: quay.io/biocontainers/meteor:2.0.22--pyhdfd78af_0
+language: bash
+
+# Pull the companion setup module into any workflow that imports us.
+# The YAML runner auto-injects `- import: metagenomics/meteor2_catalog`
+# ahead of this step and auto-wires `depends: meteor2_catalog`, so a
+# template just needs `- import: metagenomics/meteor2` to get the full
+# catalog+compute pair wired correctly.
+requires:
+  - metagenomics/meteor2_catalog
+
+# The catalog fetched by meteor2_catalog is read via /resource. The URI
+# must match that step's `publish:` field.
+resource: "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/"
+
+command:
+  cond: PAIRED
+  true: |
+    . /builtin/std.sh
+    mkdir -p /tmp/meteor/in
+    cp /input/*.f*q.gz /tmp/meteor/in/
+    meteor fastq   -i /tmp/meteor/in/     -p -m '{SAMPLE}' -o /tmp/meteor/fastq/
+    meteor mapping -i /tmp/meteor/fastq/{SAMPLE}/   -r /resource/ -o /tmp/meteor/map/ -t ${CPU}
+    meteor profile -i /tmp/meteor/map/{SAMPLE}/     -r /resource/ -o /output/
+  false: |
+    . /builtin/std.sh
+    mkdir -p /tmp/meteor/in
+    cp /input/*.f*q.gz /tmp/meteor/in/
+    meteor fastq   -i /tmp/meteor/in/        -m '{SAMPLE}' -o /tmp/meteor/fastq/
+    meteor mapping -i /tmp/meteor/fastq/{SAMPLE}/   -r /resource/ -o /tmp/meteor/map/ -t ${CPU}
+    meteor profile -i /tmp/meteor/map/{SAMPLE}/     -r /resource/ -o /output/
+
+outputs:
+  profile: "*"
+
+task_spec:
+  cpu: 8
+  mem: 32

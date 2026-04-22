@@ -11,31 +11,31 @@ Today scitq has two parallel, incompatible stores for YAML modules:
 | | Bundled modules | Private modules |
 |---|---|---|
 | Location | `python/src/scitq2_modules/yaml/**/*.yaml` inside the `scitq2` Python package | `{script_root}/modules/*.yaml` on the server filesystem |
-| Namespace | Path-based (`genetic/fastp`) | Flat, no slashes allowed (`filepath.Base(name) == name`) |
+| Namespace | Path-based (`genomics/fastp`) | Flat, no slashes allowed (`filepath.Base(name) == name`) |
 | Lifecycle | Shipped with the client release | Uploaded via `scitq module upload` |
 | Versioning | Coupled to scitq package version | None — upload overwrites with `--force` |
 | Resolved by | `_load_public_import` → reads from Python package on the worker running the runner | `_load_private_module` → searches pipeline dir + `{script_root}/modules` on the server |
 | Updating | Wait for a scitq release → `pip install -U scitq2` everywhere | `scitq module upload --force` |
 
 Concrete pains we hit:
-- **A bundled-module bug fix needs a scitq release.** Example (recent): a `gzip -t` sanity check in `genetic/fastp.yaml` to catch truncated inputs. Today that change ships only when the whole package ships, on every worker's venv.
+- **A bundled-module bug fix needs a scitq release.** Example (recent): a `gzip -t` sanity check in `genomics/fastp.yaml` to catch truncated inputs. Today that change ships only when the whole package ships, on every worker's venv.
 - **No site-specific overrides.** A lab wanting a different `fastp` adapter sequence must either fork the upstream module (losing upgradeability) or copy-paste into every template.
-- **Private modules can't mirror the bundled taxonomy.** A team's internal aligner can't live at `genetic/my_aligner` next to `genetic/fastp`; it must be flat.
+- **Private modules can't mirror the bundled taxonomy.** A team's internal aligner can't live at `metagenomics/my_aligner` next to `genomics/fastp`; it must be flat.
 - **No history.** Overwriting a module silently changes every future template run that imports it. No way to pin a template to a specific module revision, and no audit trail.
 
 ## Goals
 
-1. **One store, two origins.** Server-side module store holds both bundled and user-uploaded modules. `import: genetic/fastp` resolves the same way for both.
+1. **One store, two origins.** Server-side module store holds both bundled and user-uploaded modules. `import: genomics/fastp` resolves the same way for both.
 2. **Versioning.** Every module has an explicit `(path, version)` key. Existing templates keep working with whatever version was current at upload time.
 3. **Origin provenance.** Each stored module knows whether it was seeded from the scitq package (`bundled`), uploaded by a user (`local`), or modified from bundled (`forked`).
-4. **Path namespacing for private modules.** `scitq module upload --path genetic/my_aligner.yaml` works and is resolvable as `import: genetic/my_aligner`.
+4. **Path namespacing for private modules.** `scitq module upload --path metagenomics/my_aligner.yaml` works and is resolvable as `import: metagenomics/my_aligner`.
 5. **Admin-controlled updates.** Admin decides when to pull newer bundled modules; forks are never clobbered silently.
 6. **Offline / dev compatibility.** The `scitq2_modules` Python package remains usable as a fallback for local dry-runs without a server.
 
 ## Non-goals
 
 - Three-way merge UIs for reconciling forks against upstream. `diff` + manual edit is sufficient.
-- Curated category enforcement. No required `genetic/`, no allowed-prefix list. Folders are organisational, not mandatory.
+- Curated category enforcement. No required `genomics/` or `metagenomics/`, no allowed-prefix list. Folders are organisational, not mandatory.
 - Dependency resolution between modules. Templates still reference modules directly; modules don't import other modules (that's already the case today).
 - **Python modules (`scitq2_modules.fastp` and friends).** See [Why YAML only](#why-yaml-only) below. Python modules stay in the pip-installed `scitq2_modules` package.
 
@@ -55,16 +55,16 @@ This makes the module library a YAML-only store. If a future need for versioned 
 
 A YAML module is identified by the pair `(path, version)` where:
 
-- `path` — forward-slash path in a virtual namespace, no leading slash, no `..`, no empty segments. Examples: `genetic/fastp`, `genetic/bowtie2_host_removal`, `internal/my_aligner`, `hello`.
+- `path` — forward-slash path in a virtual namespace, no leading slash, no `..`, no empty segments. Examples: `genomics/fastp`, `metagenomics/bowtie2_host_removal`, `internal/my_aligner`, `hello`.
 - `version` — tolerant semver: a leading `MAJOR.MINOR.PATCH` followed by an optional `-<suffix>`. Examples: `1.2.3`, `1.1.1-site`, `2.0.0-beta1`. Ordering: numeric MAJOR.MINOR.PATCH first, then suffix lexicographic, then a row without suffix sorts higher than one with (so `1.1.0` > `1.1.0-rc1`). New uploads MUST bump at least PATCH.
 
 A "resolvable name" in a template is `path[@version]`:
 
 ```yaml
 steps:
-  - import: genetic/fastp                 # latest available
-  - import: genetic/fastp@latest          # same — explicit form
-  - import: genetic/fastp@1.2.0           # pinned to a concrete version
+  - import: genomics/fastp                 # latest available
+  - import: genomics/fastp@latest          # same — explicit form
+  - import: genomics/fastp@1.2.0           # pinned to a concrete version
 ```
 
 `@latest` is a magic value meaning "highest-ordered version present in the store at resolution time". Bare `path` (no `@`) is shorthand for `@latest`. This mirrors `workflow_template`'s use of `latest`. `latest` is never stored — the runner always records the resolved concrete version into `template_run.module_pins`, so a re-run with those pins replays exactly what ran the first time even if a newer version has since been uploaded.
@@ -76,7 +76,7 @@ steps:
 Every module row has an `origin`:
 
 - `bundled` — seeded from the scitq package, never modified locally. Content hash matches the package's shipped hash.
-- `forked` — originated from `bundled` but diverged locally (admin edited `genetic/fastp` to add a site-specific adapter). Never overwritten by sync without `--force`.
+- `forked` — originated from `bundled` but diverged locally (admin edited `genomics/fastp` to add a site-specific adapter). Never overwritten by sync without `--force`.
 - `local` — uploaded by a user, no bundled counterpart.
 
 Origin is per-row (per version). Bumping a forked module to a new version resets the decision point: the next sync of bundled can either upsert a new bundled version alongside the fork (both live) or be blocked until admin resolves — see [Sync semantics](#sync-semantics).
@@ -102,7 +102,7 @@ New table (not renaming the existing private-module filesystem layout; that's mi
 ```sql
 CREATE TABLE module (
     module_id    SERIAL PRIMARY KEY,
-    path         TEXT NOT NULL,            -- e.g. 'genetic/fastp' (no leading slash, no extension)
+    path         TEXT NOT NULL,            -- e.g. 'genomics/fastp' (no leading slash, no extension)
     version      TEXT NOT NULL,            -- tolerant semver, see Identity
     content      BYTEA NOT NULL,           -- YAML bytes as-uploaded
     content_sha  TEXT NOT NULL,            -- sha256 hex of content, for sync detection
@@ -131,7 +131,7 @@ Triggered by `scitq module upgrade` (admin only) and on server first-start:
 
 ```
 for each bundled YAML file discovered under scitq2_modules/yaml/:
-    path    = relative path with .yaml stripped (e.g. 'genetic/fastp')
+    path    = relative path with .yaml stripped (e.g. 'genomics/fastp')
     version = YAML 'version:' field (REQUIRED)
     sha     = sha256(content)
 
@@ -163,7 +163,7 @@ A `local` upload at a path that already has a `bundled` row **at the same versio
 
 Admin edits a bundled module via the CLI/MCP edit path (see below):
 - The row's `origin` flips to `forked`, its `bundled_sha` is set to the pre-edit content hash, and the content updates in place (not a new version — this is the "I'm patching my deployment of this exact version" case).
-- An explicit fork-as-new-version path is also available: `scitq module fork genetic/fastp@1.1.0 --new-version 1.1.1-site` creates a new `forked` row at `(genetic/fastp, 1.1.1-site)` without touching the original.
+- An explicit fork-as-new-version path is also available: `scitq module fork genomics/fastp@1.1.0 --new-version 1.1.1-site` creates a new `forked` row at `(genomics/fastp, 1.1.1-site)` without touching the original.
 
 ### Sync semantics
 
@@ -171,9 +171,9 @@ Admin edits a bundled module via the CLI/MCP edit path (see below):
 
 ```
 $ scitq module upgrade
-genetic/fastp                     1.2.0   bundled (new)         would insert
-genetic/fastp                     1.1.0   forked                keep (local edits detected)
-genetic/bowtie2_host_removal      1.0.3   bundled (up-to-date)  no-op
+genomics/fastp                     1.2.0   bundled (new)         would insert
+genomics/fastp                     1.1.0   forked                keep (local edits detected)
+metagenomics/bowtie2_host_removal      1.0.3   bundled (up-to-date)  no-op
 internal/my_aligner               2.0.0   local                 no-op
 
 2 new bundled modules, 1 fork preserved, 0 conflicts.
@@ -192,26 +192,26 @@ All commands operate on YAML modules. Python modules are not part of this librar
 # Upload. --path is the local file; server-side namespace taken from --as,
 # defaulting to the basename of --path with .yaml stripped.
 scitq module upload --path ./modules/my_aligner.yaml                 # path=my_aligner
-scitq module upload --path ./modules/my_aligner.yaml --as genetic/my_aligner
+scitq module upload --path ./modules/my_aligner.yaml --as metagenomics/my_aligner
 
 # Explicit version; if omitted, read from YAML 'version:'.
-scitq module upload --path ./genetic/fastp.yaml --version 1.2.0 --as genetic/fastp
+scitq module upload --path ./genomics/fastp.yaml --version 1.2.0 --as genomics/fastp
 
 # Download. --version defaults to latest available.
-scitq module download --name genetic/fastp
-scitq module download --name genetic/fastp --version 1.1.0 -o fastp-1.1.0.yaml
+scitq module download --name genomics/fastp
+scitq module download --name genomics/fastp --version 1.1.0 -o fastp-1.1.0.yaml
 
 # List. Flat by default, --tree groups by folder, --versions shows all versions per path.
 scitq module list
 scitq module list --tree
-scitq module list --versions genetic/fastp
+scitq module list --versions genomics/fastp
 
 # Show provenance: origin, hash, who uploaded.
-scitq module origin genetic/fastp
-scitq module origin genetic/fastp@1.1.0
+scitq module origin genomics/fastp
+scitq module origin genomics/fastp@1.1.0
 
 # Create a local fork of a bundled module at a new version.
-scitq module fork genetic/fastp@1.1.0 --new-version 1.1.1-site
+scitq module fork genomics/fastp@1.1.0 --new-version 1.1.1-site
 
 # Admin-only: seed / update bundled modules from the installed scitq2 package.
 scitq module upgrade                # dry-run, shows diff
@@ -256,7 +256,7 @@ When a template runs through the YAML runner, for each `import: <path>` without 
 
 Templates do not need to pin versions by default. Two escape hatches for when pinning matters:
 
-- **Explicit pin in YAML**: `import: genetic/fastp@1.1.0`. The runner respects it.
+- **Explicit pin in YAML**: `import: genomics/fastp@1.1.0`. The runner respects it.
 - **Recorded resolution** (above): a template_run snapshots the versions it actually used. A "reproduce this run" flow can replay with the same pins even if the template YAML is unversioned.
 
 New templates that care about reproducibility are expected to pin manually. scitq does not force pinning.
@@ -289,8 +289,8 @@ Out of scope for v1, but worth noting so the design doesn't paint us into a corn
 - Unit: seeding skips matching bundled rows, inserts new ones, preserves forks. Colliding content at same `(path, version)` refused without `--force`.
 - Unit: upload with slashes accepted; upload with `..` or leading `/` rejected.
 - Unit: version ordering handles `1.2.0` > `1.1.1-site` > `1.1.1-rc1` > `1.1.0` correctly.
-- Integration: upload private `genetic/my_aligner`, import from a template, verify it loads. Upload a `local` at a path bundled already has: both visible, version-specific imports resolve the right one.
-- Integration: admin edits bundled `genetic/fastp` via CLI; row flips to `forked`; `module upgrade` dry-run reports it as fork-preserved; `--apply` does not overwrite.
+- Integration: upload private `metagenomics/my_aligner`, import from a template, verify it loads. Upload a `local` at a path bundled already has: both visible, version-specific imports resolve the right one.
+- Integration: admin edits bundled `genomics/fastp` via CLI; row flips to `forked`; `module upgrade` dry-run reports it as fork-preserved; `--apply` does not overwrite.
 - Integration: pre-migration server with on-disk private modules is upgraded; all existing private modules appear in the new table with `origin=L`; templates that imported them still resolve.
-- Offline: with `SCITQ_SERVER` unset, `_load_module genetic/fastp` falls back to the package copy.
+- Offline: with `SCITQ_SERVER` unset, `_load_module genomics/fastp` falls back to the package copy.
 - Pin: an unpinned template run records resolved versions into `template_run.module_pins`; re-running with the recorded pins replays the exact same module content even after a subsequent `module upgrade`.

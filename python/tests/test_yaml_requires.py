@@ -24,31 +24,31 @@ def _load_mock(modules):
 
 def test_auto_injects_required_module_and_wires_depends():
     mods = {
-        "genetic/meteor2_catalog": {"name": "meteor2_catalog", "per_sample": False},
-        "genetic/meteor2": {"name": "meteor2", "requires": ["genetic/meteor2_catalog"]},
+        "metagenomics/meteor2_catalog": {"name": "meteor2_catalog", "per_sample": False},
+        "metagenomics/meteor2": {"name": "meteor2", "requires": ["metagenomics/meteor2_catalog"]},
     }
-    data = {"steps": [{"import": "genetic/meteor2", "inputs": "fastp.fastqs"}]}
+    data = {"steps": [{"import": "metagenomics/meteor2", "inputs": "fastp.fastqs"}]}
 
     with patch.object(yaml_runner, "_load_module_by_ref", _load_mock(mods)):
         yaml_runner._expand_requires(data)
 
     assert len(data["steps"]) == 2, "prep module should be prepended"
-    assert data["steps"][0]["import"] == "genetic/meteor2_catalog", "prep comes first"
-    assert data["steps"][1]["import"] == "genetic/meteor2"
+    assert data["steps"][0]["import"] == "metagenomics/meteor2_catalog", "prep comes first"
+    assert data["steps"][1]["import"] == "metagenomics/meteor2"
     # depends: was auto-wired using the required module's name
     assert data["steps"][1]["depends"] == "meteor2_catalog"
 
 
 def test_no_duplicate_when_user_already_imported():
     mods = {
-        "genetic/meteor2_catalog": {"name": "meteor2_catalog"},
-        "genetic/meteor2": {"name": "meteor2", "requires": ["genetic/meteor2_catalog"]},
+        "metagenomics/meteor2_catalog": {"name": "meteor2_catalog"},
+        "metagenomics/meteor2": {"name": "meteor2", "requires": ["metagenomics/meteor2_catalog"]},
     }
     # User put the catalog right where they wanted it
     data = {"steps": [
-        {"import": "genetic/fastp"},
-        {"import": "genetic/meteor2_catalog"},
-        {"import": "genetic/meteor2"},
+        {"import": "genomics/fastp"},
+        {"import": "metagenomics/meteor2_catalog"},
+        {"import": "metagenomics/meteor2"},
     ]}
 
     with patch.object(yaml_runner, "_load_module_by_ref", _load_mock(mods)):
@@ -57,9 +57,9 @@ def test_no_duplicate_when_user_already_imported():
     # No injection — user's positioning is preserved
     import_paths = [s.get("import") for s in data["steps"]]
     assert import_paths == [
-        "genetic/fastp",
-        "genetic/meteor2_catalog",
-        "genetic/meteor2",
+        "genomics/fastp",
+        "metagenomics/meteor2_catalog",
+        "metagenomics/meteor2",
     ]
     # But depends is still wired on the meteor2 step
     assert data["steps"][2]["depends"] == "meteor2_catalog"
@@ -144,8 +144,8 @@ def test_multiple_requires_all_listed():
 
 
 def test_no_requires_does_nothing():
-    mods = {"genetic/fastp": {"name": "fastp"}}
-    data = {"steps": [{"import": "genetic/fastp"}]}
+    mods = {"genomics/fastp": {"name": "fastp"}}
+    data = {"steps": [{"import": "genomics/fastp"}]}
     expected = [dict(s) for s in data["steps"]]
 
     with patch.object(yaml_runner, "_load_module_by_ref", _load_mock(mods)):
