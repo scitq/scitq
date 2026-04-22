@@ -232,10 +232,22 @@ func TestRecruitmentCycle(t *testing.T) {
 		step2TaskIds := make([]int32, 10)
 		shell := "sh"
 		for i := 0; i < 10; i++ {
-			// Step 1 task
+			// Step 1 task. The `sleep 5` is deliberate: this test checks
+			// that the recruiter's worker-recycle path rescales the
+			// `weight` of tasks still running on a worker when its
+			// concurrency changes (here: exp16 goes from 5 → 4 on recycle
+			// to step 2). That UPDATE is guarded with
+			// `AND status IN ('A','C','R','D','U')` — so a task that has
+			// already reached 'S' is not affected. Without the sleep,
+			// `echo "hello"` completes in milliseconds on a fast CI node,
+			// all step 1 tasks are 'S' before the 3-second step-2
+			// recruiter timeout fires, the rescale UPDATE matches zero
+			// rows, and the `atLeastOneTaskWithWeightNotOne` assertion
+			// flakes. The sleep keeps tasks in 'R' long enough for the
+			// rescale to hit them.
 			taskResp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 				StepId:    &step1Id,
-				Command:   "echo \"hello with CPU $CPU\"",
+				Command:   "sleep 5 && echo \"hello with CPU $CPU\"",
 				Shell:     &shell,
 				Container: "alpine:latest", // Use a small image to speed up tests
 			})
