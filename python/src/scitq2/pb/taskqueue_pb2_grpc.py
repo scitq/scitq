@@ -365,6 +365,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.DeleteTemplateRunRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
+        self.RegisterAdhocRun = channel.unary_unary(
+                '/taskqueue.TaskQueue/RegisterAdhocRun',
+                request_serializer=taskqueue__pb2.RegisterAdhocRunRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.TemplateRun.FromString,
+                _registered_method=True)
         self.UploadModule = channel.unary_unary(
                 '/taskqueue.TaskQueue/UploadModule',
                 request_serializer=taskqueue__pb2.UploadModuleRequest.SerializeToString,
@@ -851,6 +856,18 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RegisterAdhocRun(self, request, context):
+        """Register a local run (python script that doesn't come from an uploaded
+        template). Creates a template_run row with a NULL workflow_template_id
+        and records script identity so "what launched this workflow?" stays
+        answerable. The returned template_run_id should be set on
+        UpdateTemplateRun once the workflow is created (same flow as
+        server-launched templates).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def UploadModule(self, request, context):
         """Module system
         """
@@ -1281,6 +1298,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.DeleteTemplateRun,
                     request_deserializer=taskqueue__pb2.DeleteTemplateRunRequest.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'RegisterAdhocRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterAdhocRun,
+                    request_deserializer=taskqueue__pb2.RegisterAdhocRunRequest.FromString,
+                    response_serializer=taskqueue__pb2.TemplateRun.SerializeToString,
             ),
             'UploadModule': grpc.unary_unary_rpc_method_handler(
                     servicer.UploadModule,
@@ -3145,6 +3167,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/DeleteTemplateRun',
             taskqueue__pb2.DeleteTemplateRunRequest.SerializeToString,
             taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RegisterAdhocRun(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/RegisterAdhocRun',
+            taskqueue__pb2.RegisterAdhocRunRequest.SerializeToString,
+            taskqueue__pb2.TemplateRun.FromString,
             options,
             channel_credentials,
             insecure,

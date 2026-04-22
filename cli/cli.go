@@ -1259,15 +1259,39 @@ func (c *CLI) WorkflowList() error {
 
 	fmt.Println("📘 Workflow List:")
 	for _, w := range res.Workflows {
+		maxw := "unlimited"
 		if w.MaximumWorkers != nil {
-			fmt.Printf("🔹 ID: %d | Name: %s | Status: %s | Strategy: %s | Max Workers: %d\n",
-				w.WorkflowId, w.Name, w.Status, w.RunStrategy, *w.MaximumWorkers)
-		} else {
-			fmt.Printf("🔹 ID: %d | Name: %s | Status: %s | Strategy: %s | Max Workers: unlimited\n",
-				w.WorkflowId, w.Name, w.Status, w.RunStrategy)
+			maxw = fmt.Sprintf("%d", *w.MaximumWorkers)
 		}
+		fmt.Printf("🔹 ID: %d | Name: %s | Status: %s | Strategy: %s | Max Workers: %s",
+			w.WorkflowId, w.Name, w.Status, w.RunStrategy, maxw)
+		if src := workflowLaunchSummary(w); src != "" {
+			fmt.Printf(" | Launched: %s", src)
+		}
+		fmt.Println()
 	}
 	return nil
+}
+
+// workflowLaunchSummary renders the workflow's provenance in a single line:
+// template name@version for template-launched workflows, "script: <name>"
+// for local-Python ad-hoc runs, empty for workflows with no template_run
+// link (pre-feature legacy rows).
+func workflowLaunchSummary(w *pb.Workflow) string {
+	if w.TemplateName != nil && *w.TemplateName != "" {
+		v := ""
+		if w.TemplateVersion != nil && *w.TemplateVersion != "" {
+			v = "@" + *w.TemplateVersion
+		}
+		return "template " + *w.TemplateName + v
+	}
+	if w.ScriptName != nil && *w.ScriptName != "" {
+		if w.ScriptSha256 != nil && len(*w.ScriptSha256) >= 8 {
+			return "script " + *w.ScriptName + " (" + (*w.ScriptSha256)[:8] + ")"
+		}
+		return "script " + *w.ScriptName
+	}
+	return ""
 }
 
 func (c *CLI) WorkflowCreate() error {
@@ -1656,9 +1680,8 @@ func (c *CLI) TemplateRun() error {
 	}
 
 	fmt.Printf("🚀 Template run created with ID %d\n", res.TemplateRunId)
-	if res.ErrorMessage != nil {
-		errMsg := *res.ErrorMessage
-		fmt.Printf("⚠️  Warning: %s\n", errMsg)
+	if res.ErrorMessage != nil && strings.TrimSpace(*res.ErrorMessage) != "" {
+		fmt.Printf("⚠️  Warning: %s\n", strings.TrimSpace(*res.ErrorMessage))
 	}
 	return nil
 }

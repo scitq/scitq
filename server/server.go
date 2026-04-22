@@ -4256,19 +4256,27 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
-	// Base query to select workflow fields
+	// Join to template_run + workflow_template so every row carries its
+	// launch provenance (template name/version for RunTemplate-launched
+	// workflows, script_name for local-Python ad-hoc runs). LEFT JOINs
+	// throughout: older workflows created before the template_run link
+	// existed stay visible with NULLs.
 	query := `
-        SELECT workflow_id, workflow_name, status, run_strategy, maximum_workers, live
-        FROM workflow
+        SELECT w.workflow_id, w.workflow_name, w.status, w.run_strategy, w.maximum_workers, w.live,
+               tr.template_run_id, wt.name, wt.version,
+               tr.script_name, tr.script_sha256
+        FROM workflow w
+        LEFT JOIN template_run tr ON tr.workflow_id = w.workflow_id
+        LEFT JOIN workflow_template wt ON wt.workflow_template_id = tr.workflow_template_id
     `
 	var args []interface{}
 
 	// Add name filter if provided
 	if req.NameLike != nil {
-		query += " WHERE workflow_name ILIKE $1"
+		query += " WHERE w.workflow_name ILIKE $1"
 		args = append(args, req.NameLike)
 	}
-	query += " ORDER BY workflow_id DESC"
+	query += " ORDER BY w.workflow_id DESC"
 
 	// Handle pagination parameters
 	paramCount := len(args)
@@ -4305,8 +4313,26 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 	var workflows []*pb.Workflow
 	for rows.Next() {
 		var wf pb.Workflow
-		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers, &wf.Live); err != nil {
+		var templateRunID sql.NullInt32
+		var templateName, templateVersion, scriptName, scriptSha sql.NullString
+		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers, &wf.Live,
+			&templateRunID, &templateName, &templateVersion, &scriptName, &scriptSha); err != nil {
 			return nil, fmt.Errorf("failed to scan workflow: %w", err)
+		}
+		if templateRunID.Valid {
+			wf.TemplateRunId = proto.Int32(templateRunID.Int32)
+		}
+		if templateName.Valid {
+			wf.TemplateName = proto.String(templateName.String)
+		}
+		if templateVersion.Valid {
+			wf.TemplateVersion = proto.String(templateVersion.String)
+		}
+		if scriptName.Valid {
+			wf.ScriptName = proto.String(scriptName.String)
+		}
+		if scriptSha.Valid {
+			wf.ScriptSha256 = proto.String(scriptSha.String)
 		}
 		// Populate progress from in-memory step stats aggregator (no DB hit)
 		s.stats.mu.Lock()

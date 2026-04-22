@@ -249,6 +249,60 @@ func transformParamSchema(rawJSON string, cfg config.Config) (string, error) {
 	return string(transformed), nil
 }
 
+// RegisterAdhocRun creates a template_run row for a local Python DSL run —
+// i.e. the client invoked `python my_script.py` directly, without uploading
+// a template first. workflow_template_id stays NULL; script_name and
+// script_sha256 record the identity of the launching script, and
+// module_pins_json captures the Python-side versioning knobs (scitq2 version,
+// etc.). The returned template_run_id is what the client passes to
+// UpdateTemplateRun once it has created the workflow — same flow as the
+// server-launched templates.
+func (s *taskQueueServer) RegisterAdhocRun(ctx context.Context, req *pb.RegisterAdhocRunRequest) (*pb.TemplateRun, error) {
+	if req.ScriptName == "" {
+		return nil, fmt.Errorf("script_name is required")
+	}
+	if req.ScriptSha256 == "" {
+		return nil, fmt.Errorf("script_sha256 is required")
+	}
+	paramValues := req.ParamValuesJson
+	if paramValues == "" {
+		paramValues = "{}"
+	}
+
+	user := GetUserFromContext(ctx)
+	var userId *uint32
+	if user != nil {
+		uid := uint32(user.UserID)
+		userId = &uid
+	}
+
+	var modulePinsJSON sql.NullString
+	if req.ModulePinsJson != "" {
+		modulePinsJSON = sql.NullString{String: req.ModulePinsJson, Valid: true}
+	}
+
+	var templateRunID int32
+	var createdAt time.Time
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO template_run
+		   (workflow_template_id, param_values, run_by, created_at,
+		    script_name, script_sha256, module_pins)
+		 VALUES (NULL, $1, $2, NOW(), $3, $4, $5)
+		 RETURNING template_run_id, created_at`,
+		paramValues, userId, req.ScriptName, req.ScriptSha256, modulePinsJSON,
+	).Scan(&templateRunID, &createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert ad-hoc template_run: %w", err)
+	}
+
+	return &pb.TemplateRun{
+		TemplateRunId:   templateRunID,
+		Status:          "P",
+		CreatedAt:       createdAt.Format(time.RFC3339),
+		ParamValuesJson: paramValues,
+	}, nil
+}
+
 func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRequest) (*pb.TemplateRun, error) {
 	// Wait for Python DSL environment to be ready (bootstrapped async at startup)
 	if s.pythonReady != nil {
@@ -423,14 +477,19 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 	}
 
 	// ✅ Script ran successfully (but workflow_id will be updated later by Python)
-	return &pb.TemplateRun{
+	resp := &pb.TemplateRun{
 		TemplateRunId:      templateRunId,
 		WorkflowTemplateId: req.WorkflowTemplateId,
 		CreatedAt:          createdAt.Format(time.RFC3339),
 		ParamValuesJson:    req.ParamValuesJson,
 		Status:             "S",
-		ErrorMessage:       proto.String(stderr),
-	}, nil
+	}
+	// Only surface stderr when there's actual content — otherwise the CLI
+	// prints an empty "Warning:" line on every successful run.
+	if strings.TrimSpace(stderr) != "" {
+		resp.ErrorMessage = proto.String(stderr)
+	}
+	return resp, nil
 }
 
 type ParamSpec struct {
@@ -883,6 +942,9 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 }
 
 func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.TemplateRunFilter) (*pb.TemplateRunList, error) {
+	// LEFT JOIN on workflow_template so ad-hoc runs (workflow_template_id
+	// IS NULL) still show up — their identity is carried by script_name /
+	// script_sha256 instead of template name/version.
 	query := `
 		SELECT
 			r.template_run_id,
@@ -896,9 +958,11 @@ func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.Template
 			r.workflow_id,
 			r.created_at,
 			r.param_values,
-			r.error_message
+			r.error_message,
+			r.script_name,
+			r.script_sha256
 		FROM template_run r
-		JOIN workflow_template t ON r.workflow_template_id = t.workflow_template_id
+		LEFT JOIN workflow_template t ON r.workflow_template_id = t.workflow_template_id
 		LEFT JOIN workflow w ON r.workflow_id = w.workflow_id
 		LEFT JOIN scitq_user u ON r.run_by = u.user_id
 	`
@@ -919,21 +983,33 @@ func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.Template
 
 	for rows.Next() {
 		var r pb.TemplateRun
+		var workflowTemplateID sql.NullInt32
 		var workflowID sql.NullInt32
 		var errorMsg sql.NullString
+		var scriptName, scriptSha sql.NullString
 		var createdAt time.Time
 
-		if err := rows.Scan(&r.TemplateRunId, &r.WorkflowTemplateId, &r.TemplateName, &r.TemplateVersion,
-			&r.WorkflowName, &r.RunBy, &r.RunByUsername, &r.Status, &workflowID, &createdAt, &r.ParamValuesJson, &errorMsg); err != nil {
+		if err := rows.Scan(&r.TemplateRunId, &workflowTemplateID, &r.TemplateName, &r.TemplateVersion,
+			&r.WorkflowName, &r.RunBy, &r.RunByUsername, &r.Status, &workflowID, &createdAt,
+			&r.ParamValuesJson, &errorMsg, &scriptName, &scriptSha); err != nil {
 			return nil, fmt.Errorf("failed to scan template run: %w", err)
 		}
 
+		if workflowTemplateID.Valid {
+			r.WorkflowTemplateId = workflowTemplateID.Int32
+		}
 		r.CreatedAt = createdAt.Format(time.RFC3339)
 		if workflowID.Valid {
 			r.WorkflowId = proto.Int32(workflowID.Int32)
 		}
 		if errorMsg.Valid {
 			r.ErrorMessage = proto.String(errorMsg.String)
+		}
+		if scriptName.Valid {
+			r.ScriptName = proto.String(scriptName.String)
+		}
+		if scriptSha.Valid {
+			r.ScriptSha256 = proto.String(scriptSha.String)
 		}
 		runs = append(runs, &r)
 	}

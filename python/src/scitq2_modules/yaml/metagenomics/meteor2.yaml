@@ -1,5 +1,5 @@
 name: meteor2
-version: "1.0.2"
+version: "1.0.5"
 description: "Taxonomic / functional profiling of metagenomic reads against a meteor2 catalog (meteor 2.0.22 3-stage pipeline: fastq → mapping → profile)"
 container: quay.io/biocontainers/meteor:2.0.22--pyhdfd78af_0
 language: bash
@@ -12,9 +12,16 @@ language: bash
 requires:
   - metagenomics/meteor2_catalog
 
-# The catalog fetched by meteor2_catalog is read via /resource. The URI
-# must match that step's `publish:` field.
-resource: "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/"
+
+# Pull the catalog into /resource with its subdirectory layout preserved:
+# scitq's resource fetcher flattens bare directory downloads, so we
+# explicitly un-flatten by listing each subtree with `|mv:<subdir>`. Meteor
+# expects `/resource/fasta/*.bt2l` and `/resource/database/*.feather` plus
+# the top-level reference.json, which the third URI drops at /resource/.
+resource:
+  - "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/fasta/|mv:fasta"
+  - "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/database/|mv:database"
+  - "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/{params.meteor2_catalog}_reference.json"
 
 command:
   cond: PAIRED
@@ -25,6 +32,19 @@ command:
     meteor fastq   -i /tmp/meteor/in/     -p -m '{SAMPLE}' -o /tmp/meteor/fastq/
     meteor mapping -i /tmp/meteor/fastq/{SAMPLE}/   -r /resource/ -o /tmp/meteor/map/ -t ${CPU}
     meteor profile -i /tmp/meteor/map/{SAMPLE}/     -r /resource/ -o /output/
+
+    # meteor profile leaves a symlink like <sample>_raw.tsv.xz pointing at
+    # the mapping dir under /tmp (in-container absolute path). scitq uploads
+    # /output from the host, where that target doesn't exist, so every such
+    # symlink would upload-fail. Materialize while we're still in-container.
+    find /output -type l | while read -r link; do
+        target=$(readlink -f "$link" 2>/dev/null) || true
+        if [ -n "$target" ] && [ -f "$target" ]; then
+            rm "$link" && cp "$target" "$link"
+        else
+            rm -f "$link"
+        fi
+    done
   false: |
     . /builtin/std.sh
     mkdir -p /tmp/meteor/in
@@ -32,6 +52,19 @@ command:
     meteor fastq   -i /tmp/meteor/in/        -m '{SAMPLE}' -o /tmp/meteor/fastq/
     meteor mapping -i /tmp/meteor/fastq/{SAMPLE}/   -r /resource/ -o /tmp/meteor/map/ -t ${CPU}
     meteor profile -i /tmp/meteor/map/{SAMPLE}/     -r /resource/ -o /output/
+
+    # meteor profile leaves a symlink like <sample>_raw.tsv.xz pointing at
+    # the mapping dir under /tmp (in-container absolute path). scitq uploads
+    # /output from the host, where that target doesn't exist, so every such
+    # symlink would upload-fail. Materialize while we're still in-container.
+    find /output -type l | while read -r link; do
+        target=$(readlink -f "$link" 2>/dev/null) || true
+        if [ -n "$target" ] && [ -f "$target" ]; then
+            rm "$link" && cp "$target" "$link"
+        else
+            rm -f "$link"
+        fi
+    done
 
 outputs:
   profile: "*"

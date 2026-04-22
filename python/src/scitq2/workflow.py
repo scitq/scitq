@@ -265,16 +265,19 @@ class Task:
             # Fallback: treat as a single item
             input_items = [self.inputs]
 
-        # Resolve dependencies
+        # Resolve dependencies. Always infer from inputs (data-flow edges) AND
+        # from explicit `depends:` (ordering-only edges) — union, not either-or.
+        # Previously this was either-or, which silently dropped the data-flow
+        # edges whenever a user (or a requires:-injected step) set `depends:`.
+        # That broke reuse-hit input redirection for dependents whose edges
+        # weren't recorded in task_dependencies.
         resolved_depends = set()
-        if self.depends is None and self.inputs:
-            # Step 1: if no explicit dependencies, infer from inputs
+        if self.inputs:
             for input_item in input_items:
                 if isinstance(input_item, OutputBase):
                     for task_id in input_item.resolve_task_id():
                         resolved_depends.add(task_id)
-        elif self.depends is not None:
-            # Step 2: if explicit dependencies are given, resolve them
+        if self.depends is not None:
             if isinstance(self.depends, Iterable):
                 for dep in self.depends:
                     if isinstance(dep, Step):

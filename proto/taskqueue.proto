@@ -74,6 +74,13 @@ service TaskQueue {
     rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
     rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
     rpc DeleteTemplateRun(DeleteTemplateRunRequest) returns (Ack);
+    // Register a local run (python script that doesn't come from an uploaded
+    // template). Creates a template_run row with a NULL workflow_template_id
+    // and records script identity so "what launched this workflow?" stays
+    // answerable. The returned template_run_id should be set on
+    // UpdateTemplateRun once the workflow is created (same flow as
+    // server-launched templates).
+    rpc RegisterAdhocRun(RegisterAdhocRunRequest) returns (TemplateRun);
     // Module system
     rpc UploadModule(UploadModuleRequest) returns (Ack);
     rpc ListModules(google.protobuf.Empty) returns (ModuleList);
@@ -595,6 +602,16 @@ message Workflow {
     int32 running_tasks = 9;    // Accepted + Running + Uploading
     int32 retrying_tasks = 10;  // Tasks currently being retried (failed once, clone in progress)
     bool live = 11;             // Live mode: prevents auto-completion of workflow
+    // Launch provenance: lets "how was this workflow created?" be answered
+    // without a follow-up query. For template-launched workflows,
+    // template_name + template_version are set. For local-Python ad-hoc
+    // runs, script_name (and optionally script_sha256) are set instead.
+    // template_run_id is populated for both.
+    optional int32 template_run_id = 12;
+    optional string template_name = 13;
+    optional string template_version = 14;
+    optional string script_name = 15;
+    optional string script_sha256 = 16;
 }
 message WorkflowRequest {
     string name = 1;
@@ -793,6 +810,8 @@ message TemplateList {
 
 message TemplateRun {
   int32 template_run_id = 1;
+  // 0 = ad-hoc run (local Python script, no template uploaded). For those,
+  // see script_name / script_sha256 instead.
   int32 workflow_template_id = 2;
   optional string template_name = 3;
   optional string template_version = 4;
@@ -804,6 +823,8 @@ message TemplateRun {
   string param_values_json = 10;
   optional string error_message = 11;
   optional string run_by_username = 12;
+  optional string script_name = 13;    // ad-hoc runs only
+  optional string script_sha256 = 14;  // ad-hoc runs only
 }
 
 message TemplateRunList {
@@ -835,6 +856,19 @@ message WorkspaceRootResponse {
 
 message DeleteTemplateRunRequest {
   int32 template_run_id = 1;
+}
+
+// Ad-hoc (local Python) run registration — no uploaded template, just a
+// script file with some params. The server stores it as a template_run with
+// workflow_template_id=NULL.
+message RegisterAdhocRunRequest {
+  string script_name   = 1;  // bare filename of the launching script
+  string script_sha256 = 2;  // SHA-256 of the script file's content (hex)
+  string param_values_json = 3; // JSON snapshot of the params the user ran with
+  // module_pins_json stores the Python versioning knobs — typically
+  // {"scitq2":"0.7.4"} so replays can check compatibility against later
+  // upgrades. Same column as YAML's per-module pins, different shape.
+  string module_pins_json = 4;
 }
 
 // Template download

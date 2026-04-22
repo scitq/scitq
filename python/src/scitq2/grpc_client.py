@@ -371,6 +371,22 @@ class Scitq2Client:
         response = self.stub.FetchInfo(request)
         return response
 
+    def register_adhoc_run(self, script_name: str, script_sha256: str,
+                           param_values_json: str = "{}",
+                           module_pins_json: str = "") -> int:
+        """Register an ad-hoc (local Python DSL) run with the server and
+        return the resulting template_run_id. Use this when a script that
+        is NOT an uploaded template is about to create a workflow, so the
+        server can record script identity + versions for traceability."""
+        request = taskqueue_pb2.RegisterAdhocRunRequest(
+            script_name=script_name,
+            script_sha256=script_sha256,
+            param_values_json=param_values_json,
+            module_pins_json=module_pins_json,
+        )
+        resp = self.stub.RegisterAdhocRun(request)
+        return int(resp.template_run_id)
+
     def update_template_run(self, template_run_id: int, workflow_id: Optional[int] = None, error_message: Optional[str] = None):
         """
         Updates the status of a workflow template run. Can be used to attach a workflow_id

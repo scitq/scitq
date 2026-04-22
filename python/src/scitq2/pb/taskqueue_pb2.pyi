@@ -857,7 +857,7 @@ class WorkflowId(_message.Message):
     def __init__(self, workflow_id: _Optional[int] = ...) -> None: ...
 
 class Workflow(_message.Message):
-    __slots__ = ("workflow_id", "name", "status", "run_strategy", "maximum_workers", "total_tasks", "succeeded_tasks", "failed_tasks", "running_tasks", "retrying_tasks", "live")
+    __slots__ = ("workflow_id", "name", "status", "run_strategy", "maximum_workers", "total_tasks", "succeeded_tasks", "failed_tasks", "running_tasks", "retrying_tasks", "live", "template_run_id", "template_name", "template_version", "script_name", "script_sha256")
     WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
@@ -869,6 +869,11 @@ class Workflow(_message.Message):
     RUNNING_TASKS_FIELD_NUMBER: _ClassVar[int]
     RETRYING_TASKS_FIELD_NUMBER: _ClassVar[int]
     LIVE_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_NAME_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_VERSION_FIELD_NUMBER: _ClassVar[int]
+    SCRIPT_NAME_FIELD_NUMBER: _ClassVar[int]
+    SCRIPT_SHA256_FIELD_NUMBER: _ClassVar[int]
     workflow_id: int
     name: str
     status: str
@@ -880,7 +885,12 @@ class Workflow(_message.Message):
     running_tasks: int
     retrying_tasks: int
     live: bool
-    def __init__(self, workflow_id: _Optional[int] = ..., name: _Optional[str] = ..., status: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., total_tasks: _Optional[int] = ..., succeeded_tasks: _Optional[int] = ..., failed_tasks: _Optional[int] = ..., running_tasks: _Optional[int] = ..., retrying_tasks: _Optional[int] = ..., live: bool = ...) -> None: ...
+    template_run_id: int
+    template_name: str
+    template_version: str
+    script_name: str
+    script_sha256: str
+    def __init__(self, workflow_id: _Optional[int] = ..., name: _Optional[str] = ..., status: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., total_tasks: _Optional[int] = ..., succeeded_tasks: _Optional[int] = ..., failed_tasks: _Optional[int] = ..., running_tasks: _Optional[int] = ..., retrying_tasks: _Optional[int] = ..., live: bool = ..., template_run_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., script_name: _Optional[str] = ..., script_sha256: _Optional[str] = ...) -> None: ...
 
 class WorkflowRequest(_message.Message):
     __slots__ = ("name", "run_strategy", "maximum_workers", "status", "live")
@@ -1216,7 +1226,7 @@ class TemplateList(_message.Message):
     def __init__(self, templates: _Optional[_Iterable[_Union[Template, _Mapping]]] = ...) -> None: ...
 
 class TemplateRun(_message.Message):
-    __slots__ = ("template_run_id", "workflow_template_id", "template_name", "template_version", "workflow_name", "run_by", "status", "workflow_id", "created_at", "param_values_json", "error_message", "run_by_username")
+    __slots__ = ("template_run_id", "workflow_template_id", "template_name", "template_version", "workflow_name", "run_by", "status", "workflow_id", "created_at", "param_values_json", "error_message", "run_by_username", "script_name", "script_sha256")
     TEMPLATE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     TEMPLATE_NAME_FIELD_NUMBER: _ClassVar[int]
@@ -1229,6 +1239,8 @@ class TemplateRun(_message.Message):
     PARAM_VALUES_JSON_FIELD_NUMBER: _ClassVar[int]
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     RUN_BY_USERNAME_FIELD_NUMBER: _ClassVar[int]
+    SCRIPT_NAME_FIELD_NUMBER: _ClassVar[int]
+    SCRIPT_SHA256_FIELD_NUMBER: _ClassVar[int]
     template_run_id: int
     workflow_template_id: int
     template_name: str
@@ -1241,7 +1253,9 @@ class TemplateRun(_message.Message):
     param_values_json: str
     error_message: str
     run_by_username: str
-    def __init__(self, template_run_id: _Optional[int] = ..., workflow_template_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., workflow_name: _Optional[str] = ..., run_by: _Optional[int] = ..., status: _Optional[str] = ..., workflow_id: _Optional[int] = ..., created_at: _Optional[str] = ..., param_values_json: _Optional[str] = ..., error_message: _Optional[str] = ..., run_by_username: _Optional[str] = ...) -> None: ...
+    script_name: str
+    script_sha256: str
+    def __init__(self, template_run_id: _Optional[int] = ..., workflow_template_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., workflow_name: _Optional[str] = ..., run_by: _Optional[int] = ..., status: _Optional[str] = ..., workflow_id: _Optional[int] = ..., created_at: _Optional[str] = ..., param_values_json: _Optional[str] = ..., error_message: _Optional[str] = ..., run_by_username: _Optional[str] = ..., script_name: _Optional[str] = ..., script_sha256: _Optional[str] = ...) -> None: ...
 
 class TemplateRunList(_message.Message):
     __slots__ = ("runs",)
@@ -1256,14 +1270,16 @@ class TemplateRunFilter(_message.Message):
     def __init__(self, workflow_template_id: _Optional[int] = ...) -> None: ...
 
 class UpdateTemplateRunRequest(_message.Message):
-    __slots__ = ("template_run_id", "workflow_id", "error_message")
+    __slots__ = ("template_run_id", "workflow_id", "error_message", "module_pins")
     TEMPLATE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    MODULE_PINS_FIELD_NUMBER: _ClassVar[int]
     template_run_id: int
     workflow_id: int
     error_message: str
-    def __init__(self, template_run_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., error_message: _Optional[str] = ...) -> None: ...
+    module_pins: str
+    def __init__(self, template_run_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., error_message: _Optional[str] = ..., module_pins: _Optional[str] = ...) -> None: ...
 
 class WorkspaceRootRequest(_message.Message):
     __slots__ = ("provider", "region")
@@ -1284,6 +1300,18 @@ class DeleteTemplateRunRequest(_message.Message):
     TEMPLATE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     template_run_id: int
     def __init__(self, template_run_id: _Optional[int] = ...) -> None: ...
+
+class RegisterAdhocRunRequest(_message.Message):
+    __slots__ = ("script_name", "script_sha256", "param_values_json", "module_pins_json")
+    SCRIPT_NAME_FIELD_NUMBER: _ClassVar[int]
+    SCRIPT_SHA256_FIELD_NUMBER: _ClassVar[int]
+    PARAM_VALUES_JSON_FIELD_NUMBER: _ClassVar[int]
+    MODULE_PINS_JSON_FIELD_NUMBER: _ClassVar[int]
+    script_name: str
+    script_sha256: str
+    param_values_json: str
+    module_pins_json: str
+    def __init__(self, script_name: _Optional[str] = ..., script_sha256: _Optional[str] = ..., param_values_json: _Optional[str] = ..., module_pins_json: _Optional[str] = ...) -> None: ...
 
 class DownloadTemplateRequest(_message.Message):
     __slots__ = ("workflow_template_id", "name", "version")
@@ -1306,16 +1334,100 @@ class UploadModuleRequest(_message.Message):
     def __init__(self, filename: _Optional[str] = ..., content: _Optional[bytes] = ..., force: bool = ...) -> None: ...
 
 class ModuleList(_message.Message):
-    __slots__ = ("modules",)
+    __slots__ = ("modules", "entries")
     MODULES_FIELD_NUMBER: _ClassVar[int]
+    ENTRIES_FIELD_NUMBER: _ClassVar[int]
     modules: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, modules: _Optional[_Iterable[str]] = ...) -> None: ...
+    entries: _containers.RepeatedCompositeFieldContainer[ModuleEntry]
+    def __init__(self, modules: _Optional[_Iterable[str]] = ..., entries: _Optional[_Iterable[_Union[ModuleEntry, _Mapping]]] = ...) -> None: ...
+
+class ModuleEntry(_message.Message):
+    __slots__ = ("path", "version", "origin", "description")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    version: str
+    origin: str
+    description: str
+    def __init__(self, path: _Optional[str] = ..., version: _Optional[str] = ..., origin: _Optional[str] = ..., description: _Optional[str] = ...) -> None: ...
+
+class ModuleListFilter(_message.Message):
+    __slots__ = ("path", "latest_only")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    LATEST_ONLY_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    latest_only: bool
+    def __init__(self, path: _Optional[str] = ..., latest_only: bool = ...) -> None: ...
 
 class DownloadModuleRequest(_message.Message):
     __slots__ = ("filename",)
     FILENAME_FIELD_NUMBER: _ClassVar[int]
     filename: str
     def __init__(self, filename: _Optional[str] = ...) -> None: ...
+
+class UpgradeBundledModulesRequest(_message.Message):
+    __slots__ = ("apply",)
+    APPLY_FIELD_NUMBER: _ClassVar[int]
+    apply: bool
+    def __init__(self, apply: bool = ...) -> None: ...
+
+class UpgradeBundledModulesResponse(_message.Message):
+    __slots__ = ("report", "inserted", "forks_preserved", "conflicts", "skipped", "up_to_date")
+    REPORT_FIELD_NUMBER: _ClassVar[int]
+    INSERTED_FIELD_NUMBER: _ClassVar[int]
+    FORKS_PRESERVED_FIELD_NUMBER: _ClassVar[int]
+    CONFLICTS_FIELD_NUMBER: _ClassVar[int]
+    SKIPPED_FIELD_NUMBER: _ClassVar[int]
+    UP_TO_DATE_FIELD_NUMBER: _ClassVar[int]
+    report: str
+    inserted: int
+    forks_preserved: int
+    conflicts: int
+    skipped: int
+    up_to_date: int
+    def __init__(self, report: _Optional[str] = ..., inserted: _Optional[int] = ..., forks_preserved: _Optional[int] = ..., conflicts: _Optional[int] = ..., skipped: _Optional[int] = ..., up_to_date: _Optional[int] = ...) -> None: ...
+
+class ModuleOriginRequest(_message.Message):
+    __slots__ = ("path", "version")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    version: str
+    def __init__(self, path: _Optional[str] = ..., version: _Optional[str] = ...) -> None: ...
+
+class ModuleOriginResponse(_message.Message):
+    __slots__ = ("path", "version", "origin", "content_sha256", "bundled_sha256", "description", "uploaded_at", "uploaded_by", "fork_is_outdated")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_SHA256_FIELD_NUMBER: _ClassVar[int]
+    BUNDLED_SHA256_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    UPLOADED_AT_FIELD_NUMBER: _ClassVar[int]
+    UPLOADED_BY_FIELD_NUMBER: _ClassVar[int]
+    FORK_IS_OUTDATED_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    version: str
+    origin: str
+    content_sha256: str
+    bundled_sha256: str
+    description: str
+    uploaded_at: str
+    uploaded_by: str
+    fork_is_outdated: bool
+    def __init__(self, path: _Optional[str] = ..., version: _Optional[str] = ..., origin: _Optional[str] = ..., content_sha256: _Optional[str] = ..., bundled_sha256: _Optional[str] = ..., description: _Optional[str] = ..., uploaded_at: _Optional[str] = ..., uploaded_by: _Optional[str] = ..., fork_is_outdated: bool = ...) -> None: ...
+
+class ForkModuleRequest(_message.Message):
+    __slots__ = ("source_path", "source_version", "new_version")
+    SOURCE_PATH_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_VERSION_FIELD_NUMBER: _ClassVar[int]
+    NEW_VERSION_FIELD_NUMBER: _ClassVar[int]
+    source_path: str
+    source_version: str
+    new_version: str
+    def __init__(self, source_path: _Optional[str] = ..., source_version: _Optional[str] = ..., new_version: _Optional[str] = ...) -> None: ...
 
 class FileContent(_message.Message):
     __slots__ = ("filename", "content")

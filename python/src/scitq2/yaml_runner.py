@@ -644,8 +644,18 @@ def _load_public_import(import_name: str) -> dict:
                 'source': 'package',
             })
             return data
+    hint = ""
+    if '/' in import_name:
+        # Common confusion: template wrote `import: modules/foo` expecting
+        # script_root resolution (which `module:` does), not a library lookup.
+        hint = (
+            f"\n  Hint: `import:` loads from the server module library or the "
+            f"bundled scitq2_modules package. For a private YAML file under "
+            f"your script tree (e.g. {{script_root}}/modules/{os.path.basename(import_name)}.yaml) "
+            f"use `module: {os.path.basename(import_name)}.yaml` instead."
+        )
     raise FileNotFoundError(
-        f"Public module not found: {import_name} (tried server library, then package at {base_dir})"
+        f"Public module not found: {import_name} (tried server library, then package at {base_dir}){hint}"
     )
 
 

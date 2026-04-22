@@ -4,6 +4,7 @@ import inspect
 import os
 import sys
 import ast
+import hashlib
 from typing import Callable, Type, Optional, Dict, get_type_hints
 from scitq2.param import ParamSpec
 from scitq2.workflow import Workflow
@@ -11,6 +12,36 @@ from scitq2.grpc_client import Scitq2Client
 import re
 import traceback
 import grpc
+
+try:
+    from scitq2.__version__ import __version__ as _scitq2_version
+except ImportError:
+    _scitq2_version = "0.0.0+dev"
+
+
+def _compute_script_identity(func: Callable) -> tuple[str, str]:
+    """Return (script_name, script_sha256) for the module defining `func`.
+    Falls back to sys.argv[0] if the source file isn't readable. Failures
+    degrade gracefully — ad-hoc registration is traceability, never a gate."""
+    path = None
+    try:
+        path = inspect.getsourcefile(func) or inspect.getfile(func)
+    except TypeError:
+        path = None
+    if not path or not os.path.isfile(path):
+        path = sys.argv[0] if sys.argv else "<unknown>"
+    name = os.path.basename(path) if path else "<unknown>"
+    sha = ""
+    try:
+        if os.path.isfile(path):
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            sha = h.hexdigest()
+    except OSError:
+        sha = ""
+    return name, sha
 
 class WorkflowDefinitionError(Exception):
     pass
@@ -242,6 +273,28 @@ def run(func: Callable, live: bool = False):
         standalone = args.standalone or not os.environ.get("SCITQ_TEMPLATE_RUN_ID")
         try:
             client = Scitq2Client()
+            # Ad-hoc run registration: when the script is invoked directly
+            # (not via RunTemplate on the server), record its identity on
+            # the server as a template_run with NULL workflow_template_id.
+            # This lets the workflow answer "what launched me?" even for
+            # local-python invocations. Reuses the existing compile() path
+            # by seeding SCITQ_TEMPLATE_RUN_ID in the current process env.
+            if standalone and not os.environ.get("SCITQ_TEMPLATE_RUN_ID") and not args.dry_run:
+                try:
+                    script_name, script_sha = _compute_script_identity(func)
+                    param_values_json = args.values if (args.values and args.values != '{}') else "{}"
+                    module_pins_json = json.dumps({"scitq2": _scitq2_version})
+                    tr_id = client.register_adhoc_run(
+                        script_name=script_name,
+                        script_sha256=script_sha,
+                        param_values_json=param_values_json,
+                        module_pins_json=module_pins_json,
+                    )
+                    os.environ["SCITQ_TEMPLATE_RUN_ID"] = str(tr_id)
+                except grpc.RpcError as e:
+                    # Non-fatal: registration is traceability only. Log and continue.
+                    print(f"⚠️ Could not register ad-hoc template_run (traceability only): "
+                          f"{e.details() if hasattr(e, 'details') else e}", file=sys.stderr)
             workflow_status = "D" if args.debug else None
             activate = standalone and not args.debug and not args.dry_run
             if args.no_recruiters:

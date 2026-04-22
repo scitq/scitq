@@ -86,6 +86,7 @@ const (
 	TaskQueue_ListTemplateRuns_FullMethodName          = "/taskqueue.TaskQueue/ListTemplateRuns"
 	TaskQueue_UpdateTemplateRun_FullMethodName         = "/taskqueue.TaskQueue/UpdateTemplateRun"
 	TaskQueue_DeleteTemplateRun_FullMethodName         = "/taskqueue.TaskQueue/DeleteTemplateRun"
+	TaskQueue_RegisterAdhocRun_FullMethodName          = "/taskqueue.TaskQueue/RegisterAdhocRun"
 	TaskQueue_UploadModule_FullMethodName              = "/taskqueue.TaskQueue/UploadModule"
 	TaskQueue_ListModules_FullMethodName               = "/taskqueue.TaskQueue/ListModules"
 	TaskQueue_ListModulesFiltered_FullMethodName       = "/taskqueue.TaskQueue/ListModulesFiltered"
@@ -175,6 +176,13 @@ type TaskQueueClient interface {
 	ListTemplateRuns(ctx context.Context, in *TemplateRunFilter, opts ...grpc.CallOption) (*TemplateRunList, error)
 	UpdateTemplateRun(ctx context.Context, in *UpdateTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
 	DeleteTemplateRun(ctx context.Context, in *DeleteTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
+	// Register a local run (python script that doesn't come from an uploaded
+	// template). Creates a template_run row with a NULL workflow_template_id
+	// and records script identity so "what launched this workflow?" stays
+	// answerable. The returned template_run_id should be set on
+	// UpdateTemplateRun once the workflow is created (same flow as
+	// server-launched templates).
+	RegisterAdhocRun(ctx context.Context, in *RegisterAdhocRunRequest, opts ...grpc.CallOption) (*TemplateRun, error)
 	// Module system
 	UploadModule(ctx context.Context, in *UploadModuleRequest, opts ...grpc.CallOption) (*Ack, error)
 	ListModules(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ModuleList, error)
@@ -884,6 +892,16 @@ func (c *taskQueueClient) DeleteTemplateRun(ctx context.Context, in *DeleteTempl
 	return out, nil
 }
 
+func (c *taskQueueClient) RegisterAdhocRun(ctx context.Context, in *RegisterAdhocRunRequest, opts ...grpc.CallOption) (*TemplateRun, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TemplateRun)
+	err := c.cc.Invoke(ctx, TaskQueue_RegisterAdhocRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) UploadModule(ctx context.Context, in *UploadModuleRequest, opts ...grpc.CallOption) (*Ack, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Ack)
@@ -1115,6 +1133,13 @@ type TaskQueueServer interface {
 	ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error)
 	UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error)
 	DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error)
+	// Register a local run (python script that doesn't come from an uploaded
+	// template). Creates a template_run row with a NULL workflow_template_id
+	// and records script identity so "what launched this workflow?" stays
+	// answerable. The returned template_run_id should be set on
+	// UpdateTemplateRun once the workflow is created (same flow as
+	// server-launched templates).
+	RegisterAdhocRun(context.Context, *RegisterAdhocRunRequest) (*TemplateRun, error)
 	// Module system
 	UploadModule(context.Context, *UploadModuleRequest) (*Ack, error)
 	ListModules(context.Context, *emptypb.Empty) (*ModuleList, error)
@@ -1340,6 +1365,9 @@ func (UnimplementedTaskQueueServer) UpdateTemplateRun(context.Context, *UpdateTe
 }
 func (UnimplementedTaskQueueServer) DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTemplateRun not implemented")
+}
+func (UnimplementedTaskQueueServer) RegisterAdhocRun(context.Context, *RegisterAdhocRunRequest) (*TemplateRun, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterAdhocRun not implemented")
 }
 func (UnimplementedTaskQueueServer) UploadModule(context.Context, *UploadModuleRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UploadModule not implemented")
@@ -2573,6 +2601,24 @@ func _TaskQueue_DeleteTemplateRun_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_RegisterAdhocRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterAdhocRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).RegisterAdhocRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_RegisterAdhocRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).RegisterAdhocRun(ctx, req.(*RegisterAdhocRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_UploadModule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UploadModuleRequest)
 	if err := dec(in); err != nil {
@@ -3119,6 +3165,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteTemplateRun",
 			Handler:    _TaskQueue_DeleteTemplateRun_Handler,
+		},
+		{
+			MethodName: "RegisterAdhocRun",
+			Handler:    _TaskQueue_RegisterAdhocRun_Handler,
 		},
 		{
 			MethodName: "UploadModule",

@@ -77,7 +77,14 @@
           <span class="wf-id">#{wf.workflowId}</span>
           <span class="wf-status-dot {wf.status === 'S' ? 'wf-dot-green' : wf.runningTasks > 0 ? 'wf-dot-blue' : wf.failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
                 title={wf.status === 'S' ? 'Completed' : wf.runningTasks > 0 ? `${wf.runningTasks} active` : wf.status === 'F' ? `Stuck: ${wf.failedTasks} failed` : wf.failedTasks > 0 ? `${wf.failedTasks} failed, no active tasks` : 'Idle'}></span>
-          <a href={`#/tasks?workflowId=${wf.workflowId}`} class="wf-name">{wf.name}</a>
+          {@const launchedBy = wf.templateName
+              ? `template ${wf.templateName}${wf.templateVersion ? '@' + wf.templateVersion : ''}`
+              : wf.scriptName
+                ? `script ${wf.scriptName}${wf.scriptSha256 ? ' (' + wf.scriptSha256.slice(0, 8) + ')' : ''}`
+                : ''}
+          <a href={`#/tasks?workflowId=${wf.workflowId}`}
+             class="wf-name"
+             title={launchedBy ? `Launched by: ${launchedBy}` : undefined}>{wf.name}</a>
           {#if wf.totalTasks > 0}
             {@const t = wf.totalTasks}
             {@const pctSuccess = wf.succeededTasks / t * 100}
