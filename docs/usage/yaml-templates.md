@@ -732,6 +732,79 @@ The calling template can override `ORAL` to switch catalogs:
 
 By default, a task only runs when **all** its prerequisites have succeeded. If any prerequisite fails (even after exhausting retries), the dependent task stays blocked.
 
+Prerequisites are usually wired implicitly via `inputs:` — referencing a previous step's output creates a data dependency AND an ordering dependency in one move. When no data flows but you still need ordering (e.g. a setup step that publishes into the resource tree for a later step to read via `resource:`), use `depends:`.
+
+### `depends:` — ordering without data flow
+
+`depends:` takes one step name or a list of step names. Tasks in the declaring step won't start until every task of the listed step(s) has succeeded — no file contents are fetched, only the ordering constraint is enforced.
+
+```yaml
+steps:
+  - import: genetic/meteor2_catalog          # one-off setup: downloads a catalog,
+                                              # publishes to {RESOURCE_ROOT}/meteor2/<name>/
+
+  - import: genetic/meteor2
+    inputs: fastp.fastqs                     # data dep on the upstream QC step
+    depends: meteor2_catalog                 # pure ordering dep: don't start the
+                                              # per-sample profiler until the catalog
+                                              # is fully uploaded
+```
+
+Typical pattern for a **setup + compute** pair:
+- Setup step (`per_sample: false`, `skip_if_exists: true`, `publish: {RESOURCE_ROOT}/...`) runs once and leaves artefacts in the workspace. `skip_if_exists` makes it a no-op on reruns, so the expensive download happens at most once per workspace.
+- Compute step reads those artefacts via `resource:` and declares `depends: <setup_step_name>` so it waits until the upload finishes.
+
+The step name you pass to `depends:` is whatever the target step's `name:` field resolves to — for a bundled module that's the module's own `name:` value. Referenced steps must appear **before** the declaring step in the `steps:` list, so they're built first.
+
+### `requires:` — companion modules a module pulls in
+
+Module authors can declare companion modules that should always accompany theirs. `requires:` is a **module-level** field (can also be set on an inline step). When a template imports a module that declares `requires:`:
+
+- Every required module not already explicitly imported by the template is auto-injected as a `- import: <path>` step ahead of the importing step.
+- The required module's step name is auto-added to the importing step's `depends:` list.
+- `requires:` chains transitively — a required module's own `requires:` are resolved the same way, with injection order guaranteeing prerequisites precede their consumers.
+
+The practical effect: a template author writes the compute step once and everything else falls into place.
+
+```yaml
+# scitq2_modules/yaml/genetic/meteor2.yaml  (library module)
+name: meteor2
+version: "1.0.0"
+requires:
+  - genetic/meteor2_catalog          # pull in the companion setup module
+resource: "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/"
+command: …
+```
+
+A template that wants meteor2 profiling therefore only needs:
+
+```yaml
+steps:
+  - import: genetic/fastp
+    inputs: sample.fastqs
+  - import: genetic/meteor2          # catalog auto-injected + depends auto-wired
+    inputs: fastp.fastqs
+```
+
+Behind the scenes the runner rewrites this to the equivalent of:
+
+```yaml
+steps:
+  - import: genetic/fastp
+    inputs: sample.fastqs
+  - import: genetic/meteor2_catalog
+  - import: genetic/meteor2
+    inputs: fastp.fastqs
+    depends: meteor2_catalog
+```
+
+If you want explicit control — for instance, to place the setup step somewhere specific, or to pass step-level overrides — just import it yourself in the template. The runner detects the explicit import and skips the injection, but still wires `depends:` for you.
+
+**When to use `requires:` vs. explicit `import:`**:
+
+- Module author: declare `requires:` on your module body if your step fundamentally doesn't work without another module also being present. Self-healing templates.
+- Template author: if you want to place a setup step in a custom spot or override its params, write an explicit `import:` for it. `requires:` won't duplicate.
+
 ### `accept_failure`
 
 For aggregation steps that should run with partial results, use `accept_failure: true`:

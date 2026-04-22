@@ -781,6 +781,165 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
     raise ValueError(f"Cannot resolve input: {input_ref} (available steps: {available})")
 
 
+def _load_module_by_ref(ref: str, pipeline_dir: Optional[str] = None,
+                        script_root: Optional[str] = None) -> Optional[dict]:
+    """Unified loader for a module reference of the form `path[@version]`.
+    Tries the server library first (via `_load_public_import`, which also
+    falls back to the installed scitq2_modules package), then the private
+    search paths so inline / pipeline-local modules work in dry-run too.
+    Returns None if nothing resolves — the caller decides whether that's
+    worth surfacing."""
+    try:
+        return _load_public_import(ref)
+    except FileNotFoundError:
+        pass
+    try:
+        return _load_private_module(ref, pipeline_dir=pipeline_dir, script_root=script_root)
+    except FileNotFoundError:
+        return None
+
+
+def _expand_requires(data: dict, pipeline_dir: Optional[str] = None,
+                     script_root: Optional[str] = None) -> None:
+    """Pre-process steps to honour module-level `requires:` declarations.
+
+    A module with `requires: [<other_path>, ...]` pulls its companion
+    modules into the workflow even if the template didn't explicitly list
+    them. The typical use is a one-off setup step (e.g. a reference
+    catalog download) alongside a per-sample compute step: the module
+    author declares the pairing once, and template writers don't have to
+    remember both.
+
+    Behaviour:
+    - Every module referenced from a step's `requires:` (or the inherited
+      `requires:` of the module that step imports) that isn't already in
+      the template's explicit `import:` / `module:` list is prepended to
+      `steps:` as a `- import: <path>` synthetic step.
+    - Transitive requires are resolved.
+    - For each requiring step, the required modules' `name:` fields are
+      appended to that step's `depends:` list, merging with any explicit
+      `depends:` the user set.
+    - Modules the user already imported explicitly are left exactly where
+      they were in the template (so the user keeps full control over
+      placement and parameters).
+    """
+    steps = data.get('steps') or []
+    if not steps:
+        return
+
+    # What paths are already imported by the user? Normalise refs by
+    # dropping @version + extensions so duplicates are detected across
+    # notation variants.
+    def _normalise_ref(ref: str) -> str:
+        if '@' in ref:
+            ref = ref.split('@', 1)[0]
+        for ext in ('.yaml', '.yml'):
+            if ref.endswith(ext):
+                ref = ref[: -len(ext)]
+                break
+        return ref
+
+    explicitly_imported = set()
+    for step_def in steps:
+        ref = step_def.get('import') or step_def.get('module')
+        if isinstance(ref, str):
+            explicitly_imported.add(_normalise_ref(ref))
+
+    # Cache loaded module bodies so we don't hit the server twice.
+    module_cache: Dict[str, Optional[dict]] = {}
+
+    def _load(ref: str) -> Optional[dict]:
+        norm = _normalise_ref(ref)
+        if norm in module_cache:
+            return module_cache[norm]
+        mod = _load_module_by_ref(ref, pipeline_dir=pipeline_dir, script_root=script_root)
+        module_cache[norm] = mod
+        return mod
+
+    # For each original step, collect its effective `requires:` list (from
+    # the imported module and/or the step_def itself) and recursively
+    # expand transitive requires into a set of module paths to ensure.
+    needed: List[str] = []  # paths to inject, in discovery order
+    seen: set = set()  # normalised paths already decided on
+
+    def _collect_transitive(ref: str) -> None:
+        norm = _normalise_ref(ref)
+        if norm in seen:
+            return
+        seen.add(norm)
+        mod = _load(ref)
+        if not mod:
+            return
+        for sub_req in mod.get('requires', []) or []:
+            _collect_transitive(sub_req)
+        # Only inject if the user didn't already import it themselves.
+        if norm not in explicitly_imported:
+            needed.append(norm)
+
+    # First pass: walk the original steps to discover every transitively-
+    # required module. `_collect_transitive` populates `needed` with the
+    # paths that must be injected (i.e. not already explicitly imported).
+    for step_def in steps:
+        ref = step_def.get('import') or step_def.get('module')
+        if isinstance(ref, str):
+            mod = _load(ref)
+            if mod:
+                for sub_req in mod.get('requires', []) or []:
+                    _collect_transitive(sub_req)
+        for inline_req in step_def.get('requires', []) or []:
+            _collect_transitive(inline_req)
+
+    # Build the final step list: injections first (in discovery order so
+    # transitive prerequisites precede their consumers), then the user's
+    # original steps in their original order.
+    if needed:
+        injections = [{'import': path} for path in needed]
+        final_steps = injections + steps
+        data['steps'] = final_steps
+    else:
+        final_steps = steps
+
+    # Second pass: auto-wire `depends:` for every step — both user-written
+    # and injected — using the required modules' `name:` fields. Running
+    # this over the full list means an injected prep step that *itself*
+    # has `requires:` gets its own depends wired too.
+    for step_def in final_steps:
+        requires: List[str] = []
+        ref = step_def.get('import') or step_def.get('module')
+        if isinstance(ref, str):
+            mod = _load(ref)
+            if mod:
+                requires.extend(mod.get('requires', []) or [])
+        for inline_req in step_def.get('requires', []) or []:
+            requires.append(inline_req)
+
+        if not requires:
+            continue
+
+        auto_deps: List[str] = []
+        for req_path in requires:
+            req_mod = _load(req_path)
+            if not req_mod:
+                continue
+            req_name = req_mod.get('name')
+            if req_name:
+                auto_deps.append(req_name)
+        if not auto_deps:
+            continue
+
+        existing = step_def.get('depends')
+        if existing is None:
+            existing_list = []
+        elif isinstance(existing, str):
+            existing_list = [existing]
+        elif isinstance(existing, list):
+            existing_list = list(existing)
+        else:
+            existing_list = [str(existing)]
+        merged = list(existing_list) + [d for d in auto_deps if d not in existing_list]
+        step_def['depends'] = merged[0] if len(merged) == 1 else merged
+
+
 def _merge_module_step(module_data: dict, step_def: dict, exclude_key: str) -> dict:
     """Merge module data with step definition. Step overrides module,
     except 'vars' which are merged (step vars override individual module vars)."""
@@ -923,6 +1082,39 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     elif sample is not None and step_def.get('_is_first_step'):
         # v1 backward compat: implicit first step input from iterator
         step_kwargs['inputs'] = sample.fastqs
+
+    # Depends: wire a task-level dependency on one or more earlier steps
+    # by *name*, without any data flow. Useful when a setup step publishes
+    # content that a later step consumes via `resource:` (e.g. a reference
+    # catalog fetched once and read by all per-sample compute tasks) —
+    # `resource:` alone wouldn't force ordering because it's just a URI.
+    #
+    # Form:
+    #   depends: setup_step_name
+    # or:
+    #   depends: [step_a, step_b]
+    #
+    # Referenced steps must already be built (they're looked up in
+    # step_map). Since the runner builds one-off steps (per_sample: false)
+    # before per-iteration steps, a per-sample step can safely depend on a
+    # one-off setup step declared above it in the template.
+    depends_def = step_def.get('depends')
+    if depends_def:
+        if isinstance(depends_def, str):
+            dep_names = [depends_def]
+        elif isinstance(depends_def, list):
+            dep_names = [str(d) for d in depends_def]
+        else:
+            raise ValueError(f"Step '{name}': 'depends' must be a string or list of strings, got {type(depends_def).__name__}")
+        resolved_depends = []
+        for dep_name in dep_names:
+            if dep_name not in step_map:
+                raise ValueError(
+                    f"Step '{name}': depends references unknown step '{dep_name}' "
+                    f"(available: {sorted(step_map.keys())})"
+                )
+            resolved_depends.append(step_map[dep_name])
+        step_kwargs['depends'] = resolved_depends
 
     # Resource
     resource = step_def.get('resource')
@@ -1114,6 +1306,14 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
                     workflow_vars[f"{sub['name'].upper()}_COUNT"] = str(len(iterations))
     for var_name, var_expr in data.get('vars', {}).items():
         workflow_vars[var_name] = _resolve_field(var_expr, params, extra_vars=workflow_vars)
+
+    # Expand `requires:` declarations. A module can list other modules its
+    # steps need to run alongside (typically one-off setup steps like a
+    # catalog download). Any required module not already explicitly
+    # imported by the template is prepended as a synthetic `- import: ...`
+    # step, and the requiring step's `depends:` is extended with the
+    # required step's name so ordering is enforced automatically.
+    _expand_requires(data, pipeline_dir, script_root=os.environ.get('SCITQ_SCRIPT_ROOT'))
 
     # Classify steps
     optimize_target = data.get('optimize', {}).get('step') if data.get('optimize') else None

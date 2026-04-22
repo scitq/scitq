@@ -32,6 +32,16 @@ Every row has an **origin** that records where it came from:
 - `local` — uploaded by a user, no bundled counterpart.
 - `forked` — started as `bundled` then diverged locally (admin edited a bundled module in place, or explicitly forked it to a new version). Never overwritten by `module upgrade` without `--force`.
 
+### Companion modules (`requires:`)
+
+A module can declare `requires:` listing other modules that must always accompany it in a workflow. Typical use is a compute module that requires a one-off setup module (e.g. catalog download). The yaml_runner:
+
+1. Auto-injects any required module not already explicitly imported by the template, as a synthetic `- import: <path>` step ahead of the requiring step.
+2. Extends the requiring step's `depends:` list with the required modules' step names.
+3. Resolves `requires:` transitively — a required module's own `requires:` are pulled in the same way.
+
+Template authors can leave the plumbing to the module author. For details and examples see [YAML templates — `requires:`](../usage/yaml-templates.md#requires-companion-modules-a-module-pulls-in).
+
 ### Resolution order
 
 At template run time, `_load_module(path, version)` in `yaml_runner`:

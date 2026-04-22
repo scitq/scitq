@@ -1,0 +1,28 @@
+name: megahit
+version: "1.0.0"
+description: "De novo metagenomic assembly with MEGAHIT (paired-end)"
+container: quay.io/biocontainers/megahit:1.2.9--haf24da9_8
+language: bash
+command: |
+  . /builtin/std.sh
+
+  megahit \
+      -1 $(ls /input/*_1.fastq.gz | sort | paste -sd ',') \
+      -2 $(ls /input/*_2.fastq.gz | sort | paste -sd ',') \
+      --k-list 21,41,61,81 \
+      --min-contig-len 1500 \
+      --out-prefix {SAMPLE} \
+      --tmp-dir /tmp \
+      -o /tmp/megahit_out \
+      -t ${CPU}
+
+  sed '/^>/s/^>/>{SAMPLE}__/' /tmp/megahit_out/{SAMPLE}.contigs.fa > /output/{SAMPLE}.contigs.fa
+  cp /tmp/megahit_out/options.json /tmp/megahit_out/{SAMPLE}.log /output/
+outputs:
+  contigs: "*.contigs.fa"
+  log: "*.log"
+  options: "options.json"
+task_spec:
+  cpu: 32
+  mem: 64
+  prefetch: "100%"

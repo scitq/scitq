@@ -1,0 +1,50 @@
+name: meteor2
+version: "1.0.0"
+description: "Taxonomic / functional profiling of metagenomic reads against a meteor2 catalog"
+container: quay.io/biocontainers/meteor:2.0.0--py_0
+language: bash
+
+# Pull the companion setup module into any workflow that imports us.
+# The YAML runner auto-injects `- import: genetic/meteor2_catalog` ahead
+# of this step and auto-wires `depends: meteor2_catalog`, so a template
+# just needs `- import: genetic/meteor2` to get the full catalog+compute
+# pair wired correctly.
+requires:
+  - genetic/meteor2_catalog
+
+# The catalog fetched by meteor2_catalog is read via /resource. The URI
+# must match that step's `publish:` field.
+resource: "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/"
+
+command:
+  cond: PAIRED
+  true: |
+    . /builtin/std.sh
+    . /builtin/bio.sh
+
+    _find_pairs /input/*.f*q.gz
+
+    meteor profile \
+        --reference /resource/ \
+        -1 $READS1 \
+        -2 $READS2 \
+        --sample {SAMPLE} \
+        --threads ${CPU} \
+        --output-dir /output/
+  false: |
+    . /builtin/std.sh
+
+    meteor profile \
+        --reference /resource/ \
+        -U /input/*.f*q.gz \
+        --sample {SAMPLE} \
+        --threads ${CPU} \
+        --output-dir /output/
+
+outputs:
+  profile: "*.profile"
+  tsv: "*.tsv"
+
+task_spec:
+  cpu: 8
+  mem: 32

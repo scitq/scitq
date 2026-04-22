@@ -1,0 +1,36 @@
+name: meteor2_catalog
+version: "1.0.0"
+description: "Download and cache a meteor2 reference catalog in the workspace resource tree (runs once per workspace, idempotent)"
+container: quay.io/biocontainers/meteor:2.0.0--py_0
+language: bash
+
+# One-off setup step: runs once per workflow regardless of iteration count.
+per_sample: false
+
+# Skip if a prior workflow already populated this catalog in the workspace.
+# Combined with `publish:`, this makes the catalog download idempotent
+# across workflows — the first run pays the cost, every subsequent run
+# sees an already-populated publish URI and short-circuits.
+skip_if_exists: true
+
+# Publish the downloaded catalog into the shared resource tree so
+# per-sample compute tasks can pick it up via `resource:`.
+publish: "{RESOURCE_ROOT}/meteor2/{params.meteor2_catalog}/"
+
+resource: []
+
+command: |
+  . /builtin/std.sh
+
+  # Fetch the named catalog into /output — scitq uploads /output to the
+  # publish URI above at task completion.
+  meteor download \
+      --catalog {params.meteor2_catalog} \
+      --output-dir /output/
+
+outputs:
+  catalog: "*"
+
+task_spec:
+  cpu: 2
+  mem: 8
