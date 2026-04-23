@@ -174,9 +174,15 @@ to this:
 ## Backuping
 
 To backup a scitq install, backup:
-- PostgreSQL (using pg_dump) : it contains all history
+- PostgreSQL (using pg_dump) : it contains workflow state and the module metadata index.
 - `/etc/scitq.yaml` : your configuration (it contains passwords for your providers so be careful)
-- `/var/lib/scitq` : it contains your templates, modules, task logs and the Python environment (this is the default location, the location may be changed in `/etc/scitq.yaml`)
+- `/var/lib/scitq` : templates, task logs and the Python environment (default location; override via `/etc/scitq.yaml`).
+- `/var/lib/scitq/modules` *specifically* : **the canonical content of every YAML module** — bundled, local, forked. This is where module bytes actually live; the DB is just an index that can be rebuilt from the tree. If you only have bandwidth for one backup, this is the one to prioritise for module content. Git-tracking this directory is a reasonable admin practice.
+
+**Recovery pairings:**
+- PostgreSQL lost, `/var/lib/scitq/modules` intact → restart the server, the startup reindex rebuilds the `module` table from disk. Workflow state is gone but the library comes back automatically.
+- `/var/lib/scitq/modules` lost, PostgreSQL intact → must restore the modules directory from backup. The DB's metadata rows alone cannot reconstruct content.
+- Both lost → run `scitq module upgrade --apply` (once the server is back up) to seed bundled content from the installed `scitq2_modules` package; re-upload any private / forked modules from the admin's own sources.
 
 ## Upgrading
 

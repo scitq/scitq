@@ -265,6 +265,10 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	if err := os.MkdirAll(tempScriptRoot, 0o755); err != nil {
 		t.Fatalf("failed to create temp script root: %v", err)
 	}
+	tempModulesRoot := filepath.Join(baseTmp, "modules")
+	if err := os.MkdirAll(tempModulesRoot, 0o755); err != nil {
+		t.Fatalf("failed to create temp modules root: %v", err)
+	}
 	// Use a shared Python venv to avoid pip races between parallel tests
 	sharedPythonOnce.Do(func() {
 		dir, err := os.MkdirTemp("", "scitq-test-python-*")
@@ -315,6 +319,7 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 		cfg.Scitq.WorkerToken = workerToken
 		cfg.Scitq.JwtSecret = jwtSecret
 		cfg.Scitq.ScriptRoot = tempScriptRoot
+		cfg.Scitq.ModulesRoot = tempModulesRoot
 		cfg.Scitq.ScriptVenv = tempPythonEnv
 		cfg.Scitq.RecruitmentInterval = 2
 		cfg.Scitq.AdminUser = adminUser

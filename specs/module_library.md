@@ -83,29 +83,78 @@ Origin is per-row (per version). Bumping a forked module to a new version resets
 
 ### Resolution
 
-When a template uses `import: <path>[@<version>]`:
+**One keyword, one source.** When a template uses `import: <path>[@<version>]`:
 
 1. Server looks up `(path, version)` in the `module` table. If `version` is omitted, the highest-version row wins.
-2. If not found **and the runner is executing in client-offline mode** (no server access, e.g. local dry-run), fall back to the Python package at `scitq2_modules/yaml/<path>.yaml`.
-3. Otherwise error: `module '<path>'[@<version>]' not found`.
+2. Not found → hard error: `module '<path>'[@<version>]' not found in library. Run 'scitq module upgrade --apply' to seed bundled modules.` The runner does **not** fall back to the Python package, the script root, or anywhere else.
 
-Key property: **the server store always wins over the package fallback when the server is reachable.** This is what lets admin-uploaded patches take effect without a client release. The Python package is only a fallback for offline dev.
+Key property: **the library is the single source of truth at runtime.** Admins can therefore:
 
-Private and bundled imports share one keyword (`import:`). The legacy `module:` keyword remains accepted for backward compatibility and is identical to `import:` under the new model.
+- exclude or delete a bundled module and trust it is gone (no package fallback re-introduces it),
+- upload a private module at any namespace and have templates reach it the same way as bundled content,
+- forget about on-disk `{script_root}/modules/` entirely — it is no longer consulted.
+
+Templates become univocal: every `import:` means "library lookup", full stop. There is no user-facing distinction between bundled and private modules at template-authoring time.
+
+### Opt-in offline mode
+
+For development and dry-run scenarios that must run without a server, `python -m scitq2.yaml_runner` accepts:
+
+- `--offline` — bypass the server entirely. Module resolution reads from a filesystem tree instead.
+- `--yaml-module-path DIR` — in offline mode, use `DIR` as the root of the module tree (e.g. `DIR/genomics/fastp.yaml`). Defaults to the installed `scitq2_modules/yaml/` directory in the current Python environment.
+
+Without `--offline`, the runner always talks to the server and fails loud if the server is unreachable. There is no implicit offline fallback — the behavior is explicit and visible at the command line. This is deliberate: offline is a testing tool, not a degradation of normal operation. Pointing `--yaml-module-path` at a work-in-progress tree (e.g. a git checkout) makes local iteration on bundled modules tractable without round-tripping through the server.
+
+The `--offline` flag is rejected on the server-side run path (the yaml_runner subprocess started by `RunTemplate` is always online); it is only meaningful when the user runs `yaml_runner` directly from the CLI.
+
+### Unified `import:`, deprecated `module:`
+
+The `module:` keyword is retained as a deprecated alias of `import:` for one release cycle. Concretely:
+
+- A template using `module: X.yaml` emits a one-line deprecation warning on each run: `⚠️ 'module:' is deprecated; use 'import:' with the library path (e.g. 'import: private/X')`.
+- During the deprecation window, `module:` still resolves against the library exactly like `import:`, with one compatibility shim: a trailing `.yaml` on the ref is stripped before lookup (so `module: biomscope_align.yaml` resolves to path `biomscope_align` in the library).
+- After the deprecation window, `module:` is removed. Templates must use `import:`.
+
+Migrating private modules from `{script_root}/modules/` into the library is a one-time admin step: `scitq module upload --path /scripts/modules/X.yaml --as private/X` (or whatever namespace the admin chooses). After that, templates can reference `import: private/X`.
 
 ## Server-side storage
 
-### Schema
+### Two-tier layout: filesystem canonical + DB index
 
-New table (not renaming the existing private-module filesystem layout; that's migrated, see below):
+Module content is stored on disk; the `module` table is a metadata index that can be rebuilt from the filesystem. Rationale:
+
+- **Config-shaped content belongs on disk.** Modules are declarative YAML — git-trackable, rsync-backable, admin-inspectable by `cat`/`grep`. Everything else that's config-shaped in scitq (templates, scitq.yaml, provider configs) already lives on disk for the same reasons.
+- **DB loss is recoverable.** If the PostgreSQL database is wiped, a server restart reindexes from the filesystem and the library returns to working order. Backups can focus on the one directory; the DB catches up by itself.
+- **Operational state stays in DB.** Workflows, tasks, template_runs, recruiters — everything genuinely transient/transactional — remains where it belongs. The DB keeps its operational role; it just stops being the authoritative store for module bytes.
+
+**Directory layout** (rooted at `scitq.modules_root`, default `/var/lib/scitq/modules`):
+
+```
+/var/lib/scitq/modules/
+├── genomics/
+│   ├── fastp/
+│   │   ├── 1.0.0.yaml
+│   │   └── 1.1.0.yaml
+│   └── multiqc/
+│       └── 1.0.0.yaml
+├── metagenomics/
+│   └── meteor2/
+│       └── 1.0.5.yaml
+└── private/
+    └── biomscope_align/
+        └── 1.0.0.yaml
+```
+
+Filename is exactly `<version>.yaml`; directory prefix is the module's namespace path. Writes are atomic (temp file + rename) so a crash mid-write leaves either the old file or no file at that path, never a partial.
+
+### Schema
 
 ```sql
 CREATE TABLE module (
     module_id    SERIAL PRIMARY KEY,
     path         TEXT NOT NULL,            -- e.g. 'genomics/fastp' (no leading slash, no extension)
     version      TEXT NOT NULL,            -- tolerant semver, see Identity
-    content      BYTEA NOT NULL,           -- YAML bytes as-uploaded
-    content_sha  TEXT NOT NULL,            -- sha256 hex of content, for sync detection
+    content_sha  TEXT NOT NULL,            -- sha256 hex of the on-disk content, for change detection
     origin       CHAR(1) NOT NULL CHECK (origin IN ('B','L','F')),  -- Bundled / Local / Forked
     bundled_sha  TEXT,                     -- sha256 of the bundled content this row derives from (NULL for 'L')
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -118,16 +167,45 @@ CREATE INDEX module_path_idx ON module (path);
 ```
 
 Notes:
-- `content` is stored in the DB, not the filesystem. Removes the `script_root/modules` quirk and makes modules backup/replicate with the rest of the DB.
-- `content_sha` lets the sync job detect "has the bundled version on disk changed since I last seeded it".
+- **No `content` column.** The bytes live on disk at `{modules_root}/<path>/<version>.yaml`. The row is a pure metadata index.
+- `content_sha` lets the sync job detect "has the bundled version on disk changed since I last seeded it" without having to re-read the file.
 - `bundled_sha` on a `forked` row records the upstream content it diverged from — powers the "your fork is N versions behind bundled" diagnostic.
 - No soft-delete. Modules accumulate; templates pin what they used. Old versions can be pruned via an explicit `scitq module prune <path> --keep 5` if storage becomes a concern (out of scope for v1).
+
+### Write-side invariants
+
+Every operation that adds or updates a module writes the file first, then the metadata row. If the file write succeeds and the DB update fails, the file remains consistent and a subsequent reindex will insert the missing metadata row automatically. If the file write fails, the DB is untouched — no phantom rows.
+
+- `UploadModule` — `writeModuleFile(...)` then `INSERT/UPDATE module`.
+- `UpgradeBundledModules` / `autoUpgradeBundledModules` — same.
+- `ForkModule` — `readModuleFile` of the source, `writeModuleFile` at the new version, then `INSERT module` for the fork row.
+- `importLegacyOnDiskModules` — same (writes the legacy file to the new layout before inserting).
+
+### Read-side invariants
+
+Every operation that returns module bytes reads from disk; the DB row provides the `(path, version, origin, content_sha, …)` metadata only.
+
+- `DownloadModule` — look up the row, then read `{modules_root}/<resolved_path>/<resolved_version>.yaml`.
+- `ListModulesFiltered` / `GetModuleOrigin` — metadata-only, no disk read.
+
+If a metadata row exists but the file is missing or unreadable, `DownloadModule` surfaces a clear error pointing at the reindex/re-upload recovery path. This can only happen if someone manually deletes files from `{modules_root}` without going through the `scitq module delete` flow, or via out-of-band disk corruption.
+
+### Startup sequence
+
+On every server startup, after PostgreSQL migrations have applied:
+
+1. **Content-to-disk migration.** For each row with `content IS NOT NULL` (legacy schema), write the bytes to `{modules_root}/<path>/<version>.yaml` and clear the column. Idempotent — after the first successful pass, subsequent startups find zero matching rows and the step no-ops.
+2. **Legacy on-disk import.** For each file in `{script_root}/modules/*.yaml`, write it to the canonical `{modules_root}/<name>/<version>.yaml` location and insert a metadata row as `origin=L`. One-off migration from the pre-library layout; idempotent.
+3. **Reindex.** Walk `{modules_root}` for any `.yaml` file not already indexed in the `module` table. Insert a metadata row with `origin=B` for paths under `genomics/` and `metagenomics/` (the shipped-bundled namespaces), `origin=L` otherwise. Handles DB-loss recovery: a fresh DB on top of an existing filesystem rebuilds the index automatically.
+4. **Auto-upgrade bundled modules** (async, gated on Python venv readiness). See "Auto-upgrade at server startup" above.
+
+The first three phases are synchronous and block startup until complete. The fourth is async because it needs the Python venv to be ready; meanwhile the server starts serving requests using whatever is already in the library.
 
 ### Seeding bundled modules
 
 Bundled content lives in the installed `scitq2_modules` Python package at `scitq2_modules/yaml/<path>.yaml`, each file carrying a `version:` field (required going forward on bundled modules).
 
-Triggered by `scitq module upgrade` (admin only) and on server first-start:
+Triggered by `scitq module upgrade` (admin only) **and automatically at every server startup** (configurable, enabled by default — see Auto-upgrade below):
 
 ```
 for each bundled YAML file discovered under scitq2_modules/yaml/:
@@ -154,6 +232,41 @@ for each bundled YAML file discovered under scitq2_modules/yaml/:
 Writes only. Never deletes rows, even if a bundled entry is removed from the package (keep reproducibility of old template_runs). An admin-visible warning surfaces in `module list` for any `origin=B` row whose path no longer exists in the package.
 
 The `scitq2_modules` Python package therefore remains the source of truth for bundled content; `module upgrade` copies it into the server store. This is a deliberate choice — the alternative (embedding a tarball in the server binary) is more packaging work and doesn't help the common case, which is "admin installed a new scitq release, wants the new bundled modules available to templates".
+
+### Auto-upgrade at server startup
+
+Because the library is now the single source of truth, a fresh install would not resolve any bundled `import:` until someone runs `scitq module upgrade --apply`. To keep "it just works" as the default, the server runs `module upgrade --apply` semantics automatically at every startup, subject to configuration.
+
+Configuration block in `scitq.yaml`:
+
+```yaml
+scitq:
+  autoupgrade_modules: true           # default: true
+  autoupgrade_exclude:                # default: []
+    - "metagenomics/*"                # glob: single-segment wildcard
+    - "genomics/multiqc"              # exact path
+```
+
+Startup behaviour when enabled:
+
+1. Walk `scitq2_modules/yaml/` in the installed package.
+2. For each file, compute `path` and match against `autoupgrade_exclude`. Skip matches.
+3. For the rest, apply the same upsert rules as `module upgrade --apply`:
+   - `(path, version)` absent → insert as `origin=B`.
+   - `(path, version)` present with matching SHA → no-op.
+   - `(path, version)` present with different SHA → log warning, skip (manual `--force` still required for an in-place overwrite).
+   - Any `origin=F` row at the path → skip. Forks are never overwritten by auto-upgrade.
+4. Log a one-line summary: `auto-upgrade: inserted N, matched M, excluded K, preserved L forks`. Quiet for pure no-op runs.
+
+Glob syntax for `autoupgrade_exclude`: `*` matches any single path segment (so `metagenomics/*` matches every direct child but not nested subpaths); `**` matches any number of segments recursively; everything else is treated as literal. Exact paths (no wildcard) match exactly.
+
+Disabling (`autoupgrade_modules: false`):
+
+- Nothing runs at startup. Templates requesting bundled modules that haven't been manually upgraded will fail.
+- Admins can still `scitq module upgrade [--apply]` manually to produce the same result on demand.
+- Appropriate for frozen-library environments (audit-sensitive sites, CI) or when the admin wants to gate every update through a review step.
+
+Interaction with an explicitly-deleted module: `autoupgrade_exclude` prevents re-import on subsequent startups but does **not** retroactively remove rows. To both delete and prevent reinstatement, admin issues `scitq module delete <ref>` (see CLI) then adds the path to `autoupgrade_exclude`.
 
 ### Forking semantics
 
@@ -238,15 +351,19 @@ Extend `UploadModule`, `DownloadModule`, `ListModules`; add `ModuleOrigin`, `For
 `_load_public_import` and `_load_private_module` collapse into one function, `_load_module(import_name, version=None)`:
 
 ```
-1. If server is reachable (SCITQ_SERVER is set and reachable):
-     rpc ModuleGet(path=import_name, version=version) → content
-2. Else (offline, local dry-run, server down):
-     look up scitq2_modules/yaml/<import_name>.yaml in the installed package
-     (version ignored; there is no versioning in the fallback)
-3. Raise if neither finds anything.
+if --offline flag is set:
+    root = --yaml-module-path or installed scitq2_modules/yaml/
+    return read(root/<path>.yaml)   # version ignored in offline mode
+else:
+    rpc DownloadModule(path=import_name, version=version) → content
+    if not found → hard error with hint to run 'scitq module upgrade --apply'
 ```
 
-Since YAML templates always execute server-side (the CLI ships YAML bytes to the server; the server's `yaml_runner` subprocess resolves the imports), branch 1 is the only one that runs in production. The package fallback (branch 2) keeps `yaml_runner.py` usable as a standalone tool for local dry-runs or development without a server — it just can't see server-side overrides in that mode.
+Since YAML templates always execute server-side in production (the CLI ships YAML bytes to the server; the server's `yaml_runner` subprocess resolves the imports), the server-path is what runs in practice. `--offline` is a testing and development switch exposed only on direct CLI invocation of `yaml_runner`.
+
+### `{RESOURCE_ROOT}` hard-fail
+
+Orthogonal to the library but enforced by the same runner: if a template references `{RESOURCE_ROOT}` anywhere (scan covers `resource:`, `publish:`, `command:`, `vars:`, recursively) and the runner cannot resolve it to a real value — no `workspace:` declared, workspace doesn't map to a `provider:region`, no `local_resources` entry for that pair, or the server lookup fails — the run is **rejected before any workflow is created**, with the specific reason logged to stderr. The prior silent-expansion-to-empty-string behaviour is gone. Templates that don't reference `{RESOURCE_ROOT}` are unaffected.
 
 ### Pin recording
 
@@ -263,19 +380,39 @@ New templates that care about reproducibility are expected to pin manually. scit
 
 ## Migration
 
-One migration on the server:
+Migration happens in two stages, both handled automatically at server startup. Admins do not need to run anything manually.
 
-1. `CREATE TABLE module (...)` as above.
-2. For each file in the existing on-disk `{script_root}/modules/*.yaml`:
-   - `path` = filename with `.yaml` stripped
-   - `version` = value of the YAML `version:` field; if missing, `0.0.0`
-   - `origin` = `L` (local)
-   - `content_sha` = sha256(content)
-   - Insert.
-3. Immediately run `sync-modules --apply` to seed all bundled modules from the installed scitq2_modules package at their declared versions.
-4. Leave the on-disk `{script_root}/modules` directory alone. An out-of-band cleanup step (next release) removes it once we're sure nothing reads from it.
+### From pre-library (on-disk at `{script_root}/modules/`)
 
-For clients: updating `_load_module` to hit the server is the only runner change. Clients predating this spec continue to find bundled modules in the Python package (pre-migration behaviour), just without server-side override.
+On the first startup of a library-aware server:
+
+1. `CREATE TABLE module (...)` as above (via the SQL migration).
+2. For each file in `{script_root}/modules/*.yaml`, write the content to `{modules_root}/<name>/<version>.yaml` and insert a metadata row as `origin=L`. `version` comes from the YAML's `version:` field, falling back to `0.0.0`.
+3. Reindex `{modules_root}` for anything already on disk not yet in the DB.
+4. Auto-upgrade bundled modules from the installed `scitq2_modules` package.
+
+The legacy `{script_root}/modules/` directory is not deleted — it is simply no longer consulted at runtime. An admin can remove it manually once confident the migration ran cleanly.
+
+### From library-v1 (content stored in DB)
+
+For servers upgraded from an earlier library-aware release that stored content in the `module.content` BYTEA column:
+
+1. SQL migration 23 relaxes `NOT NULL` on `content`.
+2. Server startup runs `migrateModuleContentToDisk`: for each row with `content IS NOT NULL`, write the bytes to `{modules_root}/<path>/<version>.yaml` and clear the column. Idempotent.
+3. A follow-up SQL migration in a later release drops the `content` column entirely. In the interim it stays nullable and zero-filled — no data hazard.
+
+### Backup
+
+After migration, the two things worth backing up are:
+
+- `{modules_root}` — the authoritative content.
+- PostgreSQL — for workflow state, templates, users, etc. The `module` table in particular is recoverable from `{modules_root}` via startup reindex, so it's the weaker of the two dependencies.
+
+Loss of PostgreSQL: rebuild from backups, let the server reindex. Loss of `{modules_root}`: must restore from backup — the DB index alone can't reconstruct content. Loss of both: re-run `scitq module upgrade --apply` to get the bundled modules back, re-upload any private/forked modules from the admin's own git history or backup.
+
+### Client runner changes
+
+For clients (the Python yaml_runner): all library access is now RPC-based. Offline dry-run via `--offline` continues to work by reading from the filesystem directly. No breaking change to the on-wire gRPC surface.
 
 ## Future improvements
 
@@ -291,6 +428,12 @@ Out of scope for v1, but worth noting so the design doesn't paint us into a corn
 - Unit: version ordering handles `1.2.0` > `1.1.1-site` > `1.1.1-rc1` > `1.1.0` correctly.
 - Integration: upload private `metagenomics/my_aligner`, import from a template, verify it loads. Upload a `local` at a path bundled already has: both visible, version-specific imports resolve the right one.
 - Integration: admin edits bundled `genomics/fastp` via CLI; row flips to `forked`; `module upgrade` dry-run reports it as fork-preserved; `--apply` does not overwrite.
-- Integration: pre-migration server with on-disk private modules is upgraded; all existing private modules appear in the new table with `origin=L`; templates that imported them still resolve.
-- Offline: with `SCITQ_SERVER` unset, `_load_module genomics/fastp` falls back to the package copy.
+- Integration: pre-migration server with on-disk private modules is upgraded; all existing private modules appear in the new table with `origin=L` and their content lives at `{modules_root}/<name>/<version>.yaml`; templates that imported them still resolve.
+- Integration: library-v1 server with content in DB is upgraded; `migrateModuleContentToDisk` writes each row to `{modules_root}` and clears the column; `DownloadModule` serves the same bytes pre- and post-migration.
+- Integration: DB-loss recovery — drop the `module` table with the filesystem tree intact, restart; reindex rebuilds every metadata row, `module list` and `DownloadModule` return the same content.
+- Filesystem: crash-mid-write safety — manually kill the server after a temp file is created but before the rename; restart; the module is either fully present or absent, never partial.
+- Offline: `python -m scitq2.yaml_runner --offline --yaml-module-path /tmp/tree template.yaml` resolves against `/tmp/tree/<path>.yaml`; without `--offline`, the runner errors rather than falling through.
+- Deprecation: a template using `module: X.yaml` emits one deprecation warning per run and resolves the library path `X`.
+- `{RESOURCE_ROOT}`: template referencing `{RESOURCE_ROOT}` in any field with no way to resolve it is rejected before workflow creation; template that does not reference it runs unchanged.
+- Auto-upgrade exclude: `autoupgrade_exclude: ["metagenomics/*"]` prevents those modules from being seeded on subsequent startups; already-imported rows are left in place.
 - Pin: an unpinned template run records resolved versions into `template_run.module_pins`; re-running with the recorded pins replays the exact same module content even after a subsequent `module upgrade`.

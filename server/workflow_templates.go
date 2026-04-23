@@ -1156,10 +1156,15 @@ func (s *taskQueueServer) UpgradeBundledModules(ctx context.Context, req *pb.Upg
 			e.Path, versionStr).Scan(&existingOrigin, &existingSha)
 		if err == sql.ErrNoRows {
 			if req.Apply {
+				// Write the file first, then index.
+				if err := writeModuleFile(s.cfg.Scitq.ModulesRoot, e.Path, versionStr, content); err != nil {
+					reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s error    disk write: %v", e.Path, versionStr, err))
+					continue
+				}
 				_, err = s.db.ExecContext(ctx, `
-					INSERT INTO module (path, version, content, content_sha, origin, bundled_sha, description)
-					VALUES ($1, $2, $3, $4, 'B', $4, $5)
-				`, e.Path, versionStr, content, e.ContentSha256, descStr)
+					INSERT INTO module (path, version, content_sha, origin, bundled_sha, description)
+					VALUES ($1, $2, $3, 'B', $3, $4)
+				`, e.Path, versionStr, e.ContentSha256, descStr)
 				if err != nil {
 					reportLines = append(reportLines, fmt.Sprintf("%-40s %-20s error    %v", e.Path, versionStr, err))
 					continue
@@ -1208,6 +1213,144 @@ func (s *taskQueueServer) UpgradeBundledModules(ctx context.Context, req *pb.Upg
 		Skipped:        skipped,
 		UpToDate:       upToDate,
 	}, nil
+}
+
+// matchExcludeGlob returns true if `path` matches `pattern` under the
+// autoupgrade_exclude grammar:
+//   - exact match (no wildcards)
+//   - single-segment `*` via filepath.Match (e.g. `metagenomics/*` matches
+//     `metagenomics/foo` but not `metagenomics/foo/bar`)
+//   - recursive `/**` tail (e.g. `internal/**` matches `internal/x` and
+//     `internal/x/y`; and matches the bare `internal` too for completeness)
+func matchExcludeGlob(pattern, path string) bool {
+	if pattern == path {
+		return true
+	}
+	if strings.HasSuffix(pattern, "/**") {
+		prefix := strings.TrimSuffix(pattern, "/**")
+		return path == prefix || strings.HasPrefix(path, prefix+"/")
+	}
+	matched, err := filepath.Match(pattern, path)
+	if err != nil {
+		return false
+	}
+	return matched
+}
+
+// autoUpgradeBundledModules seeds/updates bundled modules at server startup
+// from the installed scitq2_modules Python package. Opt-out via
+// `scitq.autoupgrade_modules: false`; selective opt-out via the
+// `autoupgrade_exclude` glob list. Applies the same upsert rules as the
+// admin-invoked UpgradeBundledModules RPC (skip forks, skip SHA-matching
+// bundled, refuse SHA-mismatch same-version without --force). Never
+// deletes rows. Logs a single-line summary so quiet restarts stay quiet.
+func (s *taskQueueServer) autoUpgradeBundledModules(ctx context.Context) {
+	if !s.cfg.Scitq.AutoupgradeModules {
+		return
+	}
+	venvPython := filepath.Join(s.cfg.Scitq.ScriptVenv, "bin", "python")
+	cmd := exec.CommandContext(ctx, venvPython, "-m", "scitq2.yaml_runner", "--list-bundled")
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("⚠️ auto-upgrade modules: failed to enumerate bundled modules: %v", err)
+		return
+	}
+
+	type bundledEntry struct {
+		Path          string `json:"path"`
+		Version       any    `json:"version"`
+		Description   any    `json:"description"`
+		ContentSha256 string `json:"content_sha256"`
+		ContentBase64 string `json:"content_base64"`
+	}
+
+	var inserted, matched, excluded, forksPreserved, conflicts, skipped int
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var e bundledEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue
+		}
+
+		// Apply exclusion patterns.
+		isExcluded := false
+		for _, pat := range s.cfg.Scitq.AutoupgradeExclude {
+			if matchExcludeGlob(pat, e.Path) {
+				isExcluded = true
+				break
+			}
+		}
+		if isExcluded {
+			excluded++
+			continue
+		}
+
+		versionStr, _ := e.Version.(string)
+		descStr, _ := e.Description.(string)
+		if versionStr == "" || versionStr == "latest" {
+			skipped++
+			continue
+		}
+		content, err := base64.StdEncoding.DecodeString(e.ContentBase64)
+		if err != nil {
+			skipped++
+			continue
+		}
+
+		var existingOrigin sql.NullString
+		var existingSha sql.NullString
+		err = s.db.QueryRowContext(ctx,
+			`SELECT origin, content_sha FROM module WHERE path=$1 AND version=$2`,
+			e.Path, versionStr).Scan(&existingOrigin, &existingSha)
+		if err == sql.ErrNoRows {
+			if err := writeModuleFile(s.cfg.Scitq.ModulesRoot, e.Path, versionStr, content); err != nil {
+				log.Printf("⚠️ auto-upgrade modules: write %s@%s failed: %v", e.Path, versionStr, err)
+				conflicts++
+				continue
+			}
+			_, insErr := s.db.ExecContext(ctx, `
+				INSERT INTO module (path, version, content_sha, origin, bundled_sha, description)
+				VALUES ($1, $2, $3, 'B', $3, $4)
+			`, e.Path, versionStr, e.ContentSha256, descStr)
+			if insErr != nil {
+				log.Printf("⚠️ auto-upgrade modules: insert %s@%s failed: %v", e.Path, versionStr, insErr)
+				conflicts++
+				continue
+			}
+			inserted++
+			continue
+		}
+		if err != nil {
+			log.Printf("⚠️ auto-upgrade modules: lookup %s@%s failed: %v", e.Path, versionStr, err)
+			conflicts++
+			continue
+		}
+		switch existingOrigin.String {
+		case "F":
+			forksPreserved++
+		case "B":
+			if existingSha.String == e.ContentSha256 {
+				matched++
+			} else {
+				log.Printf("⚠️ auto-upgrade modules: same (path,version) re-shipped with different bytes at %s@%s — not overwritten (run `scitq module upgrade --force` to resolve)", e.Path, versionStr)
+				conflicts++
+			}
+		case "L":
+			log.Printf("⚠️ auto-upgrade modules: local upload collides with bundled %s@%s — not overwritten", e.Path, versionStr)
+			conflicts++
+		}
+	}
+
+	if inserted+forksPreserved+conflicts > 0 || excluded > 0 {
+		// Something interesting happened — summary is worth logging.
+		log.Printf("📦 auto-upgrade: inserted %d, matched %d, excluded %d, forks preserved %d, conflicts %d, skipped %d",
+			inserted, matched, excluded, forksPreserved, conflicts, skipped)
+	}
+	// Pure no-op (matched only) → silent; nothing new to say.
 }
 
 // GetModuleOrigin returns provenance metadata for a single module row.
@@ -1304,27 +1447,30 @@ func (s *taskQueueServer) ForkModule(ctx context.Context, req *pb.ForkModuleRequ
 		return nil, fmt.Errorf("'latest' is a reserved version alias")
 	}
 
-	// Load source row
+	// Load source metadata (content comes from disk).
 	var srcVersion, srcContentSha string
-	var srcContent []byte
 	var srcDescription sql.NullString
 	if req.SourceVersion == "" || req.SourceVersion == "latest" {
 		err = s.db.QueryRowContext(ctx, `
-			SELECT version, content, content_sha, description FROM module
+			SELECT version, content_sha, description FROM module
 			 WHERE path = $1 ORDER BY version DESC LIMIT 1
-		`, path).Scan(&srcVersion, &srcContent, &srcContentSha, &srcDescription)
+		`, path).Scan(&srcVersion, &srcContentSha, &srcDescription)
 	} else {
 		srcVersion = req.SourceVersion
 		err = s.db.QueryRowContext(ctx, `
-			SELECT content, content_sha, description FROM module
+			SELECT content_sha, description FROM module
 			 WHERE path = $1 AND version = $2
-		`, path, req.SourceVersion).Scan(&srcContent, &srcContentSha, &srcDescription)
+		`, path, req.SourceVersion).Scan(&srcContentSha, &srcDescription)
 	}
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("source module %s@%s not found", path, req.SourceVersion)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to load source module: %w", err)
+	}
+	srcContent, err := readModuleFile(s.cfg.Scitq.ModulesRoot, path, srcVersion)
+	if err != nil {
+		return nil, fmt.Errorf("source module %s@%s metadata exists but file missing: %w", path, srcVersion, err)
 	}
 
 	var uploadedBy *uint32
@@ -1333,10 +1479,15 @@ func (s *taskQueueServer) ForkModule(ctx context.Context, req *pb.ForkModuleRequ
 		uploadedBy = &uid
 	}
 
+	// Copy content to the new version's on-disk location, then insert the
+	// fork metadata row.
+	if err := writeModuleFile(s.cfg.Scitq.ModulesRoot, path, req.NewVersion, srcContent); err != nil {
+		return nil, fmt.Errorf("failed to write fork %s@%s to disk: %w", path, req.NewVersion, err)
+	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO module (path, version, content, content_sha, origin, bundled_sha, description, uploaded_by)
-		VALUES ($1, $2, $3, $4, 'F', $4, $5, $6)
-	`, path, req.NewVersion, srcContent, srcContentSha, srcDescription, uploadedBy)
+		INSERT INTO module (path, version, content_sha, origin, bundled_sha, description, uploaded_by)
+		VALUES ($1, $2, $3, 'F', $3, $4, $5)
+	`, path, req.NewVersion, srcContentSha, srcDescription, uploadedBy)
 	if err != nil {
 		// Most likely: unique violation on (path, new_version) — surface cleanly.
 		return nil, fmt.Errorf("failed to create fork %s@%s: %w", path, req.NewVersion, err)
@@ -1407,20 +1558,210 @@ func (s *taskQueueServer) importLegacyOnDiskModules() {
 		sha := sha256.Sum256(content)
 		shaHex := hex.EncodeToString(sha[:])
 		description := extractModuleDescription(content)
+		// Write the content to the canonical on-disk location first — the
+		// filesystem is the source of truth and must always be consistent
+		// with the metadata row.
+		if err := writeModuleFile(s.cfg.Scitq.ModulesRoot, path, version, content); err != nil {
+			log.Printf("⚠️ module migration: write %s@%s failed: %v", path, version, err)
+			continue
+		}
 		if _, err := s.db.Exec(`
-			INSERT INTO module (path, version, content, content_sha, origin, description)
-			VALUES ($1, $2, $3, $4, 'L', $5)
-		`, path, version, content, shaHex, description); err != nil {
+			INSERT INTO module (path, version, content_sha, origin, description)
+			VALUES ($1, $2, $3, 'L', $4)
+		`, path, version, shaHex, description); err != nil {
 			log.Printf("⚠️ module migration: insert failed for %s@%s: %v", path, version, err)
 			continue
 		}
 		imported++
 	}
 	if imported > 0 {
-		log.Printf("📦 Migrated %d legacy on-disk module(s) into the module table", imported)
+		log.Printf("📦 Migrated %d legacy on-disk module(s) into the module library", imported)
 	}
 }
 
+// migrateModuleContentToDisk is the one-shot startup hook that dumps any
+// legacy DB-embedded content to the canonical on-disk location and
+// clears the column. Idempotent: on later restarts, the SELECT returns
+// zero rows and the function no-ops. Runs AFTER the migrations-up have
+// executed (so `content` is nullable), but BEFORE anything reads modules.
+func (s *taskQueueServer) migrateModuleContentToDisk(ctx context.Context) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT module_id, path, version, content FROM module WHERE content IS NOT NULL`)
+	if err != nil {
+		log.Printf("⚠️ module content migration: query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type pending struct {
+		id      int64
+		path    string
+		version string
+		content []byte
+	}
+	var items []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.path, &p.version, &p.content); err != nil {
+			log.Printf("⚠️ module content migration: scan failed: %v", err)
+			continue
+		}
+		items = append(items, p)
+	}
+	rows.Close()
+
+	if len(items) == 0 {
+		return
+	}
+
+	var dumped, failed int
+	for _, p := range items {
+		if err := writeModuleFile(s.cfg.Scitq.ModulesRoot, p.path, p.version, p.content); err != nil {
+			log.Printf("⚠️ module content migration: write %s@%s failed: %v", p.path, p.version, err)
+			failed++
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE module SET content = NULL WHERE module_id = $1`, p.id); err != nil {
+			log.Printf("⚠️ module content migration: clear content for %s@%s failed: %v", p.path, p.version, err)
+			failed++
+			continue
+		}
+		dumped++
+	}
+	log.Printf("📦 module content migration: dumped %d rows to %s (%d failed)",
+		dumped, s.cfg.Scitq.ModulesRoot, failed)
+}
+
+// reindexModulesDirectory walks the modules tree and inserts metadata
+// rows for any files not already tracked in the `module` table. Lets
+// the DB recover from a full drop by rebuilding from the filesystem
+// (which is authoritative). Origin is guessed from the top-level
+// namespace: `genomics/*` and `metagenomics/*` → B, everything else →
+// L. Admins can correct with `scitq module set-origin` later.
+func (s *taskQueueServer) reindexModulesDirectory(ctx context.Context) {
+	root := s.cfg.Scitq.ModulesRoot
+	if _, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				log.Printf("⚠️ module reindex: cannot create %s: %v", root, err)
+			}
+			return
+		}
+		log.Printf("⚠️ module reindex: cannot stat %s: %v", root, err)
+		return
+	}
+
+	var reindexed int
+	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip inaccessible entries, keep walking
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(p, ".yaml") && !strings.HasSuffix(p, ".yml") {
+			return nil
+		}
+		// Layout: <root>/<path>/<version>.yaml  →  relpath = <path>/<version>.yaml
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		dir, file := filepath.Split(rel)
+		dir = strings.TrimSuffix(dir, "/")
+		if dir == "" {
+			return nil // module without a version subdir — not our layout
+		}
+		version := strings.TrimSuffix(strings.TrimSuffix(file, ".yaml"), ".yml")
+		modulePath := dir
+
+		var existing int
+		qErr := s.db.QueryRowContext(ctx,
+			`SELECT 1 FROM module WHERE path=$1 AND version=$2`, modulePath, version).Scan(&existing)
+		if qErr == nil {
+			return nil // already indexed
+		}
+		if qErr != sql.ErrNoRows {
+			log.Printf("⚠️ module reindex: lookup %s@%s failed: %v", modulePath, version, qErr)
+			return nil
+		}
+
+		content, readErr := os.ReadFile(p)
+		if readErr != nil {
+			log.Printf("⚠️ module reindex: read %s failed: %v", p, readErr)
+			return nil
+		}
+		sum := sha256.Sum256(content)
+		sha := hex.EncodeToString(sum[:])
+		origin := "L"
+		if strings.HasPrefix(modulePath, "genomics/") || strings.HasPrefix(modulePath, "metagenomics/") {
+			origin = "B"
+		}
+		description := extractModuleDescription(content)
+		if _, insErr := s.db.ExecContext(ctx, `
+			INSERT INTO module (path, version, content_sha, origin, description)
+			VALUES ($1, $2, $3, $4, $5)
+		`, modulePath, version, sha, origin, description); insErr != nil {
+			log.Printf("⚠️ module reindex: insert %s@%s failed: %v", modulePath, version, insErr)
+			return nil
+		}
+		reindexed++
+		return nil
+	})
+	if err != nil {
+		log.Printf("⚠️ module reindex: walk %s failed: %v", root, err)
+	}
+	if reindexed > 0 {
+		log.Printf("📦 module reindex: recovered %d metadata row(s) from %s", reindexed, root)
+	}
+}
+
+
+// moduleFilePath returns the canonical on-disk location of a module's
+// content under modulesRoot. The tree is organised as
+// `<modulesRoot>/<path>/<version>.yaml`, preserving the namespace
+// structure so admins can `cd` / `grep` / git-track the directory.
+func moduleFilePath(modulesRoot, path, version string) string {
+	return filepath.Join(modulesRoot, filepath.FromSlash(path), version+".yaml")
+}
+
+// writeModuleFile creates any missing parent directories and writes the
+// module content to the canonical location. Content is written to a
+// temp file and renamed to provide atomicity against crashes mid-write.
+func writeModuleFile(modulesRoot, path, version string, content []byte) error {
+	dest := moduleFilePath(modulesRoot, path, version)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("module dir create: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".modupload-*.tmp")
+	if err != nil {
+		return fmt.Errorf("module tempfile: %w", err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("module write: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("module close: %w", err)
+	}
+	if err := os.Rename(tmpName, dest); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("module rename: %w", err)
+	}
+	return nil
+}
+
+// readModuleFile loads module content from the canonical location.
+// Missing files become a well-typed error so callers can degrade
+// gracefully (e.g. surface a "module row exists but file missing —
+// reindex needed" diagnostic).
+func readModuleFile(modulesRoot, path, version string) ([]byte, error) {
+	return os.ReadFile(moduleFilePath(modulesRoot, path, version))
+}
 
 // normalizeModulePath validates and canonicalises the namespace path of a
 // module. The on-the-wire `filename` field may be `my_aligner`,
@@ -1557,12 +1898,18 @@ func (s *taskQueueServer) UploadModule(ctx context.Context, req *pb.UploadModule
 		} else if newOrigin == "" {
 			newOrigin = "L"
 		}
+		// Write the file first. If the DB update fails afterward, the
+		// file-on-disk is still the latest content — subsequent reindex
+		// will re-match. This is strictly safer than writing the DB first.
+		if err := writeModuleFile(s.cfg.Scitq.ModulesRoot, path, version, req.Content); err != nil {
+			return nil, fmt.Errorf("failed to write module %q@%q to disk: %w", path, version, err)
+		}
 		_, err = s.db.ExecContext(ctx, `
 			UPDATE module
-			   SET content=$1, content_sha=$2, origin=$3, uploaded_at=NOW(),
-			       uploaded_by=$4, description=$5
-			 WHERE path=$6 AND version=$7
-		`, req.Content, shaHex, newOrigin, uploadedBy, description, path, version)
+			   SET content_sha=$1, origin=$2, uploaded_at=NOW(),
+			       uploaded_by=$3, description=$4
+			 WHERE path=$5 AND version=$6
+		`, shaHex, newOrigin, uploadedBy, description, path, version)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update module %q@%q: %w", path, version, err)
 		}
@@ -1570,10 +1917,13 @@ func (s *taskQueueServer) UploadModule(ctx context.Context, req *pb.UploadModule
 		return &pb.Ack{Success: true}, nil
 	}
 
+	if err := writeModuleFile(s.cfg.Scitq.ModulesRoot, path, version, req.Content); err != nil {
+		return nil, fmt.Errorf("failed to write module %q@%q to disk: %w", path, version, err)
+	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO module (path, version, content, content_sha, origin, uploaded_by, description)
-		VALUES ($1, $2, $3, $4, 'L', $5, $6)
-	`, path, version, req.Content, shaHex, uploadedBy, description)
+		INSERT INTO module (path, version, content_sha, origin, uploaded_by, description)
+		VALUES ($1, $2, $3, 'L', $4, $5)
+	`, path, version, shaHex, uploadedBy, description)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert module %q@%q: %w", path, version, err)
 	}
@@ -1691,35 +2041,41 @@ func (s *taskQueueServer) listModulesCore(ctx context.Context, pathFilter string
 }
 
 // DownloadModule fetches module bytes from the library. Accepts:
-//   - `genetic/fastp@1.2.0` — path + exact version
-//   - `genetic/fastp@latest` or `genetic/fastp` — highest version
+//   - `genomics/fastp@1.2.0` — path + exact version
+//   - `genomics/fastp@latest` or `genomics/fastp` — highest version
 //   - bare `fastp` — legacy flat path, highest version
+//
+// The DB row is the index; content is read from the canonical on-disk
+// location `<ModulesRoot>/<path>/<version>.yaml`.
 func (s *taskQueueServer) DownloadModule(ctx context.Context, req *pb.DownloadModuleRequest) (*pb.FileContent, error) {
 	path, version, err := parseModulePathVersion(req.Filename)
 	if err != nil {
 		return nil, err
 	}
 
-	var content []byte
 	var resolvedVersion string
 	if version == "" || version == "latest" {
 		err = s.db.QueryRowContext(ctx, `
-			SELECT content, version FROM module
+			SELECT version FROM module
 			 WHERE path = $1
 			 ORDER BY version DESC
 			 LIMIT 1
-		`, path).Scan(&content, &resolvedVersion)
+		`, path).Scan(&resolvedVersion)
 	} else {
 		err = s.db.QueryRowContext(ctx, `
-			SELECT content, version FROM module
+			SELECT version FROM module
 			 WHERE path = $1 AND version = $2
-		`, path, version).Scan(&content, &resolvedVersion)
+		`, path, version).Scan(&resolvedVersion)
 	}
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("module %q not found", req.Filename)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to load module %q: %w", req.Filename, err)
+	}
+	content, err := readModuleFile(s.cfg.Scitq.ModulesRoot, path, resolvedVersion)
+	if err != nil {
+		return nil, fmt.Errorf("module %q metadata row exists but file is missing or unreadable (%v). Run a server restart to reindex, or re-upload.", req.Filename, err)
 	}
 	return &pb.FileContent{
 		Filename: path + "@" + resolvedVersion,

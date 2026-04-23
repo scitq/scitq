@@ -1,0 +1,11 @@
+-- Module content moves from DB BYTEA to canonical on-disk files at
+-- `{modules_root}/<path>/<version>.yaml`. The `module` table becomes a
+-- metadata index: (path, version, origin, content_sha, bundled_sha,
+-- uploaded_at, uploaded_by, description). Rationale in
+-- specs/module_library.md.
+--
+-- This migration only relaxes the NOT NULL on content so the server's
+-- startup hook can dump existing rows to disk and then clear the column.
+-- A follow-up migration (000024) drops the column entirely once all
+-- rows have been migrated and the new code has shipped.
+ALTER TABLE module ALTER COLUMN content DROP NOT NULL;

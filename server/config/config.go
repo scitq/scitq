@@ -138,6 +138,36 @@ type Config struct {
 
 		// WorkerRetention is the number of days to retain soft-deleted workers before pruning.
 		WorkerRetention int `yaml:"worker_retention" default:"30"`
+
+		// ModulesRoot is the directory where YAML module files are stored as
+		// the canonical source of truth. Each module row in the `module`
+		// table points at `{ModulesRoot}/<path>/<version>.yaml`. Admins can
+		// inspect / grep / rsync / git-track this directory; losing the DB
+		// is recoverable by reindexing the tree at startup. See
+		// specs/module_library.md.
+		ModulesRoot string `yaml:"modules_root" default:"/var/lib/scitq/modules"`
+
+		// AutoupgradeModules, when true (default), triggers the server to run
+		// `module upgrade --apply` semantics at every startup so bundled YAML
+		// modules shipped in the scitq2_modules Python package appear in the
+		// server-side module library without an explicit admin step. Set to
+		// false for frozen-library environments (audit-sensitive sites, CI)
+		// where every module change must be gated through a manual review.
+		// See specs/module_library.md.
+		AutoupgradeModules bool `yaml:"autoupgrade_modules" default:"true"`
+
+		// AutoupgradeExclude is a list of glob-style path patterns that the
+		// auto-upgrade step will skip. `*` matches a single path segment,
+		// `**` matches any number of segments; everything else is literal.
+		// Examples:
+		//   - "metagenomics/*"     # skip every direct child of the namespace
+		//   - "genomics/multiqc"   # skip exactly this module
+		//   - "internal/**"        # skip every module under internal/ recursively
+		// Excluded modules are NOT reinstated on subsequent startups; does
+		// not retroactively delete rows already in the library (use
+		// `scitq module delete` for that, then add to this list to prevent
+		// reinstatement).
+		AutoupgradeExclude []string `yaml:"autoupgrade_exclude"`
 	} `yaml:"scitq"`
 
 	// Providers contains configurations for different cloud providers supported by scitq.

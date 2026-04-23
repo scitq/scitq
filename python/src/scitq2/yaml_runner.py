@@ -616,89 +616,92 @@ def _load_module_from_server(path: str, version: Optional[str]) -> Optional[dict
     return yaml.safe_load(resp.content)
 
 
-def _load_public_import(import_name: str) -> dict:
-    """Load a public module by reference. Tries the server-side library
-    first (authoritative when deployed), then falls back to the
-    `scitq2_modules/yaml/` tree shipped with the installed Python package.
-    Accepts `path` or `path@version`.
-    """
-    path, version = _split_module_ref(import_name)
+# --offline mode: bypass the server and read modules from a filesystem
+# tree. Set by main() before any step compilation begins. See
+# specs/module_library.md.
+_offline_mode: bool = False
+_offline_module_path: Optional[str] = None
+# One-time-per-run flag for the `module:` deprecation warning.
+_module_keyword_deprecation_warned: bool = False
 
-    mod = _load_module_from_server(path, version)
-    if mod is not None:
-        return mod
 
-    # Package fallback — no versioning here, just the shipped copy.
-    base_dir = _find_public_module_dir()
+def _offline_load(path: str, ref: str) -> dict:
+    """Read a module from `_offline_module_path` (or the installed
+    scitq2_modules/yaml/ by default). No server, no versioning. Only used
+    when --offline is set."""
+    base_dir = _offline_module_path or _find_public_module_dir()
     for ext in ('.yaml', '.yml', ''):
         full = os.path.join(base_dir, path + ext)
         if os.path.exists(full):
             with open(full) as f:
                 data = yaml.safe_load(f)
-            # Record a pin pointing at the package fallback for diagnostics;
-            # version is whatever the file declares (may be None).
             _resolved_module_pins.append({
-                'ref': import_name,
+                'ref': ref,
                 'path': path,
                 'version': (data or {}).get('version'),
-                'source': 'package',
+                'source': 'offline',
             })
             return data
-    hint = ""
-    if '/' in import_name:
-        # Common confusion: template wrote `import: modules/foo` expecting
-        # script_root resolution (which `module:` does), not a library lookup.
-        hint = (
-            f"\n  Hint: `import:` loads from the server module library or the "
-            f"bundled scitq2_modules package. For a private YAML file under "
-            f"your script tree (e.g. {{script_root}}/modules/{os.path.basename(import_name)}.yaml) "
-            f"use `module: {os.path.basename(import_name)}.yaml` instead."
-        )
     raise FileNotFoundError(
-        f"Public module not found: {import_name} (tried server library, then package at {base_dir}){hint}"
+        f"Module not found in offline tree: {ref} "
+        f"(searched {base_dir} for {path}.yaml)"
     )
 
 
-def _load_private_module(module_path: str, pipeline_dir: Optional[str] = None,
-                         script_root: Optional[str] = None) -> dict:
-    """Load a private module by path. Tries the server-side library first
-    (matches the public-import behaviour), then falls back to local file
-    search so direct `python -m scitq2.yaml_runner ...` invocations keep
-    working without a server. Accepts `path` or `path@version`.
+def _load_public_import(import_name: str) -> dict:
+    """Load a module by reference from the server library. No fallback to
+    the Python package or filesystem in online mode — the library is the
+    single source of truth at runtime. In --offline mode, reads from
+    `_offline_module_path` instead (default: installed scitq2_modules/yaml/).
+    Accepts `path` or `path@version`.
     """
-    path, version = _split_module_ref(module_path)
+    path, version = _split_module_ref(import_name)
+
+    if _offline_mode:
+        return _offline_load(path, import_name)
 
     mod = _load_module_from_server(path, version)
     if mod is not None:
         return mod
 
-    # Local filesystem fallback — unchanged from pre-library behaviour.
-    candidates = []
-    if pipeline_dir:
-        candidates.append(os.path.join(pipeline_dir, module_path))
-        candidates.append(os.path.join(pipeline_dir, 'modules', module_path))
-    candidates.append(module_path)
-    if script_root:
-        candidates.append(os.path.join(script_root, 'modules', module_path))
-    module_path_env = os.environ.get('SCITQ_YAML_MODULE_PATH')
-    if module_path_env:
-        candidates.append(os.path.join(module_path_env, module_path))
-
-    for cand in candidates:
-        if os.path.exists(cand):
-            with open(cand) as f:
-                data = yaml.safe_load(f)
-            _resolved_module_pins.append({
-                'ref': module_path,
-                'path': path,
-                'version': (data or {}).get('version'),
-                'source': 'filesystem',
-            })
-            return data
-
     raise FileNotFoundError(
-        f"Private module not found: {module_path} (tried server library, then local paths: {candidates})"
+        f"Module '{import_name}' not found in library. "
+        f"If this is a bundled module, the server may need seeding: run "
+        f"`scitq module upgrade --apply` (admin). "
+        f"If it is a private module, upload it first with "
+        f"`scitq module upload --path X --as <namespace>/<name>`."
     )
+
+
+def _load_private_module(module_path: str, pipeline_dir: Optional[str] = None,
+                         script_root: Optional[str] = None) -> dict:
+    """Deprecated — `module:` keyword is an alias for `import:`. The
+    trailing `.yaml` is stripped to match library path conventions (so
+    `module: biomscope_align.yaml` resolves to library path
+    `biomscope_align`). Emits a one-time deprecation warning per run.
+
+    pipeline_dir / script_root arguments are retained for signature
+    compatibility but no longer consulted — the old filesystem fallbacks
+    (`{script_root}/modules/`, `{pipeline_dir}/modules/`,
+    `$SCITQ_YAML_MODULE_PATH`) have been removed. See
+    specs/module_library.md.
+    """
+    global _module_keyword_deprecation_warned
+    if not _module_keyword_deprecation_warned:
+        print("⚠️ 'module:' is deprecated; use 'import:' with the library path "
+              "(e.g. 'import: private/X'). The `.yaml` suffix is stripped "
+              "automatically for backward compatibility.", file=sys.stderr)
+        _module_keyword_deprecation_warned = True
+
+    # Strip a trailing .yaml/.yml so `module: X.yaml` maps to library
+    # path `X`. The ref kept for diagnostics is the original (with .yaml).
+    ref = module_path
+    stripped = module_path
+    for ext in ('.yaml', '.yml'):
+        if stripped.endswith(ext):
+            stripped = stripped[: -len(ext)]
+            break
+    return _load_public_import(stripped)
 
 
 # ---------------------------------------------------------------------------
@@ -1867,6 +1870,12 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Print step decisions to stderr")
     parser.add_argument("--list-bundled", action="store_true", dest="list_bundled",
                         help="Emit JSON lines describing bundled modules (for server-side module upgrade)")
+    parser.add_argument("--offline", action="store_true",
+                        help="Resolve modules from a local filesystem tree instead of the server library. "
+                             "For development and dry-run only; production YAML runs always go online.")
+    parser.add_argument("--yaml-module-path", dest="yaml_module_path", default=None,
+                        help="In --offline mode, root of the module tree (e.g. a git checkout). "
+                             "Defaults to the installed scitq2_modules/yaml/ directory.")
     args = parser.parse_args()
 
     if args.list_bundled:
@@ -1875,6 +1884,14 @@ def main():
 
     if not args.input:
         parser.error("input YAML file is required unless --list-bundled is given")
+
+    if args.yaml_module_path and not args.offline:
+        parser.error("--yaml-module-path requires --offline")
+
+    # Wire offline flags into the module loader before any resolution happens.
+    global _offline_mode, _offline_module_path
+    _offline_mode = args.offline
+    _offline_module_path = args.yaml_module_path
 
     with open(args.input) as f:
         data = yaml.safe_load(f)

@@ -163,15 +163,38 @@ For chat-based administration, the same functionality is exposed as MCP tools:
 
 ---
 
-## Database schema
+## Storage layout
+
+Module content is stored as YAML files on disk; the `module` DB table is a metadata index that can be rebuilt from the filesystem on startup.
+
+**Filesystem** (rooted at `scitq.modules_root`, default `/var/lib/scitq/modules`):
+
+```
+/var/lib/scitq/modules/
+├── genomics/
+│   ├── fastp/
+│   │   ├── 1.0.0.yaml
+│   │   └── 1.1.0.yaml
+│   └── multiqc/
+│       └── 1.0.0.yaml
+├── metagenomics/
+│   └── meteor2/
+│       └── 1.0.5.yaml
+└── private/
+    └── biomscope_align/
+        └── 1.0.0.yaml
+```
+
+One file per `(path, version)`. The namespace becomes the directory prefix. Admins can `cat`, `grep`, `git` this tree directly.
+
+**DB table** (metadata index, no content):
 
 ```sql
 CREATE TABLE module (
     module_id    SERIAL PRIMARY KEY,
     path         TEXT NOT NULL,
     version      TEXT NOT NULL,
-    content      BYTEA NOT NULL,
-    content_sha  TEXT NOT NULL,
+    content_sha  TEXT NOT NULL,           -- sha256 of the on-disk file, for change detection
     origin       CHAR(1) NOT NULL CHECK (origin IN ('B','L','F')),
     bundled_sha  TEXT,
     uploaded_at  TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -186,6 +209,11 @@ ALTER TABLE template_run ADD COLUMN module_pins JSONB;
 ```
 
 Origin is stored as `B`/`L`/`F` on disk and surfaced as `bundled`/`local`/`forked` at every public boundary (RPC responses, CLI output, MCP).
+
+**Recovery properties:**
+- Losing the DB but keeping `modules_root` → server reindexes from disk at startup, library is restored automatically.
+- Losing `modules_root` but keeping the DB → content must be restored from backup; DB metadata alone can't reconstruct bytes.
+- Writes are atomic (temp file + rename) so a crash mid-write leaves a consistent state.
 
 ---
 

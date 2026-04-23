@@ -5340,9 +5340,35 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 			log.Fatalf("failed to check providers: %v", err)
 		}
 
-		// Phase 1 module library migration: move legacy on-disk private
-		// modules into the module table. Idempotent — safe to leave wired.
+		// Phase 1: move any legacy DB-embedded module content out to
+		// disk. The `module` table now stores metadata only; the
+		// canonical bytes live at
+		// `{ModulesRoot}/<path>/<version>.yaml`. One-shot and idempotent.
+		s.migrateModuleContentToDisk(s.ctx)
+
+		// Phase 2: legacy private modules from pre-library releases
+		// (`{script_root}/modules/*.yaml`) are migrated into the library
+		// on first-boot and written to the canonical ModulesRoot tree.
+		// Idempotent.
 		s.importLegacyOnDiskModules()
+
+		// Phase 3: recover any metadata rows missing for files already
+		// on disk (DB-loss recovery path — regenerates the index from
+		// the filesystem, which is authoritative).
+		s.reindexModulesDirectory(s.ctx)
+
+		// Phase 4: auto-upgrade bundled modules from the scitq2_modules
+		// package so a fresh install has bundled content available without
+		// requiring an explicit `scitq module upgrade --apply`. Runs in a
+		// goroutine because it needs the Python venv to be ready; quiet on
+		// no-op restarts. Opt-out via scitq.autoupgrade_modules: false;
+		// selective opt-out via scitq.autoupgrade_exclude.
+		go func() {
+			if s.pythonReady != nil {
+				<-s.pythonReady
+			}
+			s.autoUpgradeBundledModules(s.ctx)
+		}()
 
 		s.startJobQueue()
 		s.startFlavorStatsJobs()
