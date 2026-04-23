@@ -104,6 +104,9 @@ When the provider has a `local_resources` entry in `scitq.yaml`, `{RESOURCE_ROOT
 
 Without `{RESOURCE_ROOT}`, all workers download from the same source (e.g., Azure), paying egress fees even when running on OVH.
 
+!!! note "`{RESOURCE_ROOT}` must resolve"
+    A template that references `{RESOURCE_ROOT}` (anywhere — `resource:`, `publish:`, `command:`, `vars:`) is rejected at run time if the runner can't produce a real value. Previously the variable silently expanded to an empty string, producing malformed URIs that only failed at the worker. See [YAML templates — `{RESOURCE_ROOT}`](yaml-templates.md#the-resource_root-variable) for the prerequisites (`workspace:`, `local_resources`, server reachability).
+
 ### Input data location
 
 For workflows ingesting external data (ENA, SRA, private URIs):

@@ -1246,10 +1246,32 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
 
     workflow = Workflow(**wf_kwargs)
 
-    # Resolve RESOURCE_ROOT from server if provider/region are set
+    # Resolve RESOURCE_ROOT from server if provider/region are set.
+    # Policy: `{RESOURCE_ROOT}` is a hard dependency — if the template
+    # actually uses it and we can't resolve it, fail loudly rather than
+    # silently expanding to an empty string (which produces malformed
+    # URIs like `/meteor2/hs_10_4_gut/` that only surface as obscure
+    # fetch errors at worker runtime). If the template does NOT use it,
+    # resolution failure is a non-event.
     from scitq2.grpc_client import Scitq2Client
     client = Scitq2Client()
+
+    def _template_uses_resource_root(d):
+        """Recursive scan — catches `resource:`, `publish:`, `command:`,
+        `vars:`, module `requires:` imports pulled in elsewhere, and any
+        other field that ultimately gets string-substituted."""
+        if isinstance(d, str):
+            return '{RESOURCE_ROOT}' in d
+        if isinstance(d, dict):
+            return any(_template_uses_resource_root(v) for v in d.values())
+        if isinstance(d, (list, tuple)):
+            return any(_template_uses_resource_root(v) for v in d)
+        return False
+
+    uses_resource_root = _template_uses_resource_root(data)
     resource_root = ''
+    resolve_error = None
+
     if 'provider' in wf_kwargs and 'region' in wf_kwargs:
         try:
             resource_root = client.get_resource_root(
@@ -1257,32 +1279,35 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         except Exception as e:
             err_str = str(e)
             if 'UNAUTHENTICATED' in err_str or 'invalid session' in err_str:
-                print(f"⚠️ {{RESOURCE_ROOT}} lookup failed: authentication rejected by server. "
-                      f"SCITQ_TOKEN may be invalid or expired.",
-                      file=sys.stderr)
+                resolve_error = (f"{{RESOURCE_ROOT}} lookup failed: authentication rejected by server. "
+                                 f"SCITQ_TOKEN may be invalid or expired. (server error: {e})")
             elif 'NotFound' in err_str or 'not found' in err_str.lower():
-                print(f"⚠️ {{RESOURCE_ROOT}} will be empty: no local_resources configured for "
-                      f"{wf_kwargs['provider']}:{wf_kwargs['region']} "
-                      f"(check scitq.yaml). Resources using {{RESOURCE_ROOT}} will resolve to invalid paths.",
-                      file=sys.stderr)
+                resolve_error = (f"{{RESOURCE_ROOT}} has no value: no local_resources configured for "
+                                 f"{wf_kwargs['provider']}:{wf_kwargs['region']} "
+                                 f"(check scitq.yaml). (server error: {e})")
             else:
-                print(f"⚠️ {{RESOURCE_ROOT}} lookup failed for "
-                      f"{wf_kwargs['provider']}:{wf_kwargs['region']}. "
-                      f"Resources using {{RESOURCE_ROOT}} will resolve to invalid paths.",
-                      file=sys.stderr)
-            print(f"   (server error: {e})", file=sys.stderr)
+                resolve_error = (f"{{RESOURCE_ROOT}} lookup failed for "
+                                 f"{wf_kwargs['provider']}:{wf_kwargs['region']}. "
+                                 f"(server error: {e})")
     elif 'workspace' in data:
-        print(f"⚠️ {{RESOURCE_ROOT}} will be empty: workspace: did not resolve to a provider:region pair. "
-              f"Resources using {{RESOURCE_ROOT}} will resolve to invalid paths.",
-              file=sys.stderr)
+        resolve_error = ("{RESOURCE_ROOT} has no value: workspace: did not resolve to a "
+                         "provider:region pair.")
     else:
-        # No workspace at all — only warn if resources use {RESOURCE_ROOT}
-        _uses_resource_root = any('{RESOURCE_ROOT}' in str(sd.get('resource', ''))
-                                   for sd in data.get('steps', []))
-        if _uses_resource_root:
-            print(f"⚠️ {{RESOURCE_ROOT}} will be empty: no 'workspace:' directive in the template. "
-                  f"Add workspace: \"{{params.location}}\" (or similar) to enable {{RESOURCE_ROOT}}.",
-                  file=sys.stderr)
+        resolve_error = ("{RESOURCE_ROOT} has no value: no 'workspace:' directive in the "
+                         "template. Add workspace: \"{params.location}\" (or similar) to "
+                         "enable {RESOURCE_ROOT}.")
+
+    if uses_resource_root and (resolve_error is not None or not resource_root):
+        # Template uses {RESOURCE_ROOT} but we couldn't produce a usable
+        # value — refuse to run. Silent fallback to '' produced bugs
+        # (malformed URIs, late worker-side errors).
+        msg = resolve_error or ("{RESOURCE_ROOT} resolved to an empty string "
+                                "(server returned no error but no value either).")
+        print(f"❌ {msg}", file=sys.stderr)
+        print("   The template references {RESOURCE_ROOT}; refusing to run with an unresolved value.",
+              file=sys.stderr)
+        sys.exit(1)
+    # Template doesn't use it — stay silent.
 
     # Build iterations
     iterate_raw = data.get('iterate')

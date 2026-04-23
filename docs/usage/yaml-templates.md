@@ -474,7 +474,15 @@ When your provider has a local copy of reference data (configured via `local_res
     resource: "{RESOURCE_ROOT}/my_index.tgz|untar"
 ```
 
-If no local resource root is configured, `{RESOURCE_ROOT}` is empty and the resource path is used as-is.
+**`{RESOURCE_ROOT}` must resolve to a real value whenever a template uses it.** If the template contains `{RESOURCE_ROOT}` anywhere (in `resource:`, `publish:`, `command:`, `vars:`, or any nested field) and the runner cannot produce a value — no `workspace:`, workspace doesn't resolve to a `provider:region` pair, no `local_resources` entry for that provider, or the server lookup fails — the run is **rejected before any workflow is created**, with the specific reason printed. Silent expansion to an empty string is no longer supported: it used to produce malformed URIs like `/meteor2/hs_10_4_gut/` that only surfaced as obscure fetch errors at worker runtime.
+
+If the template does not reference `{RESOURCE_ROOT}` at all, resolution is skipped silently regardless of configuration.
+
+Typical prerequisites to use `{RESOURCE_ROOT}`:
+
+1. The template declares `workspace: "{params.location}"` (or another expression that evaluates to `provider:region`).
+2. The server's `scitq.yaml` has a `local_resources` entry for the selected `provider:region`.
+3. The running user's session has permission to call the `get_resource_root` RPC (standard user sessions qualify).
 
 ## Variable interpolation
 
