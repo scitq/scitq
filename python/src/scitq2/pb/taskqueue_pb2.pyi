@@ -1354,12 +1354,14 @@ class ModuleEntry(_message.Message):
     def __init__(self, path: _Optional[str] = ..., version: _Optional[str] = ..., origin: _Optional[str] = ..., description: _Optional[str] = ...) -> None: ...
 
 class ModuleListFilter(_message.Message):
-    __slots__ = ("path", "latest_only")
+    __slots__ = ("path", "latest_only", "origin")
     PATH_FIELD_NUMBER: _ClassVar[int]
     LATEST_ONLY_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_FIELD_NUMBER: _ClassVar[int]
     path: str
     latest_only: bool
-    def __init__(self, path: _Optional[str] = ..., latest_only: bool = ...) -> None: ...
+    origin: str
+    def __init__(self, path: _Optional[str] = ..., latest_only: bool = ..., origin: _Optional[str] = ...) -> None: ...
 
 class DownloadModuleRequest(_message.Message):
     __slots__ = ("filename",)

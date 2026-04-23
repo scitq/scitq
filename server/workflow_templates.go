@@ -1585,7 +1585,7 @@ func (s *taskQueueServer) UploadModule(ctx context.Context, req *pb.UploadModule
 // flat `modules` string list and the structured `entries`. Old clients
 // reading only `modules` keep working unchanged.
 func (s *taskQueueServer) ListModules(ctx context.Context, _ *emptypb.Empty) (*pb.ModuleList, error) {
-	return s.listModulesCore(ctx, "", false)
+	return s.listModulesCore(ctx, "", false, "")
 }
 
 // ListModulesFiltered is the v2 surface taking an optional path filter and
@@ -1603,18 +1603,43 @@ func (s *taskQueueServer) ListModulesFiltered(ctx context.Context, req *pb.Modul
 	if req.LatestOnly != nil {
 		latestOnly = *req.LatestOnly
 	}
-	return s.listModulesCore(ctx, pathFilter, latestOnly)
+	originFilter := ""
+	if req.Origin != nil && *req.Origin != "" {
+		// Accept either the single-letter on-disk form (B/L/F, case-
+		// insensitive) or the spelled-out public form (bundled/local/
+		// forked). Anything else is an unrecognised origin and we surface
+		// the valid options rather than silently returning zero rows.
+		switch strings.ToLower(*req.Origin) {
+		case "b", "bundled":
+			originFilter = "B"
+		case "l", "local":
+			originFilter = "L"
+		case "f", "forked":
+			originFilter = "F"
+		default:
+			return nil, fmt.Errorf("unknown origin %q: expected one of bundled, local, forked (or B/L/F)", *req.Origin)
+		}
+	}
+	return s.listModulesCore(ctx, pathFilter, latestOnly, originFilter)
 }
 
-func (s *taskQueueServer) listModulesCore(ctx context.Context, pathFilter string, latestOnly bool) (*pb.ModuleList, error) {
+func (s *taskQueueServer) listModulesCore(ctx context.Context, pathFilter string, latestOnly bool, originFilter string) (*pb.ModuleList, error) {
 	query := `
 		SELECT path, version, origin, COALESCE(description, '')
 		  FROM module
 	`
 	args := []any{}
+	where := []string{}
 	if pathFilter != "" {
-		query += " WHERE path = $1"
 		args = append(args, pathFilter)
+		where = append(where, fmt.Sprintf("path = $%d", len(args)))
+	}
+	if originFilter != "" {
+		args = append(args, originFilter)
+		where = append(where, fmt.Sprintf("origin = $%d", len(args)))
+	}
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += " ORDER BY path, version"
 	rows, err := s.db.QueryContext(ctx, query, args...)

@@ -1,5 +1,5 @@
 name: meteor2
-version: "1.0.5"
+version: "1.0.6"
 description: "Taxonomic / functional profiling of metagenomic reads against a meteor2 catalog (meteor 2.0.22 3-stage pipeline: fastq → mapping → profile)"
 container: quay.io/biocontainers/meteor:2.0.22--pyhdfd78af_0
 language: bash
@@ -27,11 +27,20 @@ command:
   cond: PAIRED
   true: |
     . /builtin/std.sh
+    # Move (not copy) fastqs into meteor's input tree. /input is RW and
+    # scitq re-downloads inputs on retry, so we can safely consume them
+    # here — saves both disk and a couple of gigs of I/O per sample.
     mkdir -p /tmp/meteor/in
-    cp /input/*.f*q.gz /tmp/meteor/in/
+    mv /input/*.f*q.gz /tmp/meteor/in/
     meteor fastq   -i /tmp/meteor/in/     -p -m '{SAMPLE}' -o /tmp/meteor/fastq/
     meteor mapping -i /tmp/meteor/fastq/{SAMPLE}/   -r /resource/ -o /tmp/meteor/map/ -t ${CPU}
     meteor profile -i /tmp/meteor/map/{SAMPLE}/     -r /resource/ -o /output/
+
+    # Preserve mapping outputs (gene count tables, census_stage_1.json,
+    # etc.) alongside the profile. Skip the CRAM/BAM/SAM alignment files —
+    # they're huge and almost never needed downstream.
+    cp -r /tmp/meteor/map/{SAMPLE} /output/mapping.{SAMPLE}
+    find /output/mapping.{SAMPLE} -type f \( -name '*.cram' -o -name '*.bam' -o -name '*.sam' \) -delete
 
     # meteor profile leaves a symlink like <sample>_raw.tsv.xz pointing at
     # the mapping dir under /tmp (in-container absolute path). scitq uploads
@@ -47,11 +56,20 @@ command:
     done
   false: |
     . /builtin/std.sh
+    # Move (not copy) fastqs into meteor's input tree. /input is RW and
+    # scitq re-downloads inputs on retry, so we can safely consume them
+    # here — saves both disk and a couple of gigs of I/O per sample.
     mkdir -p /tmp/meteor/in
-    cp /input/*.f*q.gz /tmp/meteor/in/
+    mv /input/*.f*q.gz /tmp/meteor/in/
     meteor fastq   -i /tmp/meteor/in/        -m '{SAMPLE}' -o /tmp/meteor/fastq/
     meteor mapping -i /tmp/meteor/fastq/{SAMPLE}/   -r /resource/ -o /tmp/meteor/map/ -t ${CPU}
     meteor profile -i /tmp/meteor/map/{SAMPLE}/     -r /resource/ -o /output/
+
+    # Preserve mapping outputs (gene count tables, census_stage_1.json,
+    # etc.) alongside the profile. Skip the CRAM/BAM/SAM alignment files —
+    # they're huge and almost never needed downstream.
+    cp -r /tmp/meteor/map/{SAMPLE} /output/mapping.{SAMPLE}
+    find /output/mapping.{SAMPLE} -type f \( -name '*.cram' -o -name '*.bam' -o -name '*.sam' \) -delete
 
     # meteor profile leaves a symlink like <sample>_raw.tsv.xz pointing at
     # the mapping dir under /tmp (in-container absolute path). scitq uploads

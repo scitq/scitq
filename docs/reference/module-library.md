@@ -140,6 +140,7 @@ The YAML content must carry a top-level `version:` field — uploads without it 
 | `scitq module list --tree` | Group rows by folder prefix. |
 | `scitq module list --versions <path>` | Every version at a single path. |
 | `scitq module list --latest` | Only the highest version per path. |
+| `scitq module list --origin <kind>` | Filter by origin (`bundled` / `local` / `forked`, or `B`/`L`/`F`). Useful right after an upgrade to review rows auto-imported as `local`. |
 | `scitq module download --name <ref> [-o FILE]` | Fetch a module by `path`, `path@version`, or `path@latest`. Prints to stdout if `-o` is omitted. |
 | `scitq module origin <ref>` | Print provenance: origin, content SHA, bundled SHA (on forks), uploader, description, and a flag if a fork is outdated. |
 | `scitq module fork <ref> --new-version V` | **Admin**: clone a module row into a new `(path, V)` with `origin=forked`. |

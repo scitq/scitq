@@ -7565,7 +7565,13 @@ type ModuleListFilter struct {
 	// --versions X` use case.
 	Path *string `protobuf:"bytes,1,opt,name=path,proto3,oneof" json:"path,omitempty"`
 	// If true, return only the highest-ordered version per path.
-	LatestOnly    *bool `protobuf:"varint,2,opt,name=latest_only,json=latestOnly,proto3,oneof" json:"latest_only,omitempty"`
+	LatestOnly *bool `protobuf:"varint,2,opt,name=latest_only,json=latestOnly,proto3,oneof" json:"latest_only,omitempty"`
+	// Origin filter — case-insensitive, accepts full word ('bundled',
+	// 'local', 'forked') or single letter ('B', 'L', 'F'). Matches the
+	// `scitq module list --origin X` use case, typically used to audit
+	// pre-library files that were auto-imported as origin=local at server
+	// startup.
+	Origin        *string `protobuf:"bytes,3,opt,name=origin,proto3,oneof" json:"origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7612,6 +7618,13 @@ func (x *ModuleListFilter) GetLatestOnly() bool {
 		return *x.LatestOnly
 	}
 	return false
+}
+
+func (x *ModuleListFilter) GetOrigin() string {
+	if x != nil && x.Origin != nil {
+		return *x.Origin
+	}
+	return ""
 }
 
 type DownloadModuleRequest struct {
@@ -10007,13 +10020,15 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
 	"\x06origin\x18\x03 \x01(\tR\x06origin\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\"j\n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\"\x92\x01\n" +
 	"\x10ModuleListFilter\x12\x17\n" +
 	"\x04path\x18\x01 \x01(\tH\x00R\x04path\x88\x01\x01\x12$\n" +
 	"\vlatest_only\x18\x02 \x01(\bH\x01R\n" +
-	"latestOnly\x88\x01\x01B\a\n" +
+	"latestOnly\x88\x01\x01\x12\x1b\n" +
+	"\x06origin\x18\x03 \x01(\tH\x02R\x06origin\x88\x01\x01B\a\n" +
 	"\x05_pathB\x0e\n" +
-	"\f_latest_only\"3\n" +
+	"\f_latest_onlyB\t\n" +
+	"\a_origin\"3\n" +
 	"\x15DownloadModuleRequest\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\"4\n" +
 	"\x1cUpgradeBundledModulesRequest\x12\x14\n" +

@@ -908,6 +908,12 @@ message ModuleListFilter {
   optional string path = 1;
   // If true, return only the highest-ordered version per path.
   optional bool latest_only = 2;
+  // Origin filter — case-insensitive, accepts full word ('bundled',
+  // 'local', 'forked') or single letter ('B', 'L', 'F'). Matches the
+  // `scitq module list --origin X` use case, typically used to audit
+  // pre-library files that were auto-imported as origin=local at server
+  // startup.
+  optional string origin = 3;
 }
 
 message DownloadModuleRequest {

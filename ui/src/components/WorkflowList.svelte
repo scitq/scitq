@@ -55,6 +55,23 @@
       }
     }
   });
+
+  /**
+   * Describe what launched a workflow (template name@version, local
+   * script name, or empty string for legacy rows without a template_run
+   * link). Used as the hover tooltip on the workflow name.
+   */
+  function launchSummary(wf) {
+    if (wf.templateName) {
+      const v = wf.templateVersion ? '@' + wf.templateVersion : '';
+      return 'template ' + wf.templateName + v;
+    }
+    if (wf.scriptName) {
+      const sha = wf.scriptSha256 ? ' (' + wf.scriptSha256.slice(0, 8) + ')' : '';
+      return 'script ' + wf.scriptName + sha;
+    }
+    return '';
+  }
 </script>
 
 <!-- Workflows list container -->
@@ -77,14 +94,9 @@
           <span class="wf-id">#{wf.workflowId}</span>
           <span class="wf-status-dot {wf.status === 'S' ? 'wf-dot-green' : wf.runningTasks > 0 ? 'wf-dot-blue' : wf.failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
                 title={wf.status === 'S' ? 'Completed' : wf.runningTasks > 0 ? `${wf.runningTasks} active` : wf.status === 'F' ? `Stuck: ${wf.failedTasks} failed` : wf.failedTasks > 0 ? `${wf.failedTasks} failed, no active tasks` : 'Idle'}></span>
-          {@const launchedBy = wf.templateName
-              ? `template ${wf.templateName}${wf.templateVersion ? '@' + wf.templateVersion : ''}`
-              : wf.scriptName
-                ? `script ${wf.scriptName}${wf.scriptSha256 ? ' (' + wf.scriptSha256.slice(0, 8) + ')' : ''}`
-                : ''}
           <a href={`#/tasks?workflowId=${wf.workflowId}`}
              class="wf-name"
-             title={launchedBy ? `Launched by: ${launchedBy}` : undefined}>{wf.name}</a>
+             title={launchSummary(wf) ? `Launched by: ${launchSummary(wf)}` : undefined}>{wf.name}</a>
           {#if wf.totalTasks > 0}
             {@const t = wf.totalTasks}
             {@const pctSuccess = wf.succeededTasks / t * 100}

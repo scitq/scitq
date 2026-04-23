@@ -177,3 +177,121 @@ To backup a scitq install, backup:
 - PostgreSQL (using pg_dump) : it contains all history
 - `/etc/scitq.yaml` : your configuration (it contains passwords for your providers so be careful)
 - `/var/lib/scitq` : it contains your templates, modules, task logs and the Python environment (this is the default location, the location may be changed in `/etc/scitq.yaml`)
+
+## Upgrading
+
+Most upgrades are stateless — swap the server and CLI binaries, restart
+the service, done. A few releases carry schema migrations or library
+changes that need one or two follow-up commands. Apply them once, after
+every service has started cleanly on the new binary.
+
+### Routine upgrade checklist
+
+1. Stop the service: `systemctl stop scitq`.
+2. Install the new binaries (`scitq-server`, `scitq`, and the
+   `scitq-client` that workers pull).
+3. Start the service: `systemctl start scitq`. Schema migrations under
+   `server/migrations/` apply automatically at startup; check
+   `journalctl -u scitq -n 200` for any migration warnings.
+4. Rebuild the UI if you serve it locally (`make ui-build`).
+5. Verify: `scitq --version`, `scitq workflow list`, and a one-off
+   `scitq task list --limit 1` to confirm the server responds.
+
+### Upgrading from a pre-library release (YAML module library)
+
+Releases that shipped the versioned YAML module library — bundled,
+local, and forked modules in a single server-side store — need an
+explicit admin-initiated step to seed the bundled rows. The rest is
+automatic.
+
+**1. Automatic at server startup.** The first start of the new server
+reads `{script_root}/modules/*.yaml` (default `/scripts/modules/`) and
+inserts each file into the `module` table as `origin=local` at path
+derived from the filename. Version comes from the YAML's `version:`
+field, or `0.0.0` if absent. The migration is idempotent — safe to
+leave the legacy directory in place, subsequent restarts are no-ops.
+
+Audit what landed:
+
+```sh
+scitq module list --origin local
+```
+
+Entries addressed at top-level paths (no namespace prefix, e.g. just
+`megahit`, `my_aligner`) are the ones your previous `module:`
+references resolved against. They keep working exactly as before.
+
+**2. Admin-initiated: seed the bundled modules.** Bundled YAML modules
+(shipped with the `scitq2_modules` Python package — `genomics/fastp`,
+`metagenomics/meteor2`, etc.) are **not** auto-imported. Seed them with:
+
+```sh
+# Dry-run — shows what would change
+scitq module upgrade
+
+# Commit
+scitq module upgrade --apply
+```
+
+`module upgrade` requires admin privileges. If the logged-in user is
+not flagged admin, the command returns
+`admin privileges required to upgrade bundled modules`. Grant the flag
+in the database:
+
+```sh
+sudo -u postgres psql scitq2 -c \
+  "UPDATE scitq_user SET is_admin=true WHERE username='<your-user>';"
+```
+
+and re-login (`scitq login --user <your-user> --password …`) — the
+`is_admin` bit is cached at session creation, not re-read per request.
+
+**3. Verify the shape of the library.**
+
+```sh
+scitq module list --tree                 # grouped by namespace
+scitq module list --origin bundled       # the newly-seeded rows
+scitq module origin genomics/fastp       # provenance of a specific path
+```
+
+**4. Update your templates** if they use `import:` (public) paths that
+referenced the old `genetic/` namespace. Releases that introduced the
+library reorganised bundled modules under `genomics/` and
+`metagenomics/`; the `genetic/` namespace is not shipped. Replace in
+each template:
+
+| Before | After |
+|---|---|
+| `import: genetic/fastp` | `import: genomics/fastp` |
+| `import: genetic/multiqc` | `import: genomics/multiqc` |
+| `import: genetic/seqtk_sample` | `import: genomics/seqtk_sample` |
+| `import: genetic/bowtie2_host_removal` | `import: metagenomics/bowtie2_host_removal` |
+| `import: genetic/eskrim` | `import: metagenomics/eskrim` |
+| `import: genetic/megahit` | `import: metagenomics/megahit` |
+| `import: genetic/metaphlan` | `import: metagenomics/metaphlan` |
+| `import: genetic/meteor2` | `import: metagenomics/meteor2` |
+| `import: genetic/meteor2_catalog` | `import: metagenomics/meteor2_catalog` |
+
+Bump the template's `version:` and re-upload. Private modules
+(`module: X.yaml`, resolved against `{script_root}/modules/`) are
+unaffected.
+
+**5. Optional cleanup.** Once no template or active `template_run`
+references a pre-library path, stale `origin=local` rows auto-imported
+in step 1 can be deleted — but there is no operational reason to
+hurry. They cost near-zero and keep replayability of older workflows.
+
+### Troubleshooting
+
+- **`Public module not found: modules/X`** on template run — the
+  template uses `import: modules/X` (library lookup), but the file is
+  private at `{script_root}/modules/X.yaml`. Change to
+  `module: X.yaml` (private loader).
+- **`admin privileges required`** on `module upgrade` / `module fork`
+  / `user create` — see the admin-grant snippet above.
+- **`scitq module list --origin local` rejected as unknown argument** —
+  you are on a pre-`--origin`-filter CLI. Redeploy the `scitq` binary.
+- **`duplicate key value violates unique constraint` during
+  `module upgrade --apply`** — a local upload has collided with a
+  bundled version. Review with `scitq module list --versions <path>`;
+  bump or remove the offending local row.

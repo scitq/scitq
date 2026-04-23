@@ -714,13 +714,14 @@ scitq module upload --path modules/biomscope_align.yaml --as internal/biomscope_
 Lists modules in the library. Output includes an origin marker per row (📚 bundled, 👤 local, 🍴 forked).
 
 ```sh
-scitq module list [--tree] [--versions <path>] [--latest]
+scitq module list [--tree] [--versions <path>] [--latest] [--origin <bundled|local|forked>]
 ```
 
 Options:
 - `--tree`: group rows by folder prefix.
 - `--versions <path>`: show every version at a single path.
 - `--latest`: show only the highest version per path.
+- `--origin <kind>`: filter by origin. Case-insensitive, accepts the full word (`bundled`, `local`, `forked`) or a single letter (`B`, `L`, `F`). Typical use: audit what was auto-imported as `origin=local` during a pre-library upgrade.
 
 Examples:
 
@@ -729,6 +730,8 @@ scitq module list
 scitq module list --tree
 scitq module list --versions genomics/fastp
 scitq module list --latest
+scitq module list --origin local       # pre-library files imported at upgrade
+scitq module list --origin forked      # site-patched rows (for review)
 ```
 
 #### `module download`

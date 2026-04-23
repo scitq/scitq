@@ -314,8 +314,9 @@ type Attr struct {
 
 		List *struct {
 			Tree     bool    `arg:"--tree" help:"Group the list by folder (namespace tree view)"`
-			Versions *string `arg:"--versions" help:"Show every version at this path (e.g. --versions genetic/fastp)"`
+			Versions *string `arg:"--versions" help:"Show every version at this path (e.g. --versions genomics/fastp)"`
 			Latest   bool    `arg:"--latest" help:"Show only the highest version per path"`
+			Origin   *string `arg:"--origin" help:"Filter by origin: bundled, local or forked"`
 		} `arg:"subcommand:list" help:"List modules in the server library"`
 
 		Download *struct {
@@ -1914,6 +1915,9 @@ func (c *CLI) ModuleList() error {
 	if c.Attr.Module.List.Latest {
 		latest := true
 		filter.LatestOnly = &latest
+	}
+	if c.Attr.Module.List.Origin != nil && *c.Attr.Module.List.Origin != "" {
+		filter.Origin = c.Attr.Module.List.Origin
 	}
 	resp, err := c.QC.Client.ListModulesFiltered(ctx, filter)
 	if err != nil {
