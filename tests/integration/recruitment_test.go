@@ -256,10 +256,16 @@ func TestRecruitmentCycle(t *testing.T) {
 			t.Logf("✅ Created step 1 task %d: id=%d", i, taskResp.TaskId)
 		}
 		for i := 0; i < 10; i++ {
-			// Step 2 task, depends on step 1 task
+			// Step 2 task, depends on step 1 task. The leading `sleep 5`
+			// matches step 1 above and exists for the same reason: it keeps
+			// step 2 tasks in 'R' long enough for the polling loop further
+			// down to catch the moment when workers have been recycled to
+			// step 2. Without it, `echo` completes in milliseconds on a
+			// fast CI node, step 2 finishes before the next 1-second poll
+			// fires, and the `workersRecycled` assertion flakes.
 			taskResp, err := qc.SubmitTask(ctx, &pb.TaskRequest{
 				StepId:     &step2Id,
-				Command:    "echo \"goodbye with CPU $CPU\"",
+				Command:    "sleep 5 && echo \"goodbye with CPU $CPU\"",
 				Shell:      &shell,
 				Dependency: []int32{step1TaskIds[i]},
 				Container:  "alpine:latest", // Use a small image to speed up tests
@@ -372,17 +378,26 @@ func TestRecruitmentCycle(t *testing.T) {
 					}
 				}
 				if !workersRecycled {
+					// "Recycled" means: a worker first deployed for step 1
+					// was later observed assigned to step 2. That's a
+					// per-worker historical fact, so accumulate it across
+					// poll iterations rather than checking the snapshot
+					// "all workers currently on step 2" (which is true only
+					// for the brief window between step 1 finishing on the
+					// last task and step 2 finishing on the first task —
+					// easy to miss under parallel-test load). cheap8_id and
+					// exp16_id were captured above when those workers were
+					// first deployed for step 1; if either of them is later
+					// seen on step 2, recycling worked.
 					workers, err := qc.ListWorkers(ctx, &pb.ListWorkersRequest{})
 					require.NoError(t, err)
-					workersRecycled = true
 					for _, w := range workers.Workers {
-						workersRecycled = workersRecycled && (w.StepId != nil && *w.StepId == 2)
-						if !workersRecycled {
+						if (w.WorkerId == cheap8_id || w.WorkerId == exp16_id) &&
+							w.StepId != nil && *w.StepId == 2 {
+							workersRecycled = true
+							log.Printf("✅ Worker %d (originally deployed for step 1) recycled to step 2", w.WorkerId)
 							break
 						}
-					}
-					if workersRecycled {
-						log.Printf("✅ Workers have been recycled to step 2")
 					}
 				}
 				if !steps11to20Done {

@@ -46,7 +46,17 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 	defer tx.Rollback()
 
-	// 1️⃣ Count pending tasks eligible for scheduling
+	// 1️⃣ Promote W→P first: catch tasks whose prerequisites just became
+	// terminal (e.g. a skip-if-exists or reuse hit on a prereq committed in
+	// a concurrent tx). Must happen before the pending-task count below,
+	// otherwise the early-return-when-count==0 path rolls back the promotion
+	// and the dependent task stays stuck in W forever — observable as the
+	// "✅ promoted task N W→P" log line printing on every tick without the
+	// task ever leaving W.
+	s.promoteWaitingTasks(tx)
+
+	// 2️⃣ Count pending tasks eligible for scheduling (includes any tasks
+	// just promoted by promoteWaitingTasks above).
 	var pendingTaskCount int
 	err = tx.QueryRow(`
 		SELECT COUNT(*)
@@ -60,11 +70,13 @@ func (s *taskQueueServer) assignPendingTasks() {
 		log.Printf("⚠️ Failed to count pending tasks: %v", err)
 		return
 	}
-	// Promote W→P: check waiting tasks whose prerequisites are all done.
-	// This catches tasks submitted after a concurrent reuse/skip tx committed.
-	s.promoteWaitingTasks(tx)
 
 	if pendingTaskCount == 0 {
+		// Nothing to assign, but the promotion done above must still be
+		// persisted — commit before letting the deferred Rollback fire.
+		if err := tx.Commit(); err != nil {
+			log.Printf("⚠️ Failed to commit W→P promotions: %v", err)
+		}
 		return
 	}
 

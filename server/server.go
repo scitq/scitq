@@ -257,7 +257,21 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		initialStatus = req.Status
 	}
 
-	err := s.db.QueryRow(
+	// Insert the task and its dependencies atomically. Without this tx,
+	// there is a window between INSERT INTO task and INSERT INTO
+	// task_dependencies where a concurrent assignPendingTasks ->
+	// promoteWaitingTasks goroutine sees the task in W with no
+	// task_dependencies rows; its `NOT EXISTS (...)` is then vacuously true
+	// and the task is promoted W→P even though it has unresolved
+	// prerequisites. Symptom in tests: extra recruiter deployments because
+	// downstream-step tasks appear as "pending" prematurely.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin submit-task tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	err = tx.QueryRowContext(ctx,
 		`WITH inserted AS (
            INSERT INTO task (
              command, shell, container, container_options, step_id,
@@ -285,11 +299,10 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		return nil, fmt.Errorf("failed to submit task: %w", err)
 	}
 
-	log.Printf("✅ Task %d submitted (Command: %s, Container: %s)", taskID, req.Command, req.Container)
-
-	// Insert dependencies if any
+	// Insert dependencies if any — same tx so they become visible together
+	// with the task row.
 	if len(req.Dependency) > 0 {
-		stmt, err := s.db.PrepareContext(ctx, `
+		stmt, err := tx.PrepareContext(ctx, `
 			INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id, accept_failure)
 			VALUES ($1, $2, $3)
 		`)
@@ -306,10 +319,12 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	}
 
 	// If task was submitted as W (has dependencies), check if all prerequisites
-	// are already S — promote to P immediately to avoid race with reuse hits
+	// are already S — promote to P immediately to avoid race with reuse hits.
+	// Done in the same tx so the resulting status is consistent with the
+	// dependencies that were just inserted.
 	if initialStatus == "W" && len(req.Dependency) > 0 {
 		var allDone bool
-		s.db.QueryRowContext(ctx, `
+		if err := tx.QueryRowContext(ctx, `
 			SELECT NOT EXISTS (
 				SELECT 1
 				FROM task_dependencies d
@@ -317,14 +332,26 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 				WHERE d.dependent_task_id = $1
 				  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
 			)
-		`, taskID).Scan(&allDone)
+		`, taskID).Scan(&allDone); err != nil {
+			return nil, fmt.Errorf("failed to check prerequisites: %w", err)
+		}
 		if allDone {
 			// Fix inputs from reuse-hit prerequisites before promoting
-			s.redirectReuseInputsDB(ctx, taskID)
-			s.db.ExecContext(ctx, `UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, taskID)
+			s.redirectReuseInputs(tx, taskID)
+			if _, err := tx.ExecContext(ctx, `UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, taskID); err != nil {
+				return nil, fmt.Errorf("failed to promote task: %w", err)
+			}
 			initialStatus = "P"
-			log.Printf("✅ task %d promoted W→P at submit (all prerequisites already done)", taskID)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit submit-task tx: %w", err)
+	}
+
+	log.Printf("✅ Task %d submitted (Command: %s, Container: %s)", taskID, req.Command, req.Container)
+	if initialStatus == "P" && len(req.Dependency) > 0 {
+		log.Printf("✅ task %d promoted W→P at submit (all prerequisites already done)", taskID)
 	}
 
 	// Increment pending count in step stats aggregator
