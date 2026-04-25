@@ -1,0 +1,95 @@
+name: simka
+version: "1.0.0"
+description: |
+  Reference-free pairwise distance matrices between metagenomes via k-mer
+  spectra (Benoit et al., PeerJ Computer Science 2:e94, 2016). Use as a
+  fan-in / grouped step after a per-sample QC step (e.g. fastp,
+  bowtie2_host_removal): simka reads every sample's fastqs at once and
+  emits Bray-Curtis / Jaccard / Hellinger / Chord / Kulczynski abundance
+  and presence-absence matrices, all reference-free, so results do not
+  depend on whether a species is in any catalog.
+
+  Inputs: paired (`*.1.fastq.gz` / `*.2.fastq.gz` or `*_1.fastq.gz` /
+  `*_2.fastq.gz`) and/or single-end (`*.fastq.gz`) gzipped fastqs in
+  /input. Sample IDs are derived from the file stem.
+
+  Outputs: `mat_*.csv` distance matrices (semicolon-separated, NxN with
+  sample IDs in the header row and first column).
+
+container: quay.io/biocontainers/simka:1.5.3--h077b44d_5
+language: bash
+
+vars:
+  KMER_SIZE: "31"
+  ABUNDANCE_MIN: "2"
+  KMER_ABUNDANCE_MAX: "999999999"
+  MAX_READS: "-1"          # -1 = use all reads (simka default), 0 = auto-estimate, N>0 = cap
+  # By default simka only emits abundance Bray-Curtis + presence/absence
+  # Jaccard. With DISTANCES=all you also get Chord, Hellinger, Whittaker,
+  # Kulczynski, Canberra, Jensen-Shannon, etc. The extra cost is small.
+  DISTANCES: "all"         # "all" | "default"
+  EXTRA_ARGS: ""
+
+command: |
+  set -euo pipefail
+  shopt -s nullglob
+
+  # Build simka's input list: one line per sample, paired R1/R2 separated
+  # by ',' if both present. Sample ID is the fastq stem with the read-pair
+  # suffix stripped.
+  cd /input
+  : > /tmp/simka_input.txt
+  declare -A handled=()
+
+  for r1 in *.1.fastq.gz *_1.fastq.gz; do
+      [ -e "$r1" ] || continue
+      case "$r1" in
+          *.1.fastq.gz) sample="${r1%.1.fastq.gz}"; r2="${sample}.2.fastq.gz" ;;
+          *_1.fastq.gz) sample="${r1%_1.fastq.gz}"; r2="${sample}_2.fastq.gz" ;;
+      esac
+      if [ -f "$r2" ]; then
+          echo "${sample}: /input/${r1} , /input/${r2}" >> /tmp/simka_input.txt
+          handled[$r1]=1; handled[$r2]=1
+      fi
+  done
+
+  for fq in *.fastq.gz; do
+      [ -e "$fq" ] || continue
+      [ -n "${handled[$fq]:-}" ] && continue
+      sample="${fq%.fastq.gz}"
+      echo "${sample}: /input/${fq}" >> /tmp/simka_input.txt
+  done
+
+  echo "=== simka input list ==="
+  cat /tmp/simka_input.txt
+  test -s /tmp/simka_input.txt
+
+  case "{DISTANCES}" in
+      all)     DIST_FLAGS="-simple-dist -complex-dist" ;;
+      default) DIST_FLAGS="" ;;
+      *)       DIST_FLAGS="{DISTANCES}" ;;
+  esac
+
+  mkdir -p /tmp/simka_tmp
+  simka \
+      -in /tmp/simka_input.txt \
+      -out /output \
+      -out-tmp /tmp/simka_tmp \
+      -nb-cores ${CPU} \
+      -max-memory $(( ${MEM:-8} * 1024 )) \
+      -kmer-size {KMER_SIZE} \
+      -abundance-min {ABUNDANCE_MIN} \
+      -abundance-max {KMER_ABUNDANCE_MAX} \
+      -max-reads {MAX_READS} \
+      $DIST_FLAGS \
+      {EXTRA_ARGS} \
+      2>&1 | tee /output/simka.log
+
+outputs:
+  matrices: "mat_*.csv*"
+  log: "*.log"
+
+task_spec:
+  cpu: 16
+  mem: 60
+  prefetch: "100%"

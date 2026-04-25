@@ -308,7 +308,7 @@ type Attr struct {
 	Module *struct {
 		Upload *struct {
 			Path  string  `arg:"--path,required" help:"Path to the module YAML file"`
-			As    *string `arg:"--as" help:"Namespace path to register the module under (defaults to the filename without extension, e.g. 'genetic/fastp')"`
+			As    *string `arg:"--as" help:"Full module name to register under, including any folder segments (e.g. 'metagenomics/simka' — not 'metagenomics/'). Defaults to the local filename without extension."`
 			Force bool    `arg:"--force" help:"Overwrite an existing module at the same (path, version)"`
 		} `arg:"subcommand:upload" help:"Upload a YAML module to the server's module library"`
 
@@ -1797,7 +1797,12 @@ func (c *CLI) ModuleUpload() error {
 	// as a flat upload without an explicit namespace).
 	filename := filepath.Base(c.Attr.Module.Upload.Path)
 	if c.Attr.Module.Upload.As != nil && *c.Attr.Module.Upload.As != "" {
-		filename = *c.Attr.Module.Upload.As
+		as := *c.Attr.Module.Upload.As
+		if strings.HasSuffix(as, "/") {
+			return fmt.Errorf("--as must include the module name, not just a folder (got %q — did you mean %q?)",
+				as, as+strings.TrimSuffix(filepath.Base(c.Attr.Module.Upload.Path), filepath.Ext(c.Attr.Module.Upload.Path)))
+		}
+		filename = as
 	}
 
 	_, err = c.QC.Client.UploadModule(ctx, &pb.UploadModuleRequest{
