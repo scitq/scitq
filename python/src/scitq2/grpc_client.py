@@ -103,7 +103,8 @@ class Scitq2Client:
         )
         self.stub = taskqueue_pb2_grpc.TaskQueueStub(self.channel)
 
-    def create_workflow(self, name: str, maximum_workers: Optional[int] = None, status: Optional[str] = None, live: bool = False) -> int:
+    def create_workflow(self, name: str, maximum_workers: Optional[int] = None, status: Optional[str] = None, live: bool = False,
+                        run_strategy: Optional[str] = None) -> int:
         """
         Creates a new workflow on the server.
 
@@ -123,6 +124,8 @@ class Scitq2Client:
             request.status = status
         if live:
             request.live = True
+        if run_strategy is not None:
+            request.run_strategy = run_strategy
         response = self.stub.CreateWorkflow(request)
         return response.workflow_id
 

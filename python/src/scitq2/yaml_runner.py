@@ -750,8 +750,17 @@ def _resolve_adhoc_container(step_def: dict, workflow, registry: str = "gmtscien
 # ---------------------------------------------------------------------------
 
 def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = False,
-                    itervar: Optional[Dict] = None):
-    """Resolve 'step_name.output_name' or 'iterator.group' to inputs, or pass through raw URIs."""
+                    itervar: Optional[Dict] = None,
+                    iterations: Optional[List[Dict]] = None):
+    """Resolve 'step_name.output_name' or 'iterator.group' to inputs, or pass through raw URIs.
+
+    For per-sample steps, `itervar` carries the current iteration. For grouped
+    (fan-in) steps `itervar` is None but `iterations` carries the full list of
+    iterations — an iterator-shaped reference (e.g. `sample.fastqs`) on a
+    grouped step then resolves to the union of that file group across every
+    sample, sparing the workflow author from inserting a no-op pass-through
+    step purely to give the resolver an upstream Step to look up.
+    """
     if not input_ref:
         return None
     # Raw URI — pass through as-is (e.g. "s3://bucket/path/", "azure://container/path/")
@@ -759,29 +768,54 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
         return input_ref
     parts = input_ref.split('.')
 
-    # Check if this is an iterator reference (e.g. sample.fastqs or sample)
+    # Pick the iteration source: a single current itervar for per-sample
+    # resolution, or the full iterations list when this is a grouped step.
+    iter_pool: Optional[List[Dict]] = None
     if itervar is not None and '_sample' in itervar:
-        sample = itervar['_sample']
+        iter_pool = [itervar]
+    elif grouped and iterations:
+        iter_pool = iterations
+
+    if iter_pool:
+        # The iterator name is the same across all iterations — read it once.
         iter_name = None
-        # Find the iterator name from itervar keys (the non-underscore key)
-        for k, v in itervar.items():
+        for k in iter_pool[0]:
             if not k.startswith('_'):
                 iter_name = k.lower()
                 break
         if iter_name and parts[0].lower() == iter_name:
             if len(parts) == 2:
-                # sample.fastqs — named file group
+                # sample.fastqs — named file group, collected across iter_pool
                 group_name = parts[1]
-                if hasattr(sample, 'file_groups') and group_name in sample.file_groups:
-                    return sample.file_groups[group_name]
-                # Fallback: check direct attribute (v1 compat: sample.fastqs)
-                if hasattr(sample, group_name):
-                    return getattr(sample, group_name)
-                raise ValueError(f"Iterator '{parts[0]}' has no file group '{group_name}' "
-                                 f"(available: {list(sample.file_groups.keys()) if hasattr(sample, 'file_groups') else ['fastqs']})")
+                collected = []
+                for iv in iter_pool:
+                    sample = iv.get('_sample')
+                    if sample is None:
+                        continue
+                    if hasattr(sample, 'file_groups') and group_name in sample.file_groups:
+                        collected.extend(sample.file_groups[group_name])
+                    elif hasattr(sample, group_name):
+                        val = getattr(sample, group_name)
+                        if isinstance(val, (list, tuple)):
+                            collected.extend(val)
+                        else:
+                            collected.append(val)
+                if not collected:
+                    sample0 = iter_pool[0].get('_sample')
+                    available = (list(sample0.file_groups.keys())
+                                 if sample0 is not None and hasattr(sample0, 'file_groups')
+                                 else ['fastqs'])
+                    raise ValueError(f"Iterator '{parts[0]}' has no file group '{group_name}' "
+                                     f"(available: {available})")
+                return collected
             elif len(parts) == 1:
                 # sample — all files (unnamed group / v1 filter:)
-                return sample.fastqs
+                collected = []
+                for iv in iter_pool:
+                    sample = iv.get('_sample')
+                    if sample is not None:
+                        collected.extend(sample.fastqs)
+                return collected
 
     # Step reference
     if len(parts) == 2:
@@ -978,6 +1012,7 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
                 params, itervar: Optional[Dict] = None, is_fan_in: bool = False,
                 default_language: str = 'sh', script_root: Optional[str] = None,
                 pipeline_dir: Optional[str] = None, workflow_vars: Optional[Dict] = None,
+                iterations: Optional[List[Dict]] = None,
                 verbose: bool = False) -> Step:
     """Build a single step from a YAML definition."""
 
@@ -1021,7 +1056,7 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
                     kwargs[key] = _resolve_field(val, params, itervar)
             input_ref = step_def.get('inputs')
             if input_ref:
-                kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in, itervar=itervar)
+                kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in, itervar=itervar, iterations=iterations)
             if 'worker_pool' in step_def and isinstance(step_def['worker_pool'], dict):
                 kwargs['worker_pool'] = _build_worker_pool(step_def['worker_pool'], params)
             sample = itervar.get('_sample') if itervar else None
@@ -1085,13 +1120,13 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
         input_ref = _resolve_field(input_ref, params, itervar, step_fields=step_def, extra_vars=extra_vars)
         if isinstance(input_ref, list):
             # Multiple input references — resolve each and combine with +
-            resolved = [_resolve_inputs(ref.strip(), step_map, grouped=is_fan_in, itervar=itervar) for ref in input_ref]
+            resolved = [_resolve_inputs(ref.strip(), step_map, grouped=is_fan_in, itervar=itervar, iterations=iterations) for ref in input_ref]
             combined = resolved[0]
             for r in resolved[1:]:
                 combined = combined + r
             step_kwargs['inputs'] = combined
         elif isinstance(input_ref, str):
-            step_kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in, itervar=itervar)
+            step_kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in, itervar=itervar, iterations=iterations)
     elif sample is not None and step_def.get('_is_first_step'):
         # v1 backward compat: implicit first step input from iterator
         step_kwargs['inputs'] = sample.fastqs
@@ -1246,6 +1281,11 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     # Live mode for optimization workflows
     if data.get('optimize'):
         wf_kwargs['live'] = True
+
+    # Workflow-level run strategy (B=Batch default, T=Thread/sticky, D=Debug,
+    # Z=Suspended). Friendly words (batch|thread|debug|suspended) accepted.
+    if data.get('run_strategy'):
+        wf_kwargs['run_strategy'] = data['run_strategy']
 
     workflow = Workflow(**wf_kwargs)
 
@@ -1443,6 +1483,7 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         step = _build_step(workflow, step_def, step_map, params, is_fan_in=True,
                            default_language=default_language, script_root=script_root,
                            pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
+                           iterations=iterations,
                            verbose=verbose)
         if step is not None:
             step_map[step.name] = step

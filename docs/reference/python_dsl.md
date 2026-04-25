@@ -6,7 +6,7 @@
 
 Check if all the URI provided points to a file
 
-### `cond(*conditions: tuple[bool, any], default: Optional[<built-in function any>] = None) -> <built-in function any>`
+### `cond(*conditions: tuple[bool, any], default: any | None = None) -> <built-in function any>`
 
 Switch-like function to assign a value to a variable on the first True condition.
 
@@ -14,8 +14,7 @@ Args:
     *conditions: Tuples of (condition, value) where condition is a boolean
                  and value is the value to assign if the condition is True.
                  If value is a callable (e.g. a lambda), it will be called
-                 only when its condition is the first True match, enabling
-                 lazy evaluation.
+                 only when its condition is True, enabling lazy evaluation.
     default: Optional value to return if no conditions are True. If not provided,
              a ValueError will be raised if no conditions match.
              Can also be a callable for lazy evaluation.
@@ -23,57 +22,75 @@ Args:
 Returns:
     A value based on the first True condition.
 
-#### Lazy evaluation with lambdas
-
-Because Python evaluates all function arguments before calling the function,
-all values in `cond()` tuples are evaluated eagerly, even if their condition
-is False. This can cause errors when a value references a variable that may
-not exist:
-
-```python
-# This will raise an error if seqtk is not defined, even though the
-# condition may be False:
-inputs=cond(
-    (params.depth is not None, seqtk.output("fastqs")),
-    default=humanfilter.output("fastqs")
-)
-```
-
-To avoid this, wrap values in lambdas. `cond()` will only call the lambda
-when its condition matches:
-
-```python
-inputs=cond(
-    (params.depth is not None, lambda: seqtk.output("fastqs")),
-    default=lambda: humanfilter.output("fastqs")
-)
-```
-
-Non-callable values still work as before, so this is fully backward-compatible.
-
-### `run(func: Callable)`
+### `run(func: Callable, live: bool = False)`
 
 Run a workflow function that may optionally take a Params class instance.
 
 Behavior:
-- `--params`: Outputs the parameter schema as JSON.
-- `--values`: Parses values as JSON and runs the workflow.
-- `--metadata`: Extracts workflow metadata (name, version, description) via static AST inspection.
-- `--standalone`: Explicitly set the workflow to Running after creation. This is the default when running outside the template engine (i.e. when `SCITQ_TEMPLATE_RUN_ID` is not set).
-- `--debug`: Run in Debug mode with interactive task selection. Limits recruitment to 1 worker; original maximum workers is restored when exiting debug to normal execution.
-- `--dry-run`: Create the workflow, verify it compiles correctly, then delete it without launching anything.
+- --params: Outputs the parameter schema as JSON.
+- --values: Parses values and runs the workflow.
+- --metadata: Extracts workflow metadata (static AST inspection).
+- --live: Keep the DSL running for dynamic task submission (optimization loops).
 - No args:
     - If function takes no parameter, calls directly.
     - Otherwise, prints usage error.
 
+When live=True (or --live flag), the workflow function receives a LiveContext
+as its second argument: func(workflow, ctx) or func(params, workflow, ctx).
+
 
 ## Classes
+
+## `LiveContext`
+
+Provides wait/observe/stop/kill primitives for live DSL mode.
+
+The LiveContext connects to a running scitq server and lets the DSL
+script react to task results, submit new tasks, and control execution.
+### `is_done(self, task) -> bool`
+
+  Check if a task has reached terminal status.
+
+### `kill(self, task)`
+
+  Send SIGKILL (hard kill) to a running task.
+
+### `observe(self, task) -> float | None`
+
+  Non-blocking: return the current quality_score of a task, or None.
+
+### `stop(self, task, grace_period: int | None = None)`
+
+  Send SIGTERM (graceful stop) to a running task.
+  grace_period: seconds before SIGKILL (default: 10).
+
+### `wait(self, task) -> float | None`
+
+  Block until a task reaches terminal status (S or F).
+  
+  Returns the quality_score on success, None if no quality defined.
+  Raises RuntimeError on failure.
+  When a task succeeds but quality_score is not yet populated (async extraction),
+  polls a few more times to wait for it.
+
+### `wait_all(self, tasks) -> List[Tuple[int, float | None]]`
+
+  Wait for all tasks to reach terminal status.
+  
+  Returns list of (task_id, quality_score) pairs.
+  Failed tasks have quality_score = None.
+  For succeeded tasks, waits briefly for async quality extraction.
 
 ## `Outputs`
 
 Represents the declarative outputs of a Step, which can be used in other Steps.
-Note that the publish attribute is attached to Task so it may vary within a Step, 
-but not globs (e.g. named output), which should remain consistent for a given Step
+Note that the publish attribute is attached to Task so it may vary within a Step,
+but not globs (e.g. named output), which should remain consistent for a given Step.
+
+publish can be:
+- a full URI string (e.g. "azure://rnd/results/project/") — used as-is
+- True — uses the workflow's publish_root with auto-generated subpath
+- a relative path (no "://") — appended to the workflow's publish_root
 ## `Param`
 
 _No documentation available._
@@ -86,6 +103,10 @@ _No documentation available._
 _No documentation available._
 
 ### `integer(**kwargs)`
+
+_No documentation available._
+
+### `path(**kwargs)`
 
 _No documentation available._
 
@@ -120,6 +141,27 @@ _No documentation available._
 
 _No documentation available._
 
+## `Quality`
+
+Defines quality variable extraction and scoring for a Step.
+
+Variables are regex patterns with one capture group, applied to task stdout/stderr.
+
+Single-objective (backward compatible):
+    Quality(variables={"auc": r"auc: ([0-9.]+)"}, formula="auc")
+
+Multi-objective:
+    Quality(
+        variables={"train_auc": r"train_auc: ([0-9.]+)", "test_auc": r"test_auc: ([0-9.]+)"},
+        objectives=[
+            {"formula": "test_auc", "direction": "maximize"},
+            {"formula": "test_auc - train_auc", "direction": "maximize"},
+        ],
+    )
+### `to_json(self) -> str`
+
+_No documentation available._
+
 ## `Raw`
 
 Default language: run the command as-is without shell injection or helpers.
@@ -127,7 +169,7 @@ Default language: run the command as-is without shell injection or helpers.
 
 _No documentation available._
 
-### `executable(self) -> Optional[str]`
+### `executable(self) -> str | None`
 
 _No documentation available._
 
@@ -155,7 +197,7 @@ _No documentation available._
 ## `URI`
 
 A utility class to discover and group URIs (e.g. rclone resources specified in scitq style) from a remote source.
-### `find(uri_base: str, group_by: Optional[str] = None, pattern: Optional[str] = None, filter: Optional[str] = None, event_name: Optional[str] = None, field_map: Optional[Dict[str, str]] = None) -> Iterator[scitq2.uri.URIObject]`
+### `find(uri_base: str, group_by: str | None = None, pattern: str | None = None, filter: str | None = None, event_name: str | None = None, field_map: Dict[str, str] | None = None) -> Iterator[scitq2.uri.URIObject]`
 
   Discover and group URIs from a remote source.
   
@@ -169,6 +211,22 @@ A utility class to discover and group URIs (e.g. rclone resources specified in s
   
   Returns:
       Dict of event tag → URIObject
+
+### `glob(uri_pattern: str) -> List[str]`
+
+  Return a flat list of URIs matching a glob pattern.
+  
+  Example:
+      files = URI.glob("azure://bucket/data/*.bam")
+
+### `glob_groups(uri_pattern: str) -> List[scitq2.uri.URIObject]`
+
+  Discover files and group them by folder.
+  
+  Returns a list of URIObject with 'name' (folder name) and 'uris' (list of matching URIs).
+  
+  Example:
+      samples = URI.glob_groups("azure://bucket/data/*/*.fastq.gz")
 
 ## `W`
 
@@ -217,16 +275,16 @@ Example:
         max_recruited=10,
         task_batches=2
     )
-### `build_recruiter(self, task_spec, default_provider: Optional[str] = None, default_region: Optional[str] = None) -> tuple[str, dict]`
+### `build_recruiter(self, task_spec, default_provider: str | None = None, default_region: str | None = None) -> tuple[str, dict]`
 
 _No documentation available._
 
-### `clone_with(self, *match: scitq2.recruit.FieldExpr, max_recruited: Optional[int] = None, task_batches: Optional[int] = None, timeout: Optional[int] = None) -> 'WorkerPool'`
+### `clone_with(self, *match: scitq2.recruit.FieldExpr, max_recruited: int | None = None, task_batches: int | None = None, timeout: int | None = None) -> 'WorkerPool'`
 
   Returns a copy of the current WorkerPool with optionally overridden fields.
   Any provided arguments override the corresponding fields in the original pool.
 
-### `compile_filter(self, default_provider: Optional[str] = None, default_region: Optional[str] = None) -> str`
+### `compile_filter(self, default_provider: str | None = None, default_region: str | None = None) -> str`
 
   Compiles the worker pool's match expressions into a protofilter string.
 
@@ -245,8 +303,12 @@ Workflow and there can only be one Workflow object in a scitq DSL script.
 - region: instance region (e.g. 'swedencentral' for Microsoft or 'GRA11' for OVH)
 - naming_strategy: function to define how workflow and step names are constructed (default to dot_join),
 - task_naming_strategy: function to define how task names are constructed (default to dot_join),
-- retry: default number of retry for each task in the workflow (can be overridden at step level)
-### `Step(self, *, name: str, command: str, container: str, tag: Optional[str] = None, inputs: Union[str, scitq2.workflow.OutputBase, List[str], List[scitq2.workflow.OutputBase], NoneType] = None, outputs: Optional[scitq2.workflow.Outputs] = None, resources: Union[scitq2.uri.Resource, str, List[scitq2.uri.Resource], List[str], NoneType] = None, language: Optional[scitq2.language.Language] = None, worker_pool: Optional[scitq2.recruit.WorkerPool] = None, task_spec: Optional[scitq2.workflow.TaskSpec] = None, naming_strategy: Optional[<built-in function callable>] = None, depends: Union[ForwardRef('Step'), List[ForwardRef('Step')], NoneType] = None, retry: Optional[int] = None) -> scitq2.workflow.Step`
+- container: (default step value) Docker container image for steps (can be overridden at step level),
+- publish_root: base URI for publishing outputs (e.g. "azure://rnd/results/project/"). Steps can then use Outputs(publish=True) or Outputs(publish="subdir/"),
+- resources: default resources for all steps (can be overridden at step level),
+- retry: default number of retry for each task in the workflow (can be overridden at step level),
+- run_strategy: workflow scheduling mode. Accepts a single-letter DB code ('B'/'T'/'D'/'Z') or a friendly word ('batch'/'thread'/'debug'/'suspended'). Default: server picks 'B' (batch). 'T' (thread) requests sticky scheduling — currently a partially-implemented feature: the field is plumbed through to the database, but the sticky-scheduling and worker-side I/O short-circuit logic is still pending (see specs/sticky_thread_run_strategy.md), so 'T' behaves like 'B' until that ships
+### `Step(self, *, name: str, command: str, container: str | None = None, tag: str | None = None, inputs: str | scitq2.workflow.OutputBase | List[str] | List[scitq2.workflow.OutputBase] | None = None, outputs: scitq2.workflow.Outputs | None = None, resources: scitq2.uri.Resource | str | List[scitq2.uri.Resource] | List[str] | None = None, language: scitq2.language.Language | None = None, worker_pool: scitq2.recruit.WorkerPool | None = None, task_spec: scitq2.workflow.TaskSpec | None = None, naming_strategy: callable | None = None, depends: ForwardRef('Step') | List[ForwardRef('Step')] | None = None, skip_if_exists: bool | None = None, retry: int | None = None, accept_failure: bool = False, quality: scitq2.workflow.Quality | None = None) -> <function Workflow.Step at 0x10aea7cc0>`
 
   Add a Step to the Workflow with a single Task.
   If the Step already exists with the same name, the Task is added to the existing Step.
@@ -262,11 +324,9 @@ Workflow and there can only be one Workflow object in a scitq DSL script.
   - task_spec: optional task specification for the step (overrides workflow default),
   - naming_strategy: optional naming strategy for the step (overrides workflow default),
   - depends: optional dependencies for the task (can be Step or list of Steps),
-  - skip_if_exists: optional bool to skip the task if output already contains files,
-  - retry: optional number of retries for the task (overrides workflow default),
-  - accept_failure: if True, dependencies are satisfied even when prerequisites fail terminally (all retries exhausted). Default: False
+  - retry: optional number of retries for the task (overrides workflow default)
 
-### `compile(self, client: scitq2.grpc_client.Scitq2Client) -> int`
+### `compile(self, client: scitq2.grpc_client.Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: str | None = None, opportunistic: bool = False, untrusted: List[str] | None = None) -> int`
 
 _No documentation available._
 
@@ -275,7 +335,7 @@ _No documentation available._
 
 ## Functions
 
-### `ENA(identifier: str, group_by: str, filter: Optional[scitq2.biology.SampleFilter] = None, use_ftp: bool = False, use_aspera: bool = False, layout: str = 'AUTO') -> List[scitq2.biology.Sample]`
+### `ENA(identifier: str, group_by: str, filter: scitq2.biology.SampleFilter | None = None, use_ftp: bool = False, use_aspera: bool = False, layout: str = 'AUTO') -> List[scitq2.biology.Sample]`
 
 A Constructor of Sample objects extracted from a public project present in EMBL-EBI ENA https://www.ebi.ac.uk/ena/
 - identifier: the project accession from which the Samples are created,
@@ -285,7 +345,7 @@ A Constructor of Sample objects extracted from a public project present in EMBL-
 - use_aspera: Force Aspera transport in scitq URI (scitq provides sane defaults otherwise),
 - layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred).
 
-### `FASTQ(roots: Union[Iterable[str], str], *, group_by: str = 'folder', layout: Literal['AUTO', 'PAIRED', 'SINGLE'] = 'AUTO', only_read1: Optional[bool] = None, strict_pairs: bool = False, allow_unknown: bool = True, study_vote: Literal['majority', 'all'] = 'majority', filter: Optional[str] = None, pattern: Optional[str] = None) -> List[scitq2.biology.Sample]`
+### `FASTQ(roots: Iterable[str] | str, *, group_by: str = 'folder', layout: Literal['AUTO', 'PAIRED', 'SINGLE'] = 'AUTO', only_read1: bool | None = None, strict_pairs: bool = False, allow_unknown: bool = True, study_vote: Literal['majority', 'all'] = 'majority', filter: str | None = None, pattern: str | None = None) -> List[scitq2.biology.Sample]`
 
 High-level FASTQ source on top of URI.find().
 
@@ -296,13 +356,14 @@ Returns a list of sample dicts with keys:
   - reads: { 'R1': [...], 'R2': [...] } when effective_layout == 'PAIRED'
   - fastqs: list[str] (final selection after enforcement)
 
-### `SRA(identifier: str, group_by: str, filter: Optional[scitq2.biology.SampleFilter] = None, layout: str = 'AUTO') -> List[scitq2.biology.Sample]`
+### `SRA(identifier: str, group_by: str, filter: scitq2.biology.SampleFilter | None = None, layout: str = 'AUTO', download_method: str = 'sra-aws') -> List[scitq2.biology.Sample]`
 
 A Constructor of Sample objects extracted from a public project present in NIH NCBI SRA https://www.ncbi.nlm.nih.gov/sra
 - identifier: the project accession from which the Samples are created,
 - group_by: how to group data information in what constitutes a base object, is the sample based upon the sample_accession, or the run_accession, or grouped by another variable,
 - filter: See SampleFilter on how to use this,
-- layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred). 
+- layout: Specify layout (PAIRED/SINGLE) manually - if set to SINGLE, takes only r1 read if the real layout is PAIRED, default to AUTO (layout is inferred).
+- download_method: specify the download method to use for FASTQ retrieval. Options are 'sra-tools' or 'sra-aws'. 
 
 With SRA, transport is always sra-tools, maybe not the most performant but the most reliable tranport.
 
@@ -396,7 +457,7 @@ SampleFilter can use the following atributes from S:
 ## `URI`
 
 A utility class to discover and group URIs (e.g. rclone resources specified in scitq style) from a remote source.
-### `find(uri_base: str, group_by: Optional[str] = None, pattern: Optional[str] = None, filter: Optional[str] = None, event_name: Optional[str] = None, field_map: Optional[Dict[str, str]] = None) -> Iterator[scitq2.uri.URIObject]`
+### `find(uri_base: str, group_by: str | None = None, pattern: str | None = None, filter: str | None = None, event_name: str | None = None, field_map: Dict[str, str] | None = None) -> Iterator[scitq2.uri.URIObject]`
 
   Discover and group URIs from a remote source.
   
@@ -410,6 +471,22 @@ A utility class to discover and group URIs (e.g. rclone resources specified in s
   
   Returns:
       Dict of event tag → URIObject
+
+### `glob(uri_pattern: str) -> List[str]`
+
+  Return a flat list of URIs matching a glob pattern.
+  
+  Example:
+      files = URI.glob("azure://bucket/data/*.bam")
+
+### `glob_groups(uri_pattern: str) -> List[scitq2.uri.URIObject]`
+
+  Discover files and group them by folder.
+  
+  Returns a list of URIObject with 'name' (folder name) and 'uris' (list of matching URIs).
+  
+  Example:
+      samples = URI.glob_groups("azure://bucket/data/*/*.fastq.gz")
 
 ## `URIObject`
 

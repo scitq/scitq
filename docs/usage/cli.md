@@ -411,7 +411,7 @@ Options:
 - `--name` (required): human-readable name of the workflow.  
 - `--run-strategy`: controls how tasks are distributed between workers.  
   - `B`: **Batch-wise** (default) — workers focus on completing one step before moving to the next.  
-  - `T`: **Thread-wise** — workers advance tasks as far as possible across steps.  
+  - `T`: **Thread-wise** — sticky scheduling: workers carry a thread of related tasks (typically a per-sample chain plus its downstream grouped step) end-to-end on the same machine, skipping the workspace round-trip between sticky tasks. *Currently the database column and CLI flag are wired through but the actual sticky scheduling and worker-side I/O short-circuit are not yet implemented — `T` behaves like `B` at runtime until they ship. See `specs/sticky_thread_run_strategy.md` for the design.*  
   - `D`: **Debug** mode — tasks are not assigned automatically; use the DSL `--debug` flag to enter interactive task selection. Recruitment is limited to 1 worker. When exiting debug to normal execution, the original maximum workers setting is restored.
   - `Z`: **Suspended** — workflow is created but not yet launched.  
 - `--maximum-workers`: caps the total number of workers the workflow can use.

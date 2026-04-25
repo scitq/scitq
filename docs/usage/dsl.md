@@ -85,6 +85,9 @@ The Workflow() constructor takes several mandatory attributes:
 
 Here we added two facultative attributes, a default language for the command argument of each Step, here `Shell("sh")` (which will be busybox sh in alpine), and a worker pool definition.
 
+Other useful optional attributes:
+- `run_strategy`: workflow scheduling mode. Accepts either a single-letter DB code (`"B"`, `"T"`, `"D"`, `"Z"`) or a friendly word (`"batch"`, `"thread"`, `"debug"`, `"suspended"`). Default: server picks `"B"` (batch). `"T"` (thread / sticky) requests sticky scheduling for sequential per-sample chains plus their downstream grouped step — the field is plumbed through to the database today, but the server-side sticky-scheduling and worker-side I/O short-circuit logic is still pending (see `specs/sticky_thread_run_strategy.md`); setting `run_strategy="thread"` now makes your workflow opt in automatically once that ships.
+
 Defining a worker pool is recommanded in all workflows as it creates recruiters automatically for all your steps. Here we define the most simple WorkerPool, the local worker pool: `WorkerPool(W.provider=="local.local", W.region=="local")`, which recruits any manually deployed worker.
 
 ### A minimal Step

@@ -391,6 +391,26 @@ Multiple inputs are combined with a list (mixing step references and URIs is all
     grouped: true
 ```
 
+A fan-in step can also consume the iterator's per-sample inputs directly, without a per-sample step in between. The runner expands `<itervar>.<group>` (e.g. `sample.fastqs`) on a `grouped: true` step to the union of that file group across every iteration:
+
+```yaml
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.input_uri}"
+  group_by: folder
+  fastqs: "*.f*q.gz"
+
+steps:
+  # No per-sample step here — the grouped step pulls the iterator's
+  # fastqs directly across all samples.
+  - import: metagenomics/simka
+    inputs: sample.fastqs
+    grouped: true
+```
+
+This is the right pattern when the only thing you want to do with the per-sample fastqs is feed them to a many-to-one tool (simka, k-mer comparisons, joint variant calling, etc.) — no need for a no-op pass-through step purely to register an upstream output for the resolver. (See note: until this support landed, an explicit `name: stage` step that did `mv /input/*.fastq.gz /output/` was required between the iterator and the grouped step.)
+
 ### Outputs
 
 Named outputs let downstream steps reference specific file patterns:
@@ -446,6 +466,25 @@ When a task has no `publish` path, its `/output/` directory is uploaded to the w
 When `publish` is defined, successful tasks upload to the publish path instead of the workspace. However, **failed tasks always upload to the workspace** (never to publish), so their output can be inspected for debugging.
 
 If omitted, task outputs are only stored locally on the worker and lost when it is destroyed. Multi-step workflows need either `workspace` or `publish` on every step so that downstream tasks can find their inputs. Using `workspace` is the standard approach; relying on `publish` alone works but is not recommended (publish is meant for final results, not intermediate data).
+
+### Run strategy
+
+The optional `run_strategy:` field at the top level of the workflow tells the server how to schedule tasks across workers. It accepts either a single-letter DB code (`B`, `T`, `D`, `Z`) or a friendly word (`batch`, `thread`, `debug`, `suspended`). Default when omitted: `batch`.
+
+```yaml
+name: my-workflow
+version: 1.0.0
+run_strategy: thread     # or "T", or "batch", or "B", or omitted
+```
+
+| value | meaning |
+|---|---|
+| `batch` (`B`) | **Default.** Workers pick up tasks step-by-step: one step's tasks complete on a worker pool, outputs round-trip through the workspace, then the next step's tasks can land on any free worker. |
+| `thread` (`T`) | Sticky scheduling: a thread of related tasks (typically per-sample chains, optionally followed by a co-located grouped step) is pinned to one worker, and the workspace round-trip between sticky tasks is skipped. *Currently a partially-implemented feature: the field is plumbed through to the database, but the sticky scheduling and worker-side I/O short-circuit logic still needs to ship before `T` behaves differently from `B` at runtime. See `specs/sticky_thread_run_strategy.md` for the design.* |
+| `debug` (`D`) | Caps `maximum_workers` to 1 and starts the workflow paused — useful for stepping through a template by hand. |
+| `suspended` (`Z`) | Workflow is created but no tasks are dispatched. Useful when you want to inspect/edit before kicking off. |
+
+For per-sample workflows that end with a many-to-one fan-in (e.g. simka, joint variant calling) and where the per-sample data is large, `run_strategy: thread` is the eventual escape hatch from the workspace round-trip — once the server-side support lands. Today, set it if you want the workflow record to advertise the intent and pick up the optimisation automatically when the server upgrades.
 
 ### Resources
 

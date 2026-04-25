@@ -444,6 +444,29 @@ def underscore_join(*args: str) -> str:
     """
     return "_".join(filter(None, args))
 
+_RUN_STRATEGY_ALIASES = {
+    "batch": "B", "b": "B",
+    "thread": "T", "t": "T",
+    "debug": "D", "d": "D",
+    "suspended": "Z", "z": "Z",
+}
+
+
+def _normalise_run_strategy(value: Optional[str]) -> Optional[str]:
+    """Accept either a single-letter code (B/T/D/Z) or a friendly word
+    (batch/thread/debug/suspended) and return the single-letter code the
+    server expects. None → None (server picks its default, currently 'B')."""
+    if value is None:
+        return None
+    key = value.strip().lower()
+    if key in _RUN_STRATEGY_ALIASES:
+        return _RUN_STRATEGY_ALIASES[key]
+    raise ValueError(
+        f"unknown run_strategy {value!r}; expected one of "
+        f"{sorted(set(_RUN_STRATEGY_ALIASES.values()) | set(_RUN_STRATEGY_ALIASES.keys()))}"
+    )
+
+
 def dot_join(*args: str) -> str:
     """
     Joins multiple strings with dots, ignoring empty strings.
@@ -606,7 +629,8 @@ class Workflow:
     - container: (default step value) Docker container image for steps (can be overridden at step level),
     - publish_root: base URI for publishing outputs (e.g. "azure://rnd/results/project/"). Steps can then use Outputs(publish=True) or Outputs(publish="subdir/"),
     - resources: default resources for all steps (can be overridden at step level),
-    - retry: default number of retry for each task in the workflow (can be overridden at step level)
+    - retry: default number of retry for each task in the workflow (can be overridden at step level),
+    - run_strategy: workflow scheduling mode. Accepts a single-letter DB code ('B'/'T'/'D'/'Z') or a friendly word ('batch'/'thread'/'debug'/'suspended'). Default: server picks 'B' (batch). 'T' (thread) requests sticky scheduling — currently a partially-implemented feature: the field is plumbed through to the database, but the sticky-scheduling and worker-side I/O short-circuit logic is still pending (see specs/sticky_thread_run_strategy.md), so 'T' behaves like 'B' until that ships
     """
     last_created = None
 
@@ -615,7 +639,7 @@ class Workflow:
                  container: Optional[str] = None, publish_root: Optional[str] = None,
                  resources: Optional[Union[Resource, str, List[Resource], List[str]]] = None,
                  skip_if_exists: bool = False, retry: Optional[int] = None,
-                 live: bool = False):
+                 live: bool = False, run_strategy: Optional[str] = None):
         self.name = name
         self.live = live
         self.tag = tag
@@ -642,6 +666,9 @@ class Workflow:
             self.resources = list(resources)
         self.skip_if_exists = skip_if_exists
         self.retry = retry
+        # Accept either a single-letter DB code (B/T/D/Z) or a friendly word
+        # (batch/thread/debug/suspended). None → server default ('B').
+        self.run_strategy = _normalise_run_strategy(run_strategy)
         if Workflow.last_created is not None:
             print(f"⚠️ Warning: it is highly recommended to avoid declaring several Workflow in a code, you have previously declared {Workflow.last_created.name} and you redeclare {self.name}", file=sys.stderr)
         Workflow.last_created = self
@@ -733,6 +760,7 @@ class Workflow:
                     maximum_workers=1 if workflow_status == "D" else self.max_recruited,
                     status=workflow_status,
                     live=self.live,
+                    run_strategy=self.run_strategy,
                 )
                 self.full_name = candidate_name
                 break
