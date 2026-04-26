@@ -557,18 +557,34 @@ export async function getJobStatus(jobIds: number[]): Promise<taskqueue.JobStatu
 /* -------------------------------- WORKFLOWS TEMPLATES -------------------------------- */ 
 
 /**
- * Retrieves templates from the server with optional filtering
+ * Retrieves templates from the server with optional filtering.
+ *
+ * Defaults to "latest version per name, visible only" — the most useful
+ * everyday view. Pass allVersions=true to see history (e.g. inside the
+ * per-template versions dropdown), and showHidden=true to include
+ * templates the operator has hidden via UpdateTemplate.
+ *
  * @param {number} [TemplateId] - Optional template ID to filter by
  * @param {string} [name] - Optional template name to filter by
  * @param {string} [version] - Optional version to filter by
+ * @param {boolean} [allVersions] - When true, return every version per name (default: latest only)
+ * @param {boolean} [showHidden] - When true, include hidden templates (default: false)
  * @returns {Promise<taskqueue.Template[]>} Promise resolving to array of templates
  */
-export async function getTemplates(TemplateId?: number, name?: string, version?: string): Promise<taskqueue.Template[]> {
+export async function getTemplates(
+  TemplateId?: number,
+  name?: string,
+  version?: string,
+  allVersions?: boolean,
+  showHidden?: boolean
+): Promise<taskqueue.Template[]> {
   try {
     const requestParams: taskqueue.TemplateFilter = {};
     if (name) requestParams.name = name;
     if (TemplateId) requestParams.workflowTemplateId = TemplateId;
     if (version) requestParams.version = version;
+    if (allVersions) requestParams.allVersions = true;
+    if (showHidden) requestParams.showHidden = true;
 
     const tempUnary = await client.listTemplates(requestParams, await callOptionsUserToken());
     return tempUnary.response?.templates || [];
@@ -576,6 +592,27 @@ export async function getTemplates(TemplateId?: number, name?: string, version?:
     console.error("Error while retrieving templates:", error);
     return [];
   }
+}
+
+/**
+ * Hides or unhides a workflow template via UpdateTemplate. Hidden
+ * templates are excluded from the default `getTemplates()` listing but
+ * remain available via showHidden=true.
+ *
+ * @param {number} templateId - Template ID to update
+ * @param {boolean} hidden - Target visibility (true = hide, false = unhide)
+ * @returns {Promise<taskqueue.Template>} The updated template row
+ */
+export async function updateTemplateHidden(
+  templateId: number,
+  hidden: boolean
+): Promise<taskqueue.Template> {
+  const req: taskqueue.UpdateTemplateRequest = {
+    workflowTemplateId: templateId,
+    hidden,
+  };
+  const resp = await client.updateTemplate(req, await callOptionsUserToken());
+  return resp.response!;
 }
 
 /**

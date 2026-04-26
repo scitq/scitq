@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { wsClient } from '../lib/wsClient';
   import { Plus, Check } from 'lucide-svelte';
-  import { getTemplates, UploadTemplates, runTemp } from '../lib/api';
+  import { getTemplates, UploadTemplates, runTemp, updateTemplateHidden } from '../lib/api';
   import WfTemplateList from '../components/WfTemplateList.svelte';
   import '../styles/wfTemplate.css';
   import type { UploadTemplateResponse } from '../lib/types';
@@ -83,11 +83,33 @@
     }
   }
 
+  // Whether the listing should include templates the operator has hidden
+  // (via the per-row hide button or `scitq template update --hide`). The
+  // toggle is bound to a checkbox in the template page header.
+  let showHidden = false;
+
+  /** Reload templates from the server honouring the showHidden toggle. */
+  async function reloadTemplates() {
+    workflowsTemp = await getTemplates(undefined, undefined, undefined, false, showHidden);
+    handleSortBy();
+  }
+
   // Initialize component - load templates and subscribe to WebSocket
   onMount(async () => {
-    workflowsTemp = await getTemplates();
+    await reloadTemplates();
     unsubscribeWS = wsClient.subscribeWithTopics({ template: [] }, handleMessage);
   });
+
+  /** Hide or unhide a single template by id, then reload. */
+  async function toggleHidden(templateId: number, hidden: boolean) {
+    try {
+      await updateTemplateHidden(templateId, hidden);
+      await reloadTemplates();
+    } catch (e: any) {
+      errorMessage = e?.message || 'Failed to update template visibility';
+      showErrorModal = true;
+    }
+  }
 
   // Cleanup - unsubscribe from WebSocket when component is destroyed
   onDestroy(() => {
@@ -359,8 +381,17 @@
     </div>
   </div>
 
+  <!-- Visibility toggle: include hidden templates in the listing. Mirrors
+       `scitq template list --show-hidden` on the CLI. Templates marked
+       hidden are excluded by default to keep the page focused on what's
+       currently runnable. -->
+  <label class="wfTemp-show-hidden">
+    <input type="checkbox" bind:checked={showHidden} on:change={reloadTemplates} />
+    Show hidden templates
+  </label>
+
   <!-- Template list component -->
-  <WfTemplateList {workflowsTemp} openParamModal={openParamModal}/>
+  <WfTemplateList {workflowsTemp} openParamModal={openParamModal} {toggleHidden}/>
 </div>
 
 <!-- ----------- ERROR MODAL ---------- -->

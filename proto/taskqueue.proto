@@ -19,6 +19,7 @@ service TaskQueue {
     rpc RetryTask (RetryTaskRequest) returns (TaskResponse);
     rpc ForceRunTask (ForceRunTaskRequest) returns (Ack); // Force W→P, bypassing dependency checks
     rpc EditAndRetryTask (EditAndRetryTaskRequest) returns (TaskResponse); // Edit command and retry a single task
+    rpc EditTask (EditTaskRequest) returns (TaskResponse); // Update fields on a task in-place (no retry)
     rpc EditStepCommand (EditStepCommandRequest) returns (EditStepCommandResponse); // Find/replace in all failed tasks of a step and retry them
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);
     rpc CreateWorker(WorkerRequest) returns (WorkerIds);
@@ -71,6 +72,7 @@ service TaskQueue {
     rpc DownloadTemplate(DownloadTemplateRequest) returns (FileContent);
     rpc RunTemplate(RunTemplateRequest) returns (TemplateRun);
     rpc ListTemplates(TemplateFilter) returns (TemplateList);
+    rpc UpdateTemplate(UpdateTemplateRequest) returns (Template);
     rpc ListTemplateRuns(TemplateRunFilter) returns (TemplateRunList);
     rpc UpdateTemplateRun(UpdateTemplateRunRequest) returns (Ack);
     rpc DeleteTemplateRun(DeleteTemplateRunRequest) returns (Ack);
@@ -188,6 +190,35 @@ message ForceRunTaskRequest {
 message EditAndRetryTaskRequest {
     int32 task_id = 1;
     string command = 2; // New command to use for the retry
+}
+
+// StringList wraps a `repeated string` so it can be carried as `optional`
+// in EditTaskRequest. Required because proto3 doesn't natively support
+// `optional repeated`. Semantics in the requests that use it:
+//   - field absent (nil pointer)        → leave the underlying list alone
+//   - field present, values empty slice → clear the underlying list
+//   - field present, values non-empty   → replace the underlying list
+message StringList {
+    repeated string values = 1;
+}
+
+// EditTaskRequest updates fields on an existing task in place, without
+// triggering a retry (use EditAndRetryTask for that). Only fields whose
+// `optional` is set are touched; everything else is left as-is. The server
+// rejects status transitions into worker-managed running states ("A", "C",
+// "D", "O", "R", "U", "V") to avoid stomping on the workload's lifecycle.
+message EditTaskRequest {
+    int32 task_id = 1;
+    optional string command = 2;
+    optional string container = 3;
+    optional string container_options = 4;
+    optional string shell = 5;
+    optional string status = 6;        // e.g. "P", "W", "F", "S"
+    optional StringList input = 7;
+    optional StringList resource = 8;
+    optional string output = 9;
+    optional string publish = 10;
+    optional int32 retry = 11;
 }
 
 message EditStepCommandRequest {
@@ -341,14 +372,22 @@ message Ack {
 }
 
 message ListTasksRequest {
-    optional string status_filter = 1;      
-    optional int32 worker_id_filter = 2;   
-    optional int32 workflow_id_filter = 3;  
-    optional int32 step_id_filter = 4;   
-    optional string command_filter = 5;    
-    optional int32 limit = 6;            
-    optional int32 offset = 7;                
+    optional string status_filter = 1;
+    optional int32 worker_id_filter = 2;
+    optional int32 workflow_id_filter = 3;
+    optional int32 step_id_filter = 4;
+    optional string command_filter = 5;
+    optional int32 limit = 6;
+    optional int32 offset = 7;
     optional bool show_hidden = 8;
+    // When true, the server clips Task.command to compact_command_max
+    // characters (default 200) before returning. Used by the basic
+    // `scitq task list` view so a kilobyte-scale shell script doesn't
+    // get shipped over gRPC just to be truncated client-side. The full
+    // command is still available via `task list -l/--long` (which omits
+    // this flag).
+    optional bool compact_command = 9;
+    optional int32 compact_command_max = 10;
 }
 
 message WorkerRequest {
@@ -792,6 +831,15 @@ message TemplateFilter {
   optional int32 workflow_template_id = 1;
   optional string name = 2;
   optional string version = 3;
+  // When true, return every version that matches the other filters. The
+  // default (false) collapses the result to one row per name — the
+  // most-recently-uploaded version. Most operators want the latest by
+  // default; pass all_versions=true (or `--all-versions` on the CLI) to
+  // see history for upgrades, rollbacks, and audits.
+  optional bool all_versions = 4;
+  // When true, include hidden templates in the result. Default (false)
+  // excludes them. See workflow_template.hidden (migration 24).
+  optional bool show_hidden = 5;
 }
 
 message Template {
@@ -802,6 +850,15 @@ message Template {
   string param_json = 5;
   string uploaded_at = 6;
   optional int32 uploaded_by = 7;
+  bool hidden = 8;
+}
+
+// UpdateTemplateRequest carries an in-place edit of a workflow_template
+// row. Currently only `hidden` is mutable — uploads still go through
+// UploadTemplate which validates the script and bumps the version.
+message UpdateTemplateRequest {
+  int32 workflow_template_id = 1;
+  optional bool hidden = 2;
 }
 
 message TemplateList {

@@ -169,6 +169,38 @@ class EditAndRetryTaskRequest(_message.Message):
     command: str
     def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ...) -> None: ...
 
+class StringList(_message.Message):
+    __slots__ = ("values",)
+    VALUES_FIELD_NUMBER: _ClassVar[int]
+    values: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, values: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class EditTaskRequest(_message.Message):
+    __slots__ = ("task_id", "command", "container", "container_options", "shell", "status", "input", "resource", "output", "publish", "retry")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    COMMAND_FIELD_NUMBER: _ClassVar[int]
+    CONTAINER_FIELD_NUMBER: _ClassVar[int]
+    CONTAINER_OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    SHELL_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    INPUT_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_FIELD_NUMBER: _ClassVar[int]
+    PUBLISH_FIELD_NUMBER: _ClassVar[int]
+    RETRY_FIELD_NUMBER: _ClassVar[int]
+    task_id: int
+    command: str
+    container: str
+    container_options: str
+    shell: str
+    status: str
+    input: StringList
+    resource: StringList
+    output: str
+    publish: str
+    retry: int
+    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., shell: _Optional[str] = ..., status: _Optional[str] = ..., input: _Optional[_Union[StringList, _Mapping]] = ..., resource: _Optional[_Union[StringList, _Mapping]] = ..., output: _Optional[str] = ..., publish: _Optional[str] = ..., retry: _Optional[int] = ...) -> None: ...
+
 class EditStepCommandRequest(_message.Message):
     __slots__ = ("step_id", "find", "replace", "is_regexp")
     STEP_ID_FIELD_NUMBER: _ClassVar[int]
@@ -423,7 +455,7 @@ class Ack(_message.Message):
     def __init__(self, success: bool = ...) -> None: ...
 
 class ListTasksRequest(_message.Message):
-    __slots__ = ("status_filter", "worker_id_filter", "workflow_id_filter", "step_id_filter", "command_filter", "limit", "offset", "show_hidden")
+    __slots__ = ("status_filter", "worker_id_filter", "workflow_id_filter", "step_id_filter", "command_filter", "limit", "offset", "show_hidden", "compact_command", "compact_command_max")
     STATUS_FILTER_FIELD_NUMBER: _ClassVar[int]
     WORKER_ID_FILTER_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_ID_FILTER_FIELD_NUMBER: _ClassVar[int]
@@ -432,6 +464,8 @@ class ListTasksRequest(_message.Message):
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
     SHOW_HIDDEN_FIELD_NUMBER: _ClassVar[int]
+    COMPACT_COMMAND_FIELD_NUMBER: _ClassVar[int]
+    COMPACT_COMMAND_MAX_FIELD_NUMBER: _ClassVar[int]
     status_filter: str
     worker_id_filter: int
     workflow_id_filter: int
@@ -440,7 +474,9 @@ class ListTasksRequest(_message.Message):
     limit: int
     offset: int
     show_hidden: bool
-    def __init__(self, status_filter: _Optional[str] = ..., worker_id_filter: _Optional[int] = ..., workflow_id_filter: _Optional[int] = ..., step_id_filter: _Optional[int] = ..., command_filter: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., show_hidden: bool = ...) -> None: ...
+    compact_command: bool
+    compact_command_max: int
+    def __init__(self, status_filter: _Optional[str] = ..., worker_id_filter: _Optional[int] = ..., workflow_id_filter: _Optional[int] = ..., step_id_filter: _Optional[int] = ..., command_filter: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., show_hidden: bool = ..., compact_command: bool = ..., compact_command_max: _Optional[int] = ...) -> None: ...
 
 class WorkerRequest(_message.Message):
     __slots__ = ("provider_id", "flavor_id", "region_id", "number", "concurrency", "prefetch", "step_id")
@@ -1192,17 +1228,21 @@ class RunTemplateRequest(_message.Message):
     def __init__(self, workflow_template_id: _Optional[int] = ..., param_values_json: _Optional[str] = ..., no_recruiters: bool = ...) -> None: ...
 
 class TemplateFilter(_message.Message):
-    __slots__ = ("workflow_template_id", "name", "version")
+    __slots__ = ("workflow_template_id", "name", "version", "all_versions", "show_hidden")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
+    ALL_VERSIONS_FIELD_NUMBER: _ClassVar[int]
+    SHOW_HIDDEN_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     name: str
     version: str
-    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ...) -> None: ...
+    all_versions: bool
+    show_hidden: bool
+    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., all_versions: bool = ..., show_hidden: bool = ...) -> None: ...
 
 class Template(_message.Message):
-    __slots__ = ("workflow_template_id", "name", "version", "description", "param_json", "uploaded_at", "uploaded_by")
+    __slots__ = ("workflow_template_id", "name", "version", "description", "param_json", "uploaded_at", "uploaded_by", "hidden")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
@@ -1210,6 +1250,7 @@ class Template(_message.Message):
     PARAM_JSON_FIELD_NUMBER: _ClassVar[int]
     UPLOADED_AT_FIELD_NUMBER: _ClassVar[int]
     UPLOADED_BY_FIELD_NUMBER: _ClassVar[int]
+    HIDDEN_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     name: str
     version: str
@@ -1217,7 +1258,16 @@ class Template(_message.Message):
     param_json: str
     uploaded_at: str
     uploaded_by: int
-    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ..., uploaded_at: _Optional[str] = ..., uploaded_by: _Optional[int] = ...) -> None: ...
+    hidden: bool
+    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ..., uploaded_at: _Optional[str] = ..., uploaded_by: _Optional[int] = ..., hidden: bool = ...) -> None: ...
+
+class UpdateTemplateRequest(_message.Message):
+    __slots__ = ("workflow_template_id", "hidden")
+    WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
+    HIDDEN_FIELD_NUMBER: _ClassVar[int]
+    workflow_template_id: int
+    hidden: bool
+    def __init__(self, workflow_template_id: _Optional[int] = ..., hidden: bool = ...) -> None: ...
 
 class TemplateList(_message.Message):
     __slots__ = ("templates",)

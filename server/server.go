@@ -1617,6 +1617,102 @@ func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequ
 	return &pb.Ack{}, nil
 }
 
+// EditTask updates an arbitrary subset of fields on an existing task in
+// place. Designed for operator workflows: fix a typo in container, change
+// a wrong publish path, swap inputs, or push a stuck task back to W/P
+// without resubmitting. Status transitions into worker-managed running
+// states ("A","C","D","O","R","U","V") are rejected — those are owned by
+// the worker lifecycle and overriding them from here would corrupt the
+// scheduler's view. Use SignalTask / killTask for cancellation, retry for
+// re-running, and EditAndRetryTask when you want both a command change
+// and a retry in one shot.
+func (s *taskQueueServer) EditTask(ctx context.Context, req *pb.EditTaskRequest) (*pb.TaskResponse, error) {
+	if req.TaskId == 0 {
+		return nil, fmt.Errorf("task_id is required")
+	}
+	// Block transitions into worker-managed running states. Allow common
+	// terminal/quiescent states (P, W, F, S, X, I, Z) — the operator may
+	// legitimately want any of those.
+	if req.Status != nil {
+		switch *req.Status {
+		case "A", "C", "D", "O", "R", "U", "V":
+			return nil, fmt.Errorf("status %q is worker-managed; cannot set via EditTask", *req.Status)
+		}
+	}
+
+	// Build a dynamic UPDATE clause. Only fields whose optional pointer is
+	// non-nil are touched.
+	sets := []string{}
+	args := []any{}
+	addSet := func(col string, val any) {
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)+1))
+		args = append(args, val)
+	}
+	if req.Command != nil {
+		addSet("command", *req.Command)
+	}
+	if req.Container != nil {
+		addSet("container", *req.Container)
+	}
+	if req.ContainerOptions != nil {
+		addSet("container_options", *req.ContainerOptions)
+	}
+	if req.Shell != nil {
+		addSet("shell", *req.Shell)
+	}
+	if req.Status != nil {
+		addSet("status", *req.Status)
+	}
+	if req.Output != nil {
+		addSet("output", *req.Output)
+	}
+	if req.Publish != nil {
+		addSet("publish", *req.Publish)
+	}
+	if req.Retry != nil {
+		addSet("retry", *req.Retry)
+	}
+	if req.Input != nil {
+		addSet("input", pq.StringArray(req.Input.Values))
+	}
+	if req.Resource != nil {
+		addSet("resource", pq.StringArray(req.Resource.Values))
+	}
+
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
+
+	// task_id always last in args
+	args = append(args, req.TaskId)
+	query := fmt.Sprintf(
+		`UPDATE task SET %s WHERE task_id = $%d AND NOT hidden`,
+		strings.Join(sets, ", "),
+		len(args),
+	)
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update task %d: %w", req.TaskId, err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return nil, fmt.Errorf("task %d not found or hidden", req.TaskId)
+	}
+	log.Printf("✏️ Task %d updated (%d field%s)", req.TaskId, len(sets), pluralS(len(sets)))
+	if req.Status != nil {
+		// A status change usually wants the assignment loop to wake up.
+		s.triggerAssign()
+	}
+	return &pb.TaskResponse{TaskId: req.TaskId}, nil
+}
+
+// pluralS returns "s" when n != 1; tiny helper to clean up log strings.
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndRetryTaskRequest) (*pb.TaskResponse, error) {
 	// Update the command on the original task, then retry
 	result, err := s.db.ExecContext(ctx,
@@ -3015,10 +3111,26 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		where = append(where, "t.hidden = FALSE")
 	}
 
+	// When compact_command is requested, clip the command in SQL so the
+	// trim happens at the DB boundary instead of shipping the full text
+	// across the wire just to truncate it client-side. Default max is 200
+	// chars, comfortably more than the CLI's display cap of 80 so a future
+	// display tweak doesn't need a server change.
+	commandExpr := "t.command"
+	if req.CompactCommand != nil && *req.CompactCommand {
+		max := int32(200)
+		if req.CompactCommandMax != nil && *req.CompactCommandMax > 0 {
+			max = *req.CompactCommandMax
+		}
+		commandExpr = fmt.Sprintf(
+			"CASE WHEN length(t.command) > %d THEN left(t.command, %d) || '…' ELSE t.command END",
+			max, max)
+	}
+
 	// Base query (join step to expose workflow_id)
 	query := `
         SELECT
-            t.task_id, t.task_name, t.command, t.container, t.container_options, t.status,
+            t.task_id, t.task_name, ` + commandExpr + `, t.container, t.container_options, t.status,
             t.worker_id, t.step_id, t.previous_task_id, t.retry_count, t.hidden,
             s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry,
 			EXTRACT(EPOCH FROM t.run_started_at)::bigint AS run_started_epoch,

@@ -86,6 +86,22 @@ type Attr struct {
 			Command string `arg:"--command,required" help:"New command for the task"`
 		} `arg:"subcommand:edit" help:"Edit a task's command and retry it"`
 
+		Update *struct {
+			ID               int32   `arg:"--id,required" help:"Task ID to update"`
+			Command          *string `arg:"--command" help:"Replace the task's command"`
+			Container        *string `arg:"--container" help:"Replace the task's container image"`
+			ContainerOptions *string `arg:"--container-options" help:"Replace the docker run extra options string"`
+			Shell            *string `arg:"--shell" help:"Replace the shell (e.g. bash, sh)"`
+			Status           *string `arg:"--status" help:"Replace the status (P/W/F/S/X/I/Z; worker-managed states are rejected)"`
+			Output           *string `arg:"--output" help:"Replace the output URI"`
+			Publish          *string `arg:"--publish" help:"Replace the publish URI"`
+			Retry            *int32  `arg:"--retry" help:"Replace the retry counter"`
+			Input            []string `arg:"--input,separate" help:"Replace the inputs (repeat the flag once per URI). Use --clear-input to set empty."`
+			Resource         []string `arg:"--resource,separate" help:"Replace the resources (repeat the flag once per URI). Use --clear-resource to set empty."`
+			ClearInput       bool    `arg:"--clear-input" help:"Set inputs to empty (overrides --input)"`
+			ClearResource    bool    `arg:"--clear-resource" help:"Set resources to empty (overrides --resource)"`
+		} `arg:"subcommand:update" help:"Update fields on a task in place (no retry; for fixing wrong submissions or unsticking state)"`
+
 		Kill *struct {
 			ID int32 `arg:"--id,required" help:"Task ID to kill"`
 		} `arg:"subcommand:kill" help:"Send kill signal (SIGKILL) to a running task"`
@@ -285,10 +301,12 @@ type Attr struct {
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
 		List *struct {
-			Name    *string `arg:"--name" help:"Template name (can include wildcards like 'meta%')"`
-			Version *string `arg:"--version" help:"Template version (can be 'latest' or a wildcard)"`
-			Latest  bool    `arg:"--latest" help:"Show only latest version(s) for each template name"`
-		} `arg:"subcommand:list" help:"List all uploaded workflow templates"`
+			Name        *string `arg:"--name" help:"Template name (can include wildcards like 'meta%')"`
+			Version     *string `arg:"--version" help:"Template version (can be 'latest' or a wildcard)"`
+			Latest      bool    `arg:"--latest" help:"DEPRECATED no-op: latest is now the default. Use --all-versions to opt out."`
+			AllVersions bool    `arg:"--all-versions" help:"Show every version per template name (default: latest only)"`
+			ShowHidden  bool    `arg:"--show-hidden" help:"Include templates marked hidden in the listing"`
+		} `arg:"subcommand:list" help:"List uploaded workflow templates (latest version per name by default)"`
 
 		Detail *struct {
 			TemplateId *int32  `arg:"--id" help:"Show detailed information for this template ID (either name or id is required)"`
@@ -302,6 +320,12 @@ type Attr struct {
 			Version    *string `arg:"--version" help:"Optional version (default to latest)"`
 			Output     *string `arg:"--output,-o" help:"Output file path (default: stdout)"`
 		} `arg:"subcommand:download" help:"Download a template script"`
+
+		Update *struct {
+			TemplateId int32 `arg:"--id,required" help:"Template ID to update"`
+			Hide       bool  `arg:"--hide" help:"Hide the template (excluded from default listings)"`
+			Unhide     bool  `arg:"--unhide" help:"Unhide a previously hidden template"`
+		} `arg:"subcommand:update" help:"Update a template's metadata (currently: hide / unhide)"`
 	} `arg:"subcommand:template" help:"Manage workflow templates"`
 
 	// Module commands
@@ -475,6 +499,14 @@ func (c *CLI) TaskList() error {
 	if c.Attr.Task.List.Offset > 0 {
 		req.Offset = &c.Attr.Task.List.Offset
 	}
+	// In short form, ask the server to clip Task.command at the source so a
+	// kilobyte-scale shell script doesn't get shipped over gRPC just to be
+	// truncated on the way to stdout. -l/--long leaves the flag unset and
+	// receives the full text.
+	if !c.Attr.Task.List.Long {
+		t := true
+		req.CompactCommand = &t
+	}
 
 	res, err := c.QC.Client.ListTasks(ctx, req)
 	if err != nil {
@@ -578,7 +610,7 @@ func (c *CLI) TaskList() error {
 				duration = fmt.Sprintf(" | Running: %s", formatDuration(float32(elapsed.Seconds())))
 			}
 			fmt.Printf("🆔 ID: %d%s | Command: %s | Container: %s | Status: %s%s%s%s\n",
-				task.TaskId, name, task.Command, task.Container, task.Status, retries, duration, hidden)
+				task.TaskId, name, compactCommand(task.Command, 80), task.Container, task.Status, retries, duration, hidden)
 		}
 	}
 	return nil
@@ -703,6 +735,63 @@ func (c *CLI) TaskEdit() error {
 		return nil
 	}
 	fmt.Printf("✏️ Task %d edited and retried → new task ID %d\n", c.Attr.Task.Edit.ID, res.TaskId)
+	return nil
+}
+
+// TaskUpdate calls EditTask to update a subset of fields on an existing
+// task in place, without triggering a retry. Useful for fixing a typo'd
+// container, swapping inputs/resources after a wrong submission, or
+// pushing a stuck task back to W/P. Use TaskRetry / TaskEdit when you
+// want a retry as well.
+func (c *CLI) TaskUpdate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	u := c.Attr.Task.Update
+	req := &pb.EditTaskRequest{TaskId: u.ID}
+	if u.Command != nil {
+		req.Command = u.Command
+	}
+	if u.Container != nil {
+		req.Container = u.Container
+	}
+	if u.ContainerOptions != nil {
+		req.ContainerOptions = u.ContainerOptions
+	}
+	if u.Shell != nil {
+		req.Shell = u.Shell
+	}
+	if u.Status != nil {
+		req.Status = u.Status
+	}
+	if u.Output != nil {
+		req.Output = u.Output
+	}
+	if u.Publish != nil {
+		req.Publish = u.Publish
+	}
+	if u.Retry != nil {
+		req.Retry = u.Retry
+	}
+	// --clear-input wins over --input (explicit clear). Likewise for resource.
+	if u.ClearInput {
+		req.Input = &pb.StringList{Values: []string{}}
+	} else if len(u.Input) > 0 {
+		req.Input = &pb.StringList{Values: u.Input}
+	}
+	if u.ClearResource {
+		req.Resource = &pb.StringList{Values: []string{}}
+	} else if len(u.Resource) > 0 {
+		req.Resource = &pb.StringList{Values: u.Resource}
+	}
+
+	if _, err := c.QC.Client.EditTask(ctx, req); err != nil {
+		return fmt.Errorf("failed to update task: %w", err)
+	}
+	if c.jsonOut(map[string]any{"task_id": u.ID, "updated": true}) {
+		return nil
+	}
+	fmt.Printf("✏️ Task %d updated\n", u.ID)
 	return nil
 }
 
@@ -1476,9 +1565,16 @@ func (c *CLI) TemplateList() error {
 	if c.Attr.Template.List.Version != nil {
 		filter.Version = c.Attr.Template.List.Version
 	}
-	if c.Attr.Template.List.Latest {
-		latest := "latest"
-		filter.Version = &latest
+	// Default behaviour is "latest version per name". Pass --all-versions
+	// to see history. The legacy --latest flag is now a no-op (latest is
+	// the default) and remains accepted only for back-compat.
+	if c.Attr.Template.List.AllVersions {
+		t := true
+		filter.AllVersions = &t
+	}
+	if c.Attr.Template.List.ShowHidden {
+		t := true
+		filter.ShowHidden = &t
 	}
 
 	res, err := c.QC.Client.ListTemplates(ctx, filter)
@@ -1501,9 +1597,46 @@ func (c *CLI) TemplateList() error {
 		if t.UploadedBy != nil {
 			uploadedBy = fmt.Sprintf("%d", *t.UploadedBy)
 		}
-		fmt.Printf("🔹 ID: %d | Name: %s | Version: %s | Description: %s | UploadedAt: %s | UploadedBy: %s\n",
-			t.WorkflowTemplateId, t.Name, t.Version, t.Description, t.UploadedAt, uploadedBy)
+		hiddenMark := ""
+		if t.Hidden {
+			hiddenMark = " 🙈 hidden"
+		}
+		fmt.Printf("🔹 ID: %d | Name: %s | Version: %s | Description: %s | UploadedAt: %s | UploadedBy: %s%s\n",
+			t.WorkflowTemplateId, t.Name, t.Version, t.Description, t.UploadedAt, uploadedBy, hiddenMark)
 	}
+	return nil
+}
+
+// TemplateUpdate hides or unhides a workflow template via UpdateTemplate.
+// Mutually exclusive flags: --hide and --unhide.
+func (c *CLI) TemplateUpdate() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	u := c.Attr.Template.Update
+	if u.Hide && u.Unhide {
+		return fmt.Errorf("--hide and --unhide are mutually exclusive")
+	}
+	if !u.Hide && !u.Unhide {
+		return fmt.Errorf("nothing to update: pass --hide or --unhide")
+	}
+
+	hidden := u.Hide
+	res, err := c.QC.Client.UpdateTemplate(ctx, &pb.UpdateTemplateRequest{
+		WorkflowTemplateId: u.TemplateId,
+		Hidden:             &hidden,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update template: %w", err)
+	}
+	if c.jsonOut(res) {
+		return nil
+	}
+	state := "visible"
+	if res.Hidden {
+		state = "hidden"
+	}
+	fmt.Printf("✏️ Template %d (%s@%s) is now %s\n", res.WorkflowTemplateId, res.Name, res.Version, state)
 	return nil
 }
 
@@ -2395,6 +2528,20 @@ func (c *CLI) StepStats() error {
 // formatDuration prints a duration in a human-friendly way:
 // - "0" if durSeconds == 0
 // - "<1s" if 0 < durSeconds < 1
+// compactCommand renders a task's command on a single line, truncated to
+// at most max runes, suitable for the short-form `scitq task list`. Newlines
+// are collapsed to "↵" so multi-line shell scripts don't trash the per-task
+// line layout, and a trailing "…" is appended when the original was longer
+// than max. The full command is still available with `-l/--long`.
+func compactCommand(cmd string, max int) string {
+	flat := strings.ReplaceAll(strings.ReplaceAll(cmd, "\r\n", "↵"), "\n", "↵")
+	r := []rune(flat)
+	if len(r) <= max {
+		return flat
+	}
+	return string(r[:max]) + "…"
+}
+
 // - "Xs" if under 60 seconds
 // - "YmZs" if under 3600 seconds (minutes + leftover seconds)
 // - "XhYm" if 3600 seconds or more (hours + leftover minutes, omit seconds)
@@ -2588,6 +2735,8 @@ func Run(c CLI) error {
 			err = c.TaskRetry()
 		case c.Attr.Task.Edit != nil:
 			err = c.TaskEdit()
+		case c.Attr.Task.Update != nil:
+			err = c.TaskUpdate()
 		case c.Attr.Task.Kill != nil:
 			err = c.TaskKill()
 		case c.Attr.Task.Stop != nil:
@@ -2707,6 +2856,8 @@ func Run(c CLI) error {
 			err = c.TemplateRun()
 		case c.Attr.Template.Download != nil:
 			err = c.TemplateDownload()
+		case c.Attr.Template.Update != nil:
+			err = c.TemplateUpdate()
 		}
 	case c.Attr.Module != nil:
 		switch {

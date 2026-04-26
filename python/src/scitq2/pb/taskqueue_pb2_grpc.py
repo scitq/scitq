@@ -95,6 +95,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.EditAndRetryTaskRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.TaskResponse.FromString,
                 _registered_method=True)
+        self.EditTask = channel.unary_unary(
+                '/taskqueue.TaskQueue/EditTask',
+                request_serializer=taskqueue__pb2.EditTaskRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.TaskResponse.FromString,
+                _registered_method=True)
         self.EditStepCommand = channel.unary_unary(
                 '/taskqueue.TaskQueue/EditStepCommand',
                 request_serializer=taskqueue__pb2.EditStepCommandRequest.SerializeToString,
@@ -350,6 +355,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.TemplateFilter.SerializeToString,
                 response_deserializer=taskqueue__pb2.TemplateList.FromString,
                 _registered_method=True)
+        self.UpdateTemplate = channel.unary_unary(
+                '/taskqueue.TaskQueue/UpdateTemplate',
+                request_serializer=taskqueue__pb2.UpdateTemplateRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Template.FromString,
+                _registered_method=True)
         self.ListTemplateRuns = channel.unary_unary(
                 '/taskqueue.TaskQueue/ListTemplateRuns',
                 request_serializer=taskqueue__pb2.TemplateRunFilter.SerializeToString,
@@ -524,6 +534,13 @@ class TaskQueueServicer(object):
 
     def EditAndRetryTask(self, request, context):
         """Edit command and retry a single task
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def EditTask(self, request, context):
+        """Update fields on a task in-place (no retry)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -838,6 +855,12 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateTemplate(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListTemplateRuns(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1027,6 +1050,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
             'EditAndRetryTask': grpc.unary_unary_rpc_method_handler(
                     servicer.EditAndRetryTask,
                     request_deserializer=taskqueue__pb2.EditAndRetryTaskRequest.FromString,
+                    response_serializer=taskqueue__pb2.TaskResponse.SerializeToString,
+            ),
+            'EditTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.EditTask,
+                    request_deserializer=taskqueue__pb2.EditTaskRequest.FromString,
                     response_serializer=taskqueue__pb2.TaskResponse.SerializeToString,
             ),
             'EditStepCommand': grpc.unary_unary_rpc_method_handler(
@@ -1283,6 +1311,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.ListTemplates,
                     request_deserializer=taskqueue__pb2.TemplateFilter.FromString,
                     response_serializer=taskqueue__pb2.TemplateList.SerializeToString,
+            ),
+            'UpdateTemplate': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateTemplate,
+                    request_deserializer=taskqueue__pb2.UpdateTemplateRequest.FromString,
+                    response_serializer=taskqueue__pb2.Template.SerializeToString,
             ),
             'ListTemplateRuns': grpc.unary_unary_rpc_method_handler(
                     servicer.ListTemplateRuns,
@@ -1708,6 +1741,33 @@ class TaskQueue(object):
             target,
             '/taskqueue.TaskQueue/EditAndRetryTask',
             taskqueue__pb2.EditAndRetryTaskRequest.SerializeToString,
+            taskqueue__pb2.TaskResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EditTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/EditTask',
+            taskqueue__pb2.EditTaskRequest.SerializeToString,
             taskqueue__pb2.TaskResponse.FromString,
             options,
             channel_credentials,
@@ -3086,6 +3146,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/ListTemplates',
             taskqueue__pb2.TemplateFilter.SerializeToString,
             taskqueue__pb2.TemplateList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateTemplate(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/UpdateTemplate',
+            taskqueue__pb2.UpdateTemplateRequest.SerializeToString,
+            taskqueue__pb2.Template.FromString,
             options,
             channel_credentials,
             insecure,

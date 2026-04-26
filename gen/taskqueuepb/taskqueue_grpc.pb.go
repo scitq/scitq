@@ -32,6 +32,7 @@ const (
 	TaskQueue_RetryTask_FullMethodName                 = "/taskqueue.TaskQueue/RetryTask"
 	TaskQueue_ForceRunTask_FullMethodName              = "/taskqueue.TaskQueue/ForceRunTask"
 	TaskQueue_EditAndRetryTask_FullMethodName          = "/taskqueue.TaskQueue/EditAndRetryTask"
+	TaskQueue_EditTask_FullMethodName                  = "/taskqueue.TaskQueue/EditTask"
 	TaskQueue_EditStepCommand_FullMethodName           = "/taskqueue.TaskQueue/EditStepCommand"
 	TaskQueue_ListWorkers_FullMethodName               = "/taskqueue.TaskQueue/ListWorkers"
 	TaskQueue_CreateWorker_FullMethodName              = "/taskqueue.TaskQueue/CreateWorker"
@@ -83,6 +84,7 @@ const (
 	TaskQueue_DownloadTemplate_FullMethodName          = "/taskqueue.TaskQueue/DownloadTemplate"
 	TaskQueue_RunTemplate_FullMethodName               = "/taskqueue.TaskQueue/RunTemplate"
 	TaskQueue_ListTemplates_FullMethodName             = "/taskqueue.TaskQueue/ListTemplates"
+	TaskQueue_UpdateTemplate_FullMethodName            = "/taskqueue.TaskQueue/UpdateTemplate"
 	TaskQueue_ListTemplateRuns_FullMethodName          = "/taskqueue.TaskQueue/ListTemplateRuns"
 	TaskQueue_UpdateTemplateRun_FullMethodName         = "/taskqueue.TaskQueue/UpdateTemplateRun"
 	TaskQueue_DeleteTemplateRun_FullMethodName         = "/taskqueue.TaskQueue/DeleteTemplateRun"
@@ -121,6 +123,7 @@ type TaskQueueClient interface {
 	RetryTask(ctx context.Context, in *RetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	ForceRunTask(ctx context.Context, in *ForceRunTaskRequest, opts ...grpc.CallOption) (*Ack, error)
 	EditAndRetryTask(ctx context.Context, in *EditAndRetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
+	EditTask(ctx context.Context, in *EditTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	EditStepCommand(ctx context.Context, in *EditStepCommandRequest, opts ...grpc.CallOption) (*EditStepCommandResponse, error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
 	CreateWorker(ctx context.Context, in *WorkerRequest, opts ...grpc.CallOption) (*WorkerIds, error)
@@ -173,6 +176,7 @@ type TaskQueueClient interface {
 	DownloadTemplate(ctx context.Context, in *DownloadTemplateRequest, opts ...grpc.CallOption) (*FileContent, error)
 	RunTemplate(ctx context.Context, in *RunTemplateRequest, opts ...grpc.CallOption) (*TemplateRun, error)
 	ListTemplates(ctx context.Context, in *TemplateFilter, opts ...grpc.CallOption) (*TemplateList, error)
+	UpdateTemplate(ctx context.Context, in *UpdateTemplateRequest, opts ...grpc.CallOption) (*Template, error)
 	ListTemplateRuns(ctx context.Context, in *TemplateRunFilter, opts ...grpc.CallOption) (*TemplateRunList, error)
 	UpdateTemplateRun(ctx context.Context, in *UpdateTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
 	DeleteTemplateRun(ctx context.Context, in *DeleteTemplateRunRequest, opts ...grpc.CallOption) (*Ack, error)
@@ -346,6 +350,16 @@ func (c *taskQueueClient) EditAndRetryTask(ctx context.Context, in *EditAndRetry
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskResponse)
 	err := c.cc.Invoke(ctx, TaskQueue_EditAndRetryTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) EditTask(ctx context.Context, in *EditTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_EditTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -862,6 +876,16 @@ func (c *taskQueueClient) ListTemplates(ctx context.Context, in *TemplateFilter,
 	return out, nil
 }
 
+func (c *taskQueueClient) UpdateTemplate(ctx context.Context, in *UpdateTemplateRequest, opts ...grpc.CallOption) (*Template, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Template)
+	err := c.cc.Invoke(ctx, TaskQueue_UpdateTemplate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) ListTemplateRuns(ctx context.Context, in *TemplateRunFilter, opts ...grpc.CallOption) (*TemplateRunList, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TemplateRunList)
@@ -1078,6 +1102,7 @@ type TaskQueueServer interface {
 	RetryTask(context.Context, *RetryTaskRequest) (*TaskResponse, error)
 	ForceRunTask(context.Context, *ForceRunTaskRequest) (*Ack, error)
 	EditAndRetryTask(context.Context, *EditAndRetryTaskRequest) (*TaskResponse, error)
+	EditTask(context.Context, *EditTaskRequest) (*TaskResponse, error)
 	EditStepCommand(context.Context, *EditStepCommandRequest) (*EditStepCommandResponse, error)
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
 	CreateWorker(context.Context, *WorkerRequest) (*WorkerIds, error)
@@ -1130,6 +1155,7 @@ type TaskQueueServer interface {
 	DownloadTemplate(context.Context, *DownloadTemplateRequest) (*FileContent, error)
 	RunTemplate(context.Context, *RunTemplateRequest) (*TemplateRun, error)
 	ListTemplates(context.Context, *TemplateFilter) (*TemplateList, error)
+	UpdateTemplate(context.Context, *UpdateTemplateRequest) (*Template, error)
 	ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error)
 	UpdateTemplateRun(context.Context, *UpdateTemplateRunRequest) (*Ack, error)
 	DeleteTemplateRun(context.Context, *DeleteTemplateRunRequest) (*Ack, error)
@@ -1203,6 +1229,9 @@ func (UnimplementedTaskQueueServer) ForceRunTask(context.Context, *ForceRunTaskR
 }
 func (UnimplementedTaskQueueServer) EditAndRetryTask(context.Context, *EditAndRetryTaskRequest) (*TaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EditAndRetryTask not implemented")
+}
+func (UnimplementedTaskQueueServer) EditTask(context.Context, *EditTaskRequest) (*TaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EditTask not implemented")
 }
 func (UnimplementedTaskQueueServer) EditStepCommand(context.Context, *EditStepCommandRequest) (*EditStepCommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EditStepCommand not implemented")
@@ -1356,6 +1385,9 @@ func (UnimplementedTaskQueueServer) RunTemplate(context.Context, *RunTemplateReq
 }
 func (UnimplementedTaskQueueServer) ListTemplates(context.Context, *TemplateFilter) (*TemplateList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTemplates not implemented")
+}
+func (UnimplementedTaskQueueServer) UpdateTemplate(context.Context, *UpdateTemplateRequest) (*Template, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTemplate not implemented")
 }
 func (UnimplementedTaskQueueServer) ListTemplateRuns(context.Context, *TemplateRunFilter) (*TemplateRunList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTemplateRuns not implemented")
@@ -1625,6 +1657,24 @@ func _TaskQueue_EditAndRetryTask_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).EditAndRetryTask(ctx, req.(*EditAndRetryTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_EditTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EditTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).EditTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_EditTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).EditTask(ctx, req.(*EditTaskRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2547,6 +2597,24 @@ func _TaskQueue_ListTemplates_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_UpdateTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).UpdateTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_UpdateTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).UpdateTemplate(ctx, req.(*UpdateTemplateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_ListTemplateRuns_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TemplateRunFilter)
 	if err := dec(in); err != nil {
@@ -2951,6 +3019,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TaskQueue_EditAndRetryTask_Handler,
 		},
 		{
+			MethodName: "EditTask",
+			Handler:    _TaskQueue_EditTask_Handler,
+		},
+		{
 			MethodName: "EditStepCommand",
 			Handler:    _TaskQueue_EditStepCommand_Handler,
 		},
@@ -3153,6 +3225,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTemplates",
 			Handler:    _TaskQueue_ListTemplates_Handler,
+		},
+		{
+			MethodName: "UpdateTemplate",
+			Handler:    _TaskQueue_UpdateTemplate_Handler,
 		},
 		{
 			MethodName: "ListTemplateRuns",

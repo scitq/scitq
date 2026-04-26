@@ -863,7 +863,7 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 	var clauses []string
 
 	query := `
-		SELECT workflow_template_id, name, version, description, params_schema, uploaded_at, uploaded_by
+		SELECT workflow_template_id, name, version, description, params_schema, uploaded_at, uploaded_by, hidden
 		FROM workflow_template
 	`
 
@@ -876,10 +876,20 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 			clauses = append(clauses, fmt.Sprintf("name LIKE $%d::TEXT", len(args)+1))
 			args = append(args, *req.Name)
 		}
+		// `latest` is treated as "no version filter"; the actual collapse
+		// to one row per name happens below in code (see latest-collapse).
 		if req.Version != nil && *req.Version != "latest" {
 			clauses = append(clauses, fmt.Sprintf("version LIKE $%d::TEXT", len(args)+1))
 			args = append(args, *req.Version)
 		}
+	}
+
+	// Hidden filter: by default exclude hidden templates from results so
+	// they don't clutter `scitq template list` and the UI. Set show_hidden
+	// to include them; useful for archival, audit, or un-hiding.
+	showHidden := req.ShowHidden != nil && *req.ShowHidden
+	if !showHidden {
+		clauses = append(clauses, "hidden = FALSE")
 	}
 
 	if len(clauses) > 0 {
@@ -901,7 +911,7 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 		var uploadedAt time.Time
 		var rawParams sql.NullString
 
-		if err := rows.Scan(&t.WorkflowTemplateId, &t.Name, &t.Version, &t.Description, &rawParams, &uploadedAt, &uploadedBy); err != nil {
+		if err := rows.Scan(&t.WorkflowTemplateId, &t.Name, &t.Version, &t.Description, &rawParams, &uploadedAt, &uploadedBy, &t.Hidden); err != nil {
 			return nil, fmt.Errorf("failed to scan template: %w", err)
 		}
 
@@ -919,16 +929,27 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 		templates = append(templates, &t)
 	}
 
-	// Handle `version = "latest"` logic (after sorting)
-	if req.Version != nil && *req.Version == "latest" {
+	// Latest-only collapse: by default keep one row per name (the most
+	// recently uploaded), so `scitq template list` shows what's currently
+	// available to run without history clutter. Skipped when:
+	//   - all_versions=true (operator wants full history)
+	//   - workflow_template_id was specified (single-row query)
+	//   - version is set to a specific value other than "latest"
+	collapseToLatest := true
+	if req.AllVersions != nil && *req.AllVersions {
+		collapseToLatest = false
+	}
+	if req.WorkflowTemplateId != nil {
+		collapseToLatest = false
+	}
+	if req.Version != nil && *req.Version != "" && *req.Version != "latest" {
+		collapseToLatest = false
+	}
+	if collapseToLatest {
 		latest := make(map[string]*pb.Template) // name → latest version
 		for _, t := range templates {
-			if existing, ok := latest[t.Name]; !ok {
+			if existing, ok := latest[t.Name]; !ok || t.UploadedAt > existing.UploadedAt {
 				latest[t.Name] = t
-			} else {
-				if t.UploadedAt > existing.UploadedAt {
-					latest[t.Name] = t
-				}
 			}
 		}
 		var latestList []*pb.Template
@@ -939,6 +960,41 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 	}
 
 	return &pb.TemplateList{Templates: templates}, nil
+}
+
+// UpdateTemplate edits in-place fields on a workflow_template row.
+// Currently only `hidden` is mutable; uploads still go through
+// UploadTemplate which validates and bumps the version.
+func (s *taskQueueServer) UpdateTemplate(ctx context.Context, req *pb.UpdateTemplateRequest) (*pb.Template, error) {
+	if req.WorkflowTemplateId == 0 {
+		return nil, fmt.Errorf("workflow_template_id is required")
+	}
+	if req.Hidden == nil {
+		return nil, fmt.Errorf("no fields to update (set hidden=true or hidden=false)")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE workflow_template SET hidden = $1 WHERE workflow_template_id = $2`,
+		*req.Hidden, req.WorkflowTemplateId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update template %d: %w", req.WorkflowTemplateId, err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return nil, fmt.Errorf("template %d not found", req.WorkflowTemplateId)
+	}
+	if *req.Hidden {
+		log.Printf("🙈 Template %d hidden", req.WorkflowTemplateId)
+	} else {
+		log.Printf("👁️ Template %d unhidden", req.WorkflowTemplateId)
+	}
+	// Echo back the updated row so the caller sees the new state.
+	list, err := s.ListTemplates(ctx, &pb.TemplateFilter{
+		WorkflowTemplateId: &req.WorkflowTemplateId,
+		ShowHidden:         proto.Bool(true), // include even if just hidden
+	})
+	if err != nil || list == nil || len(list.Templates) == 0 {
+		return nil, fmt.Errorf("template %d updated but failed to read back", req.WorkflowTemplateId)
+	}
+	return list.Templates[0], nil
 }
 
 func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.TemplateRunFilter) (*pb.TemplateRunList, error) {
