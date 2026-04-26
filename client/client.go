@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,6 +71,15 @@ type taskHooks struct {
 	containerName string             // empty for bare tasks
 	isBare        bool
 	recovered     atomic.Bool // true once recovery has been triggered, to keep it idempotent
+
+	// capturedExit lets recoverTask preserve the workload's *actual* exit
+	// code when phase-2 SIGKILL has to fire. Set to -1 by registerHooks;
+	// recoverTask phase 2 stores the container's State.ExitCode here if
+	// `docker inspect` returns it cleanly before the kill. The post-Wait
+	// path in executeTask reads this and, if non-negative, uses it instead
+	// of cmd.Wait()'s "signal: killed" — so a workload that actually
+	// succeeded but got stuck in our log pipeline is reported as S, not F.
+	capturedExit atomic.Int32
 }
 
 var taskHooksMap sync.Map // map[int32]*taskHooks
@@ -276,8 +286,13 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		)
 		log.Printf("🛠️  Running bare command: %s -c %s", shell, task.Command)
 	} else {
-		// Docker execution: existing logic (containerName hoisted above)
-		command := []string{"run", "--rm", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
+		// Docker execution: existing logic (containerName hoisted above).
+		// `--rm` was removed deliberately: keeping the container in stopped
+		// state until executeTask explicitly removes it lets recoverTask
+		// query State.ExitCode via `docker inspect` if it ever needs to
+		// SIGKILL the cmd. The defer below is responsible for cleanup so
+		// the daemon doesn't accumulate stopped containers.
+		command := []string{"run", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
 		option := ""
 		for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
 			if folder == "resource" || folder == "scripts" {
@@ -391,8 +406,26 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		containerName: containerName,
 		isBare:        isBare,
 	}
+	hooks.capturedExit.Store(-1) // sentinel: "no captured exit code yet"
 	taskHooksMap.Store(task.TaskId, hooks)
 	defer taskHooksMap.Delete(task.TaskId)
+
+	// Ensure the (no longer auto-removed) docker container is cleaned up
+	// regardless of how executeTask exits. Best-effort: log on failure but
+	// don't propagate. -f removes whether the container is running or
+	// stopped, so it also handles the rare case where cmd.Wait() returned
+	// before the container fully cleaned up.
+	if !isBare && containerName != "" {
+		defer func() {
+			if out, err := exec.Command("docker", "rm", "-f", containerName).CombinedOutput(); err != nil {
+				outStr := strings.TrimSpace(string(out))
+				// "No such container" just means cleanup isn't needed.
+				if !strings.Contains(outStr, "No such container") {
+					log.Printf("⚠️ Task %d: docker rm cleanup failed: %v (%s)", task.TaskId, err, outStr)
+				}
+			}
+		}()
+	}
 
 	// Liveness watchdog. If the workload (docker container or bare process)
 	// is observed gone for two consecutive checks (≥2 minutes), assume
@@ -436,6 +469,21 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	// ensuring logs are on disk before we send the status update.
 	stream.CloseAndRecv()
 
+	// If recoverTask phase 2 had to SIGKILL cmd but successfully captured
+	// the container's real exit code via `docker inspect` first, override
+	// cmd.Wait()'s "signal: killed" with the workload's true outcome.
+	// Without this, a workload that actually finished cleanly but got
+	// stuck in our log pipeline would be incorrectly reported as F.
+	if captured := hooks.capturedExit.Load(); captured >= 0 {
+		if captured == 0 {
+			err = nil
+			log.Printf("✅ Task %d: container exit code 0 captured via inspect; overriding kill-status as success", task.TaskId)
+		} else {
+			err = fmt.Errorf("container exited with code %d", captured)
+			log.Printf("ℹ️ Task %d: container exit code %d captured via inspect; overriding kill-status with real code", task.TaskId, captured)
+		}
+	}
+
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
 	sec := int32(time.Since(runStart).Seconds())
 	if err != nil {
@@ -460,6 +508,25 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 // unresponsive; etc.). Idempotent — multiple callers (signal handler,
 // watchdog) can fire it without compounding effects. Returns true if this
 // call actually performed recovery (false if recovery was already done).
+//
+// Two-phase by design:
+//
+//  1. Immediate: cancel the gRPC log-stream context. This is sufficient
+//     in the common case where the wedge is a sendLogs goroutine blocked
+//     inside stream.Send() — sendLogs errors out, logWg.Wait() returns,
+//     cmd.Wait() reaps the (now-zombie) docker run / bare process and
+//     returns its *natural* exit code. The post-Wait path then reports
+//     S or F based on the actual workload result, preserving a
+//     successful workload that just had a wedged log pipeline.
+//
+//  2. Fallback (after 30s grace): if executeTask hasn't returned yet,
+//     the wedge is deeper than the log stream — most likely cmd.Wait()
+//     itself is blocked because the underlying process is still alive
+//     (docker daemon unresponsive, docker run stuck on a full output
+//     pipe, bare process in some uninterruptible state). SIGKILL the
+//     cmd. The natural exit code is then lost, cmd.Wait() returns
+//     "signal: killed", and the task is reported as F — but at least
+//     the worker stops being stuck.
 func recoverTask(taskID int32, hooks *taskHooks, reason string) bool {
 	if hooks == nil {
 		return false
@@ -468,19 +535,40 @@ func recoverTask(taskID int32, hooks *taskHooks, reason string) bool {
 		return false
 	}
 	log.Printf("🩺 Task %d: forcing recovery (%s)", taskID, reason)
+	// Phase 1: cancel-only.
 	if hooks.cancel != nil {
-		// Cancel the log-stream context so sendLogs goroutines stuck in
-		// stream.Send() error out and logWg.Wait() returns.
 		hooks.cancel()
 	}
-	if hooks.cmd != nil && hooks.cmd.Process != nil {
-		// Kill the docker run client (or bare process). For docker, this
-		// makes cmd.Wait() return even if the docker daemon is wedged.
-		// Harmless when the process is already dead (returns ESRCH).
-		if err := hooks.cmd.Process.Kill(); err != nil && !strings.Contains(err.Error(), "process already finished") {
-			log.Printf("⚠️ Task %d recovery: kill cmd process failed: %v", taskID, err)
+	// Phase 2: SIGKILL fallback.
+	go func() {
+		time.Sleep(30 * time.Second)
+		if _, stillRegistered := taskHooksMap.Load(taskID); !stillRegistered {
+			// executeTask already finished naturally with its real exit
+			// code — perfect, nothing to do.
+			return
 		}
-	}
+		// Before killing, try to recover the container's actual exit code
+		// from the daemon. With --rm dropped, the container persists in
+		// stopped state until our cleanup defer removes it; until then
+		// State.ExitCode is queryable. If we get a clean code, the
+		// post-Wait path in executeTask will use it instead of
+		// "signal: killed", preserving a successful workload.
+		if !hooks.isBare && hooks.containerName != "" {
+			out, err := exec.Command("docker", "inspect", "-f", "{{.State.ExitCode}}", hooks.containerName).CombinedOutput()
+			if err == nil {
+				if code, perr := strconv.Atoi(strings.TrimSpace(string(out))); perr == nil {
+					hooks.capturedExit.Store(int32(code))
+					log.Printf("🩺 Task %d recovery: captured container exit code %d before SIGKILL", taskID, code)
+				}
+			}
+		}
+		log.Printf("🩺 Task %d: still stuck 30s after cancel; SIGKILL'ing cmd process", taskID)
+		if hooks.cmd != nil && hooks.cmd.Process != nil {
+			if err := hooks.cmd.Process.Kill(); err != nil && !strings.Contains(err.Error(), "process already finished") {
+				log.Printf("⚠️ Task %d recovery: kill cmd process failed: %v", taskID, err)
+			}
+		}
+	}()
 	return true
 }
 
