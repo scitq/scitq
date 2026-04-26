@@ -1242,7 +1242,7 @@ class TemplateFilter(_message.Message):
     def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., all_versions: bool = ..., show_hidden: bool = ...) -> None: ...
 
 class Template(_message.Message):
-    __slots__ = ("workflow_template_id", "name", "version", "description", "param_json", "uploaded_at", "uploaded_by", "hidden")
+    __slots__ = ("workflow_template_id", "name", "version", "description", "param_json", "uploaded_at", "uploaded_by", "hidden", "version_count")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
@@ -1251,6 +1251,7 @@ class Template(_message.Message):
     UPLOADED_AT_FIELD_NUMBER: _ClassVar[int]
     UPLOADED_BY_FIELD_NUMBER: _ClassVar[int]
     HIDDEN_FIELD_NUMBER: _ClassVar[int]
+    VERSION_COUNT_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     name: str
     version: str
@@ -1259,7 +1260,8 @@ class Template(_message.Message):
     uploaded_at: str
     uploaded_by: int
     hidden: bool
-    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ..., uploaded_at: _Optional[str] = ..., uploaded_by: _Optional[int] = ..., hidden: bool = ...) -> None: ...
+    version_count: int
+    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ..., uploaded_at: _Optional[str] = ..., uploaded_by: _Optional[int] = ..., hidden: bool = ..., version_count: _Optional[int] = ...) -> None: ...
 
 class UpdateTemplateRequest(_message.Message):
     __slots__ = ("workflow_template_id", "hidden")

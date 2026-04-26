@@ -14,8 +14,11 @@
 
   // Array of workflow templates
   let workflowsTemp = [];
-  // Current sorting method ('template' or 'name')
-  let sortBy: 'template' | 'name' = 'template';
+  // Current sorting method ('template' or 'name'). Default 'name' so the
+  // listing is alphabetical out of the box; the dropdown lets the operator
+  // switch to 'template' (id desc) when they want chronological / newest-
+  // upload-first order.
+  let sortBy: 'template' | 'name' = 'name';
   // Currently selected file for upload
   let selectedFile: File | null = null;
   // Reference to file input element
@@ -130,7 +133,9 @@
               case 'template':
                   return (b.workflowTemplateId ?? 0) - (a.workflowTemplateId ?? 0);
               case 'name':
-                  return (a.name || '').localeCompare(b.name || '');
+                  // Case-insensitive locale compare so "Foo" and "foo"
+                  // group together regardless of upload casing.
+                  return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
               default:
                   return 0;
           }

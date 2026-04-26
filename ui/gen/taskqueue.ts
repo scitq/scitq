@@ -313,6 +313,77 @@ export interface EditAndRetryTaskRequest {
     command: string; // New command to use for the retry
 }
 /**
+ * StringList wraps a `repeated string` so it can be carried as `optional`
+ * in EditTaskRequest. Required because proto3 doesn't natively support
+ * `optional repeated`. Semantics in the requests that use it:
+ *   - field absent (nil pointer)        → leave the underlying list alone
+ *   - field present, values empty slice → clear the underlying list
+ *   - field present, values non-empty   → replace the underlying list
+ *
+ * @generated from protobuf message taskqueue.StringList
+ */
+export interface StringList {
+    /**
+     * @generated from protobuf field: repeated string values = 1
+     */
+    values: string[];
+}
+/**
+ * EditTaskRequest updates fields on an existing task in place, without
+ * triggering a retry (use EditAndRetryTask for that). Only fields whose
+ * `optional` is set are touched; everything else is left as-is. The server
+ * rejects status transitions into worker-managed running states ("A", "C",
+ * "D", "O", "R", "U", "V") to avoid stomping on the workload's lifecycle.
+ *
+ * @generated from protobuf message taskqueue.EditTaskRequest
+ */
+export interface EditTaskRequest {
+    /**
+     * @generated from protobuf field: int32 task_id = 1
+     */
+    taskId: number;
+    /**
+     * @generated from protobuf field: optional string command = 2
+     */
+    command?: string;
+    /**
+     * @generated from protobuf field: optional string container = 3
+     */
+    container?: string;
+    /**
+     * @generated from protobuf field: optional string container_options = 4
+     */
+    containerOptions?: string;
+    /**
+     * @generated from protobuf field: optional string shell = 5
+     */
+    shell?: string;
+    /**
+     * @generated from protobuf field: optional string status = 6
+     */
+    status?: string; // e.g. "P", "W", "F", "S"
+    /**
+     * @generated from protobuf field: optional taskqueue.StringList input = 7
+     */
+    input?: StringList;
+    /**
+     * @generated from protobuf field: optional taskqueue.StringList resource = 8
+     */
+    resource?: StringList;
+    /**
+     * @generated from protobuf field: optional string output = 9
+     */
+    output?: string;
+    /**
+     * @generated from protobuf field: optional string publish = 10
+     */
+    publish?: string;
+    /**
+     * @generated from protobuf field: optional int32 retry = 11
+     */
+    retry?: number;
+}
+/**
  * @generated from protobuf message taskqueue.EditStepCommandRequest
  */
 export interface EditStepCommandRequest {
@@ -764,6 +835,21 @@ export interface ListTasksRequest {
      * @generated from protobuf field: optional bool show_hidden = 8
      */
     showHidden?: boolean;
+    /**
+     * When true, the server clips Task.command to compact_command_max
+     * characters (default 200) before returning. Used by the basic
+     * `scitq task list` view so a kilobyte-scale shell script doesn't
+     * get shipped over gRPC just to be truncated client-side. The full
+     * command is still available via `task list -l/--long` (which omits
+     * this flag).
+     *
+     * @generated from protobuf field: optional bool compact_command = 9
+     */
+    compactCommand?: boolean;
+    /**
+     * @generated from protobuf field: optional int32 compact_command_max = 10
+     */
+    compactCommandMax?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkerRequest
@@ -1516,6 +1602,32 @@ export interface Workflow {
      * @generated from protobuf field: bool live = 11
      */
     live: boolean; // Live mode: prevents auto-completion of workflow
+    /**
+     * Launch provenance: lets "how was this workflow created?" be answered
+     * without a follow-up query. For template-launched workflows,
+     * template_name + template_version are set. For local-Python ad-hoc
+     * runs, script_name (and optionally script_sha256) are set instead.
+     * template_run_id is populated for both.
+     *
+     * @generated from protobuf field: optional int32 template_run_id = 12
+     */
+    templateRunId?: number;
+    /**
+     * @generated from protobuf field: optional string template_name = 13
+     */
+    templateName?: string;
+    /**
+     * @generated from protobuf field: optional string template_version = 14
+     */
+    templateVersion?: string;
+    /**
+     * @generated from protobuf field: optional string script_name = 15
+     */
+    scriptName?: string;
+    /**
+     * @generated from protobuf field: optional string script_sha256 = 16
+     */
+    scriptSha256?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkflowRequest
@@ -2041,6 +2153,23 @@ export interface TemplateFilter {
      * @generated from protobuf field: optional string version = 3
      */
     version?: string;
+    /**
+     * When true, return every version that matches the other filters. The
+     * default (false) collapses the result to one row per name — the
+     * most-recently-uploaded version. Most operators want the latest by
+     * default; pass all_versions=true (or `--all-versions` on the CLI) to
+     * see history for upgrades, rollbacks, and audits.
+     *
+     * @generated from protobuf field: optional bool all_versions = 4
+     */
+    allVersions?: boolean;
+    /**
+     * When true, include hidden templates in the result. Default (false)
+     * excludes them. See workflow_template.hidden (migration 24).
+     *
+     * @generated from protobuf field: optional bool show_hidden = 5
+     */
+    showHidden?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.Template
@@ -2074,6 +2203,38 @@ export interface Template {
      * @generated from protobuf field: optional int32 uploaded_by = 7
      */
     uploadedBy?: number;
+    /**
+     * @generated from protobuf field: bool hidden = 8
+     */
+    hidden: boolean;
+    /**
+     * How many versions exist for this name (counted across visible rows
+     * honouring the same show_hidden filter as the listing). Populated only
+     * when the server is collapsing to latest-per-name; in `all_versions`
+     * mode every row is its own version, so the field stays 0/unset and
+     * callers should ignore it. Used by the UI to decide whether to render
+     * a "more versions" dropdown trigger.
+     *
+     * @generated from protobuf field: int32 version_count = 9
+     */
+    versionCount: number;
+}
+/**
+ * UpdateTemplateRequest carries an in-place edit of a workflow_template
+ * row. Currently only `hidden` is mutable — uploads still go through
+ * UploadTemplate which validates the script and bumps the version.
+ *
+ * @generated from protobuf message taskqueue.UpdateTemplateRequest
+ */
+export interface UpdateTemplateRequest {
+    /**
+     * @generated from protobuf field: int32 workflow_template_id = 1
+     */
+    workflowTemplateId: number;
+    /**
+     * @generated from protobuf field: optional bool hidden = 2
+     */
+    hidden?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.TemplateList
@@ -2093,6 +2254,9 @@ export interface TemplateRun {
      */
     templateRunId: number;
     /**
+     * 0 = ad-hoc run (local Python script, no template uploaded). For those,
+     * see script_name / script_sha256 instead.
+     *
      * @generated from protobuf field: int32 workflow_template_id = 2
      */
     workflowTemplateId: number;
@@ -2136,6 +2300,14 @@ export interface TemplateRun {
      * @generated from protobuf field: optional string run_by_username = 12
      */
     runByUsername?: string;
+    /**
+     * @generated from protobuf field: optional string script_name = 13
+     */
+    scriptName?: string; // ad-hoc runs only
+    /**
+     * @generated from protobuf field: optional string script_sha256 = 14
+     */
+    scriptSha256?: string; // ad-hoc runs only
 }
 /**
  * @generated from protobuf message taskqueue.TemplateRunList
@@ -2171,6 +2343,14 @@ export interface UpdateTemplateRunRequest {
      * @generated from protobuf field: optional string error_message = 3
      */
     errorMessage?: string;
+    /**
+     * JSON-encoded array of pin objects (see specs/module_library.md).
+     * The yaml_runner snapshots the concrete (path, version) it resolved
+     * for each `import:` so replays can use identical module content.
+     *
+     * @generated from protobuf field: optional string module_pins = 4
+     */
+    modulePins?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkspaceRootRequest
@@ -2202,6 +2382,35 @@ export interface DeleteTemplateRunRequest {
      * @generated from protobuf field: int32 template_run_id = 1
      */
     templateRunId: number;
+}
+/**
+ * Ad-hoc (local Python) run registration — no uploaded template, just a
+ * script file with some params. The server stores it as a template_run with
+ * workflow_template_id=NULL.
+ *
+ * @generated from protobuf message taskqueue.RegisterAdhocRunRequest
+ */
+export interface RegisterAdhocRunRequest {
+    /**
+     * @generated from protobuf field: string script_name = 1
+     */
+    scriptName: string; // bare filename of the launching script
+    /**
+     * @generated from protobuf field: string script_sha256 = 2
+     */
+    scriptSha256: string; // SHA-256 of the script file's content (hex)
+    /**
+     * @generated from protobuf field: string param_values_json = 3
+     */
+    paramValuesJson: string; // JSON snapshot of the params the user ran with
+    /**
+     * module_pins_json stores the Python versioning knobs — typically
+     * {"scitq2":"0.7.4"} so replays can check compatibility against later
+     * upgrades. Same column as YAML's per-module pins, different shape.
+     *
+     * @generated from protobuf field: string module_pins_json = 4
+     */
+    modulePinsJson: string;
 }
 /**
  * Template download
@@ -2246,9 +2455,70 @@ export interface UploadModuleRequest {
  */
 export interface ModuleList {
     /**
+     * Flat list of `path@version` strings. Kept for backward compatibility.
+     *
      * @generated from protobuf field: repeated string modules = 1
      */
     modules: string[];
+    /**
+     * Structured view — populated by newer callers. Old callers can ignore it.
+     *
+     * @generated from protobuf field: repeated taskqueue.ModuleEntry entries = 2
+     */
+    entries: ModuleEntry[];
+}
+/**
+ * @generated from protobuf message taskqueue.ModuleEntry
+ */
+export interface ModuleEntry {
+    /**
+     * @generated from protobuf field: string path = 1
+     */
+    path: string;
+    /**
+     * @generated from protobuf field: string version = 2
+     */
+    version: string;
+    /**
+     * @generated from protobuf field: string origin = 3
+     */
+    origin: string; // "bundled" | "local" | "forked"
+    /**
+     * @generated from protobuf field: string description = 4
+     */
+    description: string;
+}
+/**
+ * Filter for ListModulesFiltered. All fields optional: an empty request
+ * returns the same data as `ListModules` (all rows).
+ *
+ * @generated from protobuf message taskqueue.ModuleListFilter
+ */
+export interface ModuleListFilter {
+    /**
+     * Restrict results to one module path (e.g. 'genomics/fastp') — returns
+     * every version at that path. Matches the `scitq module list
+     * --versions X` use case.
+     *
+     * @generated from protobuf field: optional string path = 1
+     */
+    path?: string;
+    /**
+     * If true, return only the highest-ordered version per path.
+     *
+     * @generated from protobuf field: optional bool latest_only = 2
+     */
+    latestOnly?: boolean;
+    /**
+     * Origin filter — case-insensitive, accepts full word ('bundled',
+     * 'local', 'forked') or single letter ('B', 'L', 'F'). Matches the
+     * `scitq module list --origin X` use case, typically used to audit
+     * pre-library files that were auto-imported as origin=local at server
+     * startup.
+     *
+     * @generated from protobuf field: optional string origin = 3
+     */
+    origin?: string;
 }
 /**
  * @generated from protobuf message taskqueue.DownloadModuleRequest
@@ -2258,6 +2528,134 @@ export interface DownloadModuleRequest {
      * @generated from protobuf field: string filename = 1
      */
     filename: string;
+}
+/**
+ * `scitq module upgrade` seeds/updates bundled YAML modules in the server-side
+ * module library from the installed scitq2_modules Python package.
+ * See specs/module_library.md.
+ *
+ * @generated from protobuf message taskqueue.UpgradeBundledModulesRequest
+ */
+export interface UpgradeBundledModulesRequest {
+    /**
+     * If false (default), the server returns the diff the upgrade would apply
+     * without touching the DB. If true, the changes are committed.
+     *
+     * @generated from protobuf field: bool apply = 1
+     */
+    apply: boolean;
+}
+/**
+ * @generated from protobuf message taskqueue.UpgradeBundledModulesResponse
+ */
+export interface UpgradeBundledModulesResponse {
+    /**
+     * Human-readable multi-line report of the scanned bundled modules and the
+     * action taken (or that would be taken in dry-run).
+     *
+     * @generated from protobuf field: string report = 1
+     */
+    report: string;
+    /**
+     * Summary counters — useful for scripted callers that don't want to parse
+     * the text report.
+     *
+     * @generated from protobuf field: int32 inserted = 2
+     */
+    inserted: number; // bundled rows newly inserted
+    /**
+     * @generated from protobuf field: int32 forks_preserved = 3
+     */
+    forksPreserved: number; // existing origin=F rows left alone
+    /**
+     * @generated from protobuf field: int32 conflicts = 4
+     */
+    conflicts: number; // same (path,version) re-shipped with different bytes
+    /**
+     * @generated from protobuf field: int32 skipped = 5
+     */
+    skipped: number; // bundled modules without a version field
+    /**
+     * @generated from protobuf field: int32 up_to_date = 6
+     */
+    upToDate: number; // bundled rows already present with matching content
+}
+/**
+ * Single-row origin lookup. `version` is optional — empty means "latest".
+ *
+ * @generated from protobuf message taskqueue.ModuleOriginRequest
+ */
+export interface ModuleOriginRequest {
+    /**
+     * @generated from protobuf field: string path = 1
+     */
+    path: string;
+    /**
+     * @generated from protobuf field: string version = 2
+     */
+    version: string;
+}
+/**
+ * @generated from protobuf message taskqueue.ModuleOriginResponse
+ */
+export interface ModuleOriginResponse {
+    /**
+     * @generated from protobuf field: string path = 1
+     */
+    path: string;
+    /**
+     * @generated from protobuf field: string version = 2
+     */
+    version: string;
+    /**
+     * @generated from protobuf field: string origin = 3
+     */
+    origin: string; // "bundled" | "local" | "forked"
+    /**
+     * @generated from protobuf field: string content_sha256 = 4
+     */
+    contentSha256: string;
+    /**
+     * @generated from protobuf field: string bundled_sha256 = 5
+     */
+    bundledSha256: string; // set on forked rows; the pre-fork content hash
+    /**
+     * @generated from protobuf field: string description = 6
+     */
+    description: string;
+    /**
+     * @generated from protobuf field: string uploaded_at = 7
+     */
+    uploadedAt: string; // RFC3339
+    /**
+     * @generated from protobuf field: string uploaded_by = 8
+     */
+    uploadedBy: string; // username, empty if unknown or system-seeded
+    /**
+     * @generated from protobuf field: bool fork_is_outdated = 9
+     */
+    forkIsOutdated: boolean; // true if a newer bundled content at the same path has shipped since the fork
+}
+/**
+ * Create a new forked row by cloning a bundled module to a new version.
+ * Content is taken from the source row; caller typically follows up with
+ * `scitq module download` + edit + `scitq module upload --force`.
+ *
+ * @generated from protobuf message taskqueue.ForkModuleRequest
+ */
+export interface ForkModuleRequest {
+    /**
+     * @generated from protobuf field: string source_path = 1
+     */
+    sourcePath: string;
+    /**
+     * @generated from protobuf field: string source_version = 2
+     */
+    sourceVersion: string; // optional; empty → latest bundled at source_path
+    /**
+     * @generated from protobuf field: string new_version = 3
+     */
+    newVersion: string; // required; rejected if already present
 }
 /**
  * @generated from protobuf message taskqueue.FileContent
@@ -3406,6 +3804,170 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
  * @generated MessageType for protobuf message taskqueue.EditAndRetryTaskRequest
  */
 export const EditAndRetryTaskRequest = new EditAndRetryTaskRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StringList$Type extends MessageType<StringList> {
+    constructor() {
+        super("taskqueue.StringList", [
+            { no: 1, name: "values", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<StringList>): StringList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.values = [];
+        if (value !== undefined)
+            reflectionMergePartial<StringList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StringList): StringList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated string values */ 1:
+                    message.values.push(reader.string());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StringList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated string values = 1; */
+        for (let i = 0; i < message.values.length; i++)
+            writer.tag(1, WireType.LengthDelimited).string(message.values[i]);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.StringList
+ */
+export const StringList = new StringList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
+    constructor() {
+        super("taskqueue.EditTaskRequest", [
+            { no: 1, name: "task_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "command", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "container", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "container_options", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "shell", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "input", kind: "message", T: () => StringList },
+            { no: 8, name: "resource", kind: "message", T: () => StringList },
+            { no: 9, name: "output", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "publish", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 11, name: "retry", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<EditTaskRequest>): EditTaskRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.taskId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<EditTaskRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: EditTaskRequest): EditTaskRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 task_id */ 1:
+                    message.taskId = reader.int32();
+                    break;
+                case /* optional string command */ 2:
+                    message.command = reader.string();
+                    break;
+                case /* optional string container */ 3:
+                    message.container = reader.string();
+                    break;
+                case /* optional string container_options */ 4:
+                    message.containerOptions = reader.string();
+                    break;
+                case /* optional string shell */ 5:
+                    message.shell = reader.string();
+                    break;
+                case /* optional string status */ 6:
+                    message.status = reader.string();
+                    break;
+                case /* optional taskqueue.StringList input */ 7:
+                    message.input = StringList.internalBinaryRead(reader, reader.uint32(), options, message.input);
+                    break;
+                case /* optional taskqueue.StringList resource */ 8:
+                    message.resource = StringList.internalBinaryRead(reader, reader.uint32(), options, message.resource);
+                    break;
+                case /* optional string output */ 9:
+                    message.output = reader.string();
+                    break;
+                case /* optional string publish */ 10:
+                    message.publish = reader.string();
+                    break;
+                case /* optional int32 retry */ 11:
+                    message.retry = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: EditTaskRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 task_id = 1; */
+        if (message.taskId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.taskId);
+        /* optional string command = 2; */
+        if (message.command !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.command);
+        /* optional string container = 3; */
+        if (message.container !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.container);
+        /* optional string container_options = 4; */
+        if (message.containerOptions !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.containerOptions);
+        /* optional string shell = 5; */
+        if (message.shell !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.shell);
+        /* optional string status = 6; */
+        if (message.status !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.status);
+        /* optional taskqueue.StringList input = 7; */
+        if (message.input)
+            StringList.internalBinaryWrite(message.input, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional taskqueue.StringList resource = 8; */
+        if (message.resource)
+            StringList.internalBinaryWrite(message.resource, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* optional string output = 9; */
+        if (message.output !== undefined)
+            writer.tag(9, WireType.LengthDelimited).string(message.output);
+        /* optional string publish = 10; */
+        if (message.publish !== undefined)
+            writer.tag(10, WireType.LengthDelimited).string(message.publish);
+        /* optional int32 retry = 11; */
+        if (message.retry !== undefined)
+            writer.tag(11, WireType.Varint).int32(message.retry);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.EditTaskRequest
+ */
+export const EditTaskRequest = new EditTaskRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class EditStepCommandRequest$Type extends MessageType<EditStepCommandRequest> {
     constructor() {
@@ -5042,7 +5604,9 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
             { no: 5, name: "command_filter", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 7, name: "offset", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 8, name: "show_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 8, name: "show_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 9, name: "compact_command", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 10, name: "compact_command_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<ListTasksRequest>): ListTasksRequest {
@@ -5080,6 +5644,12 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
                 case /* optional bool show_hidden */ 8:
                     message.showHidden = reader.bool();
                     break;
+                case /* optional bool compact_command */ 9:
+                    message.compactCommand = reader.bool();
+                    break;
+                case /* optional int32 compact_command_max */ 10:
+                    message.compactCommandMax = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5116,6 +5686,12 @@ class ListTasksRequest$Type extends MessageType<ListTasksRequest> {
         /* optional bool show_hidden = 8; */
         if (message.showHidden !== undefined)
             writer.tag(8, WireType.Varint).bool(message.showHidden);
+        /* optional bool compact_command = 9; */
+        if (message.compactCommand !== undefined)
+            writer.tag(9, WireType.Varint).bool(message.compactCommand);
+        /* optional int32 compact_command_max = 10; */
+        if (message.compactCommandMax !== undefined)
+            writer.tag(10, WireType.Varint).int32(message.compactCommandMax);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7542,7 +8118,12 @@ class Workflow$Type extends MessageType<Workflow> {
             { no: 8, name: "failed_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 9, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 10, name: "retrying_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 11, name: "live", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 11, name: "live", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 12, name: "template_run_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 13, name: "template_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 14, name: "template_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 15, name: "script_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 16, name: "script_sha256", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Workflow>): Workflow {
@@ -7599,6 +8180,21 @@ class Workflow$Type extends MessageType<Workflow> {
                 case /* bool live */ 11:
                     message.live = reader.bool();
                     break;
+                case /* optional int32 template_run_id */ 12:
+                    message.templateRunId = reader.int32();
+                    break;
+                case /* optional string template_name */ 13:
+                    message.templateName = reader.string();
+                    break;
+                case /* optional string template_version */ 14:
+                    message.templateVersion = reader.string();
+                    break;
+                case /* optional string script_name */ 15:
+                    message.scriptName = reader.string();
+                    break;
+                case /* optional string script_sha256 */ 16:
+                    message.scriptSha256 = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7644,6 +8240,21 @@ class Workflow$Type extends MessageType<Workflow> {
         /* bool live = 11; */
         if (message.live !== false)
             writer.tag(11, WireType.Varint).bool(message.live);
+        /* optional int32 template_run_id = 12; */
+        if (message.templateRunId !== undefined)
+            writer.tag(12, WireType.Varint).int32(message.templateRunId);
+        /* optional string template_name = 13; */
+        if (message.templateName !== undefined)
+            writer.tag(13, WireType.LengthDelimited).string(message.templateName);
+        /* optional string template_version = 14; */
+        if (message.templateVersion !== undefined)
+            writer.tag(14, WireType.LengthDelimited).string(message.templateVersion);
+        /* optional string script_name = 15; */
+        if (message.scriptName !== undefined)
+            writer.tag(15, WireType.LengthDelimited).string(message.scriptName);
+        /* optional string script_sha256 = 16; */
+        if (message.scriptSha256 !== undefined)
+            writer.tag(16, WireType.LengthDelimited).string(message.scriptSha256);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9435,7 +10046,9 @@ class TemplateFilter$Type extends MessageType<TemplateFilter> {
         super("taskqueue.TemplateFilter", [
             { no: 1, name: "workflow_template_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "all_versions", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "show_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<TemplateFilter>): TemplateFilter {
@@ -9458,6 +10071,12 @@ class TemplateFilter$Type extends MessageType<TemplateFilter> {
                 case /* optional string version */ 3:
                     message.version = reader.string();
                     break;
+                case /* optional bool all_versions */ 4:
+                    message.allVersions = reader.bool();
+                    break;
+                case /* optional bool show_hidden */ 5:
+                    message.showHidden = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9479,6 +10098,12 @@ class TemplateFilter$Type extends MessageType<TemplateFilter> {
         /* optional string version = 3; */
         if (message.version !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.version);
+        /* optional bool all_versions = 4; */
+        if (message.allVersions !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.allVersions);
+        /* optional bool show_hidden = 5; */
+        if (message.showHidden !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.showHidden);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9499,7 +10124,9 @@ class Template$Type extends MessageType<Template> {
             { no: 4, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "param_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "uploaded_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 7, name: "uploaded_by", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 7, name: "uploaded_by", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "hidden", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 9, name: "version_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Template>): Template {
@@ -9510,6 +10137,8 @@ class Template$Type extends MessageType<Template> {
         message.description = "";
         message.paramJson = "";
         message.uploadedAt = "";
+        message.hidden = false;
+        message.versionCount = 0;
         if (value !== undefined)
             reflectionMergePartial<Template>(this, message, value);
         return message;
@@ -9539,6 +10168,12 @@ class Template$Type extends MessageType<Template> {
                     break;
                 case /* optional int32 uploaded_by */ 7:
                     message.uploadedBy = reader.int32();
+                    break;
+                case /* bool hidden */ 8:
+                    message.hidden = reader.bool();
+                    break;
+                case /* int32 version_count */ 9:
+                    message.versionCount = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -9573,6 +10208,12 @@ class Template$Type extends MessageType<Template> {
         /* optional int32 uploaded_by = 7; */
         if (message.uploadedBy !== undefined)
             writer.tag(7, WireType.Varint).int32(message.uploadedBy);
+        /* bool hidden = 8; */
+        if (message.hidden !== false)
+            writer.tag(8, WireType.Varint).bool(message.hidden);
+        /* int32 version_count = 9; */
+        if (message.versionCount !== 0)
+            writer.tag(9, WireType.Varint).int32(message.versionCount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9583,6 +10224,60 @@ class Template$Type extends MessageType<Template> {
  * @generated MessageType for protobuf message taskqueue.Template
  */
 export const Template = new Template$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateTemplateRequest$Type extends MessageType<UpdateTemplateRequest> {
+    constructor() {
+        super("taskqueue.UpdateTemplateRequest", [
+            { no: 1, name: "workflow_template_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateTemplateRequest>): UpdateTemplateRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workflowTemplateId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateTemplateRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateTemplateRequest): UpdateTemplateRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 workflow_template_id */ 1:
+                    message.workflowTemplateId = reader.int32();
+                    break;
+                case /* optional bool hidden */ 2:
+                    message.hidden = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateTemplateRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 workflow_template_id = 1; */
+        if (message.workflowTemplateId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.workflowTemplateId);
+        /* optional bool hidden = 2; */
+        if (message.hidden !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.hidden);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.UpdateTemplateRequest
+ */
+export const UpdateTemplateRequest = new UpdateTemplateRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TemplateList$Type extends MessageType<TemplateList> {
     constructor() {
@@ -9645,7 +10340,9 @@ class TemplateRun$Type extends MessageType<TemplateRun> {
             { no: 9, name: "created_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 10, name: "param_values_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 11, name: "error_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 12, name: "run_by_username", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 12, name: "run_by_username", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 13, name: "script_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 14, name: "script_sha256", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<TemplateRun>): TemplateRun {
@@ -9700,6 +10397,12 @@ class TemplateRun$Type extends MessageType<TemplateRun> {
                 case /* optional string run_by_username */ 12:
                     message.runByUsername = reader.string();
                     break;
+                case /* optional string script_name */ 13:
+                    message.scriptName = reader.string();
+                    break;
+                case /* optional string script_sha256 */ 14:
+                    message.scriptSha256 = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9748,6 +10451,12 @@ class TemplateRun$Type extends MessageType<TemplateRun> {
         /* optional string run_by_username = 12; */
         if (message.runByUsername !== undefined)
             writer.tag(12, WireType.LengthDelimited).string(message.runByUsername);
+        /* optional string script_name = 13; */
+        if (message.scriptName !== undefined)
+            writer.tag(13, WireType.LengthDelimited).string(message.scriptName);
+        /* optional string script_sha256 = 14; */
+        if (message.scriptSha256 !== undefined)
+            writer.tag(14, WireType.LengthDelimited).string(message.scriptSha256);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9857,7 +10566,8 @@ class UpdateTemplateRunRequest$Type extends MessageType<UpdateTemplateRunRequest
         super("taskqueue.UpdateTemplateRunRequest", [
             { no: 1, name: "template_run_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "error_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "error_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "module_pins", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateTemplateRunRequest>): UpdateTemplateRunRequest {
@@ -9881,6 +10591,9 @@ class UpdateTemplateRunRequest$Type extends MessageType<UpdateTemplateRunRequest
                 case /* optional string error_message */ 3:
                     message.errorMessage = reader.string();
                     break;
+                case /* optional string module_pins */ 4:
+                    message.modulePins = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9902,6 +10615,9 @@ class UpdateTemplateRunRequest$Type extends MessageType<UpdateTemplateRunRequest
         /* optional string error_message = 3; */
         if (message.errorMessage !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.errorMessage);
+        /* optional string module_pins = 4; */
+        if (message.modulePins !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.modulePins);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10062,6 +10778,77 @@ class DeleteTemplateRunRequest$Type extends MessageType<DeleteTemplateRunRequest
  */
 export const DeleteTemplateRunRequest = new DeleteTemplateRunRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class RegisterAdhocRunRequest$Type extends MessageType<RegisterAdhocRunRequest> {
+    constructor() {
+        super("taskqueue.RegisterAdhocRunRequest", [
+            { no: 1, name: "script_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "script_sha256", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "param_values_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "module_pins_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RegisterAdhocRunRequest>): RegisterAdhocRunRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.scriptName = "";
+        message.scriptSha256 = "";
+        message.paramValuesJson = "";
+        message.modulePinsJson = "";
+        if (value !== undefined)
+            reflectionMergePartial<RegisterAdhocRunRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RegisterAdhocRunRequest): RegisterAdhocRunRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string script_name */ 1:
+                    message.scriptName = reader.string();
+                    break;
+                case /* string script_sha256 */ 2:
+                    message.scriptSha256 = reader.string();
+                    break;
+                case /* string param_values_json */ 3:
+                    message.paramValuesJson = reader.string();
+                    break;
+                case /* string module_pins_json */ 4:
+                    message.modulePinsJson = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RegisterAdhocRunRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string script_name = 1; */
+        if (message.scriptName !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.scriptName);
+        /* string script_sha256 = 2; */
+        if (message.scriptSha256 !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.scriptSha256);
+        /* string param_values_json = 3; */
+        if (message.paramValuesJson !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.paramValuesJson);
+        /* string module_pins_json = 4; */
+        if (message.modulePinsJson !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.modulePinsJson);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.RegisterAdhocRunRequest
+ */
+export const RegisterAdhocRunRequest = new RegisterAdhocRunRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class DownloadTemplateRequest$Type extends MessageType<DownloadTemplateRequest> {
     constructor() {
         super("taskqueue.DownloadTemplateRequest", [
@@ -10188,12 +10975,14 @@ export const UploadModuleRequest = new UploadModuleRequest$Type();
 class ModuleList$Type extends MessageType<ModuleList> {
     constructor() {
         super("taskqueue.ModuleList", [
-            { no: 1, name: "modules", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "modules", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "entries", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => ModuleEntry }
         ]);
     }
     create(value?: PartialMessage<ModuleList>): ModuleList {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.modules = [];
+        message.entries = [];
         if (value !== undefined)
             reflectionMergePartial<ModuleList>(this, message, value);
         return message;
@@ -10205,6 +10994,9 @@ class ModuleList$Type extends MessageType<ModuleList> {
             switch (fieldNo) {
                 case /* repeated string modules */ 1:
                     message.modules.push(reader.string());
+                    break;
+                case /* repeated taskqueue.ModuleEntry entries */ 2:
+                    message.entries.push(ModuleEntry.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -10221,6 +11013,9 @@ class ModuleList$Type extends MessageType<ModuleList> {
         /* repeated string modules = 1; */
         for (let i = 0; i < message.modules.length; i++)
             writer.tag(1, WireType.LengthDelimited).string(message.modules[i]);
+        /* repeated taskqueue.ModuleEntry entries = 2; */
+        for (let i = 0; i < message.entries.length; i++)
+            ModuleEntry.internalBinaryWrite(message.entries[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10231,6 +11026,137 @@ class ModuleList$Type extends MessageType<ModuleList> {
  * @generated MessageType for protobuf message taskqueue.ModuleList
  */
 export const ModuleList = new ModuleList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ModuleEntry$Type extends MessageType<ModuleEntry> {
+    constructor() {
+        super("taskqueue.ModuleEntry", [
+            { no: 1, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "version", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "origin", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ModuleEntry>): ModuleEntry {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.path = "";
+        message.version = "";
+        message.origin = "";
+        message.description = "";
+        if (value !== undefined)
+            reflectionMergePartial<ModuleEntry>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ModuleEntry): ModuleEntry {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string path */ 1:
+                    message.path = reader.string();
+                    break;
+                case /* string version */ 2:
+                    message.version = reader.string();
+                    break;
+                case /* string origin */ 3:
+                    message.origin = reader.string();
+                    break;
+                case /* string description */ 4:
+                    message.description = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ModuleEntry, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string path = 1; */
+        if (message.path !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.path);
+        /* string version = 2; */
+        if (message.version !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.version);
+        /* string origin = 3; */
+        if (message.origin !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.origin);
+        /* string description = 4; */
+        if (message.description !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.description);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ModuleEntry
+ */
+export const ModuleEntry = new ModuleEntry$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ModuleListFilter$Type extends MessageType<ModuleListFilter> {
+    constructor() {
+        super("taskqueue.ModuleListFilter", [
+            { no: 1, name: "path", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "latest_only", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "origin", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ModuleListFilter>): ModuleListFilter {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ModuleListFilter>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ModuleListFilter): ModuleListFilter {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string path */ 1:
+                    message.path = reader.string();
+                    break;
+                case /* optional bool latest_only */ 2:
+                    message.latestOnly = reader.bool();
+                    break;
+                case /* optional string origin */ 3:
+                    message.origin = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ModuleListFilter, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string path = 1; */
+        if (message.path !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.path);
+        /* optional bool latest_only = 2; */
+        if (message.latestOnly !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.latestOnly);
+        /* optional string origin = 3; */
+        if (message.origin !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.origin);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ModuleListFilter
+ */
+export const ModuleListFilter = new ModuleListFilter$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DownloadModuleRequest$Type extends MessageType<DownloadModuleRequest> {
     constructor() {
@@ -10278,6 +11204,369 @@ class DownloadModuleRequest$Type extends MessageType<DownloadModuleRequest> {
  * @generated MessageType for protobuf message taskqueue.DownloadModuleRequest
  */
 export const DownloadModuleRequest = new DownloadModuleRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpgradeBundledModulesRequest$Type extends MessageType<UpgradeBundledModulesRequest> {
+    constructor() {
+        super("taskqueue.UpgradeBundledModulesRequest", [
+            { no: 1, name: "apply", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpgradeBundledModulesRequest>): UpgradeBundledModulesRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.apply = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpgradeBundledModulesRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpgradeBundledModulesRequest): UpgradeBundledModulesRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool apply */ 1:
+                    message.apply = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpgradeBundledModulesRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool apply = 1; */
+        if (message.apply !== false)
+            writer.tag(1, WireType.Varint).bool(message.apply);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.UpgradeBundledModulesRequest
+ */
+export const UpgradeBundledModulesRequest = new UpgradeBundledModulesRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpgradeBundledModulesResponse$Type extends MessageType<UpgradeBundledModulesResponse> {
+    constructor() {
+        super("taskqueue.UpgradeBundledModulesResponse", [
+            { no: 1, name: "report", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "inserted", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "forks_preserved", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "conflicts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "skipped", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "up_to_date", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpgradeBundledModulesResponse>): UpgradeBundledModulesResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.report = "";
+        message.inserted = 0;
+        message.forksPreserved = 0;
+        message.conflicts = 0;
+        message.skipped = 0;
+        message.upToDate = 0;
+        if (value !== undefined)
+            reflectionMergePartial<UpgradeBundledModulesResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpgradeBundledModulesResponse): UpgradeBundledModulesResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string report */ 1:
+                    message.report = reader.string();
+                    break;
+                case /* int32 inserted */ 2:
+                    message.inserted = reader.int32();
+                    break;
+                case /* int32 forks_preserved */ 3:
+                    message.forksPreserved = reader.int32();
+                    break;
+                case /* int32 conflicts */ 4:
+                    message.conflicts = reader.int32();
+                    break;
+                case /* int32 skipped */ 5:
+                    message.skipped = reader.int32();
+                    break;
+                case /* int32 up_to_date */ 6:
+                    message.upToDate = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpgradeBundledModulesResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string report = 1; */
+        if (message.report !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.report);
+        /* int32 inserted = 2; */
+        if (message.inserted !== 0)
+            writer.tag(2, WireType.Varint).int32(message.inserted);
+        /* int32 forks_preserved = 3; */
+        if (message.forksPreserved !== 0)
+            writer.tag(3, WireType.Varint).int32(message.forksPreserved);
+        /* int32 conflicts = 4; */
+        if (message.conflicts !== 0)
+            writer.tag(4, WireType.Varint).int32(message.conflicts);
+        /* int32 skipped = 5; */
+        if (message.skipped !== 0)
+            writer.tag(5, WireType.Varint).int32(message.skipped);
+        /* int32 up_to_date = 6; */
+        if (message.upToDate !== 0)
+            writer.tag(6, WireType.Varint).int32(message.upToDate);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.UpgradeBundledModulesResponse
+ */
+export const UpgradeBundledModulesResponse = new UpgradeBundledModulesResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ModuleOriginRequest$Type extends MessageType<ModuleOriginRequest> {
+    constructor() {
+        super("taskqueue.ModuleOriginRequest", [
+            { no: 1, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "version", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ModuleOriginRequest>): ModuleOriginRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.path = "";
+        message.version = "";
+        if (value !== undefined)
+            reflectionMergePartial<ModuleOriginRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ModuleOriginRequest): ModuleOriginRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string path */ 1:
+                    message.path = reader.string();
+                    break;
+                case /* string version */ 2:
+                    message.version = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ModuleOriginRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string path = 1; */
+        if (message.path !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.path);
+        /* string version = 2; */
+        if (message.version !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.version);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ModuleOriginRequest
+ */
+export const ModuleOriginRequest = new ModuleOriginRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ModuleOriginResponse$Type extends MessageType<ModuleOriginResponse> {
+    constructor() {
+        super("taskqueue.ModuleOriginResponse", [
+            { no: 1, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "version", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "origin", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "content_sha256", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "bundled_sha256", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "uploaded_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "uploaded_by", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "fork_is_outdated", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ModuleOriginResponse>): ModuleOriginResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.path = "";
+        message.version = "";
+        message.origin = "";
+        message.contentSha256 = "";
+        message.bundledSha256 = "";
+        message.description = "";
+        message.uploadedAt = "";
+        message.uploadedBy = "";
+        message.forkIsOutdated = false;
+        if (value !== undefined)
+            reflectionMergePartial<ModuleOriginResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ModuleOriginResponse): ModuleOriginResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string path */ 1:
+                    message.path = reader.string();
+                    break;
+                case /* string version */ 2:
+                    message.version = reader.string();
+                    break;
+                case /* string origin */ 3:
+                    message.origin = reader.string();
+                    break;
+                case /* string content_sha256 */ 4:
+                    message.contentSha256 = reader.string();
+                    break;
+                case /* string bundled_sha256 */ 5:
+                    message.bundledSha256 = reader.string();
+                    break;
+                case /* string description */ 6:
+                    message.description = reader.string();
+                    break;
+                case /* string uploaded_at */ 7:
+                    message.uploadedAt = reader.string();
+                    break;
+                case /* string uploaded_by */ 8:
+                    message.uploadedBy = reader.string();
+                    break;
+                case /* bool fork_is_outdated */ 9:
+                    message.forkIsOutdated = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ModuleOriginResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string path = 1; */
+        if (message.path !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.path);
+        /* string version = 2; */
+        if (message.version !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.version);
+        /* string origin = 3; */
+        if (message.origin !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.origin);
+        /* string content_sha256 = 4; */
+        if (message.contentSha256 !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.contentSha256);
+        /* string bundled_sha256 = 5; */
+        if (message.bundledSha256 !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.bundledSha256);
+        /* string description = 6; */
+        if (message.description !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.description);
+        /* string uploaded_at = 7; */
+        if (message.uploadedAt !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.uploadedAt);
+        /* string uploaded_by = 8; */
+        if (message.uploadedBy !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.uploadedBy);
+        /* bool fork_is_outdated = 9; */
+        if (message.forkIsOutdated !== false)
+            writer.tag(9, WireType.Varint).bool(message.forkIsOutdated);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ModuleOriginResponse
+ */
+export const ModuleOriginResponse = new ModuleOriginResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ForkModuleRequest$Type extends MessageType<ForkModuleRequest> {
+    constructor() {
+        super("taskqueue.ForkModuleRequest", [
+            { no: 1, name: "source_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "source_version", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "new_version", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ForkModuleRequest>): ForkModuleRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.sourcePath = "";
+        message.sourceVersion = "";
+        message.newVersion = "";
+        if (value !== undefined)
+            reflectionMergePartial<ForkModuleRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ForkModuleRequest): ForkModuleRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string source_path */ 1:
+                    message.sourcePath = reader.string();
+                    break;
+                case /* string source_version */ 2:
+                    message.sourceVersion = reader.string();
+                    break;
+                case /* string new_version */ 3:
+                    message.newVersion = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ForkModuleRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string source_path = 1; */
+        if (message.sourcePath !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.sourcePath);
+        /* string source_version = 2; */
+        if (message.sourceVersion !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.sourceVersion);
+        /* string new_version = 3; */
+        if (message.newVersion !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.newVersion);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ForkModuleRequest
+ */
+export const ForkModuleRequest = new ForkModuleRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class FileContent$Type extends MessageType<FileContent> {
     constructor() {
@@ -11507,6 +12796,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "RetryTask", options: {}, I: RetryTaskRequest, O: TaskResponse },
     { name: "ForceRunTask", options: {}, I: ForceRunTaskRequest, O: Ack },
     { name: "EditAndRetryTask", options: {}, I: EditAndRetryTaskRequest, O: TaskResponse },
+    { name: "EditTask", options: {}, I: EditTaskRequest, O: TaskResponse },
     { name: "EditStepCommand", options: {}, I: EditStepCommandRequest, O: EditStepCommandResponse },
     { name: "ListWorkers", options: {}, I: ListWorkersRequest, O: WorkersList },
     { name: "CreateWorker", options: {}, I: WorkerRequest, O: WorkerIds },
@@ -11558,12 +12848,18 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "DownloadTemplate", options: {}, I: DownloadTemplateRequest, O: FileContent },
     { name: "RunTemplate", options: {}, I: RunTemplateRequest, O: TemplateRun },
     { name: "ListTemplates", options: {}, I: TemplateFilter, O: TemplateList },
+    { name: "UpdateTemplate", options: {}, I: UpdateTemplateRequest, O: Template },
     { name: "ListTemplateRuns", options: {}, I: TemplateRunFilter, O: TemplateRunList },
     { name: "UpdateTemplateRun", options: {}, I: UpdateTemplateRunRequest, O: Ack },
     { name: "DeleteTemplateRun", options: {}, I: DeleteTemplateRunRequest, O: Ack },
+    { name: "RegisterAdhocRun", options: {}, I: RegisterAdhocRunRequest, O: TemplateRun },
     { name: "UploadModule", options: {}, I: UploadModuleRequest, O: Ack },
     { name: "ListModules", options: {}, I: Empty, O: ModuleList },
+    { name: "ListModulesFiltered", options: {}, I: ModuleListFilter, O: ModuleList },
     { name: "DownloadModule", options: {}, I: DownloadModuleRequest, O: FileContent },
+    { name: "UpgradeBundledModules", options: {}, I: UpgradeBundledModulesRequest, O: UpgradeBundledModulesResponse },
+    { name: "GetModuleOrigin", options: {}, I: ModuleOriginRequest, O: ModuleOriginResponse },
+    { name: "ForkModule", options: {}, I: ForkModuleRequest, O: Ack },
     { name: "GetWorkspaceRoot", options: {}, I: WorkspaceRootRequest, O: WorkspaceRootResponse },
     { name: "GetResourceRoot", options: {}, I: WorkspaceRootRequest, O: WorkspaceRootResponse },
     { name: "RegisterSpecifications", options: {}, I: ResourceSpec, O: Ack },

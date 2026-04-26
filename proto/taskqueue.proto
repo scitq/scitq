@@ -851,6 +851,13 @@ message Template {
   string uploaded_at = 6;
   optional int32 uploaded_by = 7;
   bool hidden = 8;
+  // How many versions exist for this name (counted across visible rows
+  // honouring the same show_hidden filter as the listing). Populated only
+  // when the server is collapsing to latest-per-name; in `all_versions`
+  // mode every row is its own version, so the field stays 0/unset and
+  // callers should ignore it. Used by the UI to decide whether to render
+  // a "more versions" dropdown trigger.
+  int32 version_count = 9;
 }
 
 // UpdateTemplateRequest carries an in-place edit of a workflow_template

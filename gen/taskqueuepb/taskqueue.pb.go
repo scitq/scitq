@@ -6887,8 +6887,15 @@ type Template struct {
 	UploadedAt         string                 `protobuf:"bytes,6,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
 	UploadedBy         *int32                 `protobuf:"varint,7,opt,name=uploaded_by,json=uploadedBy,proto3,oneof" json:"uploaded_by,omitempty"`
 	Hidden             bool                   `protobuf:"varint,8,opt,name=hidden,proto3" json:"hidden,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// How many versions exist for this name (counted across visible rows
+	// honouring the same show_hidden filter as the listing). Populated only
+	// when the server is collapsing to latest-per-name; in `all_versions`
+	// mode every row is its own version, so the field stays 0/unset and
+	// callers should ignore it. Used by the UI to decide whether to render
+	// a "more versions" dropdown trigger.
+	VersionCount  int32 `protobuf:"varint,9,opt,name=version_count,json=versionCount,proto3" json:"version_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Template) Reset() {
@@ -6975,6 +6982,13 @@ func (x *Template) GetHidden() bool {
 		return x.Hidden
 	}
 	return false
+}
+
+func (x *Template) GetVersionCount() int32 {
+	if x != nil {
+		return x.VersionCount
+	}
+	return 0
 }
 
 // UpdateTemplateRequest carries an in-place edit of a workflow_template
@@ -10255,7 +10269,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_versionB\x0f\n" +
 	"\r_all_versionsB\x0e\n" +
-	"\f_show_hidden\"\x9a\x02\n" +
+	"\f_show_hidden\"\xbf\x02\n" +
 	"\bTemplate\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -10267,7 +10281,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"uploadedAt\x12$\n" +
 	"\vuploaded_by\x18\a \x01(\x05H\x00R\n" +
 	"uploadedBy\x88\x01\x01\x12\x16\n" +
-	"\x06hidden\x18\b \x01(\bR\x06hiddenB\x0e\n" +
+	"\x06hidden\x18\b \x01(\bR\x06hidden\x12#\n" +
+	"\rversion_count\x18\t \x01(\x05R\fversionCountB\x0e\n" +
 	"\f_uploaded_by\"q\n" +
 	"\x15UpdateTemplateRequest\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12\x1b\n" +

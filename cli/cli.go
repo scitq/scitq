@@ -295,14 +295,14 @@ type Attr struct {
 		Run *struct {
 			TemplateId    *int32  `arg:"--id" help:"ID of the template to run (either name or id is required)"`
 			Name          *string `arg:"--name" help:"Name of the template to run (either name or id is required)"`
-			Version       *string `arg:"--version" help:"Optional version (default to latest if omitted)"`
+			Version       *string `arg:"--ver" help:"Optional version, e.g. 1.0.0 or 'latest' (default: latest)"`
 			ParamPairs    *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
 			NoRecruiters  bool    `arg:"--no-recruiters" help:"Create workflow without recruiters"`
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
 		List *struct {
 			Name        *string `arg:"--name" help:"Template name (can include wildcards like 'meta%')"`
-			Version     *string `arg:"--version" help:"Template version (can be 'latest' or a wildcard)"`
+			Version     *string `arg:"--ver" help:"Template version, exact or SQL LIKE wildcard (e.g. 1.0%); use 'latest' or omit for latest"`
 			Latest      bool    `arg:"--latest" help:"DEPRECATED no-op: latest is now the default. Use --all-versions to opt out."`
 			AllVersions bool    `arg:"--all-versions" help:"Show every version per template name (default: latest only)"`
 			ShowHidden  bool    `arg:"--show-hidden" help:"Include templates marked hidden in the listing"`
@@ -311,13 +311,13 @@ type Attr struct {
 		Detail *struct {
 			TemplateId *int32  `arg:"--id" help:"Show detailed information for this template ID (either name or id is required)"`
 			Name       *string `arg:"--name" help:"Name of the template to show (either name or id is required)"`
-			Version    *string `arg:"--version" help:"Optional version (default to latest if omitted)"`
+			Version    *string `arg:"--ver" help:"Optional version, e.g. 1.0.0 or 'latest' (default: latest)"`
 		} `arg:"subcommand:detail" help:"Show a template's param JSON and metadata"`
 
 		Download *struct {
 			TemplateId *int32  `arg:"--id" help:"Template ID to download"`
 			Name       *string `arg:"--name" help:"Name of the template to download"`
-			Version    *string `arg:"--version" help:"Optional version (default to latest)"`
+			Version    *string `arg:"--ver" help:"Optional version, e.g. 1.0.0 or 'latest' (default: latest)"`
 			Output     *string `arg:"--output,-o" help:"Output file path (default: stdout)"`
 		} `arg:"subcommand:download" help:"Download a template script"`
 

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -946,6 +947,15 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 		collapseToLatest = false
 	}
 	if collapseToLatest {
+		// Count versions per name *before* collapsing so the UI can decide
+		// whether a per-template "more versions" dropdown is worth showing.
+		// Counts honour the same hidden filter the listing uses (templates
+		// slice was already filtered by hidden = FALSE in SQL when
+		// show_hidden was off, so the count is the visible-version count).
+		counts := make(map[string]int32, len(templates))
+		for _, t := range templates {
+			counts[t.Name]++
+		}
 		latest := make(map[string]*pb.Template) // name → latest version
 		for _, t := range templates {
 			if existing, ok := latest[t.Name]; !ok || t.UploadedAt > existing.UploadedAt {
@@ -953,11 +963,25 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 			}
 		}
 		var latestList []*pb.Template
-		for _, t := range latest {
+		for name, t := range latest {
+			t.VersionCount = counts[name]
 			latestList = append(latestList, t)
 		}
 		templates = latestList
 	}
+
+	// Sort templates alphabetically by name (case-insensitive) so listings
+	// are predictable and easy to scan in CLI and UI. In all-versions mode
+	// rows with the same name are tied; sub-order them by uploaded_at desc
+	// so the newest version of each name still bubbles up first.
+	sort.SliceStable(templates, func(i, j int) bool {
+		ni := strings.ToLower(templates[i].Name)
+		nj := strings.ToLower(templates[j].Name)
+		if ni != nj {
+			return ni < nj
+		}
+		return templates[i].UploadedAt > templates[j].UploadedAt
+	})
 
 	return &pb.TemplateList{Templates: templates}, nil
 }

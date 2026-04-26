@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronRight, ChevronDown, Play, Eye, EyeOff } from 'lucide-svelte';
-  import { onMount } from 'svelte';
+  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronDown, Play, Eye, EyeOff } from 'lucide-svelte';
+  import { onDestroy } from 'svelte';
   import { getTemplates } from '../lib/api';
   import type { Template } from '../../gen/taskqueue';
 
@@ -23,51 +23,71 @@
    */
   export let toggleHidden: ((templateId: number, hidden: boolean) => void) | undefined = undefined;
 
-  // Per-row UI state for the "show all versions of this template" dropdown.
-  // Keyed by workflow_template_id of the latest-version row that's been
-  // expanded. Loading older versions is on-demand and cached after the
-  // first fetch — operators rarely flip versions back and forth.
-  type VersionRow = Template & { _loaded?: boolean };
-  let expanded: Record<number, boolean> = {};
+  // Per-row dropdown state. Only one dropdown is open at a time; the row's
+  // workflowTemplateId acts as the discriminator. The version list itself
+  // is fetched on demand and cached by template name (operators rarely
+  // flip through versions, so on-demand keeps the initial list payload
+  // small).
+  let openTemplateId: number | null = null;
+  type VersionRow = Template;
   let versionsByName: Record<string, VersionRow[] | 'loading' | 'error'> = {};
 
-  /**
-   * Lazily fetch every version of a given template name and cache the
-   * result keyed by name. Hidden templates are NOT included unless the
-   * page-level toggle requested them; the dropdown shows what the parent
-   * listing would show, just expanded across versions.
-   */
   async function ensureVersionsLoaded(name: string) {
-    if (versionsByName[name] && versionsByName[name] !== 'error') {
-      return;
-    }
+    if (versionsByName[name] && versionsByName[name] !== 'error') return;
     versionsByName = { ...versionsByName, [name]: 'loading' };
     try {
-      // allVersions=true; showHidden left default so the dropdown matches
-      // the page-level state (hidden versions only show when the page
-      // toggle is on, which causes the parent to refetch entirely).
       const all = await getTemplates(undefined, name, undefined, true, false);
-      // Sort by uploadedAt desc (matches server default) so the dropdown
-      // reads newest→oldest.
+      // Newest first — matches the server's default order and reads as
+      // "current version at top, history below".
       all.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
       versionsByName = { ...versionsByName, [name]: all };
-    } catch (e) {
+    } catch {
       versionsByName = { ...versionsByName, [name]: 'error' };
     }
   }
 
-  function toggleExpand(t: Template) {
+  function toggleDropdown(t: Template) {
     const id = t.workflowTemplateId ?? 0;
-    expanded = { ...expanded, [id]: !expanded[id] };
-    if (expanded[id]) {
-      ensureVersionsLoaded(t.name);
+    if (openTemplateId === id) {
+      openTemplateId = null;
+      return;
     }
+    openTemplateId = id;
+    ensureVersionsLoaded(t.name);
   }
+
+  // Close any open dropdown on outside click. We attach a single document
+  // listener while a dropdown is open; the action's element stops the
+  // bubbled click on its own anchors so toggling stays sticky inside the
+  // dropdown.
+  function closeOnOutsideClick(node: HTMLElement) {
+    function onDocClick(ev: MouseEvent) {
+      if (openTemplateId === null) return;
+      if (!node.contains(ev.target as Node)) {
+        openTemplateId = null;
+      }
+    }
+    document.addEventListener('click', onDocClick);
+    return {
+      destroy() {
+        document.removeEventListener('click', onDocClick);
+      },
+    };
+  }
+
+  // Close the dropdown when the underlying list changes (e.g. parent page
+  // refetches after a hide/unhide). Avoids a stale openTemplateId pointing
+  // at a row that's no longer rendered.
+  $: if (workflowsTemp) openTemplateId = null;
+
+  onDestroy(() => {
+    openTemplateId = null;
+  });
 </script>
 
 {#if workflowsTemp && workflowsTemp.length > 0}
   <!-- Workflow templates list container -->
-  <div class="wfTemp-list">
+  <div class="wfTemp-list" use:closeOnOutsideClick>
     {#each workflowsTemp as t (t.workflowTemplateId)}
       <!-- Individual workflow template item -->
       <div class="wf-item" data-testid={`wfTemplate-${t.workflowTemplateId}`}
@@ -82,22 +102,58 @@
           <!-- Progress bar placeholder -->
           <div class="wf-progress-bar"></div>
 
-          <!-- Version + dropdown trigger. Clicking the chevron expands a
-               nested list of every uploaded version for this template
-               name, fetched on demand. -->
-          <button
-            class="wf-version-toggle"
-            type="button"
-            title={expanded[t.workflowTemplateId ?? 0] ? 'Hide other versions' : 'Show all versions'}
-            on:click={() => toggleExpand(t)}
-          >
-            {#if expanded[t.workflowTemplateId ?? 0]}
-              <ChevronDown size={14} />
-            {:else}
-              <ChevronRight size={14} />
-            {/if}
+          <!-- Version + (only when there's history) a dropdown trigger.
+               versionCount is populated by the server only when collapsing
+               to latest-per-name, which is exactly when the dropdown is
+               useful. With one version (or unset), no chevron renders. -->
+          {#if (t.versionCount ?? 1) > 1}
+            <div class="wf-version-dropdown">
+              <button
+                class="wf-version-trigger"
+                type="button"
+                title={`Show ${t.versionCount} versions`}
+                aria-haspopup="listbox"
+                aria-expanded={openTemplateId === (t.workflowTemplateId ?? 0)}
+                on:click|stopPropagation={() => toggleDropdown(t)}
+              >
+                <span class="wf-id">v{t.version}</span>
+                <ChevronDown size={14} />
+                <span class="wf-version-count">({t.versionCount})</span>
+              </button>
+
+              {#if openTemplateId === (t.workflowTemplateId ?? 0)}
+                <ul class="wf-version-menu" role="listbox" on:click|stopPropagation>
+                  {#if versionsByName[t.name] === 'loading'}
+                    <li class="wf-version-status">Loading…</li>
+                  {:else if versionsByName[t.name] === 'error'}
+                    <li class="wf-version-status">Failed to load.</li>
+                  {:else if Array.isArray(versionsByName[t.name])}
+                    {#each versionsByName[t.name] as v (v.workflowTemplateId)}
+                      <li class="wf-version-item"
+                          class:wf-version-current={v.workflowTemplateId === t.workflowTemplateId}
+                          role="option"
+                          aria-selected={v.workflowTemplateId === t.workflowTemplateId}>
+                        <button class="wf-version-link" type="button"
+                                title={`Run version ${v.version}`}
+                                on:click={() => { openTemplateId = null; openParamModal(v); }}>
+                          <span class="wf-id">v{v.version}</span>
+                          <span class="wf-version-meta">
+                            {new Date(v.uploadedAt).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
+                            · {v.uploadedBy || 'Unknown'}
+                          </span>
+                          {#if v.workflowTemplateId === t.workflowTemplateId}
+                            <span class="wf-version-tag">latest</span>
+                          {/if}
+                        </button>
+                      </li>
+                    {/each}
+                  {/if}
+                </ul>
+              {/if}
+            </div>
+          {:else}
             <span class="wf-id">v{t.version}</span>
-          </button>
+          {/if}
 
           <!-- Upload date -->
           <span class="wf-id">
@@ -142,33 +198,6 @@
           {/if}
         </div>
 
-        {#if expanded[t.workflowTemplateId ?? 0]}
-          <!-- Versions dropdown panel -->
-          <div class="wf-versions">
-            {#if versionsByName[t.name] === 'loading'}
-              <span>Loading versions…</span>
-            {:else if versionsByName[t.name] === 'error'}
-              <span>Failed to load versions.</span>
-            {:else if Array.isArray(versionsByName[t.name])}
-              {#each versionsByName[t.name] as v (v.workflowTemplateId)}
-                <div class="wf-version-row" class:wf-current-version={v.workflowTemplateId === t.workflowTemplateId}>
-                  <span class="wf-id">#{v.workflowTemplateId}</span>
-                  <span class="wf-id">v{v.version}</span>
-                  <span class="wf-id">
-                    {new Date(v.uploadedAt).toLocaleDateString('en-US', {
-                      month: '2-digit',
-                      day: '2-digit',
-                      year: 'numeric'
-                    })}
-                  </span>
-                  <span class="wf-id">{v.uploadedBy || 'Unknown'}</span>
-                  <button class="btn-action" title="Run this version" on:click={() => openParamModal(v)}><Play /></button>
-                </div>
-              {/each}
-            {/if}
-          </div>
-        {/if}
-
       </div>
 
     {/each}
@@ -179,41 +208,86 @@
 {/if}
 
 <style>
-  .wf-version-toggle {
+  /* Inline-block so the dropdown can be absolutely positioned relative to
+     the trigger (no need for a portal — the menu sits over the row). */
+  .wf-version-dropdown {
+    position: relative;
+    display: inline-block;
+  }
+  .wf-version-trigger {
     background: none;
-    border: none;
+    border: 1px solid transparent;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 0 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
     color: inherit;
   }
-  .wf-version-toggle:hover { background: rgba(0, 0, 0, 0.05); }
-  .wf-versions {
-    margin-top: 6px;
-    padding: 6px 12px;
-    background: var(--bg-secondary, #f5f5f5);
-    border-left: 2px solid var(--border-color, #ddd);
+  .wf-version-trigger:hover {
+    background: rgba(0, 0, 0, 0.06);
+    border-color: var(--border-color, #ddd);
+  }
+  .wf-version-count {
+    font-size: 0.85em;
+    opacity: 0.65;
+  }
+  .wf-version-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin: 4px 0 0;
+    padding: 4px 0;
+    list-style: none;
+    background: var(--bg-primary, #fff);
+    color: var(--text-primary, #213547);
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    min-width: 220px;
+    max-height: 320px;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .wf-version-status {
+    padding: 6px 10px;
+    font-style: italic;
+    opacity: 0.75;
+  }
+  .wf-version-item .wf-version-link {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 10px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    align-items: flex-start;
+    gap: 2px;
+    color: inherit;
   }
-  .wf-version-row {
-    display: flex;
-    gap: 12px;
-    align-items: center;
+  .wf-version-item .wf-version-link:hover {
+    background: var(--bg-secondary, #f5f5f5);
   }
-  .wf-current-version {
-    font-weight: 600;
-  }
-  .wf-hidden-marker {
-    opacity: 0.6;
-  }
-  .wf-hidden-tag {
+  .wf-version-meta {
     font-size: 0.85em;
+    opacity: 0.7;
   }
-  .wfTemp-show-hidden { /* selector also used in the page */
-    display: inline-flex; align-items: center; gap: 6px; margin: 6px 0;
+  .wf-version-current {
+    background: var(--bg-secondary, #f5f5f5);
   }
+  .wf-version-tag {
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--primary-color, #192245);
+    color: var(--primary-text, #fff);
+    padding: 1px 6px;
+    border-radius: 999px;
+    margin-top: 2px;
+  }
+  .wf-hidden-marker { opacity: 0.6; }
+  .wf-hidden-tag { font-size: 0.85em; }
 </style>
