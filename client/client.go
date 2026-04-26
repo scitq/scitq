@@ -394,17 +394,17 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	taskHooksMap.Store(task.TaskId, hooks)
 	defer taskHooksMap.Delete(task.TaskId)
 
-	// Liveness watchdog for docker tasks. If the container is observed missing
-	// or stopped for two consecutive checks (≥2 minutes), assume executeTask is
-	// stuck — most commonly because a sendLogs goroutine is blocked inside
-	// stream.Send() on the gRPC log stream and `logWg.Wait()` therefore never
-	// returns. recoverTask cancels the gRPC context (unstuck stream → sendLogs
-	// goroutines exit → logWg.Wait() returns) and kills the docker run client
-	// process (cmd.Wait() returns), letting the normal post-Wait status path
-	// report the task as F to the server. Bare tasks are not watched here:
-	// `cmd.Process` is the actual workload, and we'd need a different liveness
-	// check (zombie detection) that's harder to get right.
-	if !isBare {
+	// Liveness watchdog. If the workload (docker container or bare process)
+	// is observed gone for two consecutive checks (≥2 minutes), assume
+	// executeTask is stuck — most commonly because a sendLogs goroutine is
+	// blocked inside stream.Send() on the gRPC log stream and logWg.Wait()
+	// therefore never returns. recoverTask cancels the gRPC context (unstuck
+	// stream → sendLogs goroutines exit → logWg.Wait() returns) and kills
+	// the docker-run client / bare process (cmd.Wait() returns), letting the
+	// normal post-Wait status path report the task as F to the server.
+	if isBare {
+		go watchdogBare(ctx, task.TaskId, cmd, hooks)
+	} else {
 		go watchdogContainer(ctx, task.TaskId, containerName, hooks)
 	}
 
@@ -535,6 +535,92 @@ func watchdogContainer(ctx context.Context, taskID int32, containerName string, 
 		recoverTask(taskID, hooks, reason)
 		return
 	}
+}
+
+// watchdogBare is the bare-task analogue of watchdogContainer. It detects
+// "process is a zombie or gone" by reading /proc/<pid>/status on Linux. On
+// systems without /proc (e.g. macOS dev machines) the watchdog is a no-op
+// — bare tasks just won't get the safety net there. The same recoverTask
+// path is used once a stuck workload is detected.
+func watchdogBare(ctx context.Context, taskID int32, cmd *exec.Cmd, hooks *taskHooks) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	if _, err := os.Stat("/proc"); err != nil {
+		// No /proc — can't detect zombie state reliably. Skip the watchdog.
+		return
+	}
+	pid := cmd.Process.Pid
+	statusPath := fmt.Sprintf("/proc/%d/status", pid)
+	// Same grace + cadence as watchdogContainer.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(60 * time.Second):
+	}
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	misses := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		state, gone, err := readProcState(statusPath)
+		// "Gone" = /proc/<pid>/status disappeared (process reaped or never
+		// existed). "Zombie" = exited but not yet reaped (cmd.Wait() hasn't
+		// run because logWg.Wait() is stuck — that's our smoking gun).
+		// "X (dead)" is the terminal state Linux briefly reports between
+		// exit and full cleanup; treat the same as zombie.
+		dead := gone || state == "Z" || state == "X"
+		if err != nil && !gone {
+			// Transient read error (not ENOENT) — don't count as a miss,
+			// retry next tick. We only want firm signals.
+			continue
+		}
+		if !dead {
+			misses = 0
+			continue
+		}
+		misses++
+		if misses < 2 {
+			continue
+		}
+		var reason string
+		if gone {
+			reason = fmt.Sprintf("bare pid %d gone (no /proc entry) for ≥2 min", pid)
+		} else {
+			reason = fmt.Sprintf("bare pid %d in state %q for ≥2 min", pid, state)
+		}
+		recoverTask(taskID, hooks, reason)
+		return
+	}
+}
+
+// readProcState parses /proc/<pid>/status and returns the single-letter
+// process state (e.g. "R", "S", "Z", "X"). gone is true when the file does
+// not exist (process has been reaped or never started).
+func readProcState(statusPath string) (state string, gone bool, err error) {
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", true, nil
+		}
+		return "", false, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "State:") {
+			continue
+		}
+		// Format: "State:\tZ (zombie)" — the first non-space token after
+		// the colon is the single-letter state code.
+		fields := strings.Fields(strings.TrimPrefix(line, "State:"))
+		if len(fields) > 0 {
+			return fields[0], false, nil
+		}
+	}
+	return "", false, nil
 }
 
 func cleanupTaskWorkingDir(store string, taskID int32, reporter *event.Reporter) {
