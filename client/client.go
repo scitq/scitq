@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -53,6 +54,25 @@ type WorkerConfig struct {
 var lostTrackSeen sync.Map   // map[int32]time.Time
 var orphanSeen sync.Map      // map[int32]time.Time — tasks client thinks active but server has dropped
 var bareProcesses sync.Map   // map[int32]*os.Process — for signaling bare tasks
+
+// taskHooks lets the signal handler and the per-task watchdog reach into a
+// running executeTask invocation to forcibly unstick it. Both the watchdog
+// (container died, executeTask still spinning) and the kill-failure recovery
+// (operator sent K, docker kill returned "No such container") funnel into
+// the same recoverTask() helper, which cancels the gRPC log-stream context
+// (unblocking sendLogs goroutines stuck in stream.Send) and kills the
+// docker run client process (unblocking cmd.Wait when the docker daemon
+// itself is unresponsive). After both unblock, the normal executeTask
+// post-Wait path runs and reports the task as F to the server.
+type taskHooks struct {
+	cancel        context.CancelFunc // cancels the log-stream context
+	cmd           *exec.Cmd          // the docker run / bare process command
+	containerName string             // empty for bare tasks
+	isBare        bool
+	recovered     atomic.Bool // true once recovery has been triggered, to keep it idempotent
+}
+
+var taskHooksMap sync.Map // map[int32]*taskHooks
 
 // Track how long tasks have been locally active and whether they are executing
 var activeSince sync.Map    // map[int32]time.Time
@@ -226,6 +246,13 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	var cmd *exec.Cmd
+	// Container name is computed up-front (deterministic from worker + task)
+	// so the watchdog and signal handler can both reference it without
+	// reaching into the per-branch local. Empty when isBare.
+	var containerName string
+	if !isBare {
+		containerName = fmt.Sprintf("scitq-%s-task-%d", workerName, task.TaskId)
+	}
 
 	if isBare {
 		// Bare execution: run command directly without Docker
@@ -249,8 +276,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		)
 		log.Printf("🛠️  Running bare command: %s -c %s", shell, task.Command)
 	} else {
-		// Docker execution: existing logic
-		containerName := fmt.Sprintf("scitq-%s-task-%d", workerName, task.TaskId)
+		// Docker execution: existing logic (containerName hoisted above)
 		command := []string{"run", "--rm", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
 		option := ""
 		for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
@@ -355,6 +381,33 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return
 	}
 
+	// Register recovery hooks so the SignalTask handler (when `docker kill`
+	// fails with "No such container") and the per-task liveness watchdog
+	// (when the container disappears but executeTask is still spinning) can
+	// both forcibly unstick this invocation. See the taskHooks doc comment.
+	hooks := &taskHooks{
+		cancel:        cancel,
+		cmd:           cmd,
+		containerName: containerName,
+		isBare:        isBare,
+	}
+	taskHooksMap.Store(task.TaskId, hooks)
+	defer taskHooksMap.Delete(task.TaskId)
+
+	// Liveness watchdog for docker tasks. If the container is observed missing
+	// or stopped for two consecutive checks (≥2 minutes), assume executeTask is
+	// stuck — most commonly because a sendLogs goroutine is blocked inside
+	// stream.Send() on the gRPC log stream and `logWg.Wait()` therefore never
+	// returns. recoverTask cancels the gRPC context (unstuck stream → sendLogs
+	// goroutines exit → logWg.Wait() returns) and kills the docker run client
+	// process (cmd.Wait() returns), letting the normal post-Wait status path
+	// report the task as F to the server. Bare tasks are not watched here:
+	// `cmd.Process` is the actual workload, and we'd need a different liveness
+	// check (zombie detection) that's harder to get right.
+	if !isBare {
+		go watchdogContainer(ctx, task.TaskId, containerName, hooks)
+	}
+
 	// Function to send logs
 	var logWg sync.WaitGroup
 	sendLogs := func(reader io.Reader, stream pb.TaskQueue_SendTaskLogsClient, logType string) {
@@ -402,6 +455,88 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 }
 
 // cleanupTaskWorkingDir removes the task working directory regardless of task outcome.
+// recoverTask forcibly unsticks an executeTask invocation that has been
+// stranded (container exited but worker never noticed; docker daemon
+// unresponsive; etc.). Idempotent — multiple callers (signal handler,
+// watchdog) can fire it without compounding effects. Returns true if this
+// call actually performed recovery (false if recovery was already done).
+func recoverTask(taskID int32, hooks *taskHooks, reason string) bool {
+	if hooks == nil {
+		return false
+	}
+	if !hooks.recovered.CompareAndSwap(false, true) {
+		return false
+	}
+	log.Printf("🩺 Task %d: forcing recovery (%s)", taskID, reason)
+	if hooks.cancel != nil {
+		// Cancel the log-stream context so sendLogs goroutines stuck in
+		// stream.Send() error out and logWg.Wait() returns.
+		hooks.cancel()
+	}
+	if hooks.cmd != nil && hooks.cmd.Process != nil {
+		// Kill the docker run client (or bare process). For docker, this
+		// makes cmd.Wait() return even if the docker daemon is wedged.
+		// Harmless when the process is already dead (returns ESRCH).
+		if err := hooks.cmd.Process.Kill(); err != nil && !strings.Contains(err.Error(), "process already finished") {
+			log.Printf("⚠️ Task %d recovery: kill cmd process failed: %v", taskID, err)
+		}
+	}
+	return true
+}
+
+// signalRecover is the fast-path bridge from the SignalTask handler into
+// recoverTask: looks up the per-task hooks and triggers recovery if found.
+// No-op if the task isn't currently registered (already finished, never
+// started, etc.).
+func signalRecover(taskID int32, reason string) {
+	if h, ok := taskHooksMap.Load(taskID); ok {
+		recoverTask(taskID, h.(*taskHooks), reason)
+	}
+}
+
+// watchdogContainer polls `docker inspect` on a per-task basis and triggers
+// recoverTask if the container is missing or stopped for two consecutive
+// checks. Skips a 60s grace period after launch so docker pull / network
+// setup / other startup latency is never mistaken for a missing container.
+func watchdogContainer(ctx context.Context, taskID int32, containerName string, hooks *taskHooks) {
+	// Grace period for image pull, container creation, etc. before the first
+	// liveness check. 60s is comfortably longer than typical pull times for
+	// already-cached images and short enough to catch a wedge within minutes.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(60 * time.Second):
+	}
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	misses := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		// docker inspect -f '{{.State.Running}}' returns "true"/"false" if the
+		// container exists, or non-zero exit + "No such object" on stderr if
+		// it's gone. Either of those signals "container is no longer doing
+		// work for us" and counts as a miss.
+		out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", containerName).CombinedOutput()
+		alive := err == nil && strings.TrimSpace(string(out)) == "true"
+		if alive {
+			misses = 0
+			continue
+		}
+		misses++
+		if misses < 2 {
+			continue
+		}
+		reason := fmt.Sprintf("container %s gone or stopped for ≥2 min (last inspect: err=%v out=%q)",
+			containerName, err, strings.TrimSpace(string(out)))
+		recoverTask(taskID, hooks, reason)
+		return
+	}
+}
+
 func cleanupTaskWorkingDir(store string, taskID int32, reporter *event.Reporter) {
 	dir := filepath.Join(store, "tasks", fmt.Sprint(taskID))
 	if err := os.RemoveAll(dir); err != nil {
@@ -582,12 +717,20 @@ func (w *WorkerConfig) fetchTasks(
 				args = append(args, containerName)
 				log.Printf("🛑 Stopping container %s (task %d, SIGTERM)", containerName, sig.TaskId)
 				if out, err := exec.Command("docker", args...).CombinedOutput(); err != nil {
-					log.Printf("⚠️ docker stop %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
+					outStr := strings.TrimSpace(string(out))
+					log.Printf("⚠️ docker stop %s failed: %v (%s)", containerName, err, outStr)
+					if strings.Contains(outStr, "No such container") {
+						signalRecover(sig.TaskId, "docker stop reported container already gone")
+					}
 				}
 			} else {
 				log.Printf("🔪 Killing container %s (task %d, SIGKILL)", containerName, sig.TaskId)
 				if out, err := exec.Command("docker", "kill", containerName).CombinedOutput(); err != nil {
-					log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, strings.TrimSpace(string(out)))
+					outStr := strings.TrimSpace(string(out))
+					log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, outStr)
+					if strings.Contains(outStr, "No such container") {
+						signalRecover(sig.TaskId, "docker kill reported container already gone")
+					}
 				}
 			}
 		}()
