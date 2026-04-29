@@ -4786,6 +4786,30 @@ func (s *taskQueueServer) emitDeletedTasksForWorkflow(workflowID int32) {
 
 func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId) (*pb.Ack, error) {
 	s.emitDeletedTasksForWorkflow(req.WorkflowId)
+
+	// Signal all running tasks of this workflow with SIGKILL *before* the
+	// cascade delete removes the rows. Workers that happen to poll between
+	// this UPDATE and the DELETE below will see signal='K' and run their
+	// normal signal handler (clean docker kill + status update), which is
+	// faster and tidier than the client-side orphan-kill fallback. Tasks
+	// the workers don't poll in time still get cleaned up by that orphan
+	// detection (~9s after the cascade), so this is a "make the common
+	// case fast" optimisation, not a correctness fix.
+	if res, err := s.db.ExecContext(ctx,
+		`UPDATE task SET signal = 'K'
+		   WHERE step_id IN (SELECT step_id FROM step WHERE workflow_id = $1)
+		     AND status IN ('A','C','D','O','R','U','V')`,
+		req.WorkflowId); err == nil {
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("🔪 DeleteWorkflow %d: queued SIGKILL on %d running task(s) before cascade delete",
+				req.WorkflowId, n)
+		}
+	} else {
+		// Non-fatal: the orphan-kill on each worker still cleans up.
+		log.Printf("⚠️ DeleteWorkflow %d: pre-delete signal queue failed (%v); relying on client orphan-kill",
+			req.WorkflowId, err)
+	}
+
 	// Free workers: promote workflow-scoped workers to global before cascade nullifies step_id
 	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND deleted_at IS NULL AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, req.WorkflowId)
 	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
