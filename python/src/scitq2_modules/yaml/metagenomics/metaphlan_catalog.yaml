@@ -1,0 +1,76 @@
+name: metaphlan_catalog
+version: "1.0.0"
+description: |
+  Download and cache the MetaPhlAn ChocoPhlAn database in the workspace
+  resource tree. Runs once per workspace per (version, index) pair and is
+  idempotent — combined with publish: + skip_if_exists, the first
+  workflow that needs the DB pays the download cost; every subsequent
+  workflow sees an already-populated publish URI and short-circuits.
+
+  Designed as the catalog companion of `metagenomics/metaphlan`, mirroring
+  the `metagenomics/meteor2_catalog` pattern: any template that imports
+  `metagenomics/metaphlan` automatically gets this module injected via
+  `requires:` and the per-sample task picks the database up from the
+  shared resource path.
+
+language: bash
+per_sample: false
+skip_if_exists: true
+
+vars:
+  # MetaPhlAn major version. Mirrors `metagenomics/metaphlan`'s var of
+  # the same name; both modules pick the matching container and CLI flag
+  # via `cond: METAPHLAN_VERSION` so a workflow only sets it once.
+  METAPHLAN_VERSION: "4.1"
+  # CLI flag used to point at the database directory. 4.0 / 4.1 use
+  # --bowtie2db; 4.2 renamed it to --db_dir.
+  METAPHLAN_DB_FLAG:
+    cond: METAPHLAN_VERSION
+    "4.2": "--db_dir"
+    "4.1": "--bowtie2db"
+    "4.0": "--bowtie2db"
+    "4.0-chocophlan2021": "--bowtie2db"
+  # Optional pinned ChocoPhlAn index, e.g. "mpa_vOct22_CHOCOPhlAnSGB_202212"
+  # for 4.1 or "mpa_vJun23_CHOCOPhlAnSGB_202403" for 4.2. When empty the
+  # MetaPhlAn binary picks whichever it considers the default for the
+  # selected major version. Pin it for reproducible deployments;
+  # leave empty for "always grab whatever metaphlan ships with this image".
+  METAPHLAN_INDEX: ""
+
+container:
+  cond: METAPHLAN_VERSION
+  "4.0": "gmtscience/metaphlan4:4.0.6.1"
+  "4.0-chocophlan2021": "gmtscience/metaphlan4:4.0.6.1"
+  "4.1": "gmtscience/metaphlan4:4.1"
+  "4.2": "gmtscience/metaphlan:4.2.4"
+
+# The published tree is consumed by `metagenomics/metaphlan` via:
+#   resource: "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_VERSION}/bowtie2/|mv:bowtie2"
+# Keying on METAPHLAN_VERSION (rather than per-index) keeps the cache
+# layout simple at the cost of one DB per major version; users who pin
+# multiple indexes for the same major version can extend this path.
+publish: "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_VERSION}/"
+
+resource: []
+
+command: |
+  set -euo pipefail
+  . /builtin/std.sh
+
+  mkdir -p /output/bowtie2
+
+  # `metaphlan --install` populates the bowtie2 db files into the directory
+  # given to the version-specific flag. The optional --index pins a
+  # specific ChocoPhlAn release when METAPHLAN_INDEX is set.
+  if [ -n "{METAPHLAN_INDEX}" ]; then
+      metaphlan --install --index "{METAPHLAN_INDEX}" {METAPHLAN_DB_FLAG} /output/bowtie2
+  else
+      metaphlan --install {METAPHLAN_DB_FLAG} /output/bowtie2
+  fi
+
+outputs:
+  catalog: "*"
+
+task_spec:
+  cpu: 2
+  mem: 8

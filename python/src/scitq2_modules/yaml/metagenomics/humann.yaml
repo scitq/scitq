@@ -1,0 +1,78 @@
+name: humann
+version: "1.0.0"
+description: |
+  HUMAnN functional profiling on per-sample paired (or single-end)
+  fastqs. Produces per-sample gene-family abundance, pathway
+  abundance, and pathway coverage tables. Companion catalog modules
+  are auto-injected via `requires:`:
+
+    - `metagenomics/humann_catalog` populates ChocoPhlAn + UniRef
+      (+ optional utility-mapping) into the workspace resource tree.
+    - `metagenomics/metaphlan_catalog` populates the MetaPhlAn DB,
+      which HUMAnN invokes internally for taxonomic profiling.
+
+  Both catalog modules are workspace-cached and skip_if_exists, so
+  the multi-tens-of-GB downloads happen once per workspace and are
+  shared by every subsequent run.
+
+# HUMAnN bundles MetaPhlAn for taxonomic pre-screening, so we need both
+# catalogs. The runner auto-injects the imports and wires `depends:` so
+# this step waits for both to populate.
+requires:
+  - metagenomics/humann_catalog
+  - metagenomics/metaphlan_catalog
+
+vars:
+  HUMANN_VERSION: "3.9"
+  # Mirrors humann_catalog so a workflow only sets it once.
+  UNIREF_KIND: "uniref90"
+  # MetaPhlAn major version that HUMAnN's bundled metaphlan is compatible
+  # with. HUMAnN 3.x ships with MetaPhlAn 4.x; pin the MetaPhlAn DB
+  # version here so the two caches stay aligned.
+  METAPHLAN_VERSION: "4.1"
+  METAPHLAN_DB_FLAG:
+    cond: METAPHLAN_VERSION
+    "4.2": "--db_dir"
+    "4.1": "--bowtie2db"
+    "4.0": "--bowtie2db"
+    "4.0-chocophlan2021": "--bowtie2db"
+
+container: "quay.io/biocontainers/humann:{HUMANN_VERSION}--py312hdfd78af_0"
+
+# Pull each sub-DB into its own /resource subdir. The `|mv:` action
+# un-flattens the per-resource fetch so the directory layout matches
+# what HUMAnN's --nucleotide-database / --protein-database expect.
+resource:
+  - "{RESOURCE_ROOT}/humann/{HUMANN_VERSION}/chocophlan/|mv:chocophlan"
+  - "{RESOURCE_ROOT}/humann/{HUMANN_VERSION}/uniref/|mv:uniref"
+  - "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_VERSION}/bowtie2/|mv:bowtie2"
+
+command: |
+  set -euo pipefail
+  . /builtin/std.sh
+
+  # HUMAnN takes a single fastq input. For paired-end the standard
+  # practice (per HUMAnN docs) is to concatenate R1 + R2 — the tool
+  # treats them as independent reads from the same sample, which
+  # matches its internal accounting.
+  cat /input/*.f*q.gz > /tmp/{SAMPLE}.fastq.gz
+
+  humann \
+      --input /tmp/{SAMPLE}.fastq.gz \
+      --output /output/ \
+      --nucleotide-database /resource/chocophlan \
+      --protein-database /resource/uniref \
+      --metaphlan-options "--offline {METAPHLAN_DB_FLAG} /resource/bowtie2" \
+      --threads ${CPU} \
+      --remove-temp-output \
+      --output-basename {SAMPLE}
+
+outputs:
+  genefamilies: "*genefamilies.tsv"
+  pathabundance: "*pathabundance.tsv"
+  pathcoverage: "*pathcoverage.tsv"
+
+task_spec:
+  cpu: 8
+  mem: 32
+  disk: 100

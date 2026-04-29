@@ -1,30 +1,61 @@
 name: metaphlan
-version: "1.0.0"
+version: "1.1.0"
+description: |
+  MetaPhlAn taxonomic profiling on per-sample paired (or single-end)
+  fastqs. The companion `metagenomics/metaphlan_catalog` module is
+  auto-injected via `requires:` so a workflow only needs:
+
+    - import: metagenomics/metaphlan
+      inputs: ...
+
+  and the catalog download / mount happens transparently.
+
+# Pull the companion catalog setup module into any workflow that imports
+# us. The YAML runner auto-injects `- import: metagenomics/metaphlan_catalog`
+# ahead of this step and auto-wires `depends: metaphlan_catalog`, so a
+# template just needs `- import: metagenomics/metaphlan` to get the full
+# catalog+compute pair wired correctly.
+requires:
+  - metagenomics/metaphlan_catalog
+
 vars:
   METAPHLAN_VERSION: "4.1"
+  # CLI flag used to point at the database directory. 4.0 / 4.1 use
+  # --bowtie2db; 4.2 renamed it to --db_dir. Mirrored in
+  # metaphlan_catalog so both modules stay in sync via cond:.
   METAPHLAN_DB_FLAG:
     cond: METAPHLAN_VERSION
     "4.2": "--db_dir"
     "4.1": "--bowtie2db"
     "4.0": "--bowtie2db"
     "4.0-chocophlan2021": "--bowtie2db"
+
 container:
   cond: METAPHLAN_VERSION
   "4.0": "gmtscience/metaphlan4:4.0.6.1"
   "4.0-chocophlan2021": "gmtscience/metaphlan4:4.0.6.1"
   "4.1": "gmtscience/metaphlan4:4.1"
   "4.2": "gmtscience/metaphlan:4.2.4"
+
+# Pull the database in from the workspace cache populated by
+# metaphlan_catalog. The `|mv:bowtie2` action un-flattens the download so
+# the directory layout matches what MetaPhlAn expects at runtime.
+resource:
+  - "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_VERSION}/bowtie2/|mv:bowtie2"
+
 command: |
   . /builtin/std.sh
 
   pigz -dc /input/*.fastq.gz | metaphlan \
       --input_type fastq --no_map --offline \
-      {METAPHLAN_DB_FLAG} /resource/metaphlan/bowtie2 \
+      {METAPHLAN_DB_FLAG} /resource/bowtie2 \
       --nproc $CPU \
       -o /output/{SAMPLE}.metaphlan4_profile.txt \
       2>&1 > /output/{SAMPLE}.metaphlan4.log
+
 outputs:
   metaphlan: "*.txt"
   logs: "*.log"
+
 task_spec:
   cpu: 8

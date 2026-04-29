@@ -1,0 +1,74 @@
+name: humann_catalog
+version: "1.0.0"
+description: |
+  Download and cache the HUMAnN reference databases (ChocoPhlAn
+  nucleotide DB, UniRef protein DB, optional utility-mapping files) in
+  the workspace resource tree. Runs once per workspace per
+  (humann_version, uniref_kind) pair and is idempotent — combined with
+  publish: + skip_if_exists, the first workflow that needs the DBs
+  pays the download cost; every subsequent workflow sees an
+  already-populated publish URI and short-circuits.
+
+  Mirrors the `metaphlan_catalog` / `meteor2_catalog` pattern: any
+  template that imports `metagenomics/humann` automatically gets this
+  module injected via `requires:` and the per-sample task picks the
+  databases up from the shared resource path.
+
+  Note: HUMAnN itself runs MetaPhlAn internally for taxonomic
+  profiling. The MetaPhlAn DB is *not* downloaded here — that's
+  `metagenomics/metaphlan_catalog`'s job, and the `metagenomics/humann`
+  module declares both as `requires:` so the two caches are populated
+  independently and reused across workflows.
+
+language: bash
+per_sample: false
+skip_if_exists: true
+
+vars:
+  HUMANN_VERSION: "3.9"
+  # UniRef variant. uniref90 is the standard (better gene resolution,
+  # ~10 GB); uniref50 is ~half the size and faster but loses some
+  # mappings. Both ship the diamond-formatted index used by HUMAnN.
+  UNIREF_KIND: "uniref90"     # uniref90 | uniref50
+  UNIREF_FORMAT: "uniref90_diamond"  # uniref{50,90}_diamond — must match UNIREF_KIND
+  # ChocoPhlAn release. "full" is the default human-microbiome ChocoPhlAn;
+  # "DEMO" is a tiny test set useful for smoke tests.
+  CHOCOPHLAN_RELEASE: "full"
+  # Whether to also pull the utility-mapping files (KEGG / EC / GO
+  # mappers used by humann_renorm_table / humann_regroup_table). Adds
+  # ~500 MB. Set to "" to skip.
+  WITH_UTILITY_MAPPING: "1"
+
+container: "quay.io/biocontainers/humann:{HUMANN_VERSION}--py312hdfd78af_0"
+
+# Cache layout chosen so the per-sample module can mount each sub-DB
+# independently via `|mv:`-suffixed resources. UniRef is keyed by kind
+# so a workspace can hold both 50 and 90 if a user runs them side by
+# side without colliding.
+publish: "{RESOURCE_ROOT}/humann/{HUMANN_VERSION}/"
+
+resource: []
+
+command: |
+  set -euo pipefail
+  . /builtin/std.sh
+
+  mkdir -p /output/chocophlan /output/uniref
+
+  # ChocoPhlAn nucleotide DB (~6 GB for "full")
+  humann_databases --download chocophlan {CHOCOPHLAN_RELEASE} /output/chocophlan
+
+  # UniRef protein DB (~10 GB for uniref90, ~5 GB for uniref50)
+  humann_databases --download uniref {UNIREF_FORMAT} /output/uniref
+
+  if [ -n "{WITH_UTILITY_MAPPING}" ]; then
+      mkdir -p /output/utility_mapping
+      humann_databases --download utility_mapping full /output/utility_mapping
+  fi
+
+outputs:
+  catalog: "*"
+
+task_spec:
+  cpu: 4
+  mem: 16
