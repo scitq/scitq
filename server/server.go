@@ -1369,10 +1369,24 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 
 	// Combined query:
 	//  - validate failed + retryable
+	//  - find the chain root to recover the initial retry budget — explicit
+	//    retry is a fresh start, not a continuation, so retry_count resets to
+	//    0 and retry is restored to whatever the very first task in the chain
+	//    started with (auto-retry-decremented values from the failed clone
+	//    would leave the new task with 0 budget left, defeating the point).
 	//  - create clone
 	//  - hide old task
 	err = tx.QueryRowContext(ctx, `
-		WITH validated AS (
+		WITH RECURSIVE chain AS (
+			SELECT task_id, previous_task_id, retry FROM task WHERE task_id = $1
+			UNION ALL
+			SELECT t.task_id, t.previous_task_id, t.retry
+			FROM task t JOIN chain c ON c.previous_task_id = t.task_id
+		),
+		root AS (
+			SELECT retry AS initial_retry FROM chain WHERE previous_task_id IS NULL
+		),
+		validated AS (
 			SELECT
 				t.task_id, t.retry, t.step_id, s.workflow_id, w.status AS wf_status,
 				t.status AS task_status
@@ -1395,9 +1409,9 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				t.step_id, t.command, t.shell, t.container, t.container_options,
 				'P', NULL, t.input, t.resource,
 				t.output, '{}', FALSE,
-				GREATEST(COALESCE($2, t.retry) - 1, 0), t.is_final, t.uses_cache,
+				COALESCE($2, (SELECT initial_retry FROM root)), t.is_final, t.uses_cache,
 				t.download_timeout, t.running_timeout, t.upload_timeout,
-				t.input_hash, t.task_id, t.retry_count + 1, t.task_name
+				t.input_hash, t.task_id, 0, t.task_name
 			FROM task t
 			WHERE t.task_id = (SELECT task_id FROM validated)
 			RETURNING task_id

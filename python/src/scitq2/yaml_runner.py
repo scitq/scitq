@@ -223,9 +223,17 @@ def _resolve_cond(val, params, itervar=None, step_fields=None, extra_vars=None):
 
 
 def _resolve_field(val, params, itervar=None, step_fields=None, extra_vars=None, literal_format=None):
-    """Resolve a field value: handles cond: blocks, param references, filters, and arithmetic."""
+    """Resolve a field value: handles cond: blocks, param references, filters, and arithmetic.
+
+    Recurses into lists so that `{params.x}` placeholders nested inside a
+    YAML list (e.g. `inputs: ["{params.uri_a}", "{params.uri_b}"]`) get
+    substituted — without this, list elements were passed unchanged to
+    `_resolve_inputs`, which then tried to interpret `{params.uri_a}` as a
+    step reference and raised."""
     if isinstance(val, dict) and 'cond' in val:
         val = _resolve_cond(val, params, itervar, step_fields, extra_vars)
+    if isinstance(val, list):
+        return [_resolve_field(v, params, itervar, step_fields, extra_vars, literal_format) for v in val]
     if isinstance(val, str):
         val = _resolve_refs(val, params, itervar, extra_vars, literal_format=literal_format)
     # If result looks like arithmetic (contains operators and only numbers/operators/builtins), evaluate
@@ -1029,9 +1037,13 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
             print(f"✅ Step '{step_label}' when: {when!r} → {resolved!r}", file=sys.stderr)
 
     # Resolve imports: public (import:) or private (module:) YAML modules
-    # Supports nesting: a private module can import: a public module
+    # Supports nesting: a module can import: another module (e.g. a private
+    # wrapper that import:s a public bundled module).
     if 'import' in step_def:
         module_data = _load_public_import(step_def['import'])
+        while 'import' in module_data:
+            nested = _load_public_import(module_data['import'])
+            module_data = _merge_module_step(nested, module_data, exclude_key='import')
         merged = _merge_module_step(module_data, step_def, exclude_key='import')
         step_def = merged
 
@@ -1119,11 +1131,21 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
         # Resolve cond: on inputs
         input_ref = _resolve_field(input_ref, params, itervar, step_fields=step_def, extra_vars=extra_vars)
         if isinstance(input_ref, list):
-            # Multiple input references — resolve each and combine with +
+            # Multiple input references — resolve each, normalise to lists,
+            # then concatenate. _resolve_inputs returns a list for step / iter
+            # references but a bare string for raw URI passthrough; without
+            # the normalise step, `+`-ing the latter does *string* concat
+            # ("uri1uri2…") rather than list concat — which is what the
+            # downloader-bug-with-glued-URIs symptom was.
             resolved = [_resolve_inputs(ref.strip(), step_map, grouped=is_fan_in, itervar=itervar, iterations=iterations) for ref in input_ref]
-            combined = resolved[0]
-            for r in resolved[1:]:
-                combined = combined + r
+            combined: list = []
+            for r in resolved:
+                if r is None:
+                    continue
+                if isinstance(r, list):
+                    combined.extend(r)
+                else:
+                    combined.append(r)
             step_kwargs['inputs'] = combined
         elif isinstance(input_ref, str):
             step_kwargs['inputs'] = _resolve_inputs(input_ref, step_map, grouped=is_fan_in, itervar=itervar, iterations=iterations)
