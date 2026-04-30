@@ -214,8 +214,8 @@ type AzureConfig struct {
 	Quotas              map[string]Quota  `yaml:"quotas"` // key: region
 	Regions             []string          `yaml:"regions"`
 	UpdatePeriodicity   string            `yaml:"update_periodicity"` // Update periodicity in minutes
-	LocalWorkspaceRoots  map[string]string `yaml:"local_workspaces"`
-	LocalResourceRoots   map[string]string `yaml:"local_resources"`
+	LocalWorkspaceRoots  map[string]string `yaml:"local_workspaces"` // key: region (or "*" wildcard); value: workspace URI for that region
+	LocalResourceRoots   map[string]string `yaml:"local_resources"`  // key: region (or "*" wildcard); value: resource-root URI for that region
 }
 
 type AzureImage struct {
@@ -261,17 +261,17 @@ type OpenstackConfig struct {
 	Regions             []string               `yaml:"regions"`
 	Custom              map[string]interface{} `yaml:"custom"`             // Vendor-specific custom settings
 	UpdatePeriodicity   string                 `yaml:"update_periodicity"` // Update periodicity in minutes
-	LocalWorkspaceRoots  map[string]string      `yaml:"local_workspaces"`
-	LocalResourceRoots   map[string]string      `yaml:"local_resources"`
-	Keypair              string                 `yaml:"keypair"` // Name of the keypair to use for SSH access
+	LocalWorkspaceRoots  map[string]string      `yaml:"local_workspaces"` // key: region (or "*" wildcard); value: workspace URI for that region
+	LocalResourceRoots   map[string]string      `yaml:"local_resources"`  // key: region (or "*" wildcard); value: resource-root URI for that region
+	Keypair              string                 `yaml:"keypair"`          // Name of the keypair to use for SSH access
 }
 
 type LocalConfig struct {
 	Name                 string            `yaml:"-"`
 	DefaultRegion        string            `yaml:"default_region"`
 	Regions              []string          `yaml:"regions"`
-	LocalWorkspaceRoots  map[string]string `yaml:"local_workspaces"`
-	LocalResourceRoots   map[string]string `yaml:"local_resources"`
+	LocalWorkspaceRoots  map[string]string `yaml:"local_workspaces"` // key: region (or "*" wildcard); value: workspace URI for that region
+	LocalResourceRoots   map[string]string `yaml:"local_resources"`  // key: region (or "*" wildcard); value: resource-root URI for that region
 }
 
 func (c *Config) Validate() error {

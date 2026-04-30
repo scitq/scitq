@@ -141,3 +141,46 @@ providers:
 ```
 
 The `instances` limit is also **learned from failures**: if scitq encounters an instance-count error (like Azure `PublicIPCountLimitReached`) during deployment, it automatically sets `MaxInstances` to the current instance count for that region. Further deploys are blocked until existing workers are deleted, freeing instance slots. This means even without configuring `instances` explicitly, scitq will stop hammering the Azure API after the first failure.
+
+### Workspace and resource roots (`local_workspaces`, `local_resources`)
+
+Each provider can declare per-region URIs for the **workspace root** (where
+scitq stages task input/output between steps) and the **resource root**
+(where module-level resources live, referenced by `{RESOURCE_ROOT}` in
+module YAML). They're set on the provider config block:
+
+```yaml
+providers:
+  azure:
+    primary:
+      local_workspaces:
+        swedencentral: "azswed://rnd/workspace"
+        westeurope:    "azwest://rnd/workspace"
+        northeurope:   "aznorth://rnd/workspace"
+      local_resources:
+        swedencentral: "azswed://rnd/resource"
+        westeurope:    "azwest://rnd/resource"
+        northeurope:   "aznorth://rnd/resource"
+  local:
+    local:
+      local_workspaces:
+        "*": "s3://rnd/workspace"
+      local_resources:
+        "*": "s3://rnd/resource"
+```
+
+**Resolution order** (see `LocalConfig.GetWorkspaceRoot` /
+`AzureConfig.GetWorkspaceRoot` / `OpenstackConfig.GetWorkspaceRoot`):
+
+1. Exact match on the worker's region.
+2. Fall back to the `"*"` wildcard key if defined.
+3. Else `GetWorkspaceRoot` returns "not found" and the workflow's
+   `client.get_workspace_root(...)` call raises `unknown provider` /
+   `no workspace root for region`.
+
+The `"*"` wildcard is convenient for providers with a single (or no real)
+region — e.g. `local.local` typically has only the synthetic `local`
+region, so a wildcard avoids needing to repeat the entry for every
+permanent worker. Cloud providers with multiple regions usually want
+explicit per-region entries so cross-region transfer fees are visible
+(and avoidable).

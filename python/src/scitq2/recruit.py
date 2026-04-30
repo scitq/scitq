@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from scitq2.constants import DEFAULT_RECRUITER_TIMEOUT
 import sys
 from dataclasses import dataclass
@@ -133,20 +133,44 @@ class WorkerPool:
         return self.extra_options.get("max_recruited", None)
 
     def compile_filter(self, default_provider: Optional[str] = None, default_region: Optional[str] = None) -> str:
-        """ Compiles the worker pool's match expressions into a protofilter string."""
+        """ Compiles the worker pool's match expressions into a protofilter string.
+
+        Resolution rules (worker_pool wins, workspace is a default):
+        - If the worker pool already constrains `provider`, use it as-is and
+          warn only if it disagrees with the workflow-level default
+          (workspace location). Same for `region`.
+        - Otherwise fall back to the workflow's default provider/region.
+        """
         constraints = list(self.match)  # copy to avoid mutation
 
-        existing_fields = {expr.field for expr in constraints}
+        # Index existing field -> value for explicit overrides.
+        existing: Dict[str, FieldExpr] = {expr.field: expr for expr in constraints}
 
-        if default_provider and "provider" not in existing_fields:
+        if "provider" in existing:
+            pool_provider = existing["provider"].value
+            if default_provider and pool_provider and pool_provider != default_provider:
+                print(
+                    f"⚠️ worker_pool.provider ({pool_provider!r}) differs from "
+                    f"workflow workspace provider ({default_provider!r}); "
+                    f"compute will run on {pool_provider!r} but data lives on "
+                    f"{default_provider!r}. Cross-region I/O is implied — "
+                    f"intentional? If not, drop worker_pool.provider.",
+                    file=sys.stderr,
+                )
+        elif default_provider:
             constraints.append(FieldExpr("provider", "==", default_provider))
-        else:
-            print(f"⚠️ Warning: using provider filter may generate high transfer fees, hope you know what you are doing.", file=sys.stderr)
 
-        if default_region and "region" not in existing_fields:
+        if "region" in existing:
+            pool_region = existing["region"].value
+            if default_region and pool_region and pool_region != default_region:
+                print(
+                    f"⚠️ worker_pool.region ({pool_region!r}) differs from "
+                    f"workflow workspace region ({default_region!r}); "
+                    f"cross-region I/O implied.",
+                    file=sys.stderr,
+                )
+        elif default_region:
             constraints.append(FieldExpr("region", "==", default_region))
-        else:
-            print(f"⚠️ Warning: using region filter may generate high transfer fees, hope you know what you are doing.", file=sys.stderr)
 
         return compile_protofilter(constraints)
 

@@ -441,13 +441,35 @@ def _build_worker_pool(wp_def: dict, params, extra_vars: Optional[Dict] = None) 
     """Build a WorkerPool from YAML definition."""
     filters = []
 
-    # Provider/region from explicit field
+    # Provider/region from explicit field. Accepts:
+    #   - ProviderRegion (from a `type: provider_region` param) → tries
+    #     prefix-match on provider so "azure" matches "azure.primary".
+    #   - Plain string. May be "<provider>:<region>" or just "<provider>".
+    #     Without this branch, a literal `provider: "local.local"` was
+    #     silently ignored — the workflow's workspace then leaked into
+    #     the recruiter's protofilter, recruiting an unintended worker.
     provider_ref = wp_def.get('provider')
+    region_ref = wp_def.get('region')
     if provider_ref:
         resolved = _resolve_refs(provider_ref, params)
         if isinstance(resolved, ProviderRegion):
             filters.append(W.provider.like(f"{resolved.provider}%"))
             filters.append(W.region == resolved.region)
+        elif isinstance(resolved, str) and resolved:
+            if ':' in resolved:
+                prov, reg = resolved.split(':', 1)
+                filters.append(W.provider == prov)
+                filters.append(W.region == reg)
+            else:
+                filters.append(W.provider == resolved)
+                if region_ref:
+                    region_resolved = _resolve_refs(region_ref, params)
+                    if isinstance(region_resolved, str) and region_resolved:
+                        filters.append(W.region == region_resolved)
+    elif region_ref:
+        region_resolved = _resolve_refs(region_ref, params)
+        if isinstance(region_resolved, str) and region_resolved:
+            filters.append(W.region == region_resolved)
 
     for field in ('cpu', 'mem', 'disk', 'gpumem'):
         if field in wp_def:
