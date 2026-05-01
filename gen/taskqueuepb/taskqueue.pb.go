@@ -162,9 +162,10 @@ type TaskRequest struct {
 	Dependency       []int32                `protobuf:"varint,16,rep,packed,name=dependency,proto3" json:"dependency,omitempty"` // IDs of tasks that this task depends on
 	TaskName         *string                `protobuf:"bytes,17,opt,name=task_name,json=taskName,proto3,oneof" json:"task_name,omitempty"`
 	SkipIfExists     bool                   `protobuf:"varint,18,opt,name=skip_if_exists,json=skipIfExists,proto3" json:"skip_if_exists,omitempty"`
-	AcceptFailure    bool                   `protobuf:"varint,19,opt,name=accept_failure,json=acceptFailure,proto3" json:"accept_failure,omitempty"` // If true, dependencies accept failed prerequisites
-	Publish          *string                `protobuf:"bytes,20,opt,name=publish,proto3,oneof" json:"publish,omitempty"`                             // Publish path (copied from output on success only)
-	ReuseKey         *string                `protobuf:"bytes,21,opt,name=reuse_key,json=reuseKey,proto3,oneof" json:"reuse_key,omitempty"`           // SHA-256 hex for opportunistic reuse
+	AcceptFailure    bool                   `protobuf:"varint,19,opt,name=accept_failure,json=acceptFailure,proto3" json:"accept_failure,omitempty"`    // If true, dependencies accept failed prerequisites
+	Publish          *string                `protobuf:"bytes,20,opt,name=publish,proto3,oneof" json:"publish,omitempty"`                                // Publish path (copied from output on success only)
+	ReuseKey         *string                `protobuf:"bytes,21,opt,name=reuse_key,json=reuseKey,proto3,oneof" json:"reuse_key,omitempty"`              // SHA-256 hex for opportunistic reuse — producer side: always set when content is reuse-eligible (step not untrusted)
+	ConsumeReuse     *bool                  `protobuf:"varint,22,opt,name=consume_reuse,json=consumeReuse,proto3,oneof" json:"consume_reuse,omitempty"` // If true, server may reuse a cached result for this task (consumer side, set from workflow-level `opportunistic` flag)
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -344,6 +345,13 @@ func (x *TaskRequest) GetReuseKey() string {
 		return *x.ReuseKey
 	}
 	return ""
+}
+
+func (x *TaskRequest) GetConsumeReuse() bool {
+	if x != nil && x.ConsumeReuse != nil {
+		return *x.ConsumeReuse
+	}
+	return false
 }
 
 type Task struct {
@@ -9511,7 +9519,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_concurrencyB\x0f\n" +
 	"\r_is_permanentB\v\n" +
 	"\t_providerB\t\n" +
-	"\a_region\"\x91\a\n" +
+	"\a_region\"\xcd\a\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -9538,7 +9546,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0eskip_if_exists\x18\x12 \x01(\bR\fskipIfExists\x12%\n" +
 	"\x0eaccept_failure\x18\x13 \x01(\bR\racceptFailure\x12\x1d\n" +
 	"\apublish\x18\x14 \x01(\tH\vR\apublish\x88\x01\x01\x12 \n" +
-	"\treuse_key\x18\x15 \x01(\tH\fR\breuseKey\x88\x01\x01B\b\n" +
+	"\treuse_key\x18\x15 \x01(\tH\fR\breuseKey\x88\x01\x01\x12(\n" +
+	"\rconsume_reuse\x18\x16 \x01(\bH\rR\fconsumeReuse\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -9555,7 +9564,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_publishB\f\n" +
 	"\n" +
-	"_reuse_key\"\xdd\v\n" +
+	"_reuse_keyB\x10\n" +
+	"\x0e_consume_reuse\"\xdd\v\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +

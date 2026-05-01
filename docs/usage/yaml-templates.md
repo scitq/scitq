@@ -503,7 +503,43 @@ The `|untar` suffix tells the worker to extract after download. `|gunzip` is als
       - "azure://ref/species.tsv.gz"
 ```
 
-Resources are validated before the workflow starts — if a resource doesn't exist, the workflow is aborted with a clear error.
+Resources are validated before the workflow starts — if a resource doesn't exist, the workflow is aborted with a clear error. A resource that is published by another step in the same workflow is exempt from the existence check (and from sub-paths of such a publish path) — the producing step creates it before the consumer runs.
+
+#### File vs directory resources
+
+A resource URI without a trailing slash points to a single file:
+
+```yaml
+    resource: "azure://ref/index.tgz|untar"   # one file, extracted in /resource/
+```
+
+A resource URI that ends in `/` points to a directory and **copies its contents** into `/resource/` — i.e. the trailing folder name is *not* preserved, files land directly under `/resource/`. This matches the convention `cp dir/ /dest/` ≡ `cp dir/* /dest/` (the contents move, not the folder itself):
+
+```yaml
+    resource: "azure://ref/catalog/"
+    # /resource/<file1>, /resource/<file2>, ...
+    # NOT /resource/catalog/<file1>
+```
+
+Sub-directories inside the source are preserved relative to it. So pointing one level higher *does* recreate the intermediate folder:
+
+```yaml
+    resource: "azure://ref/"
+    # /resource/catalog/<file1>, /resource/catalog/<file2>, ...
+```
+
+#### The `|mv:<name>` action
+
+Use `|mv:<name>` to wrap the downloaded contents into a named subdirectory after the copy. Useful when the per-sample task expects a specific directory name (e.g. a tool that requires its index files to live under `/resource/<name>/`) but the source layout doesn't naturally produce that name:
+
+```yaml
+    resource: "{RESOURCE_ROOT}/metaphlan/{INDEX}/bowtie2/|mv:bowtie2"
+    # contents of .../bowtie2/ → /resource/<files> (directory copy)
+    # |mv:bowtie2 then moves them into /resource/bowtie2/<files>
+    # so the command can reference --bowtie2db /resource/bowtie2
+```
+
+`|mv:<name>` and the parent-directory trick are interchangeable for two-level layouts — the choice is stylistic. The metagenomics catalog modules (`metaphlan`, `meteor2`, `humann`) use `|mv:<name>` consistently because they need to pull *several* sibling sub-directories independently from one published catalog (e.g. `fasta/` and `database/` from a meteor2 catalog), each landing at its own `/resource/<name>/`. Pointing at the parent would force a single recursive copy of all siblings.
 
 ### The `{RESOURCE_ROOT}` variable
 

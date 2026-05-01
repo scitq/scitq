@@ -106,21 +106,6 @@
    */
   let networkAutoZoom = true;
 
-  /**
-   * Configuration for zoom behavior
-   * @type {Object}
-   * @property {number} minZoom - Minimum zoom level
-   * @property {number} maxZoom - Maximum zoom level
-   * @property {number} sensitivity - Zoom sensitivity factor
-   * @property {number} margin - Margin to prevent lines from touching
-   */
-  const ZOOM_CONFIG = {
-    minZoom: 1,         // Minimum zoom level
-    maxZoom: 15,        // Maximum zoom level
-    sensitivity: 1.2,   // Zoom sensitivity
-    margin: 0.1         // Margin around data
-  };
-
   // --- WS unsubscribe reference for cleanup ---
   let unsubscribeWS: (() => void) | null = null;
 
@@ -299,43 +284,6 @@
   }
 
   /**
-   * Calculates appropriate zoom level for automatic zoom
-   * @param {Array} history - Data history array
-   * @param {'disk'|'network'} type - Type of data being zoomed
-   * @returns {number} Calculated zoom factor
-   */
-  function calculateAutoZoom(history: any[], type: 'disk' | 'network') {
-    if (history.length < 2) return 1;
-
-    const recentData = history.slice(-5); // Use recent points for stability
-    const values = recentData.flatMap(d => 
-      type === 'disk' ? [d.read || 0, d.write || 0] : [d.sent || 0, d.received || 0]
-    ).filter(v => v > 0);
-
-    if (values.length === 0) return 1;
-
-    const max = Math.max(...values);
-    const min = Math.min(...values);
-    const range = max - min;
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-
-    let zoomFactor = 1;
-    
-    if (range > 0) {
-      const ratio = avg / range;
-      zoomFactor = Math.min(
-        ZOOM_CONFIG.maxZoom,
-        Math.max(
-          ZOOM_CONFIG.minZoom,
-          ratio * ZOOM_CONFIG.sensitivity * 10
-        )
-      );
-    }
-
-    return zoomFactor;
-  }
-
-  /**
    * Prepares chart data for rendering
    * @param {Array} history - Data history array
    * @param {'disk'|'network'} type - Type of chart data
@@ -345,17 +293,25 @@
     const isAutoZoom = type === 'disk' ? diskAutoZoom : networkAutoZoom;
     let currentZoom = type === 'disk' ? diskZoom : networkZoom;
 
-    if (isAutoZoom) {
-      currentZoom = calculateAutoZoom(history, type);
-    }
-
-    const dataValues = history.flatMap(d => 
+    const dataValues = history.flatMap(d =>
       type === 'disk' ? [d.read || 0, d.write || 0] : [d.sent || 0, d.received || 0]
     );
     const dataMax = Math.max(1, ...dataValues);
 
-    // Reduce margin to 5% to maximize space usage
-    const displayMax = dataMax * 1.05 / currentZoom;
+    // Auto-zoom = fit Y axis to data. Manual zoom = user explicitly
+    // zooms in past the max (peaks clip — that's the user's choice).
+    // Previous code computed an auto-zoom factor (avg/range) that
+    // could divide displayMax below dataMax, so peaks clipped while
+    // still in auto mode — visible as a flat top on the curve when
+    // a new maximum arrived. With auto-zoom on we now ignore the
+    // computed factor and always render with displayMax >= dataMax.
+    let displayMax: number;
+    if (isAutoZoom) {
+      currentZoom = 1; // legend display only — keep "1x" while we autofit
+      displayMax = dataMax * 1.05;
+    } else {
+      displayMax = dataMax * 1.05 / currentZoom;
+    }
 
     // Prepare chart lines
     const line1 = [];

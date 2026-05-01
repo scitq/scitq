@@ -277,13 +277,13 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              command, shell, container, container_options, step_id,
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
-             status, task_name, skip_if_exists, publish, reuse_key, created_at
+             status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
-             $15, $16, $17, $18, $19, NOW()
+             $15, $16, $17, $18, $19, $20, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -293,7 +293,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
-		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey,
+		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(),
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -976,7 +976,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					retry, is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, previous_task_id, retry_count,
-					task_name, publish, reuse_key
+					task_name, publish, reuse_key, consume_reuse
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -985,7 +985,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					GREATEST(retry - 1, 0), is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, task_id, retry_count + 1,
-					task_name, publish, reuse_key
+					task_name, publish, reuse_key, consume_reuse
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id

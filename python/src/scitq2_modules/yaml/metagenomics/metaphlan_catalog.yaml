@@ -1,5 +1,5 @@
 name: metaphlan_catalog
-version: "1.0.0"
+version: "1.4.0"
 description: |
   Download and cache the MetaPhlAn ChocoPhlAn database in the workspace
   resource tree. Runs once per workspace per (version, index) pair and is
@@ -12,6 +12,12 @@ description: |
   `metagenomics/metaphlan` automatically gets this module injected via
   `requires:` and the per-sample task picks the database up from the
   shared resource path.
+
+  v1.1.0: replaced `metaphlan --install` with explicit curl. The
+  built-in installer downloads the same files but has no observable
+  timeout — a stalled HTTP connection wedges silently for hours
+  (observed). curl with `--connect-timeout` / `--max-time` /
+  `--retry-all-errors` + resumable downloads is reliable.
 
 language: bash
 per_sample: false
@@ -29,27 +35,31 @@ vars:
     "4.2": "--db_dir"
     "4.1": "--bowtie2db"
     "4.0": "--bowtie2db"
-    "4.0-chocophlan2021": "--bowtie2db"
-  # Optional pinned ChocoPhlAn index, e.g. "mpa_vOct22_CHOCOPhlAnSGB_202212"
-  # for 4.1 or "mpa_vJun23_CHOCOPhlAnSGB_202403" for 4.2. When empty the
-  # MetaPhlAn binary picks whichever it considers the default for the
-  # selected major version. Pin it for reproducible deployments;
-  # leave empty for "always grab whatever metaphlan ships with this image".
-  METAPHLAN_INDEX: ""
+  # ChocoPhlAn catalog index. The cond: gives a sensible default per
+  # MetaPhlAn major version, so workflows can simply set
+  # METAPHLAN_VERSION and get a working catalog. To pin a different
+  # release, override this var directly at the step level — a step-level
+  # value replaces this whole cond: dict via vars merge. See:
+  # http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/
+  METAPHLAN_INDEX:
+    cond: METAPHLAN_VERSION
+    "4.0": "mpa_vOct22_CHOCOPhlAnSGB_202212"
+    "4.1": "mpa_vOct22_CHOCOPhlAnSGB_202403"
+    "4.2": "mpa_vJan25_CHOCOPhlAnSGB_202503"
 
 container:
   cond: METAPHLAN_VERSION
   "4.0": "gmtscience/metaphlan4:4.0.6.1"
-  "4.0-chocophlan2021": "gmtscience/metaphlan4:4.0.6.1"
   "4.1": "gmtscience/metaphlan4:4.1"
   "4.2": "gmtscience/metaphlan:4.2.4"
 
-# The published tree is consumed by `metagenomics/metaphlan` via:
-#   resource: "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_VERSION}/bowtie2/|mv:bowtie2"
-# Keying on METAPHLAN_VERSION (rather than per-index) keeps the cache
-# layout simple at the cost of one DB per major version; users who pin
-# multiple indexes for the same major version can extend this path.
-publish: "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_VERSION}/"
+# Cache catalogs by their own index name, not by metaphlan major
+# version. Two catalogs for the same major version (e.g. the original
+# vJan21 + the newer vOct22) can coexist in the workspace cache and
+# pinning a custom INDEX never silently overwrites another workflow's
+# default catalog. The per-sample `metagenomics/metaphlan` module reads
+# from the same per-index path.
+publish: "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_INDEX}/"
 
 resource: []
 
@@ -58,15 +68,50 @@ command: |
   . /builtin/std.sh
 
   mkdir -p /output/bowtie2
+  cd /output/bowtie2
 
-  # `metaphlan --install` populates the bowtie2 db files into the directory
-  # given to the version-specific flag. The optional --index pins a
-  # specific ChocoPhlAn release when METAPHLAN_INDEX is set.
-  if [ -n "{METAPHLAN_INDEX}" ]; then
-      metaphlan --install --index "{METAPHLAN_INDEX}" {METAPHLAN_DB_FLAG} /output/bowtie2
-  else
-      metaphlan --install {METAPHLAN_DB_FLAG} /output/bowtie2
+  INDEX="{METAPHLAN_INDEX}"
+  if [ -z "$INDEX" ]; then
+      echo "METAPHLAN_INDEX must be set — pin a ChocoPhlAn release explicitly" >&2
+      echo "(e.g. mpa_vJan21_CHOCOPhlAnSGB_202103, mpa_vOct22_CHOCOPhlAnSGB_202403)." >&2
+      exit 1
   fi
+
+  BASE="http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases"
+  # 30s connect timeout, 4h cap (the bowtie2 archive is ~19 GB, which at
+  # 2.4 MB/s would take ~2h20m). --retry-all-errors covers transient
+  # 5xx/timeouts; -C - resumes a partial download on retry.
+  CURL=(curl -L --connect-timeout 30 --max-time 14400
+        --retry 5 --retry-delay 30 --retry-all-errors
+        -C - --fail --show-error)
+
+  echo "=== Fetching auxiliary bundle: ${INDEX}.tar ==="
+  "${CURL[@]}" -o "${INDEX}.tar"  "${BASE}/${INDEX}.tar"
+  "${CURL[@]}" -o "${INDEX}.md5"  "${BASE}/${INDEX}.md5" || true
+
+  echo "=== Fetching bowtie2 indexes: ${INDEX}_bt2.tar ==="
+  "${CURL[@]}" -o "${INDEX}_bt2.tar"  "${BASE}/bowtie2_indexes/${INDEX}_bt2.tar"
+  "${CURL[@]}" -o "${INDEX}_bt2.md5" "${BASE}/bowtie2_indexes/${INDEX}_bt2.md5" || true
+
+  echo "=== md5 verification (where available) ==="
+  for sum in "${INDEX}.md5" "${INDEX}_bt2.md5"; do
+      if [ -s "$sum" ]; then
+          md5sum -c "$sum" || { echo "md5 mismatch on $sum"; exit 1; }
+      fi
+  done
+
+  echo "=== Extract both archives into /output/bowtie2/ ==="
+  tar -xf "${INDEX}.tar"
+  tar -xf "${INDEX}_bt2.tar"
+
+  # Write the marker file metaphlan reads when callers don't pass --index
+  echo "${INDEX}" > mpa_latest
+
+  # Drop the .tar files; only the extracted contents need to be published
+  rm -f "${INDEX}.tar" "${INDEX}_bt2.tar"
+
+  echo "=== Final layout ==="
+  ls -la
 
 outputs:
   catalog: "*"

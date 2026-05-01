@@ -39,6 +39,12 @@ command:
         gzip -t "$f"
     done
 
+    # Single-end branch: trusts the iterator to have already filtered to
+    # the right files (e.g. only R1 when `iterate.layout: single` against
+    # a paired-end source). Doing R1/R2 detection here via filename
+    # heuristics is unsafe — coincidental matches between unrelated
+    # single-end files (e.g. `s1_1.fq.gz` + `s2_2.fq.gz`) would mis-pair
+    # them silently. Workflow author is responsible for layout selection.
     zcat /input/*.f*q.gz > /tmp/read.fastq
     fastp \
         --trim_poly_g \

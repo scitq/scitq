@@ -1,0 +1,14 @@
+-- Per-task consumer-side gate for opportunistic reuse. Splits the producer
+-- and consumer concerns previously conflated through `reuse_key`:
+--   producer: a task gets a non-null `reuse_key` whenever its content is
+--             reuse-eligible (step not in untrusted), so on success it is
+--             stored in task_reuse for *any* future opportunistic workflow
+--             to reuse from.
+--   consumer: the workflow-level `opportunistic` flag now flows down to
+--             this per-task column. `assigntask.reuseCheckTasks` filters
+--             on it so non-opportunistic workflows neither look up nor
+--             reuse cached results — they only contribute.
+-- Default false to match the conservative-default principle (reuse is
+-- opt-in). Existing in-flight tasks become non-consumers, which is the
+-- safe behaviour while the upgrade rolls out.
+ALTER TABLE task ADD COLUMN consume_reuse BOOLEAN NOT NULL DEFAULT false;

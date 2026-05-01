@@ -1,5 +1,5 @@
 name: metaphlan
-version: "1.1.0"
+version: "1.4.0"
 description: |
   MetaPhlAn taxonomic profiling on per-sample paired (or single-end)
   fastqs. The companion `metagenomics/metaphlan_catalog` module is
@@ -20,6 +20,19 @@ requires:
 
 vars:
   METAPHLAN_VERSION: "4.1"
+  # ChocoPhlAn catalog index. The cond: gives a sensible default per
+  # MetaPhlAn major version, so workflows can simply set
+  # METAPHLAN_VERSION and get a working catalog. To pin a different
+  # release, override this var directly at the step level — a step-level
+  # value replaces this whole cond: dict via vars merge. Mirrored
+  # byte-for-byte in `metagenomics/metaphlan_catalog` so both modules
+  # compute the same name and land in the same cache slot. See:
+  # http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/
+  METAPHLAN_INDEX:
+    cond: METAPHLAN_VERSION
+    "4.0": "mpa_vOct22_CHOCOPhlAnSGB_202212"
+    "4.1": "mpa_vOct22_CHOCOPhlAnSGB_202403"
+    "4.2": "mpa_vJan25_CHOCOPhlAnSGB_202503"
   # CLI flag used to point at the database directory. 4.0 / 4.1 use
   # --bowtie2db; 4.2 renamed it to --db_dir. Mirrored in
   # metaphlan_catalog so both modules stay in sync via cond:.
@@ -28,20 +41,21 @@ vars:
     "4.2": "--db_dir"
     "4.1": "--bowtie2db"
     "4.0": "--bowtie2db"
-    "4.0-chocophlan2021": "--bowtie2db"
 
 container:
   cond: METAPHLAN_VERSION
   "4.0": "gmtscience/metaphlan4:4.0.6.1"
-  "4.0-chocophlan2021": "gmtscience/metaphlan4:4.0.6.1"
   "4.1": "gmtscience/metaphlan4:4.1"
   "4.2": "gmtscience/metaphlan:4.2.4"
 
 # Pull the database in from the workspace cache populated by
-# metaphlan_catalog. The `|mv:bowtie2` action un-flattens the download so
-# the directory layout matches what MetaPhlAn expects at runtime.
+# metaphlan_catalog. The cache is keyed by index name (not just major
+# version) so multiple catalogs for the same metaphlan release coexist
+# without overwriting each other. The `|mv:bowtie2` action un-flattens
+# the download so the directory layout matches what MetaPhlAn expects
+# at runtime.
 resource:
-  - "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_VERSION}/bowtie2/|mv:bowtie2"
+  - "{RESOURCE_ROOT}/metaphlan/{METAPHLAN_INDEX}/bowtie2/|mv:bowtie2"
 
 command: |
   . /builtin/std.sh

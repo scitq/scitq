@@ -84,16 +84,33 @@ func untar(uri *URI, fs *MetaFileSystem, isEarly bool) error {
 	}
 }
 
-// move moves the file to the target location (simply modifying the target URI)
+// move redirects where the destination URI points to *before* the copy
+// runs (early phase), so the file lands at `<dst>/<target>/<file>` (or
+// the absolute path if `target` starts with `/`). The late phase is a
+// no-op — `mv:` is purely a pre-copy redirect, not an actual filesystem
+// move post-download.
+//
+// Target normalisation:
+//   - leading `./` is stripped, so `mv:./foo` is equivalent to `mv:foo`
+//     (forgiving — it's the same user intent).
+//   - any `../` segment is rejected — `mv:` is not allowed to escape the
+//     download root (matches the docs in cli.md and the parser-time
+//     check for relative paths in URI.Path).
 func move(uri *URI, isEarly bool, target string) error {
-	if isEarly {
-		if strings.HasPrefix(target, "/") {
-			uri.Path = target
-		} else {
-			uri.Path = uri.Path + uri.Separator + target
-		}
-		return nil
-	} else {
+	if !isEarly {
 		return nil
 	}
+	target = strings.TrimPrefix(target, "./")
+	if target == "" {
+		return fmt.Errorf("mv target is empty after normalisation")
+	}
+	if strings.Contains("/"+target+"/", "/../") {
+		return fmt.Errorf("mv target %q contains a parent reference (..); only subfolders are allowed", target)
+	}
+	if strings.HasPrefix(target, "/") {
+		uri.Path = target
+	} else {
+		uri.Path = uri.Path + uri.Separator + target
+	}
+	return nil
 }

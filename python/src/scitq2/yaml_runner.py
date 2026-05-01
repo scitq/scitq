@@ -67,6 +67,9 @@ def _apply_filter(value: str, filter_name: str) -> str:
     elif filter_name == 'is_paired':
         # depth enum to paired boolean: "2x20M" -> "true", "1x10M" -> "false"
         return 'true' if value.startswith('2x') else 'false'
+    elif filter_name == 'not':
+        # boolean negation: "true" → "false", "false" → "true"
+        return 'false' if str(value).lower() in ('true', '1', 'yes') else 'true'
     elif filter_name == 'lower':
         return value.lower()
     elif filter_name == 'upper':
@@ -219,6 +222,14 @@ def _resolve_cond(val, params, itervar=None, step_fields=None, extra_vars=None):
         for candidate in ([True, 'true'] if is_truthy else [False, 'false']):
             if candidate in val:
                 return val[candidate]
+    # `default` branch as final fallthrough — lets a workflow express
+    # "use this value when nothing else matched", e.g. param-overrides:
+    #   METAPHLAN_INDEX:
+    #     cond: "{params.metaphlan_index}"
+    #     "": <version-specific default>
+    #     default: "{params.metaphlan_index}"
+    if 'default' in val:
+        return val['default']
     raise ValueError(f"cond: no match for '{resolved}' in {list(k for k in val if k != 'cond')}")
 
 
@@ -230,7 +241,10 @@ def _resolve_field(val, params, itervar=None, step_fields=None, extra_vars=None,
     substituted — without this, list elements were passed unchanged to
     `_resolve_inputs`, which then tried to interpret `{params.uri_a}` as a
     step reference and raised."""
-    if isinstance(val, dict) and 'cond' in val:
+    # Loop on cond so a `cond:` whose chosen branch is itself a `cond:`
+    # block (nested conditionals — e.g. "if param X is empty, dispatch
+    # on param Y; otherwise use param X") resolves all the way through.
+    while isinstance(val, dict) and 'cond' in val:
         val = _resolve_cond(val, params, itervar, step_fields, extra_vars)
     if isinstance(val, list):
         return [_resolve_field(v, params, itervar, step_fields, extra_vars, literal_format) for v in val]
@@ -280,30 +294,37 @@ def _build_params_class(params_def: Dict[str, dict]) -> type:
 # Iterators
 # ---------------------------------------------------------------------------
 
-def _build_iterations(iterate_def, params) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+def _build_iterations(iterate_def, params, workflow_vars: Optional[Dict] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Build the list of iteration dicts from the iterate: block.
     Returns (iterations, primary_source_type).
     Each iteration dict maps variable names to values.
     For URI/ENA/SRA sources, each dict also has a '_sample' key with the sample object.
+    workflow_vars: best-effort workflow-level vars (resolved with whatever
+    is known before iterations exist — typically RESOURCE_ROOT and any
+    `vars:` block that doesn't depend on iteration counts). Lets
+    iter-level expressions like `fastq_pair_filtering: "{PAIRED|not}"`
+    reference them.
     """
     if iterate_def is None:
         return [{}], None
 
     # Conditional iterator: cond selects which sub-block to use
     if 'cond' in iterate_def:
-        resolved = _resolve_cond(iterate_def, params)
+        resolved = _resolve_cond(iterate_def, params, extra_vars=workflow_vars)
         if isinstance(resolved, dict):
-            # The selected branch is the iterator definition
-            # Inherit 'name' and 'match' from parent if not in branch
-            if 'name' not in resolved and 'name' in iterate_def:
-                resolved['name'] = iterate_def['name']
-            if 'match' not in resolved and 'match' in iterate_def:
-                resolved['match'] = iterate_def['match']
-            return _build_iterations(resolved, params)
+            # The selected branch becomes the iterator definition. Inherit
+            # iterator-level attributes from the parent if the branch
+            # didn't override them — this lets a workflow set e.g.
+            # `fastq_pair_filtering` once at the top instead of repeating
+            # it in every cond branch.
+            for inherit in ('name', 'match', 'fastq_pair_filtering'):
+                if inherit not in resolved and inherit in iterate_def:
+                    resolved[inherit] = iterate_def[inherit]
+            return _build_iterations(resolved, params, workflow_vars=workflow_vars)
 
     # Product mode
     if 'mode' in iterate_def and iterate_def['mode'] == 'product':
-        sub_iters = [_build_single_iterator(sub, params) for sub in iterate_def['over']]
+        sub_iters = [_build_single_iterator(sub, params, workflow_vars=workflow_vars) for sub in iterate_def['over']]
         names = [sub['name'] for sub in iterate_def['over']]
         result = []
         for combo in itertools_product(*[s[0] for s in sub_iters]):
@@ -314,26 +335,58 @@ def _build_iterations(iterate_def, params) -> Tuple[List[Dict[str, Any]], Option
         return result, None
 
     # Single iterator
-    items, source_type = _build_single_iterator(iterate_def, params)
+    items, source_type = _build_single_iterator(iterate_def, params, workflow_vars=workflow_vars)
     return items, source_type
+
+
+# Per-source attribute schemas. Each entry lists the keys an iterator
+# of that source recognises. _build_single_iterator validates iter_def
+# against the matching schema — unknown keys raise instead of being
+# silently ignored. To add a new iterator type, add an entry here and
+# wire its handler in _build_single_iterator / _discover_samples.
+#
+# Sources listed in FILE_GROUP_SOURCES additionally accept extra string
+# keys as named file groups (e.g. `fastqs: "*.f*q.gz"`); other sources
+# reject anything outside the schema.
+ITERATOR_SCHEMAS: Dict[str, set] = {
+    'uri':   {'name', 'source', 'uri', 'group_by', 'filter',
+              'match', 'fastq_pair_filtering'},
+    'ena':   {'name', 'source', 'identifier', 'group_by', 'where', 'filter',
+              'match', 'fastq_pair_filtering'},
+    'sra':   {'name', 'source', 'identifier', 'group_by', 'where', 'filter',
+              'match', 'fastq_pair_filtering'},
+    'range': {'name', 'source', 'start', 'end', 'step'},
+    'list':  {'name', 'source', 'values'},
+    'lines': {'name', 'source', 'file'},
+}
+FILE_GROUP_SOURCES = {'uri', 'ena', 'sra'}
+# Internal markers added by the runner that are valid on any iterator.
+ITERATOR_INTERNAL_KEYS = {'_is_first_step'}
 
 
 def _extract_named_file_groups(iter_def: dict) -> Dict[str, str]:
     """Extract named file groups from an iterator definition.
-    Any key that isn't a known iterator key is treated as a named file group (glob pattern).
+    Any string key not in the source's schema is treated as a named file
+    group (glob pattern). Only meaningful for FILE_GROUP_SOURCES; other
+    sources reject extras at validation time.
     """
-    known_keys = {'name', 'source', 'start', 'end', 'step', 'values', 'file',
-                  'uri', 'group_by', 'filter', 'identifier', 'cond', 'mode', 'over',
-                  'match', 'where', '_is_first_step'}
+    source = iter_def.get('source', 'list')
+    schema = ITERATOR_SCHEMAS.get(source, set())
     groups = {}
     for k, v in iter_def.items():
-        if k not in known_keys and isinstance(v, str):
+        if k in schema or k in ITERATOR_INTERNAL_KEYS:
+            continue
+        if isinstance(v, str):
             groups[k] = v
     return groups
 
 
-def _build_single_iterator(iter_def: dict, params) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """Build iterations for a single iterator definition."""
+def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Build iterations for a single iterator definition.
+    workflow_vars: workflow-level vars resolved before iterations were
+    built — passed through so iter-level expressions like
+    `fastq_pair_filtering: "{PAIRED|not}"` can reference them.
+    """
     name = iter_def['name']
     source = iter_def.get('source', 'list')
     uname = name.upper()
@@ -341,13 +394,35 @@ def _build_single_iterator(iter_def: dict, params) -> Tuple[List[Dict[str, Any]]
     # Extract named file groups (v2: fastqs: "*.f*q.gz", csvs: "*.csv", etc.)
     named_groups = _extract_named_file_groups(iter_def)
 
+    # Validate iter_def keys against the source's schema. Unknown keys
+    # error — except for FILE_GROUP_SOURCES (uri/ena/sra) where extra
+    # string keys are treated as named file groups (handled by
+    # _extract_named_file_groups above). To add a new attribute supported
+    # by a source, register it in ITERATOR_SCHEMAS.
+    schema = ITERATOR_SCHEMAS.get(source)
+    if schema is None:
+        raise ValueError(f"Unknown iterator source: {source!r}")
+    extras = set(iter_def.keys()) - schema - ITERATOR_INTERNAL_KEYS
+    if source in FILE_GROUP_SOURCES:
+        # Extras that are strings are named file groups (already
+        # consumed by named_groups). Non-string extras are real errors.
+        unsupported = [k for k in extras if not isinstance(iter_def[k], str)]
+    else:
+        unsupported = sorted(extras)
+    if unsupported:
+        raise ValueError(
+            f"Iterator '{name}' (source={source!r}) doesn't recognise "
+            f"{sorted(unsupported)!r}. Supported keys for this source: "
+            f"{sorted(schema)!r}."
+        )
+
     if source in ('uri', 'ena', 'sra'):
-        samples = _discover_samples(iter_def, params, named_groups=named_groups)
+        samples = _discover_samples(iter_def, params, named_groups=named_groups, workflow_vars=workflow_vars)
         # Apply match: filter (sample name pattern)
         match_pattern = iter_def.get('match')
         if match_pattern:
             import fnmatch
-            match_pattern = _resolve_refs(match_pattern, params)
+            match_pattern = _resolve_refs(match_pattern, params, extra_vars=workflow_vars)
             samples = [s for s in samples if fnmatch.fnmatch(s.sample_accession, str(match_pattern))]
         items = []
         for sample in samples:
@@ -375,9 +450,13 @@ def _build_single_iterator(iter_def: dict, params) -> Tuple[List[Dict[str, Any]]
         raise ValueError(f"Unknown iterator source: {source}")
 
 
-def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, str]] = None) -> list:
+def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, str]] = None,
+                      workflow_vars: Optional[Dict] = None) -> list:
     """Discover samples from URI/ENA/SRA.
     named_groups: v2 named file groups (e.g. {'fastqs': '*.f*q.gz'}).
+    workflow_vars: workflow-level vars resolved before iterations were
+    built — passed through so iter-level expressions like
+    `fastq_pair_filtering: "{PAIRED|not}"` can reference them.
     """
     source = iter_def.get('source', 'uri')
 
@@ -389,14 +468,47 @@ def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, s
         first_group_glob = next(iter(named_groups.values()))
         filter_glob = first_group_glob
 
+    # `fastq_pair_filtering: true|false` (default false) is an explicit
+    # opt-in for "I want only R1 from a paired-end source." Workflow
+    # author declares intent — the iterator never silently filters.
+    #   false → pass through whatever the source returned
+    #   true  → keep only R1 (URI: trim via find_sample_parity;
+    #                         ENA/SRA: pass layout=SINGLE so the
+    #                         underlying biology classes set the
+    #                         `@only-read1` URI option and don't even
+    #                         fetch R2 over the wire).
+    # Use case: `fastq_pair_filtering: "{PAIRED|not}"` — turns on R1-only
+    # exactly when the workflow runs in single-end mode.
+    fpf_raw = _resolve_field(iter_def.get('fastq_pair_filtering', False), params, extra_vars=workflow_vars)
+    if isinstance(fpf_raw, bool):
+        fastq_pair_filtering = fpf_raw
+    else:
+        fastq_pair_filtering = str(fpf_raw).strip().lower() in ('true', '1', 'yes')
+
+    # ENA/SRA accept a layout flag that triggers "@only-read1" on paired
+    # samples (and is a no-op on single-end ones). For URI we apply the
+    # equivalent logic ourselves on the raw URI list.
+    biology_layout = 'SINGLE' if fastq_pair_filtering else 'AUTO'
+
     if source == 'uri':
         from scitq2.uri import URI
+        from scitq2.biology import find_sample_parity, PAIRED
         uri = _resolve_refs(iter_def.get('uri', ''), params)
         group_by = iter_def.get('group_by', 'folder')
         if filter_glob:
             filter_glob = _resolve_refs(str(filter_glob), params)
         samples = URI.find(uri, group_by=group_by, filter=filter_glob,
                         field_map={"sample_accession": "folder.name", "fastqs": "file.uris"})
+        # When the workflow opts in via `fastq_pair_filtering: true`,
+        # trim each sample's fastq list to R1 — but ONLY when the
+        # sample's files actually look like an R1/R2 pair. Single-end
+        # samples (or anything we can't classify) pass through as-is.
+        # Never drop a sample.
+        if fastq_pair_filtering:
+            for sample in samples:
+                parity = find_sample_parity(sample.fastqs)
+                if parity['detected'] == PAIRED:
+                    sample.fastqs = parity['R1']
         # Store named file groups on each sample (URI: generic 'files' default)
         for sample in samples:
             sample.file_groups = {k: sample.fastqs for k in named_groups} if named_groups else {'files': sample.fastqs}
@@ -411,7 +523,7 @@ def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, s
         if filter_def and isinstance(filter_def, dict):
             conditions = [getattr(S, k) == v for k, v in filter_def.items()]
             sf = SampleFilter(*conditions) if conditions else None
-        samples = ENA(identifier=identifier, group_by=group_by, filter=sf)
+        samples = ENA(identifier=identifier, group_by=group_by, filter=sf, layout=biology_layout)
         for sample in samples:
             if named_groups:
                 sample.file_groups = {k: sample.fastqs for k in named_groups}
@@ -423,7 +535,7 @@ def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, s
         identifier = _resolve_refs(iter_def.get('identifier', ''), params)
         group_by = iter_def.get('group_by', 'sample_accession')
         # v2: where: for SRA too
-        samples = SRA(identifier=identifier, group_by=group_by)
+        samples = SRA(identifier=identifier, group_by=group_by, layout=biology_layout)
         for sample in samples:
             if named_groups:
                 sample.file_groups = {k: sample.fastqs for k in named_groups}
@@ -876,6 +988,16 @@ def _load_module_by_ref(ref: str, pipeline_dir: Optional[str] = None,
         return None
 
 
+def _freeze_for_dedup(value):
+    """Convert a YAML value to a hashable form for set membership.
+    Used to dedup auto-injected `requires:` steps by (path, vars)."""
+    if isinstance(value, dict):
+        return tuple(sorted((k, _freeze_for_dedup(v)) for k, v in value.items()))
+    if isinstance(value, list):
+        return tuple(_freeze_for_dedup(v) for v in value)
+    return value
+
+
 def _expand_requires(data: dict, pipeline_dir: Optional[str] = None,
                      script_root: Optional[str] = None) -> None:
     """Pre-process steps to honour module-level `requires:` declarations.
@@ -936,41 +1058,59 @@ def _expand_requires(data: dict, pipeline_dir: Optional[str] = None,
     # For each original step, collect its effective `requires:` list (from
     # the imported module and/or the step_def itself) and recursively
     # expand transitive requires into a set of module paths to ensure.
-    needed: List[str] = []  # paths to inject, in discovery order
-    seen: set = set()  # normalised paths already decided on
+    # Each entry is (path, vars_inherited_from_requirer) so that vars
+    # set on the requiring step (e.g. METAPHLAN_INDEX="mpa_custom") flow
+    # into the auto-injected setup step. Without this, the catalog step
+    # would publish to its module-default cache slot while the consuming
+    # step looks up a different (user-pinned) slot — cache miss with
+    # nothing to consume.
+    needed: List[Tuple[str, Dict]] = []  # (path, inherited_vars), in discovery order
+    seen: set = set()  # (normalised_path, frozen_vars) already decided on
 
-    def _collect_transitive(ref: str) -> None:
+    def _collect_transitive(ref: str, inherited_vars: Dict) -> None:
         norm = _normalise_ref(ref)
-        if norm in seen:
+        # Dedup on (path, inherited_vars). Two steps requiring the same
+        # module with the same vars inject only once; with different
+        # vars (e.g. different METAPHLAN_INDEX) each gets its own
+        # injection so each cache slot gets populated.
+        vars_key = tuple(sorted((k, _freeze_for_dedup(v)) for k, v in inherited_vars.items()))
+        if (norm, vars_key) in seen:
             return
-        seen.add(norm)
+        seen.add((norm, vars_key))
         mod = _load(ref)
         if not mod:
             return
         for sub_req in mod.get('requires', []) or []:
-            _collect_transitive(sub_req)
-        # Only inject if the user didn't already import it themselves.
+            _collect_transitive(sub_req, inherited_vars)
         if norm not in explicitly_imported:
-            needed.append(norm)
+            needed.append((norm, inherited_vars))
 
     # First pass: walk the original steps to discover every transitively-
-    # required module. `_collect_transitive` populates `needed` with the
-    # paths that must be injected (i.e. not already explicitly imported).
+    # required module. Each step's own vars are inherited into its
+    # required modules so per-step customisation propagates.
     for step_def in steps:
+        step_vars = step_def.get('vars') or {}
+        if not isinstance(step_vars, dict):
+            step_vars = {}
         ref = step_def.get('import') or step_def.get('module')
         if isinstance(ref, str):
             mod = _load(ref)
             if mod:
                 for sub_req in mod.get('requires', []) or []:
-                    _collect_transitive(sub_req)
+                    _collect_transitive(sub_req, step_vars)
         for inline_req in step_def.get('requires', []) or []:
-            _collect_transitive(inline_req)
+            _collect_transitive(inline_req, step_vars)
 
     # Build the final step list: injections first (in discovery order so
     # transitive prerequisites precede their consumers), then the user's
     # original steps in their original order.
     if needed:
-        injections = [{'import': path} for path in needed]
+        injections = []
+        for path, inherited_vars in needed:
+            inj: Dict[str, Any] = {'import': path}
+            if inherited_vars:
+                inj['vars'] = dict(inherited_vars)
+            injections.append(inj)
         final_steps = injections + steps
         data['steps'] = final_steps
     else:
@@ -1057,6 +1197,26 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
             return None
         if verbose:
             print(f"✅ Step '{step_label}' when: {when!r} → {resolved!r}", file=sys.stderr)
+
+    # If the step's `vars:` block is itself a cond (e.g. dispatching the
+    # whole var-set on a param), resolve it now so the subsequent
+    # module-merge sees a flat dict. This lets a workflow opt out of
+    # overriding specific module defaults by simply omitting them in
+    # the matching cond branch — module defaults then fall through
+    # naturally, which is what users want when "I don't want to specify
+    # this var for these cases".
+    if (
+        'vars' in step_def
+        and isinstance(step_def['vars'], dict)
+        and 'cond' in step_def['vars']
+    ):
+        resolved_vars = _resolve_field(step_def['vars'], params, itervar)
+        if not isinstance(resolved_vars, dict):
+            raise ValueError(
+                f"Step '{step_def.get('name', '?')}': vars cond must resolve to a dict; got {type(resolved_vars).__name__}"
+            )
+        step_def = dict(step_def)
+        step_def['vars'] = resolved_vars
 
     # Resolve imports: public (import:) or private (module:) YAML modules
     # Supports nesting: a module can import: another module (e.g. a private
@@ -1409,11 +1569,23 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
                 for v in d.values():
                     _check_filter_usage(v)
         _check_filter_usage(iterate_raw)
-    iterations, source_type = _build_iterations(iterate_raw, params)
-
-    # Resolve workflow-level vars (available to all steps)
-    # RESOURCE_ROOT and {NAME}_COUNT are auto-injected
+    # Resolve workflow-level vars (available to all steps).
+    # RESOURCE_ROOT and {NAME}_COUNT/_S are auto-injected. Two-pass:
+    #   pass 1 — resolve user vars with what's known pre-iteration
+    #            (RESOURCE_ROOT + params). Lets the iterator block
+    #            reference workflow vars (e.g. `fastq_pair_filtering:
+    #            "{PAIRED|not}"`). Vars referencing _COUNT/_S that don't
+    #            exist yet leave the placeholder unresolved.
+    #   pass 2 — after iterations are built and _COUNT/_S are known,
+    #            re-resolve user vars from their ORIGINAL expressions so
+    #            any unresolved _COUNT placeholders get filled in.
     workflow_vars = {'RESOURCE_ROOT': resource_root}
+    user_vars_raw = data.get('vars', {})
+    for var_name, var_expr in user_vars_raw.items():
+        workflow_vars[var_name] = _resolve_field(var_expr, params, extra_vars=workflow_vars)
+
+    iterations, source_type = _build_iterations(iterate_raw, params, workflow_vars=workflow_vars)
+
     iterate_def = data.get('iterate')
     if iterate_def:
         if 'name' in iterate_def:
@@ -1426,7 +1598,9 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
             for sub in iterate_def['over']:
                 if 'name' in sub:
                     workflow_vars[f"{sub['name'].upper()}_COUNT"] = str(len(iterations))
-    for var_name, var_expr in data.get('vars', {}).items():
+    # Pass 2: re-resolve user vars now that _COUNT/_S are known. Idempotent
+    # for vars that fully resolved in pass 1.
+    for var_name, var_expr in user_vars_raw.items():
         workflow_vars[var_name] = _resolve_field(var_expr, params, extra_vars=workflow_vars)
 
     # Expand `requires:` declarations. A module can list other modules its
@@ -1541,7 +1715,10 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     # Pre-flight: validate that all resources exist.
     # Resources produced by a publish: step in this workflow are exempt — they
     # may not exist yet on first run (the publishing step creates them) and
-    # skip_if_exists will pick them up on subsequent runs.
+    # skip_if_exists will pick them up on subsequent runs. A resource is also
+    # exempt when it is a sub-path of a published namespace (e.g. the catalog
+    # publishes `.../metaphlan/{INDEX}/` and the per-sample step reads from
+    # `.../metaphlan/{INDEX}/bowtie2/`).
     produced = set()
     for step in workflow.steps:
         for task in step.tasks:
@@ -1556,7 +1733,8 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
                 if uri in seen_resources:
                     continue
                 seen_resources.add(uri)
-                if uri.rstrip('/') in produced:
+                uri_clean = uri.rstrip('/')
+                if any(uri_clean == p or uri_clean.startswith(p + '/') for p in produced):
                     continue
                 try:
                     info = client.fetch_info(uri)

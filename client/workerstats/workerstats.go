@@ -18,6 +18,30 @@ import (
 
 var lastCPUTimes []cpu.TimesStat
 
+// isVirtualNIC returns true for interface names that don't correspond to
+// real external traffic — loopback, docker/podman bridges, veth pairs,
+// wireguard/openvpn tunnels, libvirt/vmware vnets. Including them in
+// "sent"/"received" totals produces wildly inflated numbers because
+// loopback double-counts every byte and bridge traffic between
+// containers and the host appears as external bandwidth.
+func isVirtualNIC(name string) bool {
+	if name == "lo" {
+		return true
+	}
+	prefixes := []string{
+		"docker", "br-", "veth", "cni",
+		"wg", "tun", "tap",
+		"vmnet", "virbr", "vnet",
+		"flannel", "cali", "weave",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // WorkerStats matches your proto definition
 // adjust the field tags if you use protobuf-generated structs directly
 
@@ -184,7 +208,13 @@ func CollectWorkerStats() (*WorkerStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	netCounters, err := net.IOCounters(false)
+	// Per-NIC counters so we can exclude loopback and virtual interfaces.
+	// `net.IOCounters(false)` aggregates across all interfaces including
+	// `lo` and docker/wg/veth/tun bridges — that double-counts container
+	// and internal-service traffic and produces wildly inflated numbers
+	// (observed: scitq UI showing 37 MB/s "sent" while iftop on the same
+	// host showed ~459 Kb/s of real external upload).
+	netCounters, err := net.IOCounters(true)
 	if err != nil {
 		return nil, err
 	}
@@ -197,11 +227,16 @@ func CollectWorkerStats() (*WorkerStats, error) {
 	stats.DiskIO.ReadBytesTotal = int64(readTotal)
 	stats.DiskIO.WriteBytesTotal = int64(writeTotal)
 
-	if len(netCounters) > 0 {
-		nowNet := netCounters[0]
-		stats.NetIO.RecvBytesTotal = int64(nowNet.BytesRecv)
-		stats.NetIO.SentBytesTotal = int64(nowNet.BytesSent)
+	var nowSent, nowRecv uint64
+	for _, c := range netCounters {
+		if isVirtualNIC(c.Name) {
+			continue
+		}
+		nowSent += c.BytesSent
+		nowRecv += c.BytesRecv
 	}
+	stats.NetIO.RecvBytesTotal = int64(nowRecv)
+	stats.NetIO.SentBytesTotal = int64(nowSent)
 
 	if !lastTime.IsZero() {
 		dt := now.Sub(lastTime).Seconds()
@@ -214,22 +249,24 @@ func CollectWorkerStats() (*WorkerStats, error) {
 			stats.DiskIO.ReadBytesRate = float32(float64(readTotal-lastReadTotal) / dt)
 			stats.DiskIO.WriteBytesRate = float32(float64(writeTotal-lastWriteTotal) / dt)
 
-			if len(netCounters) > 0 && lastNetIO != nil {
-				lastNet := lastNetIO["total"]
-				nowNet := netCounters[0]
-				stats.NetIO.RecvBytesRate = float32(float64(nowNet.BytesRecv-lastNet.BytesRecv) / dt)
-				stats.NetIO.SentBytesRate = float32(float64(nowNet.BytesSent-lastNet.BytesSent) / dt)
+			if lastNetIO != nil {
+				lastTotal, ok := lastNetIO["total"]
+				if ok {
+					stats.NetIO.RecvBytesRate = float32(float64(nowRecv-lastTotal.BytesRecv) / dt)
+					stats.NetIO.SentBytesRate = float32(float64(nowSent-lastTotal.BytesSent) / dt)
+				}
 			}
 		}
 	}
 
 	lastDiskIO = diskCounters
-	if len(netCounters) > 0 {
-		if lastNetIO == nil {
-			lastNetIO = make(map[string]net.IOCountersStat)
-		}
-		lastNetIO["total"] = netCounters[0]
+	if lastNetIO == nil {
+		lastNetIO = make(map[string]net.IOCountersStat)
 	}
+	// Cache the filtered totals — we don't keep per-interface history,
+	// only the cumulative-since-boot non-virtual sum, so deltas line up
+	// with what we report.
+	lastNetIO["total"] = net.IOCountersStat{BytesSent: nowSent, BytesRecv: nowRecv}
 	lastTime = now
 
 	return &stats, nil

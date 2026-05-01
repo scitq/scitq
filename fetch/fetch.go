@@ -21,6 +21,7 @@ import (
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/object"
 	"github.com/rclone/rclone/fs/operations"
+	rclonesync "github.com/rclone/rclone/fs/sync"
 
 	"github.com/google/uuid"
 	"github.com/rclone/rclone/fs"
@@ -174,6 +175,71 @@ func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath str
 //	return nil
 //}
 
+// uriToRcloneString converts a parsed URI into the path string that
+// `fs.NewFs` accepts. Used when we need a sub-rooted Fs (e.g. for
+// `sync.CopyDir`) — the existing per-backend Fs is rooted at the bucket
+// or local working dir, so we must hand fs.NewFs a fully-qualified
+// directory string.
+//
+//   - remote backend (Proto != ""): "<proto>:<component>/<path>/<file>",
+//     e.g. "azswed:rnd/resource/foo/bowtie2/" — rclone's standard remote
+//     syntax with the path embedded after the bucket.
+//   - local (Proto == ""): "<component><path>/<file>" — Component is the
+//     parsed path-prefix ("/" for absolute, "./" for relative), so the
+//     concatenation gives a usable filesystem path like
+//     "/scratch/resources/<uuid>/bowtie2/".
+//
+// Trailing slash on directories (File == "") is preserved so rclone
+// treats the result as a directory.
+func uriToRcloneString(uri URI) string {
+	// `file` proto is the local-filesystem case (ParseURI sets it for both
+	// "/abs/path" and "file://..." inputs); rclone wants a bare path then.
+	// Anything else (azswed, s3, ftp, ...) is a configured rclone remote.
+	if uri.Proto != "" && uri.Proto != "file" {
+		s := uri.Proto + ":" + uri.Component
+		if uri.Path != "" {
+			s += "/" + strings.TrimSuffix(uri.Path, "/")
+		}
+		if uri.File != "" {
+			s += "/" + uri.File
+		} else {
+			s += "/"
+		}
+		return s
+	}
+	s := uri.Component + uri.Path
+	if uri.File != "" {
+		if s != "" && !strings.HasSuffix(s, "/") {
+			s += "/"
+		}
+		s += uri.File
+	} else if !strings.HasSuffix(s, "/") {
+		s += "/"
+	}
+	return s
+}
+
+// appendDirWildcard turns a directory source like `azswed://bucket/dir/`
+// into `azswed://bucket/dir/*` so the existing glob path enumerates the
+// contents. The action-suffix split matters: a source can carry a
+// trailing `|action` group (e.g. `…/dir/|mv:foo/`), and a naive
+// HasSuffix("/") check would match the action's own trailing slash —
+// blindly appending `*` would then corrupt the action into `mv:foo/*`,
+// which the action layer would interpret as a literal `*` filename.
+// We split on the first `|`, append `*` to the path part only when it
+// ends in `/`, and re-attach the action group untouched.
+func appendDirWildcard(srcStr string) string {
+	pathPart, actionsPart := srcStr, ""
+	if pipeIdx := strings.Index(srcStr, "|"); pipeIdx != -1 {
+		pathPart = srcStr[:pipeIdx]
+		actionsPart = srcStr[pipeIdx:]
+	}
+	if strings.HasSuffix(pathPart, "/") {
+		return pathPart + "*" + actionsPart
+	}
+	return srcStr
+}
+
 // FetchContext holds global configuration settings for the fetch package.
 var LoadedRemotes []string
 
@@ -323,7 +389,29 @@ func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI
 
 	// Non-glob case
 	if src.File == "" {
-		return fmt.Errorf("cannot copy directory: source %s", src)
+		// Directory source: delegate to rclone's purpose-built recursive
+		// copy (`sync.CopyDir`), which handles every supported backend
+		// uniformly — Azure blob, S3, GCS, FTP, HTTP, local, etc. We just
+		// need new Fs handles rooted at the source and destination
+		// sub-directories; sync.CopyDir then walks the source tree and
+		// reproduces it under dst.
+		if !selfIsSource {
+			return fmt.Errorf("recursive directory copy not supported when source is external (selfIsSource=false): %s", src)
+		}
+		srcStr := uriToRcloneString(src)
+		dstStr := uriToRcloneString(dst)
+		srcSubFs, err := fs.NewFs(ctx, srcStr)
+		if err != nil {
+			return fmt.Errorf("failed to open source sub-Fs %q: %w", srcStr, err)
+		}
+		dstSubFs, err := fs.NewFs(ctx, dstStr)
+		if err != nil {
+			return fmt.Errorf("failed to open destination sub-Fs %q: %w", dstStr, err)
+		}
+		if err := rclonesync.CopyDir(ctx, dstSubFs, srcSubFs, false); err != nil {
+			return fmt.Errorf("recursive directory copy %s -> %s failed: %w", srcStr, dstStr, err)
+		}
+		return nil
 	}
 
 	var err error
@@ -545,11 +633,11 @@ func NewOperation(remotes *pb.RcloneRemotes, srcStr, dstStr string) (*Operation,
 		return nil, err
 	}
 
-	// Normalize: when performing a COPY (dstStr != ""), interpret a trailing slash on the
-	// source as "copy contents" by appending a wildcard. Example:
-	//   azswed://bucket/dir/  => azswed://bucket/dir/*
-	if dstStr != "" && strings.HasSuffix(srcStr, "/") {
-		srcStr += "*"
+	// Normalize: when performing a COPY (dstStr != ""), interpret a
+	// trailing slash on the source path as "copy contents" by appending
+	// a wildcard. See `appendDirWildcard` for the action-aware split.
+	if dstStr != "" {
+		srcStr = appendDirWildcard(srcStr)
 	}
 
 	src, err := ParseURI(srcStr)
@@ -597,10 +685,17 @@ func (op *Operation) Copy() error {
 		}
 	}
 
-	for _, action := range op.dstUri.Actions {
+	// Early-phase actions: by convention actions are declared on the
+	// source URI (e.g. `azswed://.../bowtie2/|mv:bowtie2`) but applied
+	// to the destination so they can rewrite where files land *before*
+	// the copy starts. `mv`'s early phase rewrites `dstUri.Path`;
+	// `gunzip`/`untar` are late-only and no-op in the early branch.
+	// Iterating over `dstUri.Actions` here was always dead code — the
+	// guard above forces that list to be empty.
+	for _, action := range op.srcUri.Actions {
 		err := performAction(action, &op.dstUri, op.dst, true)
 		if err != nil {
-			return fmt.Errorf("early action %s failed in URI %s with error: %s", action, op.dstUri, err)
+			return fmt.Errorf("early action %s failed in URI %s with error: %s", action, op.srcUri, err)
 		}
 	}
 

@@ -469,11 +469,17 @@ type reuseHitEvent struct {
 // is responsible for applying stats/WS changes post-commit.
 func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 	var events []reuseHitEvent
+	// Filter on consume_reuse so non-opportunistic workflows don't pick up
+	// cached results — they still *contribute* (reuse_key is populated
+	// regardless when the step is reuse-eligible) but they won't *consume*.
+	// The reuse_key IS NOT NULL check stays as a no-match guard; with the
+	// consume_reuse=true filter it's redundant in practice but cheap.
 	rows, err := tx.Query(`
 		SELECT t.task_id, t.reuse_key, t.step_id, tr.output_path, tr.task_id AS original_task_id
 		FROM task t
 		JOIN task_reuse tr ON t.reuse_key = tr.reuse_key
 		WHERE t.status = 'P'
+		  AND t.consume_reuse = true
 		  AND t.reuse_key IS NOT NULL
 	`)
 	if err != nil {

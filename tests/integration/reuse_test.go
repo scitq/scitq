@@ -88,14 +88,19 @@ func TestReuseHitSkipsTask(t *testing.T) {
 	}, 30*time.Second, 500*time.Millisecond, "first task should succeed")
 	t.Logf("Run 1: task %d completed successfully", task1.TaskId)
 
-	// --- Run 2: Submit a second task with the same reuse_key → should be a reuse hit ---
+	// --- Run 2: Submit a second task with the same reuse_key AND consume_reuse=true
+	// → should be a reuse hit. ConsumeReuse is the consumer-side opt-in (mirrors
+	// the workflow-level `opportunistic` flag in the YAML/Python DSL): without it
+	// set, the server records the producer fingerprint but never looks up cached
+	// results for this task. ---
 	outputDir2 := t.TempDir() + "/run2_output/"
 	task2, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command:   "echo hello",
-		Container: "bare",
-		Status:    "P",
-		Output:    &outputDir2,
-		ReuseKey:  strPtr(reuseKey),
+		Command:      "echo hello",
+		Container:    "bare",
+		Status:       "P",
+		Output:       &outputDir2,
+		ReuseKey:     strPtr(reuseKey),
+		ConsumeReuse: boolPtr(true),
 	})
 	require.NoError(t, err)
 	t.Logf("Run 2: task %d submitted with same reuse_key=%s", task2.TaskId, reuseKey[:12])
@@ -154,14 +159,17 @@ func TestReusePromotesDependents(t *testing.T) {
 		return getTask(t, ctx, qc, prepTask.TaskId).Status == "S"
 	}, 30*time.Second, 500*time.Millisecond, "prep task should succeed")
 
-	// Run 2: submit prep task again with same reuse_key, plus a dependent task
+	// Run 2: submit prep task again with same reuse_key AND consume_reuse=true,
+	// plus a dependent task. Without ConsumeReuse the server records but doesn't
+	// look up — see TestReuseHitSkipsTask for the producer/consumer split.
 	outputDir2 := t.TempDir() + "/prep2_output/"
 	prepTask2, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command:   "echo prep",
-		Container: "bare",
-		Status:    "P",
-		Output:    &outputDir2,
-		ReuseKey:  strPtr(reuseKey),
+		Command:      "echo prep",
+		Container:    "bare",
+		Status:       "P",
+		Output:       &outputDir2,
+		ReuseKey:     strPtr(reuseKey),
+		ConsumeReuse: boolPtr(true),
 	})
 	require.NoError(t, err)
 

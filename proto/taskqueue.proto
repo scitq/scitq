@@ -136,7 +136,8 @@ message TaskRequest {
     bool skip_if_exists = 18;
     bool accept_failure = 19; // If true, dependencies accept failed prerequisites
     optional string publish = 20; // Publish path (copied from output on success only)
-    optional string reuse_key = 21; // SHA-256 hex for opportunistic reuse
+    optional string reuse_key = 21; // SHA-256 hex for opportunistic reuse — producer side: always set when content is reuse-eligible (step not untrusted)
+    optional bool consume_reuse = 22; // If true, server may reuse a cached result for this task (consumer side, set from workflow-level `opportunistic` flag)
 }
 
 message Task {

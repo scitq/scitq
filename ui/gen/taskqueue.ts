@@ -133,7 +133,11 @@ export interface TaskRequest {
     /**
      * @generated from protobuf field: optional string reuse_key = 21
      */
-    reuseKey?: string; // SHA-256 hex for opportunistic reuse
+    reuseKey?: string; // SHA-256 hex for opportunistic reuse — producer side: always set when content is reuse-eligible (step not untrusted)
+    /**
+     * @generated from protobuf field: optional bool consume_reuse = 22
+     */
+    consumeReuse?: boolean; // If true, server may reuse a cached result for this task (consumer side, set from workflow-level `opportunistic` flag)
 }
 /**
  * @generated from protobuf message taskqueue.Task
@@ -3151,7 +3155,8 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 18, name: "skip_if_exists", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 19, name: "accept_failure", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 20, name: "publish", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 21, name: "reuse_key", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 21, name: "reuse_key", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 22, name: "consume_reuse", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<TaskRequest>): TaskRequest {
@@ -3240,6 +3245,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                 case /* optional string reuse_key */ 21:
                     message.reuseKey = reader.string();
                     break;
+                case /* optional bool consume_reuse */ 22:
+                    message.consumeReuse = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3319,6 +3327,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         /* optional string reuse_key = 21; */
         if (message.reuseKey !== undefined)
             writer.tag(21, WireType.LengthDelimited).string(message.reuseKey);
+        /* optional bool consume_reuse = 22; */
+        if (message.consumeReuse !== undefined)
+            writer.tag(22, WireType.Varint).bool(message.consumeReuse);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

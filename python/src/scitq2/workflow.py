@@ -336,9 +336,14 @@ class Task:
         # Resolve resources
         resolved_resources = list(map(str, self.resources))
 
-        # Compute reuse key if opportunistic reuse is enabled
+        # Producer side: compute reuse_key whenever the step is reuse-eligible
+        # (i.e. not in `untrusted`). The fingerprint becomes available for
+        # storage in task_reuse on success regardless of whether *this*
+        # workflow consumes from the cache. Consumer-side opt-in is the
+        # workflow-level `opportunistic` flag, propagated as `consume_reuse`
+        # below — the server's reuse lookup query filters on it.
         computed_reuse_key = None
-        if opportunistic and self.step.name not in (untrusted or []):
+        if self.step.name not in (untrusted or []):
             computed_reuse_key = self._compute_reuse_key(
                 resolved_command, resolved_shell, resolved_resources, input_items
             )
@@ -361,6 +366,7 @@ class Task:
                 retry=self.retry,
                 accept_failure=self.accept_failure,
                 reuse_key=computed_reuse_key,
+                consume_reuse=opportunistic,
             )
 
 
