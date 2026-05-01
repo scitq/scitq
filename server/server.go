@@ -1048,6 +1048,18 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			}
 
 			if txErr == nil {
+				// Inherit-and-fix: the new task's `input` was copied verbatim
+				// from the failed parent via the INSERT…SELECT above. If any
+				// of its prerequisites are reuse-hits, the parent's input may
+				// have pointed at the *original* (non-cached) workspace path
+				// — a stale input that the redirect didn't catch on the first
+				// attempt because of a submit/reuse-check race window.
+				// Re-run the redirect now so retries always start with paths
+				// that match what the prerequisites actually published.
+				s.redirectReuseInputs(tx, int32(newID))
+			}
+
+			if txErr == nil {
 				_ = tx.Commit()
 				// After commit, increment Pending + Retrying in StepAgg for new retry task
 				if workflowID.Valid && stepID.Valid {

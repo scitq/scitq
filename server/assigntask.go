@@ -415,12 +415,27 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 // promoteWaitingTasks promotes W→P for tasks whose prerequisites are all terminal.
 // This catches tasks that were submitted after a concurrent reuse/skip tx committed.
 func (s *taskQueueServer) promoteWaitingTasks(tx *sql.Tx) {
-	// Only check recently submitted W tasks (race window is a few seconds)
+	// Scan W tasks whose prerequisites are all done.
+	//
+	// The previous version bounded this with `created_at > NOW() - 30s`
+	// as an optimisation, on the assumption that any race window between
+	// task submission and prerequisite completion was "a few seconds".
+	// In practice the reuse-hit redirect can race past that window —
+	// observed: a task whose prerequisite was reuse-hit just after submit
+	// stayed W with stale input until manually retried, then inherited
+	// the same stale input. Removing the time bound makes this loop a
+	// genuine safety net rather than an opportunistic catch-up.
+	//
+	// The workflow-status filter (only `R`unning workflows) keeps us
+	// from auto-promoting tasks in suspended (`Z`) or completed
+	// workflows, which the old time bound used to mask incidentally.
 	rows, err := tx.Query(`
 		SELECT t.task_id
 		FROM task t
+		LEFT JOIN step s ON s.step_id = t.step_id
+		LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
 		WHERE t.status = 'W'
-		  AND t.created_at > NOW() - INTERVAL '30 seconds'
+		  AND (t.step_id IS NULL OR t.step_id = 0 OR w.status = 'R')
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM task_dependencies d
@@ -621,8 +636,19 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 // redirectReuseInputs fixes input paths of a dependent task when its prerequisites
 // are reuse hits with changed output paths. Called at W→P promotion time,
 // when all tasks exist in the DB.
+//
+// Implementation note: lib/pq does not allow another statement on the same
+// connection while a result set is still being iterated — running tx.Exec
+// inside `for rows.Next()` silently no-ops or aborts the tx for any prereq
+// past the first. Symptom (observed): a dependent with multiple reuse-hit
+// prereqs (e.g. `compile` with fastp.Nr10, fastp.Nr11, biomscope.Nr10, …)
+// got at most ONE input redirected, the rest stayed pointing at the
+// non-cached workspace, and the task ran with stale paths.
+//
+// Fix: drain rows into a slice first, close the cursor, then issue UPDATEs.
 func (s *taskQueueServer) redirectReuseInputs(tx *sql.Tx, depTaskID int32) {
-	// Find prerequisites that are reuse hits with changed output
+	type redirect struct{ oldPrefix, newPrefix string }
+	var redirects []redirect
 	rows, err := tx.Query(`
 		SELECT t.reuse_original_output, t.output
 		FROM task_dependencies d
@@ -635,15 +661,19 @@ func (s *taskQueueServer) redirectReuseInputs(tx *sql.Tx, depTaskID int32) {
 	if err != nil {
 		return
 	}
-	defer rows.Close()
-
 	for rows.Next() {
 		var origOutput, newOutput string
 		if rows.Scan(&origOutput, &newOutput) != nil {
 			continue
 		}
-		oldPrefix := strings.TrimSuffix(origOutput, "/")
-		newPrefix := strings.TrimSuffix(newOutput, "/")
+		redirects = append(redirects, redirect{
+			oldPrefix: strings.TrimSuffix(origOutput, "/"),
+			newPrefix: strings.TrimSuffix(newOutput, "/"),
+		})
+	}
+	rows.Close()
+
+	for _, r := range redirects {
 		res, err := tx.Exec(`
 			UPDATE task SET input = array(
 				SELECT REPLACE(elem, $1, $2)
@@ -651,17 +681,20 @@ func (s *taskQueueServer) redirectReuseInputs(tx *sql.Tx, depTaskID int32) {
 			)
 			WHERE task_id = $3
 			  AND EXISTS (SELECT 1 FROM unnest(input) e WHERE e LIKE $1 || '%')
-		`, oldPrefix, newPrefix, depTaskID)
+		`, r.oldPrefix, r.newPrefix, depTaskID)
 		if err != nil {
 			log.Printf("⚠️ reuse: input redirect failed for dependent task %d: %v", depTaskID, err)
 		} else if n, _ := res.RowsAffected(); n > 0 {
-			log.Printf("♻️ reuse: redirected task %d inputs: %s → %s", depTaskID, oldPrefix, newPrefix)
+			log.Printf("♻️ reuse: redirected task %d inputs: %s → %s", depTaskID, r.oldPrefix, r.newPrefix)
 		}
 	}
 }
 
 // redirectReuseInputsDB is like redirectReuseInputs but uses s.db directly (no transaction).
+// Same drain-then-exec pattern as the tx variant — see its comment for why.
 func (s *taskQueueServer) redirectReuseInputsDB(ctx context.Context, depTaskID int32) {
+	type redirect struct{ oldPrefix, newPrefix string }
+	var redirects []redirect
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT t.reuse_original_output, t.output
 		FROM task_dependencies d
@@ -674,14 +707,19 @@ func (s *taskQueueServer) redirectReuseInputsDB(ctx context.Context, depTaskID i
 	if err != nil {
 		return
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var origOutput, newOutput string
 		if rows.Scan(&origOutput, &newOutput) != nil {
 			continue
 		}
-		oldPrefix := strings.TrimSuffix(origOutput, "/")
-		newPrefix := strings.TrimSuffix(newOutput, "/")
+		redirects = append(redirects, redirect{
+			oldPrefix: strings.TrimSuffix(origOutput, "/"),
+			newPrefix: strings.TrimSuffix(newOutput, "/"),
+		})
+	}
+	rows.Close()
+
+	for _, r := range redirects {
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE task SET input = array(
 				SELECT REPLACE(elem, $1, $2)
@@ -689,11 +727,11 @@ func (s *taskQueueServer) redirectReuseInputsDB(ctx context.Context, depTaskID i
 			)
 			WHERE task_id = $3
 			  AND EXISTS (SELECT 1 FROM unnest(input) e WHERE e LIKE $1 || '%')
-		`, oldPrefix, newPrefix, depTaskID)
+		`, r.oldPrefix, r.newPrefix, depTaskID)
 		if err != nil {
 			log.Printf("⚠️ reuse: input redirect failed for dependent task %d: %v", depTaskID, err)
 		} else if n, _ := res.RowsAffected(); n > 0 {
-			log.Printf("♻️ reuse: redirected task %d inputs: %s → %s", depTaskID, oldPrefix, newPrefix)
+			log.Printf("♻️ reuse: redirected task %d inputs: %s → %s", depTaskID, r.oldPrefix, r.newPrefix)
 		}
 	}
 }

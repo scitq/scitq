@@ -817,27 +817,17 @@ def _load_public_import(import_name: str) -> dict:
 
 def _load_private_module(module_path: str, pipeline_dir: Optional[str] = None,
                          script_root: Optional[str] = None) -> dict:
-    """Deprecated — `module:` keyword is an alias for `import:`. The
-    trailing `.yaml` is stripped to match library path conventions (so
-    `module: biomscope_align.yaml` resolves to library path
-    `biomscope_align`). Emits a one-time deprecation warning per run.
+    """Loads a module by `path[.yaml]`. Internally a thin wrapper over
+    `_load_public_import` that strips a trailing `.yaml`/`.yml` so a
+    `module: foo.yaml` reference maps to the library path `foo`.
 
-    pipeline_dir / script_root arguments are retained for signature
-    compatibility but no longer consulted — the old filesystem fallbacks
-    (`{script_root}/modules/`, `{pipeline_dir}/modules/`,
-    `$SCITQ_YAML_MODULE_PATH`) have been removed. See
-    specs/module_library.md.
+    Used in two places: the user-facing `module:` keyword (deprecated —
+    the warning fires at the call site, not here, so internal callers
+    using this as a fallback path don't print spurious warnings on
+    every legitimate `import:` lookup miss) and `_load_module_by_ref`'s
+    fallback chain. pipeline_dir / script_root are kept for signature
+    compatibility but unused; see specs/module_library.md.
     """
-    global _module_keyword_deprecation_warned
-    if not _module_keyword_deprecation_warned:
-        print("⚠️ 'module:' is deprecated; use 'import:' with the library path "
-              "(e.g. 'import: private/X'). The `.yaml` suffix is stripped "
-              "automatically for backward compatibility.", file=sys.stderr)
-        _module_keyword_deprecation_warned = True
-
-    # Strip a trailing .yaml/.yml so `module: X.yaml` maps to library
-    # path `X`. The ref kept for diagnostics is the original (with .yaml).
-    ref = module_path
     stripped = module_path
     for ext in ('.yaml', '.yml'):
         if stripped.endswith(ext):
@@ -1230,6 +1220,16 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
         step_def = merged
 
     if 'module' in step_def:
+        # Deprecation warning fires here — at the user-facing call site —
+        # not inside `_load_private_module` (which is also used as an
+        # internal fallback by `_load_module_by_ref`, where the warning
+        # would be spurious).
+        global _module_keyword_deprecation_warned
+        if not _module_keyword_deprecation_warned:
+            print("⚠️ 'module:' is deprecated; use 'import:' with the library path "
+                  "(e.g. 'import: private/X'). The `.yaml` suffix is stripped "
+                  "automatically for backward compatibility.", file=sys.stderr)
+            _module_keyword_deprecation_warned = True
         module_ref = step_def['module']
         if module_ref.endswith('.yaml') or module_ref.endswith('.yml'):
             module_data = _load_private_module(module_ref, pipeline_dir, script_root)

@@ -1,14 +1,41 @@
 name: humanfilter
-version: "1.0.0"
-container: gmtscience/bowtie2:2.5.4
+version: "1.2.0"
+description: |
+  Per-sample host removal via Bowtie2 against a prebuilt host genome
+  index (default: T2T-CHM13v2). The companion
+  `metagenomics/bowtie2_host_removal_catalog` module is auto-injected
+  via `requires:` so a workflow only needs:
+
+    - import: metagenomics/bowtie2_host_removal
+      inputs: ...
+
+  and the host-index download / publish happens transparently.
+
+# Pull the companion catalog setup module into any workflow that imports
+# us. The YAML runner injects `- import: metagenomics/bowtie2_host_removal_catalog`
+# ahead of this step and auto-wires `depends: humanfilter_catalog`.
+requires:
+  - metagenomics/bowtie2_host_removal_catalog
+
+vars:
+  # Host genome identifier — must match the catalog's HOST_NAME and the
+  # bowtie2 index basename inside the catalog's .tgz. Override (along
+  # with HOST_URL on the catalog) to swap to a different host.
+  HOST_NAME: "chm13v2.0"
+
+container: gmtscience/bowtie2:2.5.5
 language: bash
-resource: "{RESOURCE_ROOT}/chm13v2.0.tgz|untar"
+
+# Pull the .tgz published by humanfilter_catalog. Cached by HOST_NAME so
+# multiple host genomes coexist without overwriting each other.
+resource: "{RESOURCE_ROOT}/host/{HOST_NAME}/{HOST_NAME}.tgz|untar"
+
 command:
   cond: PAIRED
   true: |
     . /builtin/std.sh
 
-    bowtie2 -p $CPU --mm -x /resource/chm13v2.0/chm13v2.0 \
+    bowtie2 -p $CPU --mm -x /resource/{HOST_NAME}/{HOST_NAME} \
         -1 /input/{SAMPLE}.1.fastq.gz \
         -2 /input/{SAMPLE}.2.fastq.gz --reorder \
         --met-file /output/{SAMPLE}_human_bowtie_stats.txt \
@@ -25,7 +52,7 @@ command:
   false: |
     . /builtin/std.sh
 
-    bowtie2 -p ${CPU} --mm -x /resource/chm13v2.0/chm13v2.0 \
+    bowtie2 -p ${CPU} --mm -x /resource/{HOST_NAME}/{HOST_NAME} \
         -U /input/{SAMPLE}.fastq.gz --reorder \
         --met-file /output/{SAMPLE}_human_bowtie_stats.txt \
         2> >(tee /output/{SAMPLE}_human_bowtie.txt >&2) \

@@ -1,0 +1,95 @@
+name: humanfilter_catalog
+version: "1.2.0"
+description: |
+  Download and cache a prebuilt Bowtie2 host-genome catalog (default:
+  T2T-CHM13v2) in the workspace resource tree. Mirrors
+  `metagenomics/metaphlan_catalog`: the per-sample
+  `metagenomics/bowtie2_host_removal` module declares us as a `requires:`
+  companion, so a workflow that imports it gets the index download
+  injected automatically — no manual one-time bootstrap.
+
+  The Bowtie2 maintainers distribute prebuilt host indexes as a `.zip`
+  at https://genome-idx.s3.amazonaws.com . We download the zip, extract
+  it, and re-pack as `<HOST_NAME>.tgz` (parallel pigz) so the per-sample
+  step can pull a single artefact via `|untar`. Re-packing is a one-off
+  cost per (workspace, HOST_NAME) — combined with `publish:` and
+  `skip_if_exists: true`, every subsequent workflow short-circuits on a
+  cache hit.
+
+language: bash
+per_sample: false
+skip_if_exists: true
+
+vars:
+  # Host genome identifier. Doubles as the publish-path slot key (so
+  # multiple host genomes can coexist in one workspace cache) and the
+  # bowtie2 index basename inside the .tgz. Override to use a different
+  # genome (e.g. mouse) by setting both `HOST_NAME` and `HOST_URL` on
+  # the requiring step.
+  HOST_NAME: "chm13v2.0"
+  # Upstream Bowtie2 prebuilt index .zip — see
+  # https://benlangmead.github.io/aws-indexes/bowtie for the full list.
+  HOST_URL: "https://genome-idx.s3.amazonaws.com/bt/chm13v2.0.zip"
+
+# Catalog container needs: curl (download), unzip (extract upstream
+# .zip), tar + pigz (repack). 2.5.5 is the first gmtscience/bowtie2 tag
+# that ships `unzip` alongside bowtie2 + samtools. We deliberately do
+# not fall back to a runtime `apt-get install`: it is slow, can require
+# network outside the catalog's expected URLs, and (observed) breaks
+# when the container user cannot write under /tmp for apt-key tempfiles.
+# Pinning to a known-good image is more honest — if a tool is missing
+# the script fails loudly with "command not found" at the call site.
+container: gmtscience/bowtie2:2.5.5
+
+# Cache catalogs by HOST_NAME so different host genomes coexist in the
+# workspace without overwriting each other; the per-sample step reads
+# the same per-name path. Trailing slash → directory publish, the .tgz
+# gets uploaded inside.
+publish: "{RESOURCE_ROOT}/host/{HOST_NAME}/"
+
+resource: []
+
+command: |
+  set -euo pipefail
+  . /builtin/std.sh
+
+  WORK=/tmp/host-build
+  rm -rf "$WORK" && mkdir -p "$WORK"
+  cd "$WORK"
+
+  echo "=== Downloading {HOST_NAME} index from {HOST_URL} ==="
+  # 30s connect timeout, 2h cap. --retry-all-errors covers transient
+  # 5xx/timeouts; -C - resumes a partial download on retry.
+  CURL=(curl -L --connect-timeout 30 --max-time 7200
+        --retry 5 --retry-delay 30 --retry-all-errors
+        -C - --fail --show-error)
+  "${CURL[@]}" -o "{HOST_NAME}.zip" "{HOST_URL}"
+
+  echo "=== Extracting zip ==="
+  mkdir extract
+  unzip -q -o "{HOST_NAME}.zip" -d extract
+  rm "{HOST_NAME}.zip"
+
+  echo "=== Normalising layout (top-level dir must be {HOST_NAME}) ==="
+  # Some upstream zips wrap files in a top-level directory, others
+  # extract flat. Land on a single shape: WORK/{HOST_NAME}/<files>.
+  if [ -d "extract/{HOST_NAME}" ]; then
+      mv "extract/{HOST_NAME}" "{HOST_NAME}"
+  else
+      mkdir "{HOST_NAME}"
+      mv extract/* "{HOST_NAME}/"
+  fi
+  rmdir extract || true
+
+  echo "=== Repackaging as {HOST_NAME}.tgz (pigz parallel) ==="
+  tar -I pigz -cf "/output/{HOST_NAME}.tgz" "{HOST_NAME}"
+
+  echo "=== Final layout ==="
+  ls -la /output/
+
+outputs:
+  catalog: "*.tgz"
+
+task_spec:
+  cpu: 4
+  mem: 8
