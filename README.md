@@ -37,13 +37,14 @@ scitq task output --id 1
 ```
 
 ### Architecture
-The scitq architecture includes a Go backend, a Python DSL for workflow definition, and a Svelte.js UI for monitoring.
+The scitq architecture includes a Go backend, declarative YAML workflow templates (with a Python DSL as a lower-level alternative), and a Svelte.js UI for monitoring.
 
 - **Server**: Manages tasks, workers, and logs (PostgreSQL-backed).
 - **Client**: Executes tasks.
 - **CLI**: Provides manual interactions using command line.
 - **UI**: Provides manual interactions using a web interface (in Svelte.js).
-- **DSL**: Provides a descriptive language for task workflows using Python and a custom library.
+- **YAML templates**: Declarative pipeline definition — the recommended way to write workflows. More abstract than the Python DSL, less code to write, fewer foot-guns (no mutable state, no Python execution model to reason about), and naturally readable both by humans and by LLMs (every step, parameter, dependency, and resource is explicit and self-documenting). Uploadable to the server, runnable from the CLI or UI, with parameter forms generated automatically from the template's `params:` block. See [`docs/usage/yaml-templates.md`](docs/usage/yaml-templates.md).
+- **DSL**: Python library for workflows that need imperative control flow (loops over computed sets, runtime branching, programmatic step generation). The escape hatch when YAML's declarative model isn't enough. See [`docs/usage/dsl.md`](docs/usage/dsl.md).
 
 ### Status
 scitq is currently in **beta**. It is feature-complete but under active refinement and testing.
