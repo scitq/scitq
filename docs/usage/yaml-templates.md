@@ -346,6 +346,42 @@ iterate:
       library_strategy: WGS
 ```
 
+#### `fastq_pair_filtering` — keep R1 only
+
+When a workflow needs to run **single-end** computation on a sample whose source files are paired (`*_1.fastq.gz` / `*_2.fastq.gz`), set `fastq_pair_filtering: true` on the iterator. The iterator will keep R1 and drop R2 — but only on samples whose files actually look like an R1/R2 pair; anything classified as single-end already passes through unchanged. A sample is never dropped.
+
+```yaml
+vars:
+  PAIRED: "{params.depth|is_paired}"   # workflow-level: true for 2x* depths
+
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.bioproject}"
+  group_by: folder
+  fastqs: "*.f*q.gz"
+  fastq_pair_filtering: "{PAIRED|not}"   # filter only when running unpaired
+```
+
+For ENA/SRA sources, opting in additionally rewrites the underlying URI with `@only-read1` so R2 is never fetched over the wire.
+
+This is **opt-in by design**. Detecting an R1/R2 pair from filenames is fine on real paired-end data, but a single-end file that happens to match an R1 pattern by coincidence would otherwise have its sibling silently dropped. Making this explicit keeps the failure mode loud.
+
+The flag also works under conditional iterators — it's inherited by every branch unless a branch overrides it:
+
+```yaml
+iterate:
+  name: sample
+  match: "{params.filter:*}"
+  fastq_pair_filtering: "{PAIRED|not}"   # applied to whichever branch fires below
+  cond: "{params.data_source}"
+  uri:  { source: uri,  uri: "{params.bioproject}", group_by: folder, fastqs: "*.f*q.gz" }
+  ena:  { source: ena,  identifier: "{params.bioproject}", group_by: sample_accession }
+  sra:  { source: sra,  identifier: "{params.bioproject}", group_by: sample_accession }
+```
+
+Each iterator source declares the attributes it understands (`name`, `match`, `fastq_pair_filtering`, plus source-specific keys like `uri`, `identifier`, `where`, `group_by`, etc.). Passing an unknown attribute fails fast with an error listing the supported keys for that source — no silent ignores.
+
 ### Three kinds of steps
 
 Steps fall into three categories based on how they relate to the iteration loop:
@@ -410,6 +446,19 @@ steps:
 ```
 
 This is the right pattern when the only thing you want to do with the per-sample fastqs is feed them to a many-to-one tool (simka, k-mer comparisons, joint variant calling, etc.) — no need for a no-op pass-through step purely to register an upstream output for the resolver. (See note: until this support landed, an explicit `name: stage` step that did `mv /input/*.fastq.gz /output/` was required between the iterator and the grouped step.)
+
+#### Deterministic file order in fan-in scripts
+
+A fan-in step receives its inputs as a flat directory of files in `/input/`. Iteration with bare `glob('/input/*.csv')` returns files in **filesystem order**, which is not stable across runs (particularly across remote storage backends and depending on how the worker download interleaves file arrivals). For aggregations whose output depends on iteration order — typically anything involving floating-point summation — sort the list:
+
+```python
+from glob import glob
+for path in sorted(glob('*.tsv')):       # ← deterministic across runs
+    df = pd.read_csv(path, sep='\t')
+    ...
+```
+
+The cost is one O(N log N) sort at the start; the payoff is bit-identical output across reruns of the same workflow on the same inputs (so a NSAT/abundance/quality table compares clean with `diff`, and reuse hits don't drift due to sum-accumulation order).
 
 ### Outputs
 
@@ -674,6 +723,27 @@ Everything else is truthy. This means enum values like `"4.0"` or `"both"` are t
       "4.1": "gmtscience/metaphlan4:4.1"
 ```
 
+### `default:` — fallthrough branch
+
+A `cond:` block can declare a `default:` branch that fires when no other branch matches. This is the cleanest way to express "if a knob is set, use it; otherwise fall back":
+
+```yaml
+vars:
+  # If params.metaphlan_index is empty, the empty key matches and the inner
+  # cond on METAPHLAN_VERSION picks a per-version default. Otherwise default:
+  # passes the user's value through.
+  METAPHLAN_INDEX:
+    cond: "{params.metaphlan_index}"
+    "":
+      cond: METAPHLAN_VERSION
+      "4.0": "mpa_vOct22_CHOCOPhlAnSGB_202212"
+      "4.1": "mpa_vOct22_CHOCOPhlAnSGB_202403"
+      "4.2": "mpa_vJan25_CHOCOPhlAnSGB_202503"
+    default: "{params.metaphlan_index}"
+```
+
+The runner resolves `cond:` blocks recursively — a branch that is itself a `cond:` is unwrapped until a leaf value is reached. The example above first matches against `params.metaphlan_index`; if that's empty, the engine then evaluates the inner `cond` against `METAPHLAN_VERSION`.
+
 ## Conditional steps (`when:`)
 
 The `when:` field skips a step entirely when its value is falsy:
@@ -882,6 +952,21 @@ steps:
 ```
 
 If you want explicit control — for instance, to place the setup step somewhere specific, or to pass step-level overrides — just import it yourself in the template. The runner detects the explicit import and skips the injection, but still wires `depends:` for you.
+
+#### Vars propagate to auto-injected requires
+
+A step's `vars:` block is also visible to the modules its `requires:` line pulls in. Setting `METAPHLAN_INDEX:` on the metaphlan step is enough to make the auto-injected `metaphlan_catalog` step download and publish the same catalog — both modules then resolve to the same `{RESOURCE_ROOT}/metaphlan/{METAPHLAN_INDEX}/` cache slot:
+
+```yaml
+steps:
+  - import: metagenomics/metaphlan
+    inputs: fastp.fastqs
+    vars:
+      METAPHLAN_VERSION: "4.0"
+      METAPHLAN_INDEX: "mpa_vJan21_CHOCOPhlAnSGB_202103"   # legacy 4.0 catalog
+```
+
+Two requirers with **different** vars produce two distinct cache slots (different `METAPHLAN_INDEX` → different publish path → both catalogs coexist). Two requirers with the **same** vars are deduplicated into one auto-injected step.
 
 **When to use `requires:` vs. explicit `import:`**:
 
@@ -1232,6 +1317,14 @@ pip install optuna
 Many workflows are re-run on overlapping data batches. **Opportunistic reuse** lets scitq skip tasks that have already been executed with identical computation and inputs, reusing their output across workflows.
 
 Unlike `skip_if_exists` (which checks a single output path), reuse is content-addressed: it matches on *what the task does* and *what it processes*, not on *where the output lives*.
+
+### Producer vs consumer
+
+The `opportunistic:` flag is a **consumer-side** opt-in: it controls whether *this* workflow looks up cached results in the reuse store. Production happens regardless — every reuse-eligible task (i.e. step not in `untrusted:`) computes a `reuse_key` from its content and is recorded in the reuse store on success.
+
+So a workflow run with `opportunistic: false` (or default) **still seeds the cache** for future opportunistic workflows to consume. There's no "producer mode" to enable; the only opt-out is the `untrusted:` list, which excludes specific steps from contributing reuse keys (and therefore from being reused).
+
+Practical consequence: turn `opportunistic: true` on a fresh run that you want to *reuse* from prior runs. Run with the default elsewhere — it doesn't cost you anything, and your outputs become eligible for reuse later.
 
 ### Enabling reuse
 
