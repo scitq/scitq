@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
-  import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star } from 'lucide-svelte';
+  import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star, ArrowUpCircle } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
   import { WorkerStats } from '../../gen/taskqueue';
@@ -576,6 +576,42 @@
     }
   }
 
+  /**
+   * Phase II: operator-triggered upgrade of one worker. Plain click is
+   * normal (idle-wait); shift-click is emergency (drain in-flight then
+   * upgrade). If a request is already pending, either click cancels.
+   * See specs/worker_autoupgrade.md.
+   */
+  async function upgradeWorker(worker: any, ev: MouseEvent) {
+    if (acting.has(worker.workerId)) return;
+    const pending = worker.upgradeRequested;
+    let mode: 'normal' | 'emergency' | 'cancel';
+    if (pending) {
+      mode = 'cancel';
+    } else if (ev.shiftKey) {
+      mode = 'emergency';
+    } else {
+      mode = 'normal';
+    }
+    acting.add(worker.workerId);
+    // Optimistic local update.
+    const previous = worker.upgradeRequested;
+    internalWorkers = internalWorkers.map(w =>
+      w.workerId === worker.workerId
+        ? { ...w, upgradeRequested: mode === 'cancel' ? '' : mode }
+        : w
+    );
+    try {
+      await requestWorkerUpgrade(mode, [worker.workerId]);
+    } catch (err) {
+      // Roll back the optimistic update.
+      internalWorkers = internalWorkers.map(w =>
+        w.workerId === worker.workerId ? { ...w, upgradeRequested: previous } : w
+      );
+    } finally {
+      acting.delete(worker.workerId);
+    }
+  }
 
   /** State for workflow/step editor */
   let editingWorkflowStepFor: number | null = null;
@@ -738,6 +774,18 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                     class="worker-upgrade-badge worker-upgrade-unknown"
                     title="Worker did not report build identity (likely a pre-Phase-I build). Will resolve once the worker restarts on a newer client."
                   >?</span>
+                {/if}
+                <!-- Phase II: pending operator-triggered upgrade. -->
+                {#if worker.upgradeRequested === 'normal'}
+                  <span
+                    class="worker-upgrade-badge worker-upgrade-pending"
+                    title="Upgrade pending — worker will swap binaries once it goes idle."
+                  >upg pending</span>
+                {:else if worker.upgradeRequested === 'emergency'}
+                  <span
+                    class="worker-upgrade-badge worker-upgrade-pending-emergency"
+                    title="Emergency upgrade pending — worker is draining in-flight tasks, then will swap binaries (30 min hard cap)."
+                  >upg drain</span>
                 {/if}
               </td>
               <td class="workerCompo-wfstep">
@@ -1120,6 +1168,21 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   >
                     <Star />
                   </button>
+                  {#if worker.upgradeStatus !== 'unsupported_arch'}
+                    <button
+                      class="btn-action"
+                      class:btn-upgrade-pending={worker.upgradeRequested === 'normal'}
+                      class:btn-upgrade-emergency={worker.upgradeRequested === 'emergency'}
+                      title={worker.upgradeRequested
+                        ? `Upgrade pending (${worker.upgradeRequested}) — click to cancel`
+                        : 'Upgrade worker (click=normal idle-wait, shift-click=emergency drain)'}
+                      on:click={(ev) => upgradeWorker(worker, ev)}
+                      disabled={acting.has(worker.workerId)}
+                      data-testid={`upgrade-worker-${worker.workerId}`}
+                    >
+                      <ArrowUpCircle />
+                    </button>
+                  {/if}
                 </div>
                 <div class="action-row">
                     {#if workerDisplayMode[worker.workerId] === 'charts'}

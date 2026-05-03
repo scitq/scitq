@@ -353,6 +353,12 @@ message TaskListAndOther {
     // tasks (hard 30-min cap) then upgrade. See
     // specs/worker_autoupgrade.md (Phase II).
     string upgrade_requested = 7;
+    // Phase III: server has received SIGUSR1 and is draining its
+    // active admin jobs in preparation for a graceful exit. Workers
+    // that see this flag should stop *requesting* new task slots
+    // (existing in-flight tasks continue; the gRPC retry loop will
+    // absorb the brief bounce). See specs/worker_autoupgrade.md.
+    bool server_upgrade_in_progress = 8;
 }
 
 message TaskSignalRequest {

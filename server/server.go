@@ -11,6 +11,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -18,8 +19,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/scitq/scitq/internal/version"
@@ -91,6 +95,13 @@ type taskQueueServer struct {
 	rcloneRemotes     *pb.RcloneRemotes
 	pythonReady       chan struct{} // closed when Python DSL venv is bootstrapped
 	activeLogStreams   sync.Map     // taskID -> chan struct{} (closed when log stream ends)
+
+	// Phase III: server received SIGUSR1 and is draining active admin
+	// jobs in preparation for a clean exit. Workers see this on ping
+	// (server_upgrade_in_progress) and stop requesting new task slots
+	// while the gate is open. New admin operations are refused with
+	// FailedPrecondition. See specs/worker_autoupgrade.md.
+	gating atomic.Bool
 }
 
 type TaskUpdateBroadcast struct {
@@ -239,6 +250,107 @@ func (s *taskQueueServer) Shutdown() {
 	default:
 		close(s.done)
 	}
+}
+
+// gatingDrainTimeout caps how long the SIGUSR1 gate waits for in-flight
+// admin jobs to drain. Past this, lingering jobs are cancelled and the
+// server proceeds with the exit. Provider calls (e.g. worker create on
+// Azure) that wedge for hours shouldn't block an upgrade indefinitely.
+const gatingDrainTimeout = 10 * time.Minute
+
+// gateExit and gateStdout are injectable so tests can verify the
+// graceful-drain path without actually terminating the test binary or
+// polluting captureOutput-protected stdout. Production sets them to
+// os.Exit and os.Stdout in init().
+var (
+	gateExit   func(int) = os.Exit
+	gateStdout io.Writer = os.Stdout
+)
+
+// installGracefulGate wires SIGUSR1 to a graceful drain-and-exit. It's
+// called once during Serve() startup. The handler is idempotent: a
+// second SIGUSR1 while the gate is already open is a no-op (logged).
+// See specs/worker_autoupgrade.md (Phase III).
+func (s *taskQueueServer) installGracefulGate() {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGUSR1)
+	go func() {
+		for sig := range sigCh {
+			if !s.gating.CompareAndSwap(false, true) {
+				log.Printf("ℹ️ Received %s while gate already open; ignoring", sig)
+				continue
+			}
+			log.Printf("🛬 Received %s — entering graceful drain (10 min hard cap)", sig)
+			s.runGracefulDrain()
+		}
+	}()
+}
+
+// runGracefulDrain blocks until s.activeJobs is empty or the hard cap
+// fires, emits a single JSON status line on stdout, and exits the
+// process with code 0. The supervisor (systemd, docker, the launch
+// script) is responsible for restarting on the new binary.
+func (s *taskQueueServer) runGracefulDrain() {
+	started := time.Now()
+	deadline := started.Add(gatingDrainTimeout)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		active := s.countActiveJobs()
+		if active == 0 {
+			break
+		}
+		now := time.Now()
+		if now.After(deadline) {
+			log.Printf("⏰ Gate hard timeout (%s) hit with %d in-flight admin jobs; cancelling", gatingDrainTimeout, active)
+			s.activeJobs.Range(func(_, value any) bool {
+				if cancel, ok := value.(context.CancelFunc); ok {
+					cancel()
+				}
+				return true
+			})
+			// Brief grace for cancellations to propagate before we
+			// exit; the supervisor will pick up the new binary
+			// regardless.
+			time.Sleep(2 * time.Second)
+			break
+		}
+		<-ticker.C
+	}
+
+	drainSeconds := int(time.Since(started).Round(time.Second).Seconds())
+	// Single-line JSON on stdout — goes to journald under systemd, to
+	// the supervisor's log file otherwise. The shape is intentionally
+	// minimal so a downstream parser doesn't need to anticipate
+	// optional fields.
+	payload, _ := json.Marshal(map[string]any{
+		"event":         "server_drained",
+		"at":            time.Now().UTC().Format(time.RFC3339),
+		"drain_seconds": drainSeconds,
+	})
+	fmt.Fprintln(gateStdout, string(payload))
+	gateExit(0)
+}
+
+func (s *taskQueueServer) countActiveJobs() int {
+	n := 0
+	s.activeJobs.Range(func(_, _ any) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// refuseIfGating returns a FailedPrecondition error if the server is
+// in the SIGUSR1 drain window, so admin RPCs that would queue a new
+// job (worker create/delete, recruiter changes) bail out cleanly.
+// Tasks are NOT admin operations and pass through unaffected.
+func (s *taskQueueServer) refuseIfGating(operation string) error {
+	if s.gating.Load() {
+		return status.Errorf(codes.FailedPrecondition, "server is draining for upgrade; %s refused — retry once it has restarted", operation)
+	}
+	return nil
 }
 
 // serverCommit returns the server's full git SHA from the version package.
@@ -2478,6 +2590,9 @@ func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.Worker
 }
 
 func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerRequest) (*pb.WorkerIds, error) {
+	if err := s.refuseIfGating("CreateWorker"); err != nil {
+		return nil, err
+	}
 	var workerDetailsList []*pb.WorkerDetails
 	var jobs []Job
 
@@ -2613,6 +2728,9 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 }
 
 func (s *taskQueueServer) CreateWorkerByName(ctx context.Context, req *pb.CreateWorkerByNameRequest) (*pb.WorkerIds, error) {
+	if err := s.refuseIfGating("CreateWorkerByName"); err != nil {
+		return nil, err
+	}
 	// Resolve names to IDs via ListFlavors (same approach as CLI)
 	regionFilter := "region is default"
 	if req.Region != "" {
@@ -2864,6 +2982,9 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 }
 
 func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeletion) (*pb.JobId, error) {
+	if err := s.refuseIfGating("DeleteWorker"); err != nil {
+		return nil, err
+	}
 	var job Job
 
 	tx, err := s.db.Begin()
@@ -3643,12 +3764,13 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 	}
 
 	return &pb.TaskListAndOther{
-		Tasks:            tasks,
-		ActiveTasks:      activeTaskIDs,
-		Concurrency:      concurrency,
-		Updates:          &pb.TaskUpdateList{Updates: taskUpdateList},
-		Signals:          signals,
-		UpgradeRequested: upgradeReqNull.String,
+		Tasks:                    tasks,
+		ActiveTasks:              activeTaskIDs,
+		Concurrency:              concurrency,
+		Updates:                  &pb.TaskUpdateList{Updates: taskUpdateList},
+		Signals:                  signals,
+		UpgradeRequested:         upgradeReqNull.String,
+		ServerUpgradeInProgress:  s.gating.Load(),
 	}, nil
 }
 
@@ -4383,6 +4505,9 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 }
 
 func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter) (*pb.Ack, error) {
+	if err := s.refuseIfGating("CreateRecruiter"); err != nil {
+		return nil, err
+	}
 	// --- Validation ---
 	if req.Protofilter != "" {
 		if _, err := protofilter.ParseProtofilter(req.Protofilter); err != nil {
@@ -4460,6 +4585,9 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.RecruiterId) (*pb.Ack, error) {
+	if err := s.refuseIfGating("DeleteRecruiter"); err != nil {
+		return &pb.Ack{Success: false}, err
+	}
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM recruiter
 		WHERE step_id = $1 AND rank = $2
@@ -4473,6 +4601,9 @@ func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.RecruiterUpdate) (*pb.Ack, error) {
+	if err := s.refuseIfGating("UpdateRecruiter"); err != nil {
+		return nil, err
+	}
 	// begin transaction
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -5711,6 +5842,10 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	)
 
 	// 🚦 8. Start gRPC + job manager
+	// Phase III: install the SIGUSR1 graceful-drain handler before the
+	// gRPC server starts taking traffic, so the very first signal a
+	// running server can ever receive is handled correctly.
+	s.installGracefulGate()
 	go func() {
 		defer s.Shutdown()
 

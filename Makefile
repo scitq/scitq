@@ -15,7 +15,7 @@ BINARY_CLI=$(BINARY_DIR)/scitq$(EXE)
 PLATFORMS=linux/amd64 darwin/amd64 windows/amd64
 OUTDIR=bin
 
-.PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install add-py-version tgz-python-src
+.PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install install-server install-client install-cli server-upgrade add-py-version tgz-python-src
 
 all: tgz-python-src build-server build-client build-cli
 
@@ -195,6 +195,55 @@ install2: all
 	install -m 755 $(BINARY_CLIENT) /usr/local/bin/scitq2-client
 	install -m 755 $(BINARY_CLI) /usr/local/bin/scitq2
 
+
+# --- Granular install targets (Unix only) ----------------------------------
+# Independent install of each binary, with a one-generation `.prev`
+# backup kept alongside for one-command rollback. Uses GNU `install`
+# (which does unlink + create + rename) so a running ELF isn't truncated
+# in place — that's why these targets work without stopping any service,
+# unlike a plain `cp` which would trip ETXTBSY on Linux.
+#
+# The targets do NOT touch any service manager. Restart the daemon with
+# whatever your init system uses (systemd, runit, launchd, docker
+# --restart, ...). For graceful server reload see `make server-upgrade`.
+#
+# See specs/worker_autoupgrade.md (Phase III).
+
+INSTALL_PREFIX ?= /usr/local/bin
+SERVER_PROCESS_NAME ?= scitq-server
+
+install-server: build-server
+	@if [ -f $(INSTALL_PREFIX)/$$(basename $(BINARY_SERVER)) ]; then \
+	    mv $(INSTALL_PREFIX)/$$(basename $(BINARY_SERVER)) $(INSTALL_PREFIX)/$$(basename $(BINARY_SERVER)).prev; \
+	fi
+	install -m 755 $(BINARY_SERVER) $(INSTALL_PREFIX)/
+
+install-client: build-client
+	@if [ -f $(INSTALL_PREFIX)/$$(basename $(BINARY_CLIENT)) ]; then \
+	    mv $(INSTALL_PREFIX)/$$(basename $(BINARY_CLIENT)) $(INSTALL_PREFIX)/$$(basename $(BINARY_CLIENT)).prev; \
+	fi
+	install -m 755 $(BINARY_CLIENT) $(INSTALL_PREFIX)/
+
+install-cli: build-cli
+	@if [ -f $(INSTALL_PREFIX)/$$(basename $(BINARY_CLI)) ]; then \
+	    mv $(INSTALL_PREFIX)/$$(basename $(BINARY_CLI)) $(INSTALL_PREFIX)/$$(basename $(BINARY_CLI)).prev; \
+	fi
+	install -m 755 $(BINARY_CLI) $(INSTALL_PREFIX)/
+
+# Phase III: install the new server binary, then signal the running
+# old server to drain its in-flight admin jobs and exit. The supervisor
+# (systemd, docker, the launch script) is what actually restarts on the
+# new binary — `pkill` is portable across init systems.
+#
+# Override SERVER_PROCESS_NAME if your install layout uses a different
+# binary name (e.g. `scitq2-server`):
+#   sudo make server-upgrade SERVER_PROCESS_NAME=scitq2-server
+server-upgrade: install-server
+	@if pkill -USR1 -x $(SERVER_PROCESS_NAME); then \
+	    echo "🛠 Sent SIGUSR1 to running $(SERVER_PROCESS_NAME); supervisor will restart on new binary."; \
+	else \
+	    echo "ℹ️ No running $(SERVER_PROCESS_NAME) found; supervisor will start fresh on next launch."; \
+	fi
 
 
 # Helper for cross-compilation

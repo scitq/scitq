@@ -679,3 +679,25 @@
   color: #9ca3af;
   border: 1px dashed #6b7280;
 }
+
+/* Phase II: pending operator-triggered upgrade. */
+.worker-upgrade-pending {
+  /* Cyan — work in progress, calm. */
+  background: #0891b2;
+  color: #ecfeff;
+  border: 1px solid #155e75;
+}
+.worker-upgrade-pending-emergency {
+  /* Red — emergency drain in progress. */
+  background: #dc2626;
+  color: #fef2f2;
+  border: 1px solid #991b1b;
+}
+
+/* Upgrade button states (Phase II). */
+.btn-action.btn-upgrade-pending {
+  color: #0891b2;
+}
+.btn-action.btn-upgrade-emergency {
+  color: #dc2626;
+}

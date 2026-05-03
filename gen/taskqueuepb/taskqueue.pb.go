@@ -1876,8 +1876,14 @@ type TaskListAndOther struct {
 	// tasks (hard 30-min cap) then upgrade. See
 	// specs/worker_autoupgrade.md (Phase II).
 	UpgradeRequested string `protobuf:"bytes,7,opt,name=upgrade_requested,json=upgradeRequested,proto3" json:"upgrade_requested,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Phase III: server has received SIGUSR1 and is draining its
+	// active admin jobs in preparation for a graceful exit. Workers
+	// that see this flag should stop *requesting* new task slots
+	// (existing in-flight tasks continue; the gRPC retry loop will
+	// absorb the brief bounce). See specs/worker_autoupgrade.md.
+	ServerUpgradeInProgress bool `protobuf:"varint,8,opt,name=server_upgrade_in_progress,json=serverUpgradeInProgress,proto3" json:"server_upgrade_in_progress,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *TaskListAndOther) Reset() {
@@ -1950,6 +1956,13 @@ func (x *TaskListAndOther) GetUpgradeRequested() string {
 		return x.UpgradeRequested
 	}
 	return ""
+}
+
+func (x *TaskListAndOther) GetServerUpgradeInProgress() bool {
+	if x != nil {
+		return x.ServerUpgradeInProgress
+	}
+	return false
 }
 
 type TaskSignalRequest struct {
@@ -10088,14 +10101,15 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
 	"\fgrace_period\x18\x03 \x01(\x05H\x00R\vgracePeriod\x88\x01\x01B\x0f\n" +
-	"\r_grace_period\"\x91\x02\n" +
+	"\r_grace_period\"\xce\x02\n" +
 	"\x10TaskListAndOther\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\x12 \n" +
 	"\vconcurrency\x18\x02 \x01(\x05R\vconcurrency\x123\n" +
 	"\aupdates\x18\x03 \x01(\v2\x19.taskqueue.TaskUpdateListR\aupdates\x12!\n" +
 	"\factive_tasks\x18\x04 \x03(\x05R\vactiveTasks\x12/\n" +
 	"\asignals\x18\x06 \x03(\v2\x15.taskqueue.TaskSignalR\asignals\x12+\n" +
-	"\x11upgrade_requested\x18\a \x01(\tR\x10upgradeRequested\"}\n" +
+	"\x11upgrade_requested\x18\a \x01(\tR\x10upgradeRequested\x12;\n" +
+	"\x1aserver_upgrade_in_progress\x18\b \x01(\bR\x17serverUpgradeInProgress\"}\n" +
 	"\x11TaskSignalRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +

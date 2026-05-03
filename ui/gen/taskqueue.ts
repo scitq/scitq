@@ -702,6 +702,16 @@ export interface TaskListAndOther {
      * @generated from protobuf field: string upgrade_requested = 7
      */
     upgradeRequested: string;
+    /**
+     * Phase III: server has received SIGUSR1 and is draining its
+     * active admin jobs in preparation for a graceful exit. Workers
+     * that see this flag should stop *requesting* new task slots
+     * (existing in-flight tasks continue; the gRPC retry loop will
+     * absorb the brief bounce). See specs/worker_autoupgrade.md.
+     *
+     * @generated from protobuf field: bool server_upgrade_in_progress = 8
+     */
+    serverUpgradeInProgress: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.TaskSignalRequest
@@ -5004,7 +5014,8 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
             { no: 3, name: "updates", kind: "message", T: () => TaskUpdateList },
             { no: 4, name: "active_tasks", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "signals", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => TaskSignal },
-            { no: 7, name: "upgrade_requested", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 7, name: "upgrade_requested", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "server_upgrade_in_progress", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<TaskListAndOther>): TaskListAndOther {
@@ -5014,6 +5025,7 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
         message.activeTasks = [];
         message.signals = [];
         message.upgradeRequested = "";
+        message.serverUpgradeInProgress = false;
         if (value !== undefined)
             reflectionMergePartial<TaskListAndOther>(this, message, value);
         return message;
@@ -5044,6 +5056,9 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
                     break;
                 case /* string upgrade_requested */ 7:
                     message.upgradeRequested = reader.string();
+                    break;
+                case /* bool server_upgrade_in_progress */ 8:
+                    message.serverUpgradeInProgress = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -5079,6 +5094,9 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
         /* string upgrade_requested = 7; */
         if (message.upgradeRequested !== "")
             writer.tag(7, WireType.LengthDelimited).string(message.upgradeRequested);
+        /* bool server_upgrade_in_progress = 8; */
+        if (message.serverUpgradeInProgress !== false)
+            writer.tag(8, WireType.Varint).bool(message.serverUpgradeInProgress);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -359,20 +359,22 @@ class TaskSignal(_message.Message):
     def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ..., grace_period: _Optional[int] = ...) -> None: ...
 
 class TaskListAndOther(_message.Message):
-    __slots__ = ("tasks", "concurrency", "updates", "active_tasks", "signals", "upgrade_requested")
+    __slots__ = ("tasks", "concurrency", "updates", "active_tasks", "signals", "upgrade_requested", "server_upgrade_in_progress")
     TASKS_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     UPDATES_FIELD_NUMBER: _ClassVar[int]
     ACTIVE_TASKS_FIELD_NUMBER: _ClassVar[int]
     SIGNALS_FIELD_NUMBER: _ClassVar[int]
     UPGRADE_REQUESTED_FIELD_NUMBER: _ClassVar[int]
+    SERVER_UPGRADE_IN_PROGRESS_FIELD_NUMBER: _ClassVar[int]
     tasks: _containers.RepeatedCompositeFieldContainer[Task]
     concurrency: int
     updates: TaskUpdateList
     active_tasks: _containers.RepeatedScalarFieldContainer[int]
     signals: _containers.RepeatedCompositeFieldContainer[TaskSignal]
     upgrade_requested: str
-    def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., concurrency: _Optional[int] = ..., updates: _Optional[_Union[TaskUpdateList, _Mapping]] = ..., active_tasks: _Optional[_Iterable[int]] = ..., signals: _Optional[_Iterable[_Union[TaskSignal, _Mapping]]] = ..., upgrade_requested: _Optional[str] = ...) -> None: ...
+    server_upgrade_in_progress: bool
+    def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., concurrency: _Optional[int] = ..., updates: _Optional[_Union[TaskUpdateList, _Mapping]] = ..., active_tasks: _Optional[_Iterable[int]] = ..., signals: _Optional[_Iterable[_Union[TaskSignal, _Mapping]]] = ..., upgrade_requested: _Optional[str] = ..., server_upgrade_in_progress: bool = ...) -> None: ...
 
 class TaskSignalRequest(_message.Message):
     __slots__ = ("task_id", "signal", "grace_period")

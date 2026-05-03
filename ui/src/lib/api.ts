@@ -379,6 +379,40 @@ export async function delWorker(workerId: { workerId: any }) {
 }
 
 /**
+ * Phase II of the worker version-awareness feature: flag a worker (or
+ * all workers) for an operator-triggered upgrade. The worker reads the
+ * resulting flag from its next ping and acts. See
+ * specs/worker_autoupgrade.md.
+ *
+ * @param mode - "normal" (idle-wait), "emergency" (drain), or "cancel"
+ *               (clear a pending request)
+ * @param workerIds - Specific workers to flag. Pass undefined together
+ *                    with all=true to target every worker.
+ * @param all - When true, ignore workerIds and flag every non-deleted
+ *              worker.
+ */
+export async function requestWorkerUpgrade(
+  mode: 'normal' | 'emergency' | 'cancel',
+  workerIds?: number[],
+  all = false,
+): Promise<number[]> {
+  try {
+    const response = await client.requestWorkerUpgrade(
+      {
+        workerIds: workerIds ?? [],
+        all,
+        mode,
+      },
+      await callOptionsUserToken(),
+    );
+    return response?.response.affectedWorkerIds ?? [];
+  } catch (error) {
+    console.error('Error while requesting worker upgrade:', error);
+    throw error;
+  }
+}
+
+/**
  * Retrieves the count of tasks grouped by their status.
  * 
  * @param {number} [workerId] - Optional ID of the worker to filter tasks by.

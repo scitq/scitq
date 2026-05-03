@@ -26,11 +26,16 @@ The driving picture for this spec:
    urgency is the operator's call (it's a property of intent, not of the
    build itself: the same fix can be urgent for four workers running an
    affected step and pointless for fifty about to be reaped).
-6. **Phase III — Server self-upgrade.** Today the operator manually waits
-   for in-flight admin jobs (worker create/delete, etc.) before kicking
-   the server restart. The same job-completion check the server is already
-   doing internally to gate destructive operations can drive an automated
-   self-upgrade window.
+6. **Phase III — Server graceful gate via SIGUSR1.** Today the operator
+   manually waits for in-flight admin jobs (worker create/delete, etc.)
+   before kicking the server restart. Phase III installs a SIGUSR1
+   handler on the server: `kill -USR1 <pid>` enters a gate that refuses
+   new admin jobs, lets in-flight ones complete, emits a JSON status
+   line, and exits cleanly. The supervisor (systemd, docker, the launch
+   script) brings up the new binary the operator already laid down with
+   `make install-server`. No CLI credentials needed on the server host —
+   Unix already gates signals on UID/root, which is exactly the trust
+   boundary we want.
 
 The same Phase I detection runs on **the CLI** every time it talks to the
 server: a one-line stderr warning if the CLI binary is older than the
@@ -477,65 +482,225 @@ hash before the atomic rename.
   doing if any operator ever runs into a task that legitimately needs
   longer than 30 minutes.
 
-## Phase III — Server self-upgrade window (sketched)
+## Phase III — Server graceful gate via SIGUSR1
 
-Today an operator who wants to redeploy the server has to do it carefully:
-if a `worker create` or `worker delete` job is in flight (provider call
-in progress, half-provisioned VM, partial cleanup), bouncing the server
-mid-call leaves an orphaned cloud resource or a half-deleted record that
-needs hand-untangling. The current discipline is: wait for `scitq job
-list --active` to be empty, then upgrade.
+Today an operator who wants to redeploy the server has to do it
+carefully: if a `worker create` or `worker delete` job is in flight
+(provider call in progress, half-provisioned VM, partial cleanup),
+bouncing the server mid-call leaves an orphaned cloud resource or a
+half-deleted record that needs hand-untangling. The current discipline
+is: wait for `scitq job list --active` to be empty, then upgrade. Phase
+III automates that wait.
 
-Phase III automates that wait. The server already tracks active admin
-jobs internally (it has to, to gate destructive operations); the same
-gating can drive a self-upgrade window:
+### Why a Unix signal, not a CLI command
 
-1. Operator places a new `scitq-server` binary on the server host (or a
-   container with the new image) but doesn't restart yet — they invoke
-   `scitq admin self-upgrade <new-binary-path>` (or the equivalent
-   container-orchestrator hook).
-2. The server enters `pre-upgrade` mode: refuses to *start* new admin
-   jobs (worker create/delete, recruiter changes, template runs that
-   require new workers), lets in-flight ones complete. Existing
-   workers / running tasks are untouched — those are independent and
-   the old binary keeps serving them right up to its restart.
-3. Once the active-jobs queue empties, the server emits a
-   `pre-upgrade-complete` event, then exits cleanly (or hands off to a
-   supervisor that swaps in the new binary, exactly as Phase II workers
-   do — atomic rename + exit + restart).
-4. New server starts, registers, workers' next ping reaches it (the
-   gRPC retry loop is what makes this seamless from the worker side),
-   and admin jobs resume.
+The earlier sketch in this spec used `scitq admin self-upgrade` — an
+authenticated CLI command. That has two problems:
 
-The trigger for Phase III is **independent** of the urgency marker. The
-server's self-upgrade is always graceful — there's no "emergency" lane,
-because if the operator wants an emergency restart they still have the
-nuclear option of restarting the process directly. Phase III is the
-*non-emergency* automation; the existing manual restart remains the
-emergency path.
+1. **Root doesn't necessarily have CLI credentials.** The operator
+   doing the file ops is root; the operator with `SCITQ_TOKEN` /
+   `SCITQ_SERVER` is the user account that admins the cluster. Forcing
+   one to assume the other (token-smuggling via `sudo -E`, or expecting
+   `/root/.scitq/credentials` to exist) creates a permission knot we
+   don't want to demand of any deployment shape.
 
-Phase III is operator-triggered the same way Phase II is — `scitq admin
-self-upgrade` is the explicit action; the server never decides on its
-own to restart. Symmetry with Phase II's design: the system surfaces
-state (version mismatch, active jobs) and waits for an operator to
-press the button.
+2. **The trust boundary is already where it should be.** "You can
+   signal this process" maps exactly to "you have authority over the
+   server host" — same UID or root. We don't need application-level
+   auth on top of kernel-level auth that's already correct.
 
-Open questions for Phase III:
+So Phase III's trigger is a Unix signal: `kill -USR1 <pid>` (or
+`pkill -USR1 -x scitq2-server`, or `systemctl kill -s USR1 scitq2-server`
+if the operator runs systemd). No JWT, no shared secret, no localhost
+RPC, no oneshot binary, no peer-handoff race against the supervisor.
 
-- **What's the timeout?** If a worker-create job has been hanging on a
-  cloud provider for 20 minutes, do we wait? Probably hard cap (e.g. 10
-  min) then either bail with a clear error to the operator or force the
-  job into a `failed/aborted` terminal state and proceed.
-- **How does the new binary actually get there?** The CLI command takes
-  a path; the server reads it on disk and execs it. For container
-  deployments, the orchestrator (k8s, docker compose, systemd unit with
-  `Restart=on-failure` and a swapped image) does the swap and the
-  Phase III command just gracefully exits the running container.
-- **Can workers tell the server is in `pre-upgrade`?** Probably yes —
-  ping responses include an `upgrade_in_progress` flag so workers know
-  not to spam unnecessary work. They keep running their existing tasks;
-  they just don't ask for new ones during the window. (Symmetry with
-  Phase II's drain semantics, but server-driven.)
+### Why SIGUSR1 specifically
+
+- **SIGTERM** would conflict with `systemctl stop` semantics — operators
+  expect "stop" to actually stop, not "drain for potentially many minutes
+  then stop."
+- **SIGHUP** is the daemon-control idiom (nginx, postfix), but its
+  *traditional* meaning is "reload config." Wiring SIGHUP to graceful
+  exit means anyone who runs `systemctl reload scitq2-server` (or its
+  unit's `ExecReload=`) gets a graceful exit instead of a reload. We
+  could avoid the trap by simply not defining `ExecReload=`, but the
+  semantic mismatch is still a foot-gun for someone who doesn't read
+  the unit file first.
+- **SIGUSR1** is explicitly reserved for application-defined behaviour
+  in the POSIX signal table. Zero baggage. No surprise.
+
+### Lifecycle
+
+```
+1. Server process running normally; signal handler installed for SIGUSR1.
+2. Operator: kill -USR1 <scitq-server pid>
+3. Server enters "gating" state:
+     - Refuses to *start* new admin jobs (worker create/delete,
+       recruiter changes, template runs that require new workers).
+     - Lets in-flight admin jobs run to completion.
+     - Existing workers and running tasks are untouched — they're
+       independent of admin-job lifecycle, the old binary keeps
+       serving their gRPC calls right up to its own exit.
+4. Once the active-jobs queue empties, server emits a single JSON
+   line on stdout (which goes to journald under systemd, or to the
+   supervisor's log file otherwise):
+
+     {"event":"server_drained","at":"2026-05-03T16:42:11Z","drain_seconds":47}
+
+5. Server os.Exit(0) cleanly. The supervisor's restart policy
+   (systemd Restart=on-success, docker --restart=on-success,
+   the launch script's loop, etc.) brings up the new binary
+   that the operator already laid down with `make install-server`.
+6. Workers' gRPC retry loop reconnects within seconds — no
+   client-side action needed.
+```
+
+### Hard timeout for the drain
+
+A wedged provider call (worker-create stuck for 20 minutes on Azure)
+shouldn't keep the gate open forever. Hard cap of 10 minutes; past
+that, force the lingering job(s) to a terminal `failed/aborted` state,
+log loudly, and proceed with the exit. The 10-minute cap is a constant
+in the source, not configurable in v1; revisit if we hit a real
+deployment that wants longer.
+
+Cancelling a gate already in progress: not in v1. Sending a second
+SIGUSR1 is idempotent (the gate-in-progress flag is set; second signal
+is a no-op). If you want to cancel, your only option in v1 is to
+`kill -KILL` the server before it exits — which will leave any
+in-flight admin jobs in their committed-but-pending state, exactly
+what Phase III is designed to avoid. Don't do that.
+
+### Worker-side signal during the gate
+
+`TaskQueueClientResponse` (the ping reply) gets a small flag:
+
+```proto
+message TaskListAndOther {
+    // ... existing fields ...
+    bool server_upgrade_in_progress = 8;
+}
+```
+
+Workers respect it by simply *not asking for new task slots* during the
+window — but they keep running existing tasks, and the gRPC retry loop
+absorbs the brief restart. Symmetric with Phase II's worker drain, but
+server-driven. The flag is informational; a worker that doesn't
+understand it (older binary) just keeps working as normal, and that's
+fine.
+
+### What about emergency mode for the server?
+
+There isn't one. If the operator wants an emergency restart, they
+already have `kill -TERM` (graceful Go shutdown via context cancel,
+which is what the existing service stop already does) or `kill -KILL`.
+Phase III is the *non-emergency* automation; the existing manual stop
+remains the emergency path. Adding a third "emergency drain with cap"
+mode for the server would be overkill — admin jobs that are in flight
+but not making progress are exactly what the 10-minute hard timeout
+already handles.
+
+## Installation: Makefile targets
+
+The current Makefile has one `install` target that bundles all three
+binaries (server, client, CLI). For Phase III we add:
+
+1. **Per-binary `install-{server,client,cli}` targets**, independent.
+   A sysadmin who only wants to refresh the CLI says
+   `sudo make install-cli` and gets exactly that — no surprise client
+   refresh, no surprise service restart.
+
+2. **`.prev` backup**, one generation kept, alongside the binary.
+   Before each install, if the destination already exists, it's
+   renamed to `<binary>.prev` (in the same directory). One-command
+   roll-back if a bad upgrade is detected:
+
+   ```
+   sudo mv /usr/local/bin/scitq2-server.prev /usr/local/bin/scitq2-server
+   sudo kill -USR1 $(pgrep -x scitq2-server)
+   ```
+
+3. **No service management in the Makefile.** Build systems lay down
+   files; init systems manage daemons. Mixing them is a sysadmin trap
+   (non-portable across systemd / SysV / launchd / runit / Docker, and
+   invisibly side-effecting for someone reading `make install`).
+
+4. **`make server-upgrade` convenience target.** Bundles
+   `install-server` + `pkill -USR1`. Operator does
+   `sudo make server-upgrade` after the build; install puts the new
+   binary in place (with `.prev` backup), the SIGUSR1 tells the
+   running old server to drain-and-exit, the supervisor restarts on
+   the new binary. No `systemctl` invocation, no shell-out specific
+   to one init system.
+
+```make
+INSTALL_PREFIX ?= /usr/local/bin
+
+# Atomic install with one-generation backup. Uses GNU `install` which
+# does unlink+create+rename — works while the binary is running
+# (avoids the ETXTBSY error a plain `cp` triggers on Linux when the
+# target inode is mmap'd as a running ELF). The pre-rename of the
+# existing target to `.prev` keeps a single roll-back generation.
+define install_with_backup
+	@if [ -f $(INSTALL_PREFIX)/$$(basename $(1)) ]; then \
+	    mv $(INSTALL_PREFIX)/$$(basename $(1)) $(INSTALL_PREFIX)/$$(basename $(1)).prev; \
+	fi
+	install -m 755 $(1) $(INSTALL_PREFIX)/
+endef
+
+install-server: build-server
+	$(call install_with_backup,$(BINARY_SERVER))
+
+install-client: build-client
+	$(call install_with_backup,$(BINARY_CLIENT))
+
+install-cli: build-cli
+	$(call install_with_backup,$(BINARY_CLI))
+
+# Phase III: install new server binary, then signal the running old
+# server to drain and exit. Supervisor restarts on the new binary.
+# Uses pkill (POSIX) so this works on systemd, runit, launchd, and
+# bare-process deployments alike. Adjust the binary name to match
+# your install layout (scitq-server vs scitq2-server) via
+# SERVER_PROCESS_NAME.
+SERVER_PROCESS_NAME ?= scitq2-server
+server-upgrade: install-server
+	@if pkill -USR1 -x $(SERVER_PROCESS_NAME); then \
+	    echo "🛠 Sent SIGUSR1 to running $(SERVER_PROCESS_NAME); supervisor will restart on new binary."; \
+	else \
+	    echo "ℹ️ No running $(SERVER_PROCESS_NAME) found; supervisor will start fresh on next launch."; \
+	fi
+```
+
+### Why not also `make worker-upgrade`?
+
+For provider-deployed workers, Phase II already handles upgrades
+through the operator-triggered flow (`scitq worker upgrade <id>`):
+operator from their CLI, no Makefile, no root on the worker host.
+
+For permanent workers run by an operator who has root on the worker
+host, the same `install -m 755` + supervisor-restart pattern applies,
+but it's a manual operation per host and doesn't benefit from a
+Makefile target — the operator is already running ad-hoc commands
+on a remote host. The right pattern is to document the install
+sequence (`sudo make install-client install-cli` then their own
+service restart), not to bake a `worker-upgrade` target that assumes
+the worker's process name and supervisor.
+
+### Why `cp` was failing in your old script (operator note)
+
+If you've ever tried to `sudo cp bin/scitq-client /usr/local/bin/`
+while the worker service was running, the kernel returned
+`ETXTBSY ("Text file busy")`. That's because `cp` opens the
+destination with `O_TRUNC` and writes in place, so the destination
+inode doesn't change and Linux refuses to truncate an inode that's
+currently mmap'd as a running ELF. `install -m 755` (and `mv`) avoid
+the problem because they create a *new* inode and rename it over the
+old one — atomic at the directory entry level, and the running
+process keeps an FD on the old inode that the kernel keeps alive
+until the FD closes (the same trick Phase II's `os.Rename` worker
+self-swap exploits). Net effect: with `make install-{server,client,cli}`
+you no longer need to stop the service before installing.
 
 ## Migration / rollout plan
 
@@ -558,12 +723,17 @@ Open questions for Phase III:
    `?arch=linux-arm64` query param or a sibling
    `/scitq-client/<arch>?token=...` path. Workers send `build_arch`
    with the request so the server returns the matching binary.
-5. **Phase III — Server self-upgrade window**: `scitq admin self-upgrade`,
-   active-jobs gate, `upgrade_in_progress` ping flag, supervisor restart.
-   Independent of Phases I/II — can land in any order after Phase I, but
-   Phase III's payoff for the operator is greater once Phase II is also
-   live (worker fleet rolls forward without intervention while the server
-   self-upgrades).
+5. **Phase III — Server graceful gate via SIGUSR1**: signal handler in
+   the server, active-admin-jobs gate, JSON drained-line, clean exit;
+   `server_upgrade_in_progress` ping flag; Makefile targets
+   `install-server` / `install-client` / `install-cli` (each independent,
+   each with one-generation `.prev` backup), `server-upgrade`
+   convenience target that bundles install-server + `pkill -USR1`. No
+   CLI command, no service-management invocation, no shared secret —
+   trust is kernel-level (UID match or root). Independent of Phases
+   I/II, but Phase III's payoff for the operator is greater once
+   Phase II is also live (worker fleet rolls forward without
+   intervention while the server self-upgrades).
 
 ## Files & components touched (Phase I — done)
 
@@ -593,4 +763,16 @@ Open questions for Phase III:
 | CLI | `cli/cli.go` (new `worker upgrade`) | subcommand: positional `<id>` or `--all`, flags `--emergency` / `--cancel`; prompts on `--all --emergency` |
 | tests | `tests/integration/worker_upgrade_test.go` (new) | end-to-end: idle worker normal upgrade, busy worker waits, emergency drain, --cancel, unsupported_arch refusal, SHA mismatch |
 
-Estimated effort: Phase I: done. Phase II: ~1.5 days (the SHA endpoint + RPC + CLI is half a day; the worker idle/drain flow + integration tests is the remainder).
+## Files & components touched (Phase III — graceful gate)
+
+| Area | File / module | Change |
+|---|---|---|
+| proto | `proto/taskqueue.proto` | add `bool server_upgrade_in_progress` to `TaskListAndOther` (ping reply); regen |
+| server | `server/server.go` (signal handler, admin-job gate) | install `signal.Notify(syscall.SIGUSR1)`; on receipt set `gating=true`; intercept admin-job submission paths to refuse new jobs while gating; poll until in-flight jobs are zero or 10-minute hard timeout fires; emit `{"event":"server_drained", ...}` JSON line on stdout; `os.Exit(0)` |
+| server | `server/server.go` (ping path) | project `gating` flag into `TaskListAndOther.server_upgrade_in_progress` |
+| client | `client/client.go` (worker loop) | observe `server_upgrade_in_progress`; while true, skip asking for new task slots; keep running existing tasks; gRPC retry loop absorbs the bounce |
+| Makefile | `Makefile` | add `INSTALL_PREFIX`, `install_with_backup` macro, `install-server` / `install-client` / `install-cli` (each with `.prev` backup), `server-upgrade` (install-server + pkill -USR1) |
+| docs | install/upgrade section | document the SIGUSR1 trigger, the `.prev` rollback, the ETXTBSY note for the manual `cp` antipattern |
+| tests | `tests/integration/server_upgrade_test.go` (new) | start server → submit a long-running admin job → SIGUSR1 → verify new admin jobs are refused → wait for in-flight to finish → verify JSON drained line → verify process exit 0; second test: SIGUSR1 with no in-flight jobs exits within ~1s |
+
+Estimated effort: Phase I: done. Phase II: done. Phase III: ~1 day (signal handler + admin-gate + drained line is half a day; ping flag + worker-side handling + Makefile + integration tests is the rest).
