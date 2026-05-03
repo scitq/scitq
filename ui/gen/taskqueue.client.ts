@@ -4,6 +4,7 @@
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { TaskQueue } from "./taskqueue";
+import type { ServerVersionResponse } from "./taskqueue";
 import type { TaskSignalRequest } from "./taskqueue";
 import type { TaskStatusCountsResponse } from "./taskqueue";
 import type { TaskStatusCountsRequest } from "./taskqueue";
@@ -491,6 +492,14 @@ export interface ITaskQueueClient {
      * @generated from protobuf rpc: SignalTask
      */
     signalTask(input: TaskSignalRequest, options?: RpcOptions): UnaryCall<TaskSignalRequest, Ack>;
+    /**
+     * Returns the server's own build identity so callers (CLI, worker) can
+     * detect a version mismatch. Cheap, unauthenticated lookup — version
+     * info is not a secret. See specs/worker_autoupgrade.md (Phase I).
+     *
+     * @generated from protobuf rpc: ServerVersion
+     */
+    serverVersion(input: Empty, options?: RpcOptions): UnaryCall<Empty, ServerVersionResponse>;
 }
 /**
  * @generated from protobuf service taskqueue.TaskQueue
@@ -1118,5 +1127,16 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
     signalTask(input: TaskSignalRequest, options?: RpcOptions): UnaryCall<TaskSignalRequest, Ack> {
         const method = this.methods[84], opt = this._transport.mergeOptions(options);
         return stackIntercept<TaskSignalRequest, Ack>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * Returns the server's own build identity so callers (CLI, worker) can
+     * detect a version mismatch. Cheap, unauthenticated lookup — version
+     * info is not a secret. See specs/worker_autoupgrade.md (Phase I).
+     *
+     * @generated from protobuf rpc: ServerVersion
+     */
+    serverVersion(input: Empty, options?: RpcOptions): UnaryCall<Empty, ServerVersionResponse> {
+        const method = this.methods[85], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, ServerVersionResponse>("unary", this._transport, method, opt, input);
     }
 }

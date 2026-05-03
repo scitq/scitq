@@ -45,6 +45,43 @@ export interface WorkerInfo {
      * @generated from protobuf field: optional string region = 5
      */
     region?: string;
+    /**
+     * Build identity, reported on registration so the server can flag
+     * out-of-date workers. Phase I (visibility-only). See
+     * specs/worker_autoupgrade.md.
+     *
+     * @generated from protobuf field: optional string version = 6
+     */
+    version?: string; // semver+suffix, e.g. "v0.7.7-dev"
+    /**
+     * @generated from protobuf field: optional string commit = 7
+     */
+    commit?: string; // full git SHA
+    /**
+     * @generated from protobuf field: optional string build_arch = 8
+     */
+    buildArch?: string; // GOOS/GOARCH, e.g. "linux/amd64"
+}
+/**
+ * @generated from protobuf message taskqueue.ServerVersionResponse
+ */
+export interface ServerVersionResponse {
+    /**
+     * @generated from protobuf field: string version = 1
+     */
+    version: string; // server semver+suffix
+    /**
+     * @generated from protobuf field: string commit = 2
+     */
+    commit: string; // full git SHA
+    /**
+     * @generated from protobuf field: string build_arch = 3
+     */
+    buildArch: string; // GOOS/GOARCH (informational)
+    /**
+     * @generated from protobuf field: bool urgent = 4
+     */
+    urgent: boolean; // reserved for Phase II — server build is flagged urgent
 }
 /**
  * @generated from protobuf message taskqueue.TaskRequest
@@ -501,6 +538,30 @@ export interface Worker {
      * @generated from protobuf field: optional float flavor_disk = 19
      */
     flavorDisk?: number;
+    /**
+     * Build identity (reported by the worker on registration; persisted
+     * by the server). See specs/worker_autoupgrade.md.
+     *
+     * @generated from protobuf field: optional string version = 20
+     */
+    version?: string; // worker's semver+suffix
+    /**
+     * @generated from protobuf field: optional string commit = 21
+     */
+    commit?: string; // worker's git SHA
+    /**
+     * @generated from protobuf field: optional string build_arch = 22
+     */
+    buildArch?: string; // worker's GOOS/GOARCH
+    /**
+     * Derived upgrade status — computed live by the server from the
+     * worker's commit vs. the server's current commit. One of:
+     * "up_to_date" | "needs_upgrade" | "unsupported_arch" | "unknown"
+     * (unknown = pre-Phase-I worker that didn't report build identity).
+     *
+     * @generated from protobuf field: optional string upgrade_status = 23
+     */
+    upgradeStatus?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -3064,7 +3125,10 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
             { no: 2, name: "concurrency", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "is_permanent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "provider", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "region", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "region", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "commit", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerInfo>): WorkerInfo {
@@ -3094,6 +3158,15 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
                 case /* optional string region */ 5:
                     message.region = reader.string();
                     break;
+                case /* optional string version */ 6:
+                    message.version = reader.string();
+                    break;
+                case /* optional string commit */ 7:
+                    message.commit = reader.string();
+                    break;
+                case /* optional string build_arch */ 8:
+                    message.buildArch = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3121,6 +3194,15 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
         /* optional string region = 5; */
         if (message.region !== undefined)
             writer.tag(5, WireType.LengthDelimited).string(message.region);
+        /* optional string version = 6; */
+        if (message.version !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.version);
+        /* optional string commit = 7; */
+        if (message.commit !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.commit);
+        /* optional string build_arch = 8; */
+        if (message.buildArch !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.buildArch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3131,6 +3213,77 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
  * @generated MessageType for protobuf message taskqueue.WorkerInfo
  */
 export const WorkerInfo = new WorkerInfo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerVersionResponse$Type extends MessageType<ServerVersionResponse> {
+    constructor() {
+        super("taskqueue.ServerVersionResponse", [
+            { no: 1, name: "version", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "commit", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "build_arch", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "urgent", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerVersionResponse>): ServerVersionResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.version = "";
+        message.commit = "";
+        message.buildArch = "";
+        message.urgent = false;
+        if (value !== undefined)
+            reflectionMergePartial<ServerVersionResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerVersionResponse): ServerVersionResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string version */ 1:
+                    message.version = reader.string();
+                    break;
+                case /* string commit */ 2:
+                    message.commit = reader.string();
+                    break;
+                case /* string build_arch */ 3:
+                    message.buildArch = reader.string();
+                    break;
+                case /* bool urgent */ 4:
+                    message.urgent = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerVersionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string version = 1; */
+        if (message.version !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.version);
+        /* string commit = 2; */
+        if (message.commit !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.commit);
+        /* string build_arch = 3; */
+        if (message.buildArch !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.buildArch);
+        /* bool urgent = 4; */
+        if (message.urgent !== false)
+            writer.tag(4, WireType.Varint).bool(message.urgent);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ServerVersionResponse
+ */
+export const ServerVersionResponse = new ServerVersionResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TaskRequest$Type extends MessageType<TaskRequest> {
     constructor() {
@@ -4135,7 +4288,11 @@ class Worker$Type extends MessageType<Worker> {
             { no: 16, name: "workflow_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 17, name: "flavor_cpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 18, name: "flavor_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 19, name: "flavor_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 19, name: "flavor_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 20, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 21, name: "commit", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 22, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 23, name: "upgrade_status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -4218,6 +4375,18 @@ class Worker$Type extends MessageType<Worker> {
                 case /* optional float flavor_disk */ 19:
                     message.flavorDisk = reader.float();
                     break;
+                case /* optional string version */ 20:
+                    message.version = reader.string();
+                    break;
+                case /* optional string commit */ 21:
+                    message.commit = reader.string();
+                    break;
+                case /* optional string build_arch */ 22:
+                    message.buildArch = reader.string();
+                    break;
+                case /* optional string upgrade_status */ 23:
+                    message.upgradeStatus = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4287,6 +4456,18 @@ class Worker$Type extends MessageType<Worker> {
         /* optional float flavor_disk = 19; */
         if (message.flavorDisk !== undefined)
             writer.tag(19, WireType.Bit32).float(message.flavorDisk);
+        /* optional string version = 20; */
+        if (message.version !== undefined)
+            writer.tag(20, WireType.LengthDelimited).string(message.version);
+        /* optional string commit = 21; */
+        if (message.commit !== undefined)
+            writer.tag(21, WireType.LengthDelimited).string(message.commit);
+        /* optional string build_arch = 22; */
+        if (message.buildArch !== undefined)
+            writer.tag(22, WireType.LengthDelimited).string(message.buildArch);
+        /* optional string upgrade_status = 23; */
+        if (message.upgradeStatus !== undefined)
+            writer.tag(23, WireType.LengthDelimited).string(message.upgradeStatus);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12879,5 +13060,6 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "DeleteWorkerEvent", options: {}, I: WorkerEventId, O: Ack },
     { name: "PruneWorkerEvents", options: {}, I: WorkerEventPruneFilter, O: WorkerEventPruneResult },
     { name: "GetTaskStatusCounts", options: {}, I: TaskStatusCountsRequest, O: TaskStatusCountsResponse },
-    { name: "SignalTask", options: {}, I: TaskSignalRequest, O: Ack }
+    { name: "SignalTask", options: {}, I: TaskSignalRequest, O: Ack },
+    { name: "ServerVersion", options: {}, I: Empty, O: ServerVersionResponse }
 ]);

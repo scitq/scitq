@@ -105,6 +105,7 @@ const (
 	TaskQueue_PruneWorkerEvents_FullMethodName         = "/taskqueue.TaskQueue/PruneWorkerEvents"
 	TaskQueue_GetTaskStatusCounts_FullMethodName       = "/taskqueue.TaskQueue/GetTaskStatusCounts"
 	TaskQueue_SignalTask_FullMethodName                = "/taskqueue.TaskQueue/SignalTask"
+	TaskQueue_ServerVersion_FullMethodName             = "/taskqueue.TaskQueue/ServerVersion"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -205,6 +206,10 @@ type TaskQueueClient interface {
 	PruneWorkerEvents(ctx context.Context, in *WorkerEventPruneFilter, opts ...grpc.CallOption) (*WorkerEventPruneResult, error)
 	GetTaskStatusCounts(ctx context.Context, in *TaskStatusCountsRequest, opts ...grpc.CallOption) (*TaskStatusCountsResponse, error)
 	SignalTask(ctx context.Context, in *TaskSignalRequest, opts ...grpc.CallOption) (*Ack, error)
+	// Returns the server's own build identity so callers (CLI, worker) can
+	// detect a version mismatch. Cheap, unauthenticated lookup — version
+	// info is not a secret. See specs/worker_autoupgrade.md (Phase I).
+	ServerVersion(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ServerVersionResponse, error)
 }
 
 type taskQueueClient struct {
@@ -1086,6 +1091,16 @@ func (c *taskQueueClient) SignalTask(ctx context.Context, in *TaskSignalRequest,
 	return out, nil
 }
 
+func (c *taskQueueClient) ServerVersion(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ServerVersionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ServerVersionResponse)
+	err := c.cc.Invoke(ctx, TaskQueue_ServerVersion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -1184,6 +1199,10 @@ type TaskQueueServer interface {
 	PruneWorkerEvents(context.Context, *WorkerEventPruneFilter) (*WorkerEventPruneResult, error)
 	GetTaskStatusCounts(context.Context, *TaskStatusCountsRequest) (*TaskStatusCountsResponse, error)
 	SignalTask(context.Context, *TaskSignalRequest) (*Ack, error)
+	// Returns the server's own build identity so callers (CLI, worker) can
+	// detect a version mismatch. Cheap, unauthenticated lookup — version
+	// info is not a secret. See specs/worker_autoupgrade.md (Phase I).
+	ServerVersion(context.Context, *emptypb.Empty) (*ServerVersionResponse, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -1448,6 +1467,9 @@ func (UnimplementedTaskQueueServer) GetTaskStatusCounts(context.Context, *TaskSt
 }
 func (UnimplementedTaskQueueServer) SignalTask(context.Context, *TaskSignalRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SignalTask not implemented")
+}
+func (UnimplementedTaskQueueServer) ServerVersion(context.Context, *emptypb.Empty) (*ServerVersionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ServerVersion not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -2975,6 +2997,24 @@ func _TaskQueue_SignalTask_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ServerVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ServerVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ServerVersion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ServerVersion(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3309,6 +3349,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SignalTask",
 			Handler:    _TaskQueue_SignalTask_Handler,
+		},
+		{
+			MethodName: "ServerVersion",
+			Handler:    _TaskQueue_ServerVersion_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

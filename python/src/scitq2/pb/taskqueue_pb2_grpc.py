@@ -460,6 +460,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.TaskSignalRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
+        self.ServerVersion = channel.unary_unary(
+                '/taskqueue.TaskQueue/ServerVersion',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=taskqueue__pb2.ServerVersionResponse.FromString,
+                _registered_method=True)
 
 
 class TaskQueueServicer(object):
@@ -989,6 +994,15 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ServerVersion(self, request, context):
+        """Returns the server's own build identity so callers (CLI, worker) can
+        detect a version mismatch. Cheap, unauthenticated lookup — version
+        info is not a secret. See specs/worker_autoupgrade.md (Phase I).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TaskQueueServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1416,6 +1430,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.SignalTask,
                     request_deserializer=taskqueue__pb2.TaskSignalRequest.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'ServerVersion': grpc.unary_unary_rpc_method_handler(
+                    servicer.ServerVersion,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=taskqueue__pb2.ServerVersionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -3713,6 +3732,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/SignalTask',
             taskqueue__pb2.TaskSignalRequest.SerializeToString,
             taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ServerVersion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ServerVersion',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            taskqueue__pb2.ServerVersionResponse.FromString,
             options,
             channel_credentials,
             insecure,

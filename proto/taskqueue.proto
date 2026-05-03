@@ -101,7 +101,11 @@ service TaskQueue {
     rpc PruneWorkerEvents(WorkerEventPruneFilter) returns (WorkerEventPruneResult);
     rpc GetTaskStatusCounts(TaskStatusCountsRequest) returns (TaskStatusCountsResponse);
     rpc SignalTask(TaskSignalRequest) returns (Ack);
-}   
+    // Returns the server's own build identity so callers (CLI, worker) can
+    // detect a version mismatch. Cheap, unauthenticated lookup — version
+    // info is not a secret. See specs/worker_autoupgrade.md (Phase I).
+    rpc ServerVersion(google.protobuf.Empty) returns (ServerVersionResponse);
+}
 
 message TaskResponse {
     int32 task_id = 1;
@@ -113,6 +117,19 @@ message WorkerInfo {
     optional bool is_permanent = 3;
     optional string provider = 4;
     optional string region = 5;
+    // Build identity, reported on registration so the server can flag
+    // out-of-date workers. Phase I (visibility-only). See
+    // specs/worker_autoupgrade.md.
+    optional string version = 6;     // semver+suffix, e.g. "v0.7.7-dev"
+    optional string commit = 7;      // full git SHA
+    optional string build_arch = 8;  // GOOS/GOARCH, e.g. "linux/amd64"
+}
+
+message ServerVersionResponse {
+    string version = 1;     // server semver+suffix
+    string commit = 2;      // full git SHA
+    string build_arch = 3;  // GOOS/GOARCH (informational)
+    bool urgent = 4;        // reserved for Phase II — server build is flagged urgent
 }
 
 message TaskRequest {
@@ -254,6 +271,16 @@ message Worker {
     optional int32 flavor_cpu = 17;
     optional float flavor_mem = 18;
     optional float flavor_disk = 19;
+    // Build identity (reported by the worker on registration; persisted
+    // by the server). See specs/worker_autoupgrade.md.
+    optional string version = 20;        // worker's semver+suffix
+    optional string commit = 21;         // worker's git SHA
+    optional string build_arch = 22;     // worker's GOOS/GOARCH
+    // Derived upgrade status — computed live by the server from the
+    // worker's commit vs. the server's current commit. One of:
+    // "up_to_date" | "needs_upgrade" | "unsupported_arch" | "unknown"
+    // (unknown = pre-Phase-I worker that didn't report build identity).
+    optional string upgrade_status = 23;
 }
 
 

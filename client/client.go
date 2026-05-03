@@ -25,6 +25,7 @@ import (
 	"github.com/scitq/scitq/client/install"
 	"github.com/scitq/scitq/client/workerstats"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/internal/version"
 	"github.com/scitq/scitq/lib"
 	"github.com/scitq/scitq/utils"
 
@@ -138,6 +139,17 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Build identity — used by the server to flag stale workers in
+	// `scitq worker list`. See specs/worker_autoupgrade.md.
+	workerVersion := version.Version
+	workerCommit := ""
+	if vcs, ok := version.ReadVCS(); ok && vcs.Revision != "" {
+		workerCommit = vcs.Revision
+	} else if version.Commit != "" && version.Commit != "none" {
+		workerCommit = version.Commit
+	}
+	buildArch := runtime.GOOS + "/" + runtime.GOARCH
+
 	res, err := client.RegisterWorker(ctx,
 		&pb.WorkerInfo{
 			Name:        w.Name,
@@ -145,6 +157,9 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 			IsPermanent: &w.IsPermanent,
 			Provider:    w.Provider,
 			Region:      w.Region,
+			Version:     &workerVersion,
+			Commit:      &workerCommit,
+			BuildArch:   &buildArch,
 		})
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)
@@ -152,7 +167,16 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 		w.WorkerId = res.WorkerId
 	}
 	w.registerSpecs(client)
-	log.Printf("✅ Worker %s registered with concurrency %d", w.Name, w.Concurrency)
+	log.Printf("✅ Worker %s registered with concurrency %d (version %s, commit %s, arch %s)",
+		w.Name, w.Concurrency, workerVersion, shortSha(workerCommit), buildArch)
+}
+
+// shortSha returns the first 7 chars of a git SHA, or the original if shorter.
+func shortSha(sha string) string {
+	if len(sha) >= 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // updateTaskStatus marks task as `S` (Success) or `F` (Failed) after execution.

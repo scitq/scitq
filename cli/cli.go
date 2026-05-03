@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -115,7 +116,8 @@ type Attr struct {
 	// Worker Commands (Sub-Subcommands)
 	Worker *struct {
 		List *struct {
-			Long bool `arg:"-l,--long" help:"Show extended worker details"`
+			Long          bool `arg:"-l,--long" help:"Show extended worker details"`
+			NeedsUpgrade  bool `arg:"--needs-upgrade" help:"Only show workers running a binary older than the server (linux/amd64; non-amd64 workers are filtered out as 'unsupported_arch')"`
 		} `arg:"subcommand:list" help:"List all workers"`
 		Deploy *struct {
 			Flavor      string `arg:"--flavor,required" help:"Worker flavor"`
@@ -381,6 +383,11 @@ type Attr struct {
 
 	// Certificate command
 	Cert *struct{} `arg:"subcommand:cert" help:"Print server TLS certificate (PEM)"`
+
+	// Self-introspection commands
+	Self *struct {
+		Version *struct{} `arg:"subcommand:version" help:"Show CLI build info and compare against the server"`
+	} `arg:"subcommand:self" help:"Inspect this CLI binary"`
 
 	// HashPassword command
 	HashPassword *struct {
@@ -877,6 +884,21 @@ func (c *CLI) WorkerList() error {
 
 	fmt.Println("👷 Worker List:")
 	for _, worker := range res.Workers {
+		// --needs-upgrade filter: skip everything except actual stale-amd64 workers.
+		if c.Attr.Worker.List.NeedsUpgrade && worker.GetUpgradeStatus() != "needs_upgrade" {
+			continue
+		}
+		// Compose a small upgrade-status badge ("(stale)", "(arch?)", "(?)" or "")
+		// always shown so a stale worker is impossible to miss in the default output.
+		upgradeBadge := ""
+		switch worker.GetUpgradeStatus() {
+		case "needs_upgrade":
+			upgradeBadge = " ⚠️ stale"
+		case "unsupported_arch":
+			upgradeBadge = " (unsupported arch)"
+		case "unknown":
+			upgradeBadge = " (no version info)"
+		}
 		if c.Attr.Worker.List.Long {
 			cpuStr := ""
 			if worker.FlavorCpu != nil {
@@ -890,12 +912,24 @@ func (c *CLI) WorkerList() error {
 			if worker.FlavorDisk != nil {
 				diskStr = fmt.Sprintf(" | Disk: %dGB", int(*worker.FlavorDisk))
 			}
-			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | Permanent: %t | IPv4: %s | IPv6: %s | Flavor: %s%s%s%s | Provider: %s | Region: %s | Workflow: %s | Step: %s\n",
+			versionStr := worker.GetVersion()
+			if versionStr == "" {
+				versionStr = "?"
+			}
+			commitStr := worker.GetCommit()
+			if len(commitStr) > 7 {
+				commitStr = commitStr[:7]
+			}
+			if commitStr == "" {
+				commitStr = "?"
+			}
+			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s%s | Permanent: %t | IPv4: %s | IPv6: %s | Flavor: %s%s%s%s | Provider: %s | Region: %s | Workflow: %s | Step: %s | Build: %s/%s on %s\n",
 				worker.WorkerId,
 				worker.Name,
 				worker.Concurrency,
 				worker.Prefetch,
 				worker.Status,
+				upgradeBadge,
 				worker.IsPermanent,
 				worker.Ipv4,
 				worker.Ipv6,
@@ -907,14 +941,18 @@ func (c *CLI) WorkerList() error {
 				worker.Region,
 				worker.GetWorkflowName(),
 				worker.GetStepName(),
+				versionStr,
+				commitStr,
+				worker.GetBuildArch(),
 			)
 		} else {
-			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s | IPv4: %s | IPv6: %s | Flavor: %s | Provider: %s | Region: %s\n",
+			fmt.Printf("🔹 ID: %d | Name: %s | Concurrency: %d | Prefetch: %d | Status: %s%s | IPv4: %s | IPv6: %s | Flavor: %s | Provider: %s | Region: %s\n",
 				worker.WorkerId,
 				worker.Name,
 				worker.Concurrency,
 				worker.Prefetch,
 				worker.Status,
+				upgradeBadge,
 				worker.Ipv4,
 				worker.Ipv6,
 				worker.Flavor,
@@ -2716,6 +2754,15 @@ func Run(c CLI) error {
 	c.QC = qc
 	defer c.QC.Close()
 
+	// Phase I version-mismatch warning. Best-effort: never fatal — a stale
+	// CLI is allowed to talk to a newer server, the warning just prompts
+	// the user to update. Always to stderr so JSON-pipeline workflows
+	// (`scitq … -o json | jq …`) aren't polluted. Suppressible via
+	// SCITQ_NO_VERSION_CHECK=1. See specs/worker_autoupgrade.md.
+	if os.Getenv("SCITQ_NO_VERSION_CHECK") == "" {
+		c.checkServerVersion()
+	}
+
 	// Handle commands properly
 	switch {
 	// Task commands
@@ -2890,9 +2937,104 @@ func Run(c CLI) error {
 		case c.Attr.WorkerEvent.Prune != nil:
 			err = c.WorkerEventPrune()
 		}
+	case c.Attr.Self != nil:
+		switch {
+		case c.Attr.Self.Version != nil:
+			err = c.SelfVersion()
+		}
 	default:
 		log.Fatal("No command specified. Run with --help for usage.")
 	}
 
 	return err
+}
+
+// cliCommit returns the CLI's full git SHA (or empty when unavailable).
+// Mirrors server.serverCommit. See specs/worker_autoupgrade.md.
+func cliCommit() string {
+	if vcs, ok := version.ReadVCS(); ok && vcs.Revision != "" {
+		return vcs.Revision
+	}
+	if version.Commit != "" && version.Commit != "none" {
+		return version.Commit
+	}
+	return ""
+}
+
+// checkServerVersion is the connect-time mismatch warning. Best-effort,
+// never fatal: a stale CLI is allowed to keep working. Output goes to
+// stderr so it doesn't pollute pipelines like `scitq task list -o json`.
+func (c *CLI) checkServerVersion() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	resp, err := c.QC.Client.ServerVersion(ctx, &emptypb.Empty{})
+	if err != nil {
+		// Old server (pre-Phase-I) doesn't have the RPC. Silently skip —
+		// printing a warning here would be backwards (the CLI is *newer*).
+		return
+	}
+	clientCommit := cliCommit()
+	if clientCommit == "" || resp.GetCommit() == "" {
+		// At least one side is a `dev` build with no VCS stamp. Can't
+		// make a meaningful comparison; don't bother the user.
+		return
+	}
+	if clientCommit == resp.GetCommit() {
+		return
+	}
+	cliShort := clientCommit
+	if len(cliShort) > 7 {
+		cliShort = cliShort[:7]
+	}
+	srvShort := resp.GetCommit()
+	if len(srvShort) > 7 {
+		srvShort = srvShort[:7]
+	}
+	fmt.Fprintf(os.Stderr,
+		"⚠️  scitq CLI is out of date — your CLI is %s (%s), server is %s (%s).\n"+
+			"   Update via your install method. Set SCITQ_NO_VERSION_CHECK=1 to silence.\n",
+		version.Version, cliShort, resp.GetVersion(), srvShort)
+}
+
+// SelfVersion handles `scitq self version` — prints the build identity of
+// this CLI plus the server's, and the comparison verdict. Always exits 0.
+func (c *CLI) SelfVersion() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+	cliArch := runtime.GOOS + "/" + runtime.GOARCH
+	cliVer := version.Version
+	cliC := cliCommit()
+	cliCShort := cliC
+	if len(cliCShort) > 7 {
+		cliCShort = cliCShort[:7]
+	}
+	if cliCShort == "" {
+		cliCShort = "?"
+	}
+
+	resp, err := c.QC.Client.ServerVersion(ctx, &emptypb.Empty{})
+	if err != nil {
+		fmt.Printf("CLI:    %s (%s, %s)\n", cliVer, cliCShort, cliArch)
+		fmt.Printf("Server: <unreachable: %v>\n", err)
+		return nil
+	}
+	srvCShort := resp.GetCommit()
+	if len(srvCShort) > 7 {
+		srvCShort = srvCShort[:7]
+	}
+	if srvCShort == "" {
+		srvCShort = "?"
+	}
+	fmt.Printf("CLI:    %s (%s, %s)\n", cliVer, cliCShort, cliArch)
+	fmt.Printf("Server: %s (%s, %s)\n", resp.GetVersion(), srvCShort, resp.GetBuildArch())
+	switch {
+	case cliC == "" || resp.GetCommit() == "":
+		fmt.Printf("Status: unknown (one side is a dev build with no VCS stamp)\n")
+	case cliC == resp.GetCommit():
+		fmt.Printf("Status: up to date\n")
+	default:
+		fmt.Printf("Status: out of date — your CLI is on a different commit than the server\n")
+		fmt.Printf("        Update via your install method. (Set SCITQ_NO_VERSION_CHECK=1 to silence the per-command warning.)\n")
+	}
+	return nil
 }

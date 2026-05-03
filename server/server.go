@@ -17,10 +17,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/scitq/scitq/internal/version"
 	"github.com/scitq/scitq/server/config"
 	"github.com/scitq/scitq/server/protofilter"
 	"github.com/scitq/scitq/server/providers"
@@ -237,6 +239,35 @@ func (s *taskQueueServer) Shutdown() {
 	default:
 		close(s.done)
 	}
+}
+
+// serverCommit returns the server's full git SHA from the version package.
+// Falls back to the short Commit (or empty) when VCS info isn't available
+// — happens for `dev` builds without -ldflags. Empty propagates through to
+// `unknown` upgrade status, which is the right outcome for an unstamped
+// build.
+func (s *taskQueueServer) serverCommit() string {
+	if vcs, ok := version.ReadVCS(); ok && vcs.Revision != "" {
+		return vcs.Revision
+	}
+	if version.Commit != "" && version.Commit != "none" {
+		return version.Commit
+	}
+	return ""
+}
+
+// ServerVersion returns the server's build identity. Cheap unauthenticated
+// lookup used by both the worker (in registration) and the CLI (every
+// connect) to detect a version mismatch. See specs/worker_autoupgrade.md.
+func (s *taskQueueServer) ServerVersion(ctx context.Context, _ *emptypb.Empty) (*pb.ServerVersionResponse, error) {
+	resp := &pb.ServerVersionResponse{
+		Version:   version.Version,
+		Commit:    s.serverCommit(),
+		BuildArch: runtime.GOOS + "/" + runtime.GOARCH,
+		// Phase II reads `internal/version.Urgent` here. Phase I emits false.
+		Urgent: false,
+	}
+	return resp, nil
 }
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
@@ -2206,6 +2237,22 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		log.Printf("✅ Worker %s already registered, sending back id %d", req.Name, workerID)
 	}
 
+	// Persist the worker's reported build identity. Done as a single UPDATE
+	// after the create/find branches so we don't have to thread the fields
+	// through every INSERT path. NULLs (pre-Phase-I workers) leave existing
+	// columns untouched. See specs/worker_autoupgrade.md.
+	if req.Version != nil || req.Commit != nil || req.BuildArch != nil {
+		if _, err := tx.Exec(`
+			UPDATE worker
+			   SET version    = COALESCE($2, version),
+			       commit_sha = COALESCE($3, commit_sha),
+			       build_arch = COALESCE($4, build_arch)
+			 WHERE worker_id = $1
+		`, workerID, req.Version, req.Commit, req.BuildArch); err != nil {
+			log.Printf("⚠️ Failed to persist build identity for worker %d: %v", workerID, err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit worker registration: %v", err)
 		return nil, fmt.Errorf("failed to commit worker registration: %w", err)
@@ -3495,15 +3542,15 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	defer tx.Rollback()
 
 	query := `
-		SELECT 
-			w.worker_id, 
-			worker_name, 
-			concurrency, 
-			prefetch, 
-			w.status, 
-			COALESCE(w.ipv4::text, '') AS ipv4, 
-			COALESCE(w.ipv6::text, '') AS ipv6, 
-			COALESCE(r.region_name, '') AS region_name, 
+		SELECT
+			w.worker_id,
+			worker_name,
+			concurrency,
+			prefetch,
+			w.status,
+			COALESCE(w.ipv4::text, '') AS ipv4,
+			COALESCE(w.ipv6::text, '') AS ipv6,
+			COALESCE(r.region_name, '') AS region_name,
 			COALESCE(p.provider_name || '.' || p.config_name, '') AS provider,
 			COALESCE(f.flavor_name, '') AS flavor,
 			f.cpu, f.mem, f.disk,
@@ -3512,7 +3559,10 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			w.is_permanent,
 			w.recyclable_scope,
 			wf.workflow_id,
-			wf.workflow_name
+			wf.workflow_name,
+			w.version,
+			w.commit_sha,
+			w.build_arch
 		FROM worker w
 		LEFT JOIN region r ON r.region_id = w.region_id
 		LEFT JOIN provider p ON r.provider_id = p.provider_id
@@ -3540,18 +3590,23 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	}
 	defer rows.Close()
 
+	// Snapshot the server's own commit once outside the row loop —
+	// every worker row's upgrade_status is computed against it.
+	serverCommit := s.serverCommit()
 	for rows.Next() {
 		var worker pb.Worker
 		var stepId, workflowId sql.NullInt32
 		var flavorCpu sql.NullInt32
 		var flavorMem, flavorDisk sql.NullFloat64
 		var stepName, workflowName sql.NullString
+		var workerVersion, workerCommit, workerArch sql.NullString
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
 			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor,
 			&flavorCpu, &flavorMem, &flavorDisk,
 			&stepId, &stepName,
-			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName)
+			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName,
+			&workerVersion, &workerCommit, &workerArch)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan worker: %v", err)
 			continue
@@ -3579,6 +3634,19 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		if workflowName.Valid {
 			worker.WorkflowName = &workflowName.String
 		}
+		if workerVersion.Valid {
+			worker.Version = &workerVersion.String
+		}
+		if workerCommit.Valid {
+			worker.Commit = &workerCommit.String
+		}
+		if workerArch.Valid {
+			worker.BuildArch = &workerArch.String
+		}
+		// Derived: live comparison against server's own commit.
+		// See specs/worker_autoupgrade.md.
+		status := WorkerUpgradeStatus(workerArch.String, workerCommit.String, serverCommit)
+		worker.UpgradeStatus = &status
 
 		workers = append(workers, &worker)
 	}

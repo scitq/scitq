@@ -722,6 +722,23 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                 >
                   {worker.name}
                 </a>
+                <!-- Phase I: upgrade-status badge. See specs/worker_autoupgrade.md. -->
+                {#if worker.upgradeStatus === 'needs_upgrade'}
+                  <span
+                    class="worker-upgrade-badge worker-upgrade-stale"
+                    title="Worker is running an older binary than the server.&#10;Worker: {worker.version || '?'} ({(worker.commit || '').slice(0,7) || '?'}) on {worker.buildArch || '?'}.&#10;Redeploy this worker to update."
+                  >stale</span>
+                {:else if worker.upgradeStatus === 'unsupported_arch'}
+                  <span
+                    class="worker-upgrade-badge worker-upgrade-arch"
+                    title="Worker arch ({worker.buildArch || '?'}) is not the auto-upgrade target (linux/amd64). Upgrade is operator-initiated for this worker."
+                  >arch</span>
+                {:else if worker.upgradeStatus === 'unknown'}
+                  <span
+                    class="worker-upgrade-badge worker-upgrade-unknown"
+                    title="Worker did not report build identity (likely a pre-Phase-I build). Will resolve once the worker restarts on a newer client."
+                  >?</span>
+                {/if}
               </td>
               <td class="workerCompo-wfstep">
   {#if editingWorkflowStepFor === worker.workerId}

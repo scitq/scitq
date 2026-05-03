@@ -647,3 +647,35 @@
     filter: brightness(1.1);
   }
 }
+
+/* Phase I worker upgrade-status badges. See specs/worker_autoupgrade.md. */
+.worker-upgrade-badge {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0.05em 0.35em;
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 1.4;
+  border-radius: 3px;
+  vertical-align: middle;
+  cursor: help;
+  user-select: none;
+}
+.worker-upgrade-stale {
+  /* Amber — visible without screaming for attention. */
+  background: #f59e0b;
+  color: #1f2937;
+  border: 1px solid #b45309;
+}
+.worker-upgrade-arch {
+  /* Slate — informational, "we know but can't act". */
+  background: #6b7280;
+  color: #f9fafb;
+  border: 1px solid #4b5563;
+}
+.worker-upgrade-unknown {
+  /* Faded — pre-Phase-I worker, transient state until restart. */
+  background: transparent;
+  color: #9ca3af;
+  border: 1px dashed #6b7280;
+}

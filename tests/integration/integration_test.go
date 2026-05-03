@@ -253,7 +253,15 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 
 	// Construct DB URL
 	dbURL := fmt.Sprintf("postgres://test:test@%s:%s/scitq_test?sslmode=disable", host, pgPort.Port())
-	fmt.Println("Using Database URL:", dbURL)
+	// Use t.Logf — *not* fmt.Println — so this debug doesn't land on
+	// os.Stdout. captureOutput in runCLICommand swaps os.Stdout globally
+	// while running a CLI command (e.g. `scitq login`); a parallel test
+	// calling startServerForTest at the same moment would inject this line
+	// into the captured output, producing a token like "Using Database
+	// URL: ...\n<JWT>". The embedded \n then trips gRPC's metadata
+	// validator with "non-printable ASCII characters" the next time the
+	// caller uses that "token" as the authorization header.
+	t.Logf("Using Database URL: %s", dbURL)
 
 	// Temp dirs (unique per test)
 	baseTmp := t.TempDir()
