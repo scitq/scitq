@@ -106,6 +106,8 @@ const (
 	TaskQueue_GetTaskStatusCounts_FullMethodName       = "/taskqueue.TaskQueue/GetTaskStatusCounts"
 	TaskQueue_SignalTask_FullMethodName                = "/taskqueue.TaskQueue/SignalTask"
 	TaskQueue_ServerVersion_FullMethodName             = "/taskqueue.TaskQueue/ServerVersion"
+	TaskQueue_RequestWorkerUpgrade_FullMethodName      = "/taskqueue.TaskQueue/RequestWorkerUpgrade"
+	TaskQueue_GetClientUpgradeInfo_FullMethodName      = "/taskqueue.TaskQueue/GetClientUpgradeInfo"
 )
 
 // TaskQueueClient is the client API for TaskQueue service.
@@ -210,6 +212,16 @@ type TaskQueueClient interface {
 	// detect a version mismatch. Cheap, unauthenticated lookup — version
 	// info is not a secret. See specs/worker_autoupgrade.md (Phase I).
 	ServerVersion(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ServerVersionResponse, error)
+	// Operator-triggered worker upgrade. Sets worker.upgrade_requested
+	// for the given workers; the worker reads the column from its next
+	// ping response and acts (idle-wait or drain). See
+	// specs/worker_autoupgrade.md (Phase II).
+	RequestWorkerUpgrade(ctx context.Context, in *WorkerUpgradeRequest, opts ...grpc.CallOption) (*WorkerUpgradeReply, error)
+	// Returns the URL the worker should download a fresh client binary
+	// from (and the matching sha256 sibling URL). Both URLs already
+	// include the auth token in their query string. Authenticated.
+	// See specs/worker_autoupgrade.md (Phase II).
+	GetClientUpgradeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ClientUpgradeInfo, error)
 }
 
 type taskQueueClient struct {
@@ -1101,6 +1113,26 @@ func (c *taskQueueClient) ServerVersion(ctx context.Context, in *emptypb.Empty, 
 	return out, nil
 }
 
+func (c *taskQueueClient) RequestWorkerUpgrade(ctx context.Context, in *WorkerUpgradeRequest, opts ...grpc.CallOption) (*WorkerUpgradeReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerUpgradeReply)
+	err := c.cc.Invoke(ctx, TaskQueue_RequestWorkerUpgrade_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) GetClientUpgradeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ClientUpgradeInfo, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClientUpgradeInfo)
+	err := c.cc.Invoke(ctx, TaskQueue_GetClientUpgradeInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskQueueServer is the server API for TaskQueue service.
 // All implementations must embed UnimplementedTaskQueueServer
 // for forward compatibility.
@@ -1203,6 +1235,16 @@ type TaskQueueServer interface {
 	// detect a version mismatch. Cheap, unauthenticated lookup — version
 	// info is not a secret. See specs/worker_autoupgrade.md (Phase I).
 	ServerVersion(context.Context, *emptypb.Empty) (*ServerVersionResponse, error)
+	// Operator-triggered worker upgrade. Sets worker.upgrade_requested
+	// for the given workers; the worker reads the column from its next
+	// ping response and acts (idle-wait or drain). See
+	// specs/worker_autoupgrade.md (Phase II).
+	RequestWorkerUpgrade(context.Context, *WorkerUpgradeRequest) (*WorkerUpgradeReply, error)
+	// Returns the URL the worker should download a fresh client binary
+	// from (and the matching sha256 sibling URL). Both URLs already
+	// include the auth token in their query string. Authenticated.
+	// See specs/worker_autoupgrade.md (Phase II).
+	GetClientUpgradeInfo(context.Context, *emptypb.Empty) (*ClientUpgradeInfo, error)
 	mustEmbedUnimplementedTaskQueueServer()
 }
 
@@ -1470,6 +1512,12 @@ func (UnimplementedTaskQueueServer) SignalTask(context.Context, *TaskSignalReque
 }
 func (UnimplementedTaskQueueServer) ServerVersion(context.Context, *emptypb.Empty) (*ServerVersionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ServerVersion not implemented")
+}
+func (UnimplementedTaskQueueServer) RequestWorkerUpgrade(context.Context, *WorkerUpgradeRequest) (*WorkerUpgradeReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestWorkerUpgrade not implemented")
+}
+func (UnimplementedTaskQueueServer) GetClientUpgradeInfo(context.Context, *emptypb.Empty) (*ClientUpgradeInfo, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetClientUpgradeInfo not implemented")
 }
 func (UnimplementedTaskQueueServer) mustEmbedUnimplementedTaskQueueServer() {}
 func (UnimplementedTaskQueueServer) testEmbeddedByValue()                   {}
@@ -3015,6 +3063,42 @@ func _TaskQueue_ServerVersion_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_RequestWorkerUpgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerUpgradeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).RequestWorkerUpgrade(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_RequestWorkerUpgrade_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).RequestWorkerUpgrade(ctx, req.(*WorkerUpgradeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_GetClientUpgradeInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetClientUpgradeInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetClientUpgradeInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetClientUpgradeInfo(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskQueue_ServiceDesc is the grpc.ServiceDesc for TaskQueue service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3353,6 +3437,14 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ServerVersion",
 			Handler:    _TaskQueue_ServerVersion_Handler,
+		},
+		{
+			MethodName: "RequestWorkerUpgrade",
+			Handler:    _TaskQueue_RequestWorkerUpgrade_Handler,
+		},
+		{
+			MethodName: "GetClientUpgradeInfo",
+			Handler:    _TaskQueue_GetClientUpgradeInfo_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -17,11 +17,15 @@ The driving picture for this spec:
    `scitq worker list` shows a status column / `--needs-upgrade` filter so
    an operator can see, at a glance, which slice of the fleet is running
    stale code and decide whether (and when) to redeploy.
-5. **Phase II — Apply (worker only, amd64 only).** Once Phase I is in,
-   workers can actually upgrade themselves on top of it: download the new
-   binary, drain or wait for idle, restart. Two urgency modes
-   (non-emergency idle-wait vs emergency drain). Optional Docker
-   re-attach for in-flight runs.
+5. **Phase II — Operator-triggered apply (worker only, amd64 only).**
+   Phase I tells operators which workers are stale; Phase II gives them
+   a button. `scitq worker upgrade <id|--all> [--emergency] [--cancel]`
+   flags workers for upgrade; the worker sees the flag on its next ping
+   and acts: idle-wait by default, drain if `--emergency`. The operator
+   stays in control — bad builds don't propagate without consent, and
+   urgency is the operator's call (it's a property of intent, not of the
+   build itself: the same fix can be urgent for four workers running an
+   affected step and pointless for fifty about to be reaped).
 6. **Phase III — Server self-upgrade.** Today the operator manually waits
    for in-flight admin jobs (worker create/delete, etc.) before kicking
    the server restart. The same job-completion check the server is already
@@ -199,6 +203,12 @@ message ServerVersionResponse {
 }
 ```
 
+(The deployed Phase I includes a fourth `urgent bool` field that was
+intended for an automatic urgency classifier in Phase II. The
+operator-triggered redesign removes that classifier — the field is
+unused and should be dropped as part of Phase II's proto changes,
+before any external caller depends on it.)
+
 Cheap unauthenticated call (the version isn't a secret), so the CLI can
 hit it on connect before the user has logged in. Cache the result for the
 duration of the process.
@@ -251,231 +261,221 @@ comparison entirely, for scripted environments where the noise isn't
 helpful (CI test runners, automated workflows). The `self version`
 command ignores this env var and always reports.
 
-## Phase II — Worker auto-apply (sketched, not in immediate scope)
+## Phase II — Operator-triggered upgrade (worker only, amd64 only)
 
-This part is roughed out so Phase I doesn't paint itself into a corner. It
-is **not** in scope for the immediate implementation. CLI does not get a
-Phase II — see Non-goals.
+### Why operator-triggered, not auto
 
-### Distribution
+Auto-apply on commit-mismatch was the obvious design and the wrong one.
+Two arguments killed it:
 
-The server hosts the worker binary at a versioned URL:
+1. **Bad-build blast radius.** A flawed client binary that auto-deploys
+   to the entire fleet is a single decision that can take down every
+   running task. Detection (Phase I) plus an explicit operator action
+   keeps the operator in the loop without losing convenience — they
+   already get the `⚠️ stale` badge and `worker list --needs-upgrade`,
+   which is enough signal to act.
+2. **"Emergency" is intent, not build identity.** Whether an upgrade
+   is urgent depends on which workers are running which steps right
+   now. The same fix can be urgent for four workers running an
+   affected pipeline and pointless for fifty about to be reaped by the
+   recruiter. The server can't know that. The operator can.
+
+So Phase II ships a **manual trigger, centrally orchestrated**: one
+command flags one or many workers; each worker reads the flag from its
+ping response and acts. The mechanism (download, verify, atomic rename,
+exit, supervisor restart) is unchanged from the original auto-apply
+sketch — only the trigger moves from automatic to operator.
+
+### Trigger surface
 
 ```
-GET /worker/<arch>/<commit>/scitq-client[.sha256]
+scitq worker upgrade <id>           # one worker, normal upgrade (idle wait)
+scitq worker upgrade <id> --emergency   # one worker, drain
+scitq worker upgrade --all          # every worker, normal upgrade
+scitq worker upgrade --all --emergency  # every worker, drain
+scitq worker upgrade <id> --cancel  # clear a pending request
 ```
 
-`<arch>` is one of `linux-amd64` (initially), `linux-arm64`, ...; `<commit>`
-is the full SHA. The server serves the binary it itself was built from —
-i.e. the binaries that match `server.commit`. There are exactly two ways
-this binary gets there:
+Granularity is deliberately just *single ID* and *--all*. Batching by
+step / workflow / arch is left to the shell:
 
-1. The server's own build pipeline produces `scitq-client-<arch>` artifacts
-   alongside `scitq-server` and they're embedded into the server (`embed`
-   directive) or sit next to the server binary on disk.
-2. The server is configured with an external URL (S3 / GitHub release) and
-   redirects to it.
+```
+scitq worker list --needs-upgrade --json | jq -r '.[].id' | \
+    xargs -I{} scitq worker upgrade {}
+```
 
-Phase 2 chooses (1) for amd64. (2) becomes interesting only when we cross
-arches.
+`--needs-upgrade` already filters out workers the operator shouldn't
+bother with (up-to-date and unsupported_arch); the loop is one line.
+We can add native filters later if real usage demands it.
 
-### Trigger urgency: emergency vs. non-emergency
+`--emergency` on an idle worker behaves identically to a normal upgrade
+(both wait for idle; an idle worker is already idle). The server doesn't
+refuse it — let the operator drive, keep the server dumb.
 
-Not every upgrade is equally urgent. A point-release with a fetch-layer fix
-can wait until the worker is naturally idle — running tasks are still
-correct, they're just running on a slightly older binary. A breaking
-protocol change, by contrast, has to land *now* or in-flight tasks will
-fail outright.
+### Server side
 
-Workers therefore distinguish two modes:
+A new column tracks pending requests per worker:
 
-| Mode | When it applies | What the worker does |
-|---|---|---|
-| **non-emergency** | default for any commit-difference upgrade | wait for natural idle (no `D`/`U`/`R` tasks); never preempt anything |
-| **emergency** | server flags this build as breaking | actively *create* an idle window: stop accepting new task slots, let in-flight `D`/`U`/`R` finish (with optional Docker re-attach for `R`), restart |
+```sql
+ALTER TABLE worker
+    ADD COLUMN upgrade_requested TEXT;     -- NULL | 'normal' | 'emergency'
+```
 
-The classification is computed by the **server** and reported alongside
-the expected commit. The worker doesn't second-guess — if the server says
-emergency, the worker drains.
-
-#### What makes an upgrade emergency
-
-Two triggers, OR'd:
-
-1. **Major-version bump** detected from the version strings on either side.
-   `v0.7.x → v0.7.y` is non-emergency; `v0.7.x → v0.8.0` (or any change in
-   the leading two semver components) is automatically emergency. Major
-   bumps are reserved for breaking protocol/runtime changes, so this is
-   safe by construction.
-
-2. **Opt-in marker on the build.** A new ldflag `internal/version.Urgent`
-   set to `"true"` at build time marks an arbitrary commit as emergency
-   even within a minor-version stream. Set it on the build command when
-   merging a fix that breaks running workers (the recent reuse-redirect
-   driver bug, for instance, would have warranted it: stale workers
-   continued to silently corrupt downstream tasks). Default is `"false"`.
-
-The server reads its own `version.Urgent` and sends it in the
-`expected_commit` response payload:
+A new admin RPC sets it:
 
 ```proto
-message ServerVersionResponse {
-    string version = 1;
-    string commit = 2;
-    string build_arch = 3;
-    bool urgent = 4;          // server build was marked urgent
+rpc RequestWorkerUpgrade(WorkerUpgradeRequest) returns (WorkerUpgradeReply);
+
+message WorkerUpgradeRequest {
+    repeated int32 worker_ids = 1;     // empty + all=true means every worker
+    bool all = 2;
+    string mode = 3;                   // 'normal' | 'emergency' | 'cancel'
+}
+
+message WorkerUpgradeReply {
+    repeated int32 affected_worker_ids = 1;
 }
 ```
 
-The combined "is this an emergency upgrade for *this* worker" decision
-lives in a pure helper, easy to unit-test:
+`mode='cancel'` clears the column to NULL.
 
-```go
-func UpgradeMode(workerVersion, serverVersion string, serverUrgent bool) Mode {
-    if majorOrMinorChanged(workerVersion, serverVersion) { return Emergency }
-    if serverUrgent                                       { return Emergency }
-    return NonEmergency
+The ping response carries the current value back to the worker:
+
+```proto
+message TaskQueueClientResponse {
+    // ... existing fields ...
+    string upgrade_requested = N;     // '' | 'normal' | 'emergency'
 }
 ```
 
-### Worker-side flow — non-emergency
+The server sets the column once and lets the worker pick it up on its
+next ping. The flag is *latched*: a busy worker with `upgrade_requested
+= 'normal'` keeps seeing it on every ping until either it acts (clears
+the column itself once it has restarted on the new commit, via
+RegisterWorker — same commit means request fulfilled, server clears it)
+or the operator cancels.
+
+### Worker-side flow — normal (`upgrade_requested='normal'`)
 
 ```
-on RegisterWorker / ping response:
-    if mismatch and arch matches and mode == non-emergency:
-        schedule an upgrade attempt
-        wait for full idle, then upgrade
+1. Wait for full idle: no tasks of this worker in any of D / U / V / R.
+   Continue accepting new task slots while waiting — the operator chose
+   normal precisely because they don't want to preempt work.
+2. Download:
+     curl -ksSL https://<server>/scitq-client?token=<t>      -> /var/lib/scitq/scitq-client.new
+     curl -ksSL https://<server>/scitq-client.sha256?token=<t> -> sha
+3. Verify: sha matches sha256(scitq-client.new). Mismatch → log,
+   abort this attempt, leave column set, retry on next idle window.
+4. Emit worker_event 'upgrade_starting' (mode=normal).
+5. atomic rename(scitq-client.new, /usr/local/bin/scitq-client).
+   Linux unlink-while-open keeps the running process alive.
+6. Exit cleanly. Supervisor (systemd / docker --restart unless-stopped /
+   the launch script) restarts on the new binary.
+7. New binary calls RegisterWorker with new commit; server sees match,
+   clears upgrade_requested.
 ```
 
-**Full idle** = no tasks of this worker in any of: `D` (downloading
-inputs/resources), `U` / `V` (uploading outputs), `R` (running). Note all
-three — leaving a `U` mid-flight would lose its output, so uploads count
-just as much as downloads and runs do.
+**Full idle** = no tasks of this worker in `D`, `U`, `V`, or `R`. All
+four — losing a `U` mid-flight forfeits the output, so uploads count as
+much as runs.
 
-The worker does not stop *accepting* new tasks while waiting; it just
-won't trigger the upgrade until the queue empties on its own. On a busy
-fleet this can take an arbitrary amount of time, which is fine: the
-upgrade isn't urgent.
+### Worker-side flow — emergency (`upgrade_requested='emergency'`)
 
-Once idle:
+The worker has to *force* an idle window:
 
 ```
-1. Download new binary to /var/lib/scitq/scitq-client.new
-2. Verify SHA-256 against the server-supplied checksum
-3. Atomically rename(...) — Linux unlink-while-open keeps the running process alive
-4. Emit a "going down for upgrade" worker_event so it shows in the audit trail
-5. Exit cleanly. The supervisor (systemd / docker --restart unless-stopped /
-   the launch script) restarts the worker on the new binary.
+1. Set worker status to 'draining'. Server stops handing out new task
+   assignments to this worker. Existing assignments are not revoked.
+2. Allow in-flight D / U / V to finish (short, bounded, lose data if
+   interrupted).
+3. Wait for in-flight R tasks (Docker) to finish.
+   - Hard timeout: 30 minutes. After that, force-kill remaining
+     containers and proceed (the operator chose emergency knowing this).
+   - Force-killed tasks are marked F with reason 'killed by emergency
+     upgrade'; they'll be retried by normal scheduling once the new
+     binary is up.
+4. Once drained, run steps 2–7 of the normal flow.
 ```
 
-The supervisor-restart path is preferable to `exec`-in-place: no
-in-process gymnastics, no half-state, the gRPC stream is cleanly closed,
-and any goroutine leaks die with the parent.
+Docker re-attach (worker exits while leaving `R` containers alive,
+re-attaches after restart) is a Phase 2.5 optimisation. Out of scope
+for v1: simpler to wait or kill. We can add it when measured drain
+latency justifies the state-file invariant cost.
 
-### Worker-side flow — emergency
+### Distribution: existing endpoint, plus checksum
 
-The worker has to *force* an idle window, not wait for one. The plan:
+The server already serves the worker binary at:
 
 ```
-on emergency upgrade detection:
-    1. Set worker status to "draining" — server stops handing out new
-       task assignments to this worker. Existing assignments are not
-       revoked.
-    2. Allow currently in-flight D/U operations to finish (they are
-       short, bounded, and lose data if interrupted).
-    3. For currently-running R tasks (Docker), one of two paths:
-         a) Wait for them to finish (simple, may be slow if a task is long)
-         b) (Optional optimisation) Detach the worker from the container
-            without killing it. Persist {task_id → docker_container_id}
-            to /var/lib/scitq/in-flight-tasks.json before detaching.
-            On restart, the new binary scans that file, reattaches via
-            `docker logs --follow <id>` for each, and resumes the
-            stdout/stderr capture + exit-code-and-upload sequence.
-       Choose (a) for the first emergency-mode implementation; (b) is a
-       latency win we can add later when we have appetite for the state-
-       file invariant.
-    4. Once drained, do steps 1–5 of the non-emergency flow.
+GET /scitq-client?token=<cfg.Scitq.ClientDownloadToken>
 ```
 
-The "queued actions to redo" naturally fall out of the restart: the new
-binary registers, the server sees its task assignments still exist, and
-hands them back. No special server-side bookkeeping needed for that.
+(see `server/http.go:48`, used by Azure / OpenStack cloud-init scripts
+at worker provisioning). Phase II reuses it — the same single-file model
+(`cfg.Scitq.ClientBinaryPath` co-deployed with the server binary) covers
+both new-worker bootstrap and existing-worker upgrade. **No new
+endpoint, no commit/arch namespacing.** The implicit contract is
+"operators co-deploy server + client binaries", which we already rely on.
 
-#### Docker re-attach (optional, advanced)
+The one addition is a tamper-detection sibling:
 
-The reason this is "advanced" and not in the first cut:
+```
+GET /scitq-client.sha256?token=<cfg.Scitq.ClientDownloadToken>
+```
 
-- We have to be sure the container hasn't already exited between the
-  worker writing the state file and the worker dying. A stale entry on
-  restart needs a container-still-running check before we trust it.
-- If the new binary changed how outputs are uploaded (e.g. a new
-  metadata field), the half-finished task picks up the new behaviour
-  mid-flight. Usually fine but a sharp edge.
-- If the supervisor restart loop kills the container (some systemd
-  setups kill the whole cgroup), re-attach is moot — we'd just lose the
-  task. The `docker run --label scitq-task=<id>` + `--detach` lifecycle
-  needs to outlive the supervisor's child-cleanup.
-
-For the first emergency-mode cut, simpler is better: drain by waiting.
-Re-attach is a Phase 2.5 optimisation we can add when we measure the
-cost of the simple wait and find it unacceptable.
+Streams the SHA-256 hex of the file at `cfg.Scitq.ClientBinaryPath`,
+gated by the same token as the binary itself. Cached keyed by the
+binary's `(mtime, size)` so repeated calls don't re-hash 30 MB on every
+request. Workers verify the binary they just downloaded against this
+hash before the atomic rename.
 
 ### Failure modes
 
-- **Download fails / hash mismatch**: log, skip this attempt, retry on next
-  poll. The worker keeps running on its old binary.
-- **New binary refuses to start**: the supervisor will restart it; if it
-  keeps crashing, it'll eventually be in a crashloop. We need a safety
-  rail: the worker writes the *previous* binary path to disk before the
-  rename, and the supervisor's restart logic falls back to it after N
-  failed starts. Simpler version for v1: don't try to be clever; let it
-  crashloop and surface that in `worker list` (status `crashing`). The
-  operator manually rolls back.
-- **Upgrade triggered mid-task**: the idle gate prevents this. The worker
-  runs every running task to completion (or to its own error) before
-  upgrading.
-- **Two workers race the same server reload**: not a problem — each worker
-  decides independently based on its own idle state.
-- **Architecture not amd64**: the `unsupported_arch` status path means the
-  upgrade trigger never fires. The worker sits forever on its build,
-  visible in `worker list`. Acceptable until we add arm64 binaries.
+- **Download / SHA mismatch.** Log, abort, leave `upgrade_requested`
+  set, retry on next idle window. Worker stays on its old binary.
+- **New binary refuses to start.** Supervisor restarts it; if it
+  crashloops, it shows up in `worker list` as `crashing`. v1 keeps it
+  simple and lets the operator roll back manually (the `--cancel` flag
+  is no help once the worker has already restarted on the bad binary —
+  operator action is `scp` the old binary back into place, restart).
+  A bake-then-rename safety rail (boot on the new binary in a child
+  process and require a self-test before swap) is a future hardening
+  step.
+- **Upgrade requested mid-task.** Idle gate (normal) or drain (emergency)
+  handles it.
+- **Architecture mismatch.** Worker checks `worker.build_arch` on
+  receiving `upgrade_requested`. If not `linux/amd64`, it emits a
+  worker_event `'upgrade_refused_arch'`, leaves the flag in place (so
+  the operator sees it persist in `scitq worker list`), and does
+  nothing. Operator clears it with `--cancel`.
+- **Server rebuilt before worker upgraded.** The fetched binary is
+  always whatever the server has on disk *now*. If the server bounced
+  to a newer commit between the operator's request and the worker's
+  idle window, the worker upgrades to the latest. That's fine —
+  forward progress.
 
 ### Open questions
 
-- **Do permanent workers (manual, not provider-deployed) opt-in?** Default
-  behaviour for permanent workers should probably be: report status,
-  do not auto-apply (non-emergency). Operators opt in with `--auto-upgrade`
-  on `scitq worker create`. Provider-deployed workers (cloud VMs created by
-  a recruiter) auto-apply by default — they're disposable. **Emergency
-  mode overrides this**: if the server flags the build as urgent, every
-  worker drains and restarts regardless of the opt-in. Otherwise an urgent
-  fix can't reach the fleet, which defeats the point of the marker.
-- **How is the upgrade observed by users?** Probably as a worker_event of
-  class `lifecycle` with payload `{from: "<old commit>", to: "<new commit>",
-  mode: "emergency"|"non-emergency", duration_ms:
-  <download+drain+verify+restart>}`. Surfaces in the UI's worker events
-  tab.
-- **What if the server is rolled back?** The same comparison flips: workers
-  whose commit was the new one now show `needs_upgrade`. They'd download
-  the older binary on the next idle window (or drain immediately, if the
-  rollback is itself flagged urgent). That's correct — we follow the
-  server. (If the operator wanted to pin the fleet to a specific commit
-  irrespective of server rebuilds, that's a different feature: `pin_worker
-  <commit>`.)
-- **`Urgent` flag at build time vs. at deploy time.** The spec puts it on
-  the binary (ldflag). Alternative: a server-side runtime toggle (`scitq
-  admin urgent on`) that flips the ServerVersionResponse field without a
-  rebuild. Build-time is more honest (the urgency travels with the code
-  that needs it) but operationally less flexible. Open: do we need both?
-  Probably not for v1; revisit if we ever wish we'd flagged a *prior*
-  build as urgent after the fact.
-- **Drain timeout.** Emergency drain waits for in-flight tasks. What if a
-  task takes 8 hours? Hard time bound (e.g. drain at most 30 minutes,
-  then force-kill remaining containers and restart anyway) — the
-  emergency presumably matters more than one task. Soft suggestion: the
-  drain timeout is itself part of the emergency marker payload, so a
-  particularly nasty bug can declare "drain at most 60 seconds, then
-  pull the rug."
+- **Permanent workers.** A permanent worker (manually created, no
+  provider) is exactly as eligible as a recruited one — the operator
+  triggers explicitly per-worker or via `--all`. No `--auto-upgrade`
+  opt-in needed; there is no auto. (This was the only place in the old
+  spec where permanent / recruited workers diverged. Operator-trigger
+  removes the distinction.)
+- **Worker_event surface.** Lifecycle events to emit:
+  `upgrade_requested` (server side, when the column is set),
+  `upgrade_starting` / `upgrade_complete` / `upgrade_failed` (worker
+  side). Payload: `{from: <old commit>, to: <new commit>, mode:
+  normal|emergency, duration_ms: ...}`.
+- **`scitq worker upgrade --all` size.** On a fleet of 200 workers,
+  `--all --emergency` would drain everything at once — almost certainly
+  not what the operator wants. Should the CLI prompt "you are about to
+  drain N workers, continue?" for `--all`? Lean yes for `--emergency
+  --all`, no for plain `--all` (idle wait is harmless). Cheap to add.
+- **Drain timeout configurability.** Hard 30-min cap is a default;
+  exposing it as a flag (`--drain-timeout 5m`) is one line and worth
+  doing if any operator ever runs into a task that legitimately needs
+  longer than 30 minutes.
 
 ## Phase III — Server self-upgrade window (sketched)
 
@@ -514,10 +514,11 @@ nuclear option of restarting the process directly. Phase III is the
 *non-emergency* automation; the existing manual restart remains the
 emergency path.
 
-Phase III does **not** require a new Urgent flag and does **not** read
-`internal/version.Urgent`. It's the operator's own choice to trigger the
-self-upgrade; the server doesn't second-guess based on what the new build
-contains.
+Phase III is operator-triggered the same way Phase II is — `scitq admin
+self-upgrade` is the explicit action; the server never decides on its
+own to restart. Symmetry with Phase II's design: the system surfaces
+state (version mismatch, active jobs) and waits for an operator to
+press the button.
 
 Open questions for Phase III:
 
@@ -544,13 +545,19 @@ Open questions for Phase III:
    behavioural change for workers beyond the extra fields on register.
 2. Run for a release cycle. Operators get visibility into the upgrade
    lag and manually redeploy `--needs-upgrade` workers.
-3. **Phase II — Worker auto-apply (amd64)**: distribution endpoint,
-   urgency classifier (major-bump detection + `Urgent` ldflag), worker
-   idle gate or drain, atomic rename, supervisor restart. Add a
-   `--auto-upgrade` server config (default off) to gate the rollout,
-   then enable by default once we've watched a few rebuilds.
+3. **Phase II — Operator-triggered upgrade (amd64)**:
+   `worker.upgrade_requested` column, `RequestWorkerUpgrade` RPC,
+   `scitq worker upgrade [<id>|--all] [--emergency] [--cancel]` CLI,
+   `/scitq-client.sha256` checksum endpoint, worker idle-wait + drain
+   flows, supervisor restart. No server-side urgency classification —
+   the operator picks the mode per invocation. No `--auto-upgrade`
+   config (there is no auto).
 4. **Phase II.5 — Multi-arch distribution**: arm64. Punted until we
-   actually run an arm64 fleet in production.
+   actually run an arm64 fleet in production. When it lands, the
+   `/scitq-client?token=...` endpoint grows arch-aware: either an
+   `?arch=linux-arm64` query param or a sibling
+   `/scitq-client/<arch>?token=...` path. Workers send `build_arch`
+   with the request so the server returns the matching binary.
 5. **Phase III — Server self-upgrade window**: `scitq admin self-upgrade`,
    active-jobs gate, `upgrade_in_progress` ping flag, supervisor restart.
    Independent of Phases I/II — can land in any order after Phase I, but
@@ -558,21 +565,32 @@ Open questions for Phase III:
    live (worker fleet rolls forward without intervention while the server
    self-upgrades).
 
-## Files & components touched (Phase I)
+## Files & components touched (Phase I — done)
 
 | Area | File / module | Change |
 |---|---|---|
-| proto | `proto/taskqueue.proto` | add `version`, `commit`, `build_arch` to `WorkerInfo` and `Worker`; add `ServerVersion` RPC + `ServerVersionResponse` (with `urgent` field, reserved for Phase 2 but defined now to avoid a later proto bump); regen via `make proto-all` |
-| version | `internal/version/version.go` | add `Urgent string = "false"` ldflag-injected var; helper `IsUrgent() bool` for cleanliness |
-| migration | new `server/migrations/000026_worker_build_info.up.sql` | add the three columns to `worker` |
+| proto | `proto/taskqueue.proto` | add `version`, `commit`, `build_arch` to `WorkerInfo` and `Worker`; add `ServerVersion` RPC + `ServerVersionResponse`; regen via `make proto-all` |
+| migration | `server/migrations/000026_worker_build_info.up.sql` | add the three columns to `worker` |
 | server | `server/server.go` (`RegisterWorker`, list-workers query, new `ServerVersion`) | persist incoming fields; project derived `status`; expose own version |
-| server | new helper `server/version_compare.go` | pure function `func WorkerStatus(workerArch, workerCommit, serverCommit string) string` |
+| server | `server/version_compare.go` | pure function `WorkerUpgradeStatus(workerArch, workerCommit, serverCommit) string` |
 | client | `client/client.go` (registration) | populate `WorkerInfo.version` etc. from `internal/version` and `runtime.GOOS`/`runtime.GOARCH` |
 | CLI | `cli/cli.go` (post-connect hook) | call `ServerVersion`, compare to local commit, print stderr warning if mismatched (skipped if `SCITQ_NO_VERSION_CHECK=1`) |
-| CLI | `cli/cli.go` (`worker list`) | new column, `--needs-upgrade` filter |
+| CLI | `cli/cli.go` (`worker list`) | version/commit/arch columns, `--needs-upgrade` filter, badge rendering |
 | CLI | `cli/cli.go` (new `self version`) | print local + server build info and the comparison |
-| UI | `ui/src/routes/.../workers.svelte` | status badge, filter pill |
-| tests | `tests/integration/worker_version_test.go` | worker registration + status flip integration test |
-| tests | `tests/integration/cli_version_warning_test.go` | CLI prints stderr warning on commit mismatch; suppressed by env var |
+| UI | `ui/src/components/WorkerCompo.svelte` | status badge, tooltip with commit delta |
+| tests | `tests/integration/worker_version_test.go` | worker registration + status flip integration test, `ServerVersion` RPC wire test |
 
-Estimated effort: half a day for Phase 1 wired end-to-end (worker reporting + CLI warning + `self version`). Phase 2 (worker auto-apply) is a separate ~1–2 days.
+## Files & components touched (Phase II — operator-triggered upgrade)
+
+| Area | File / module | Change |
+|---|---|---|
+| proto | `proto/taskqueue.proto` | drop unused `urgent` field from `ServerVersionResponse`; add `upgrade_requested` string to `TaskQueueClientResponse` (ping reply); new `RequestWorkerUpgrade` RPC + `WorkerUpgradeRequest`/`WorkerUpgradeReply` |
+| migration | new `server/migrations/000027_worker_upgrade_request.up.sql` | `ALTER TABLE worker ADD COLUMN upgrade_requested TEXT;` |
+| server | `server/server.go` (`RequestWorkerUpgrade`, ping path, `RegisterWorker`) | new RPC handler (admin-gated); ping projects column into response; RegisterWorker clears column when worker.commit==server.commit |
+| server | `server/http.go` | new handler `GET /scitq-client.sha256?token=...` — streams hex SHA-256 of `cfg.Scitq.ClientBinaryPath`, cached by `(mtime, size)` |
+| server | `server/http_sha256_cache.go` (new, small) | the cache helper for the above |
+| client | `client/client.go` (ping handler, upgrade goroutine) | observe `upgrade_requested`; on `'normal'` wait for full idle then upgrade; on `'emergency'` set status=draining, hard 30-min drain timeout, then upgrade; download from `/scitq-client?token=...`, verify against `/scitq-client.sha256`, atomic rename, exit |
+| CLI | `cli/cli.go` (new `worker upgrade`) | subcommand: positional `<id>` or `--all`, flags `--emergency` / `--cancel`; prompts on `--all --emergency` |
+| tests | `tests/integration/worker_upgrade_test.go` (new) | end-to-end: idle worker normal upgrade, busy worker waits, emergency drain, --cancel, unsupported_arch refusal, SHA mismatch |
+
+Estimated effort: Phase I: done. Phase II: ~1.5 days (the SHA endpoint + RPC + CLI is half a day; the worker idle/drain flow + integration tests is the remainder).

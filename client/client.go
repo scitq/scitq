@@ -749,7 +749,9 @@ func cleanupTaskWorkingDir(store string, taskID int32, reporter *event.Reporter)
 	log.Printf("🧹 Cleaned up working dir for task %d", taskID)
 }
 
-// fetchTasks requests new tasks from the server.
+// fetchTasks requests new tasks from the server. Returns the task list
+// and the operator-triggered upgrade flag (if any) carried in the same
+// ping response.
 func (w *WorkerConfig) fetchTasks(
 	ctx context.Context,
 	client pb.TaskQueueClient,
@@ -758,7 +760,7 @@ func (w *WorkerConfig) fetchTasks(
 	sem *utils.ResizableSemaphore,
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
-) ([]*pb.Task, error) {
+) ([]*pb.Task, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -774,7 +776,7 @@ func (w *WorkerConfig) fetchTasks(
 	res, err := client.PingAndTakeNewTasks(ctx, query)
 	if err != nil {
 		log.Printf("⚠️ Error calling fetch tasks: %v", err)
-		return nil, err
+		return nil, "", err
 	}
 
 	// Apply task weights if any
@@ -934,7 +936,7 @@ func (w *WorkerConfig) fetchTasks(
 		}()
 	}
 
-	return res.Tasks, nil
+	return res.Tasks, res.UpgradeRequested, nil
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
@@ -942,6 +944,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 	store := dm.Store
 
 	var consecErrors int
+	upgradeSup := newUpgradeSupervisor()
 	for {
 		select {
 		case <-ctx.Done():
@@ -995,7 +998,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			break
 		}
 
-		tasks, err := config.fetchTasks(ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
+		tasks, upgradeReq, err := config.fetchTasks(ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -1012,6 +1015,14 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			continue
 		}
 		consecErrors = 0 // Reset error count on success
+
+		// Phase II: operator-triggered upgrade. The supervisor latches
+		// onto a request, optionally puts the worker into draining mode,
+		// waits for in-flight tasks to settle, then performs the swap.
+		// performUpgrade calls os.Exit on success — supervisor restart
+		// brings up the new binary. See specs/worker_autoupgrade.md.
+		upgradeSup.tick(ctx, client, reporter, &config, activeTasks, upgradeReq)
+
 		if len(tasks) == 0 {
 			log.Printf("No tasks available, retrying in 5 seconds...")
 			select {

@@ -465,6 +465,16 @@ class TaskQueueStub(object):
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=taskqueue__pb2.ServerVersionResponse.FromString,
                 _registered_method=True)
+        self.RequestWorkerUpgrade = channel.unary_unary(
+                '/taskqueue.TaskQueue/RequestWorkerUpgrade',
+                request_serializer=taskqueue__pb2.WorkerUpgradeRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.WorkerUpgradeReply.FromString,
+                _registered_method=True)
+        self.GetClientUpgradeInfo = channel.unary_unary(
+                '/taskqueue.TaskQueue/GetClientUpgradeInfo',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=taskqueue__pb2.ClientUpgradeInfo.FromString,
+                _registered_method=True)
 
 
 class TaskQueueServicer(object):
@@ -1003,6 +1013,26 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RequestWorkerUpgrade(self, request, context):
+        """Operator-triggered worker upgrade. Sets worker.upgrade_requested
+        for the given workers; the worker reads the column from its next
+        ping response and acts (idle-wait or drain). See
+        specs/worker_autoupgrade.md (Phase II).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetClientUpgradeInfo(self, request, context):
+        """Returns the URL the worker should download a fresh client binary
+        from (and the matching sha256 sibling URL). Both URLs already
+        include the auth token in their query string. Authenticated.
+        See specs/worker_autoupgrade.md (Phase II).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TaskQueueServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1435,6 +1465,16 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.ServerVersion,
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=taskqueue__pb2.ServerVersionResponse.SerializeToString,
+            ),
+            'RequestWorkerUpgrade': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestWorkerUpgrade,
+                    request_deserializer=taskqueue__pb2.WorkerUpgradeRequest.FromString,
+                    response_serializer=taskqueue__pb2.WorkerUpgradeReply.SerializeToString,
+            ),
+            'GetClientUpgradeInfo': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetClientUpgradeInfo,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=taskqueue__pb2.ClientUpgradeInfo.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -3759,6 +3799,60 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/ServerVersion',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             taskqueue__pb2.ServerVersionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RequestWorkerUpgrade(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/RequestWorkerUpgrade',
+            taskqueue__pb2.WorkerUpgradeRequest.SerializeToString,
+            taskqueue__pb2.WorkerUpgradeReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetClientUpgradeInfo(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/GetClientUpgradeInfo',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            taskqueue__pb2.ClientUpgradeInfo.FromString,
             options,
             channel_credentials,
             insecure,

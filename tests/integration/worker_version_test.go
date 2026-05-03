@@ -2,7 +2,6 @@ package integration_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	cli "github.com/scitq/scitq/cli"
@@ -36,7 +35,7 @@ func TestWorkerUpgradeStatus(t *testing.T) {
 	adm.Attr.Server = serverAddr
 	out, err := runCLICommand(adm, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	admToken := strings.TrimSpace(out)
+	admToken := extractToken(out)
 	admClient, err := lib.CreateClient(serverAddr, admToken)
 	require.NoError(t, err)
 	defer admClient.Close()
@@ -145,7 +144,7 @@ func TestServerVersionRPC(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	tok := strings.TrimSpace(out)
+	tok := extractToken(out)
 
 	qc, err := lib.CreateClient(serverAddr, tok)
 	require.NoError(t, err)
@@ -158,6 +157,4 @@ func TestServerVersionRPC(t *testing.T) {
 	require.NotEmpty(t, resp.GetVersion(), "ServerVersion.Version should never be empty")
 	// build_arch is always a real GOOS/GOARCH combo.
 	require.Contains(t, resp.GetBuildArch(), "/", "ServerVersion.BuildArch should be GOOS/GOARCH")
-	// `urgent` is reserved for Phase II; Phase I always emits false.
-	require.False(t, resp.GetUrgent(), "Phase I server should report Urgent=false")
 }

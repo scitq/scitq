@@ -78,10 +78,6 @@ export interface ServerVersionResponse {
      * @generated from protobuf field: string build_arch = 3
      */
     buildArch: string; // GOOS/GOARCH (informational)
-    /**
-     * @generated from protobuf field: bool urgent = 4
-     */
-    urgent: boolean; // reserved for Phase II — server build is flagged urgent
 }
 /**
  * @generated from protobuf message taskqueue.TaskRequest
@@ -562,6 +558,13 @@ export interface Worker {
      * @generated from protobuf field: optional string upgrade_status = 23
      */
     upgradeStatus?: string;
+    /**
+     * Pending operator-triggered upgrade request, if any. Phase II.
+     * "" | "normal" | "emergency".
+     *
+     * @generated from protobuf field: optional string upgrade_requested = 24
+     */
+    upgradeRequested?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -580,6 +583,54 @@ export interface ListWorkersRequest {
      * @generated from protobuf field: optional int32 workflow_id = 1
      */
     workflowId?: number;
+}
+/**
+ * Phase II: operator triggers an upgrade on one or many workers.
+ * `worker_ids` carries the targets; if `all` is true, worker_ids is
+ * ignored and every worker (matching arch/commit guard server-side) is
+ * flagged. `mode` is "normal", "emergency", or "cancel".
+ *
+ * @generated from protobuf message taskqueue.WorkerUpgradeRequest
+ */
+export interface WorkerUpgradeRequest {
+    /**
+     * @generated from protobuf field: repeated int32 worker_ids = 1
+     */
+    workerIds: number[];
+    /**
+     * @generated from protobuf field: bool all = 2
+     */
+    all: boolean;
+    /**
+     * @generated from protobuf field: string mode = 3
+     */
+    mode: string;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerUpgradeReply
+ */
+export interface WorkerUpgradeReply {
+    /**
+     * @generated from protobuf field: repeated int32 affected_worker_ids = 1
+     */
+    affectedWorkerIds: number[];
+}
+/**
+ * @generated from protobuf message taskqueue.ClientUpgradeInfo
+ */
+export interface ClientUpgradeInfo {
+    /**
+     * @generated from protobuf field: string binary_url = 1
+     */
+    binaryUrl: string; // GET → bytes; auth token already embedded
+    /**
+     * @generated from protobuf field: string sha256_url = 2
+     */
+    sha256Url: string; // GET → hex digest; auth token already embedded
+    /**
+     * @generated from protobuf field: bool insecure_skip_verify = 3
+     */
+    insecureSkipVerify: boolean; // server uses an embedded self-signed cert; worker should skip TLS verify
 }
 /**
  * @generated from protobuf message taskqueue.TaskUpdate
@@ -642,6 +693,15 @@ export interface TaskListAndOther {
      * @generated from protobuf field: repeated taskqueue.TaskSignal signals = 6
      */
     signals: TaskSignal[]; // tasks to signal on this worker
+    /**
+     * Operator-triggered upgrade flag. Empty = no request; "normal" =
+     * wait for full idle then upgrade; "emergency" = drain in-flight
+     * tasks (hard 30-min cap) then upgrade. See
+     * specs/worker_autoupgrade.md (Phase II).
+     *
+     * @generated from protobuf field: string upgrade_requested = 7
+     */
+    upgradeRequested: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskSignalRequest
@@ -3219,8 +3279,7 @@ class ServerVersionResponse$Type extends MessageType<ServerVersionResponse> {
         super("taskqueue.ServerVersionResponse", [
             { no: 1, name: "version", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "commit", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "build_arch", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "urgent", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 3, name: "build_arch", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<ServerVersionResponse>): ServerVersionResponse {
@@ -3228,7 +3287,6 @@ class ServerVersionResponse$Type extends MessageType<ServerVersionResponse> {
         message.version = "";
         message.commit = "";
         message.buildArch = "";
-        message.urgent = false;
         if (value !== undefined)
             reflectionMergePartial<ServerVersionResponse>(this, message, value);
         return message;
@@ -3246,9 +3304,6 @@ class ServerVersionResponse$Type extends MessageType<ServerVersionResponse> {
                     break;
                 case /* string build_arch */ 3:
                     message.buildArch = reader.string();
-                    break;
-                case /* bool urgent */ 4:
-                    message.urgent = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3271,9 +3326,6 @@ class ServerVersionResponse$Type extends MessageType<ServerVersionResponse> {
         /* string build_arch = 3; */
         if (message.buildArch !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.buildArch);
-        /* bool urgent = 4; */
-        if (message.urgent !== false)
-            writer.tag(4, WireType.Varint).bool(message.urgent);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4292,7 +4344,8 @@ class Worker$Type extends MessageType<Worker> {
             { no: 20, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 21, name: "commit", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 22, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 23, name: "upgrade_status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 23, name: "upgrade_status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 24, name: "upgrade_requested", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -4387,6 +4440,9 @@ class Worker$Type extends MessageType<Worker> {
                 case /* optional string upgrade_status */ 23:
                     message.upgradeStatus = reader.string();
                     break;
+                case /* optional string upgrade_requested */ 24:
+                    message.upgradeRequested = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4468,6 +4524,9 @@ class Worker$Type extends MessageType<Worker> {
         /* optional string upgrade_status = 23; */
         if (message.upgradeStatus !== undefined)
             writer.tag(23, WireType.LengthDelimited).string(message.upgradeStatus);
+        /* optional string upgrade_requested = 24; */
+        if (message.upgradeRequested !== undefined)
+            writer.tag(24, WireType.LengthDelimited).string(message.upgradeRequested);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4571,6 +4630,195 @@ class ListWorkersRequest$Type extends MessageType<ListWorkersRequest> {
  * @generated MessageType for protobuf message taskqueue.ListWorkersRequest
  */
 export const ListWorkersRequest = new ListWorkersRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerUpgradeRequest$Type extends MessageType<WorkerUpgradeRequest> {
+    constructor() {
+        super("taskqueue.WorkerUpgradeRequest", [
+            { no: 1, name: "worker_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "all", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "mode", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerUpgradeRequest>): WorkerUpgradeRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerIds = [];
+        message.all = false;
+        message.mode = "";
+        if (value !== undefined)
+            reflectionMergePartial<WorkerUpgradeRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerUpgradeRequest): WorkerUpgradeRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated int32 worker_ids */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.workerIds.push(reader.int32());
+                    else
+                        message.workerIds.push(reader.int32());
+                    break;
+                case /* bool all */ 2:
+                    message.all = reader.bool();
+                    break;
+                case /* string mode */ 3:
+                    message.mode = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerUpgradeRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated int32 worker_ids = 1; */
+        if (message.workerIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.workerIds.length; i++)
+                writer.int32(message.workerIds[i]);
+            writer.join();
+        }
+        /* bool all = 2; */
+        if (message.all !== false)
+            writer.tag(2, WireType.Varint).bool(message.all);
+        /* string mode = 3; */
+        if (message.mode !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.mode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerUpgradeRequest
+ */
+export const WorkerUpgradeRequest = new WorkerUpgradeRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerUpgradeReply$Type extends MessageType<WorkerUpgradeReply> {
+    constructor() {
+        super("taskqueue.WorkerUpgradeReply", [
+            { no: 1, name: "affected_worker_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerUpgradeReply>): WorkerUpgradeReply {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.affectedWorkerIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<WorkerUpgradeReply>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerUpgradeReply): WorkerUpgradeReply {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated int32 affected_worker_ids */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.affectedWorkerIds.push(reader.int32());
+                    else
+                        message.affectedWorkerIds.push(reader.int32());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerUpgradeReply, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated int32 affected_worker_ids = 1; */
+        if (message.affectedWorkerIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.affectedWorkerIds.length; i++)
+                writer.int32(message.affectedWorkerIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerUpgradeReply
+ */
+export const WorkerUpgradeReply = new WorkerUpgradeReply$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ClientUpgradeInfo$Type extends MessageType<ClientUpgradeInfo> {
+    constructor() {
+        super("taskqueue.ClientUpgradeInfo", [
+            { no: 1, name: "binary_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "sha256_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "insecure_skip_verify", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ClientUpgradeInfo>): ClientUpgradeInfo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.binaryUrl = "";
+        message.sha256Url = "";
+        message.insecureSkipVerify = false;
+        if (value !== undefined)
+            reflectionMergePartial<ClientUpgradeInfo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ClientUpgradeInfo): ClientUpgradeInfo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string binary_url */ 1:
+                    message.binaryUrl = reader.string();
+                    break;
+                case /* string sha256_url */ 2:
+                    message.sha256Url = reader.string();
+                    break;
+                case /* bool insecure_skip_verify */ 3:
+                    message.insecureSkipVerify = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ClientUpgradeInfo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string binary_url = 1; */
+        if (message.binaryUrl !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.binaryUrl);
+        /* string sha256_url = 2; */
+        if (message.sha256Url !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.sha256Url);
+        /* bool insecure_skip_verify = 3; */
+        if (message.insecureSkipVerify !== false)
+            writer.tag(3, WireType.Varint).bool(message.insecureSkipVerify);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ClientUpgradeInfo
+ */
+export const ClientUpgradeInfo = new ClientUpgradeInfo$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TaskUpdate$Type extends MessageType<TaskUpdate> {
     constructor() {
@@ -4755,7 +5003,8 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
             { no: 2, name: "concurrency", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "updates", kind: "message", T: () => TaskUpdateList },
             { no: 4, name: "active_tasks", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
-            { no: 6, name: "signals", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => TaskSignal }
+            { no: 6, name: "signals", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => TaskSignal },
+            { no: 7, name: "upgrade_requested", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<TaskListAndOther>): TaskListAndOther {
@@ -4764,6 +5013,7 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
         message.concurrency = 0;
         message.activeTasks = [];
         message.signals = [];
+        message.upgradeRequested = "";
         if (value !== undefined)
             reflectionMergePartial<TaskListAndOther>(this, message, value);
         return message;
@@ -4791,6 +5041,9 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
                     break;
                 case /* repeated taskqueue.TaskSignal signals */ 6:
                     message.signals.push(TaskSignal.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* string upgrade_requested */ 7:
+                    message.upgradeRequested = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4823,6 +5076,9 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
         /* repeated taskqueue.TaskSignal signals = 6; */
         for (let i = 0; i < message.signals.length; i++)
             TaskSignal.internalBinaryWrite(message.signals[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* string upgrade_requested = 7; */
+        if (message.upgradeRequested !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.upgradeRequested);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13061,5 +13317,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "PruneWorkerEvents", options: {}, I: WorkerEventPruneFilter, O: WorkerEventPruneResult },
     { name: "GetTaskStatusCounts", options: {}, I: TaskStatusCountsRequest, O: TaskStatusCountsResponse },
     { name: "SignalTask", options: {}, I: TaskSignalRequest, O: Ack },
-    { name: "ServerVersion", options: {}, I: Empty, O: ServerVersionResponse }
+    { name: "ServerVersion", options: {}, I: Empty, O: ServerVersionResponse },
+    { name: "RequestWorkerUpgrade", options: {}, I: WorkerUpgradeRequest, O: WorkerUpgradeReply },
+    { name: "GetClientUpgradeInfo", options: {}, I: Empty, O: ClientUpgradeInfo }
 ]);

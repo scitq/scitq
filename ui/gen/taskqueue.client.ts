@@ -4,6 +4,9 @@
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { TaskQueue } from "./taskqueue";
+import type { ClientUpgradeInfo } from "./taskqueue";
+import type { WorkerUpgradeReply } from "./taskqueue";
+import type { WorkerUpgradeRequest } from "./taskqueue";
 import type { ServerVersionResponse } from "./taskqueue";
 import type { TaskSignalRequest } from "./taskqueue";
 import type { TaskStatusCountsResponse } from "./taskqueue";
@@ -500,6 +503,24 @@ export interface ITaskQueueClient {
      * @generated from protobuf rpc: ServerVersion
      */
     serverVersion(input: Empty, options?: RpcOptions): UnaryCall<Empty, ServerVersionResponse>;
+    /**
+     * Operator-triggered worker upgrade. Sets worker.upgrade_requested
+     * for the given workers; the worker reads the column from its next
+     * ping response and acts (idle-wait or drain). See
+     * specs/worker_autoupgrade.md (Phase II).
+     *
+     * @generated from protobuf rpc: RequestWorkerUpgrade
+     */
+    requestWorkerUpgrade(input: WorkerUpgradeRequest, options?: RpcOptions): UnaryCall<WorkerUpgradeRequest, WorkerUpgradeReply>;
+    /**
+     * Returns the URL the worker should download a fresh client binary
+     * from (and the matching sha256 sibling URL). Both URLs already
+     * include the auth token in their query string. Authenticated.
+     * See specs/worker_autoupgrade.md (Phase II).
+     *
+     * @generated from protobuf rpc: GetClientUpgradeInfo
+     */
+    getClientUpgradeInfo(input: Empty, options?: RpcOptions): UnaryCall<Empty, ClientUpgradeInfo>;
 }
 /**
  * @generated from protobuf service taskqueue.TaskQueue
@@ -1138,5 +1159,29 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
     serverVersion(input: Empty, options?: RpcOptions): UnaryCall<Empty, ServerVersionResponse> {
         const method = this.methods[85], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, ServerVersionResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * Operator-triggered worker upgrade. Sets worker.upgrade_requested
+     * for the given workers; the worker reads the column from its next
+     * ping response and acts (idle-wait or drain). See
+     * specs/worker_autoupgrade.md (Phase II).
+     *
+     * @generated from protobuf rpc: RequestWorkerUpgrade
+     */
+    requestWorkerUpgrade(input: WorkerUpgradeRequest, options?: RpcOptions): UnaryCall<WorkerUpgradeRequest, WorkerUpgradeReply> {
+        const method = this.methods[86], opt = this._transport.mergeOptions(options);
+        return stackIntercept<WorkerUpgradeRequest, WorkerUpgradeReply>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * Returns the URL the worker should download a fresh client binary
+     * from (and the matching sha256 sibling URL). Both URLs already
+     * include the auth token in their query string. Authenticated.
+     * See specs/worker_autoupgrade.md (Phase II).
+     *
+     * @generated from protobuf rpc: GetClientUpgradeInfo
+     */
+    getClientUpgradeInfo(input: Empty, options?: RpcOptions): UnaryCall<Empty, ClientUpgradeInfo> {
+        const method = this.methods[87], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, ClientUpgradeInfo>("unary", this._transport, method, opt, input);
     }
 }

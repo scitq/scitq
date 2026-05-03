@@ -105,6 +105,16 @@ service TaskQueue {
     // detect a version mismatch. Cheap, unauthenticated lookup — version
     // info is not a secret. See specs/worker_autoupgrade.md (Phase I).
     rpc ServerVersion(google.protobuf.Empty) returns (ServerVersionResponse);
+    // Operator-triggered worker upgrade. Sets worker.upgrade_requested
+    // for the given workers; the worker reads the column from its next
+    // ping response and acts (idle-wait or drain). See
+    // specs/worker_autoupgrade.md (Phase II).
+    rpc RequestWorkerUpgrade(WorkerUpgradeRequest) returns (WorkerUpgradeReply);
+    // Returns the URL the worker should download a fresh client binary
+    // from (and the matching sha256 sibling URL). Both URLs already
+    // include the auth token in their query string. Authenticated.
+    // See specs/worker_autoupgrade.md (Phase II).
+    rpc GetClientUpgradeInfo(google.protobuf.Empty) returns (ClientUpgradeInfo);
 }
 
 message TaskResponse {
@@ -129,7 +139,10 @@ message ServerVersionResponse {
     string version = 1;     // server semver+suffix
     string commit = 2;      // full git SHA
     string build_arch = 3;  // GOOS/GOARCH (informational)
-    bool urgent = 4;        // reserved for Phase II — server build is flagged urgent
+    // (field 4 was `urgent`, intended for an automatic urgency classifier
+    // in Phase II; the operator-triggered redesign removed it.)
+    reserved 4;
+    reserved "urgent";
 }
 
 message TaskRequest {
@@ -281,6 +294,9 @@ message Worker {
     // "up_to_date" | "needs_upgrade" | "unsupported_arch" | "unknown"
     // (unknown = pre-Phase-I worker that didn't report build identity).
     optional string upgrade_status = 23;
+    // Pending operator-triggered upgrade request, if any. Phase II.
+    // "" | "normal" | "emergency".
+    optional string upgrade_requested = 24;
 }
 
 
@@ -290,6 +306,26 @@ message WorkersList {
 
 message ListWorkersRequest {
   optional int32 workflow_id = 1;
+}
+
+// Phase II: operator triggers an upgrade on one or many workers.
+// `worker_ids` carries the targets; if `all` is true, worker_ids is
+// ignored and every worker (matching arch/commit guard server-side) is
+// flagged. `mode` is "normal", "emergency", or "cancel".
+message WorkerUpgradeRequest {
+    repeated int32 worker_ids = 1;
+    bool all = 2;
+    string mode = 3;
+}
+
+message WorkerUpgradeReply {
+    repeated int32 affected_worker_ids = 1;
+}
+
+message ClientUpgradeInfo {
+    string binary_url = 1;     // GET → bytes; auth token already embedded
+    string sha256_url = 2;     // GET → hex digest; auth token already embedded
+    bool insecure_skip_verify = 3;  // server uses an embedded self-signed cert; worker should skip TLS verify
 }
 
 message TaskUpdate {
@@ -312,6 +348,11 @@ message TaskListAndOther {
     TaskUpdateList updates = 3;
     repeated int32 active_tasks = 4;
     repeated TaskSignal signals = 6;  // tasks to signal on this worker
+    // Operator-triggered upgrade flag. Empty = no request; "normal" =
+    // wait for full idle then upgrade; "emergency" = drain in-flight
+    // tasks (hard 30-min cap) then upgrade. See
+    // specs/worker_autoupgrade.md (Phase II).
+    string upgrade_requested = 7;
 }
 
 message TaskSignalRequest {

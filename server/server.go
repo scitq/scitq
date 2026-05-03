@@ -264,10 +264,117 @@ func (s *taskQueueServer) ServerVersion(ctx context.Context, _ *emptypb.Empty) (
 		Version:   version.Version,
 		Commit:    s.serverCommit(),
 		BuildArch: runtime.GOOS + "/" + runtime.GOARCH,
-		// Phase II reads `internal/version.Urgent` here. Phase I emits false.
-		Urgent: false,
 	}
 	return resp, nil
+}
+
+// RequestWorkerUpgrade flags one or many workers for upgrade. The worker
+// reads the resulting column value from its next ping response and acts.
+// See specs/worker_autoupgrade.md (Phase II). Admin-gated.
+func (s *taskQueueServer) RequestWorkerUpgrade(ctx context.Context, req *pb.WorkerUpgradeRequest) (*pb.WorkerUpgradeReply, error) {
+	if !IsAdmin(ctx) {
+		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
+	}
+
+	var dbValue any
+	switch req.Mode {
+	case "normal", "emergency":
+		dbValue = req.Mode
+	case "cancel":
+		dbValue = nil
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "mode must be one of: normal, emergency, cancel (got %q)", req.Mode)
+	}
+
+	if !req.All && len(req.WorkerIds) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "either all=true or worker_ids must be set")
+	}
+
+	var rows *sql.Rows
+	var err error
+	if req.All {
+		rows, err = s.db.Query(`
+			UPDATE worker SET upgrade_requested = $1
+			 WHERE deleted_at IS NULL
+			   AND (upgrade_requested IS DISTINCT FROM $1)
+			RETURNING worker_id
+		`, dbValue)
+	} else {
+		ids := make([]int32, 0, len(req.WorkerIds))
+		ids = append(ids, req.WorkerIds...)
+		rows, err = s.db.Query(`
+			UPDATE worker SET upgrade_requested = $1
+			 WHERE deleted_at IS NULL
+			   AND worker_id = ANY($2)
+			   AND (upgrade_requested IS DISTINCT FROM $1)
+			RETURNING worker_id
+		`, dbValue, pq.Array(ids))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to update upgrade_requested: %w", err)
+	}
+	defer rows.Close()
+
+	var affected []int32
+	for rows.Next() {
+		var id int32
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan affected worker_id: %w", err)
+		}
+		affected = append(affected, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate affected worker rows: %w", err)
+	}
+
+	eventClass := "upgrade_requested"
+	if req.Mode == "cancel" {
+		eventClass = "upgrade_cancelled"
+	}
+	for _, id := range affected {
+		ws.EmitWS("worker", id, "upgrade_requested", struct {
+			WorkerId int32  `json:"workerId"`
+			Mode     string `json:"mode"`
+		}{WorkerId: id, Mode: req.Mode})
+		// Audit-trail event. Best-effort; don't block the RPC on a write failure.
+		if _, err := s.db.Exec(`
+			INSERT INTO worker_event (worker_id, event_class, level, message)
+			VALUES ($1, $2, 'I', $3)
+		`, id, eventClass, fmt.Sprintf("operator requested %s upgrade", req.Mode)); err != nil {
+			log.Printf("⚠️ Failed to record %s event for worker %d: %v", eventClass, id, err)
+		}
+	}
+
+	log.Printf("🛠 RequestWorkerUpgrade: mode=%s affected=%d (all=%v ids=%v)", req.Mode, len(affected), req.All, req.WorkerIds)
+	return &pb.WorkerUpgradeReply{AffectedWorkerIds: affected}, nil
+}
+
+// GetClientUpgradeInfo returns the URLs an authenticated worker should
+// curl to fetch a fresh client binary and its checksum. Token is already
+// embedded — the worker doesn't need to know it. See
+// specs/worker_autoupgrade.md (Phase II).
+func (s *taskQueueServer) GetClientUpgradeInfo(ctx context.Context, _ *emptypb.Empty) (*pb.ClientUpgradeInfo, error) {
+	host := s.cfg.Scitq.ServerFQDN
+	if host == "" {
+		return nil, status.Error(codes.FailedPrecondition, "scitq.server_fqdn is not configured")
+	}
+	var base string
+	if s.cfg.Scitq.DisableHTTPS {
+		// HTTPS off → plain HTTP runs at gRPC port + 1 (see Serve()).
+		base = fmt.Sprintf("http://%s:%d", host, s.cfg.Scitq.Port+1)
+	} else {
+		port := s.cfg.Scitq.HTTPSPort
+		if port == 0 {
+			port = 443
+		}
+		base = fmt.Sprintf("https://%s:%d", host, port)
+	}
+	tok := s.cfg.Scitq.WorkerToken
+	return &pb.ClientUpgradeInfo{
+		BinaryUrl:          fmt.Sprintf("%s/scitq-client?token=%s", base, tok),
+		Sha256Url:          fmt.Sprintf("%s/scitq-client.sha256?token=%s", base, tok),
+		InsecureSkipVerify: !s.cfg.Scitq.DisableHTTPS, // matches the cloud-init `curl -k` posture for embedded self-signed certs
+	}, nil
 }
 
 func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
@@ -2252,6 +2359,20 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 			log.Printf("⚠️ Failed to persist build identity for worker %d: %v", workerID, err)
 		}
 	}
+	// Phase II: a worker re-registering on the server's own commit means
+	// the requested upgrade has landed — clear the pending request so the
+	// next ping doesn't re-fire the upgrade flow. Only act when we have
+	// both commits in hand.
+	if req.Commit != nil && *req.Commit != "" {
+		if sc := s.serverCommit(); sc != "" && *req.Commit == sc {
+			if _, err := tx.Exec(`
+				UPDATE worker SET upgrade_requested = NULL
+				 WHERE worker_id = $1 AND upgrade_requested IS NOT NULL
+			`, workerID); err != nil {
+				log.Printf("⚠️ Failed to clear upgrade_requested for worker %d: %v", workerID, err)
+			}
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Failed to commit worker registration: %v", err)
@@ -3394,19 +3515,20 @@ func (s *taskQueueServer) GetTaskStatusCounts(ctx context.Context, req *pb.TaskS
 
 func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingAndGetNewTasksRequest) (*pb.TaskListAndOther, error) {
 	var (
-		tasks          []*pb.Task
-		concurrency    int32
-		input          pq.StringArray
-		resource       pq.StringArray
-		shell          sql.NullString
-		taskUpdateList = make(map[int32]*pb.TaskUpdate)
-		activeTaskIDs  []int32
+		tasks            []*pb.Task
+		concurrency      int32
+		upgradeReqNull   sql.NullString
+		input            pq.StringArray
+		resource         pq.StringArray
+		shell            sql.NullString
+		taskUpdateList   = make(map[int32]*pb.TaskUpdate)
+		activeTaskIDs    []int32
 	)
 
-	// 1️⃣ Fetch concurrency
+	// 1️⃣ Fetch concurrency + any pending operator-triggered upgrade request.
 	err := s.db.QueryRow(`
-		SELECT concurrency FROM worker WHERE worker_id = $1 AND deleted_at IS NULL
-	`, req.WorkerId).Scan(&concurrency)
+		SELECT concurrency, upgrade_requested FROM worker WHERE worker_id = $1 AND deleted_at IS NULL
+	`, req.WorkerId).Scan(&concurrency, &upgradeReqNull)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("worker ID %d not found", req.WorkerId)
@@ -3521,11 +3643,12 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 	}
 
 	return &pb.TaskListAndOther{
-		Tasks:       tasks,
-		ActiveTasks: activeTaskIDs,
-		Concurrency: concurrency,
-		Updates:     &pb.TaskUpdateList{Updates: taskUpdateList},
-		Signals:     signals,
+		Tasks:            tasks,
+		ActiveTasks:      activeTaskIDs,
+		Concurrency:      concurrency,
+		Updates:          &pb.TaskUpdateList{Updates: taskUpdateList},
+		Signals:          signals,
+		UpgradeRequested: upgradeReqNull.String,
 	}, nil
 }
 
@@ -3562,7 +3685,8 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			wf.workflow_name,
 			w.version,
 			w.commit_sha,
-			w.build_arch
+			w.build_arch,
+			w.upgrade_requested
 		FROM worker w
 		LEFT JOIN region r ON r.region_id = w.region_id
 		LEFT JOIN provider p ON r.provider_id = p.provider_id
@@ -3599,14 +3723,14 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		var flavorCpu sql.NullInt32
 		var flavorMem, flavorDisk sql.NullFloat64
 		var stepName, workflowName sql.NullString
-		var workerVersion, workerCommit, workerArch sql.NullString
+		var workerVersion, workerCommit, workerArch, upgradeReq sql.NullString
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
 			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor,
 			&flavorCpu, &flavorMem, &flavorDisk,
 			&stepId, &stepName,
 			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName,
-			&workerVersion, &workerCommit, &workerArch)
+			&workerVersion, &workerCommit, &workerArch, &upgradeReq)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan worker: %v", err)
 			continue
@@ -3647,6 +3771,9 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		// See specs/worker_autoupgrade.md.
 		status := WorkerUpgradeStatus(workerArch.String, workerCommit.String, serverCommit)
 		worker.UpgradeStatus = &status
+		if upgradeReq.Valid {
+			worker.UpgradeRequested = &upgradeReq.String
+		}
 
 		workers = append(workers, &worker)
 	}

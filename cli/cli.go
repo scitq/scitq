@@ -145,6 +145,13 @@ type Attr struct {
 		Stats *struct {
 			WorkerIds []int32 `arg:"--worker-id,separate,required" help:"Worker IDs to get stats for"`
 		} `arg:"subcommand:stats" help:"Fetch current stats for workers"`
+		Upgrade *struct {
+			WorkerId  int32 `arg:"positional" help:"Worker ID to upgrade (omit when --all is set)"`
+			All       bool  `arg:"--all" help:"Flag every worker for upgrade"`
+			Emergency bool  `arg:"--emergency" help:"Drain in-flight tasks (hard 30-min cap) before upgrading instead of waiting for natural idle"`
+			Cancel    bool  `arg:"--cancel" help:"Clear a pending upgrade request instead of setting one"`
+			Yes       bool  `arg:"-y,--yes" help:"Skip the confirmation prompt for --all --emergency"`
+		} `arg:"subcommand:upgrade" help:"Trigger an operator-initiated upgrade on one or every worker (Phase II of the version-awareness feature)"`
 	} `arg:"subcommand:worker" help:"Manage workers"`
 
 	// Flavor commands
@@ -997,6 +1004,66 @@ func (c *CLI) WorkerStats() error {
 		fmt.Printf("    📤 Send:    %.2f B/s (total %d bytes)\n", stats.NetIo.SentBytesRate, stats.NetIo.SentBytesTotal)
 	}
 
+	return nil
+}
+
+// WorkerUpgrade flags one worker (by ID) or all workers for an
+// operator-triggered upgrade. The worker observes the resulting flag on
+// its next ping and acts. See specs/worker_autoupgrade.md (Phase II).
+func (c *CLI) WorkerUpgrade() error {
+	u := c.Attr.Worker.Upgrade
+
+	if u.All && u.WorkerId != 0 {
+		return fmt.Errorf("specify a worker ID or --all, not both")
+	}
+	if !u.All && u.WorkerId == 0 {
+		return fmt.Errorf("specify a worker ID or --all")
+	}
+	if u.Cancel && u.Emergency {
+		return fmt.Errorf("--cancel and --emergency are mutually exclusive")
+	}
+
+	mode := "normal"
+	switch {
+	case u.Cancel:
+		mode = "cancel"
+	case u.Emergency:
+		mode = "emergency"
+	}
+
+	if u.All && u.Emergency && !u.Yes {
+		fmt.Fprint(os.Stderr, "⚠️  --all --emergency drains every worker. Continue? [y/N]: ")
+		var answer string
+		_, _ = fmt.Scanln(&answer)
+		switch strings.ToLower(strings.TrimSpace(answer)) {
+		case "y", "yes":
+		default:
+			fmt.Println("aborted")
+			return nil
+		}
+	}
+
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.WorkerUpgradeRequest{Mode: mode, All: u.All}
+	if !u.All {
+		req.WorkerIds = []int32{u.WorkerId}
+	}
+	resp, err := c.QC.Client.RequestWorkerUpgrade(ctx, req)
+	if err != nil {
+		return fmt.Errorf("RequestWorkerUpgrade: %w", err)
+	}
+
+	switch mode {
+	case "cancel":
+		fmt.Printf("🧹 Cleared upgrade request on %d worker(s)\n", len(resp.AffectedWorkerIds))
+	default:
+		fmt.Printf("🛠 Flagged %d worker(s) for %s upgrade\n", len(resp.AffectedWorkerIds), mode)
+	}
+	if len(resp.AffectedWorkerIds) > 0 && len(resp.AffectedWorkerIds) <= 50 {
+		fmt.Printf("    affected: %v\n", resp.AffectedWorkerIds)
+	}
 	return nil
 }
 
@@ -2802,6 +2869,8 @@ func Run(c CLI) error {
 			err = c.WorkerUpdate()
 		case c.Attr.Worker.Stats != nil:
 			err = c.WorkerStats()
+		case c.Attr.Worker.Upgrade != nil:
+			err = c.WorkerUpgrade()
 		}
 	case c.Attr.Flavor != nil:
 		switch {
