@@ -212,7 +212,12 @@ install2: all
 INSTALL_PREFIX ?= /usr/local/bin
 SERVER_PROCESS_NAME ?= scitq-server
 
-install-server: build-server
+# `$(UI_PREREQ)` runs *before* build-server because the server binary
+# `//go:embed all:public`s the UI at compile time — if we skip the
+# UI rebuild, the new server ships with whatever was last embedded
+# (typically very stale). Override with `SKIP_UI=1` for fast iteration
+# on backend-only changes.
+install-server: $(UI_PREREQ) build-server
 	@if [ -f $(INSTALL_PREFIX)/$$(basename $(BINARY_SERVER)) ]; then \
 	    mv $(INSTALL_PREFIX)/$$(basename $(BINARY_SERVER)) $(INSTALL_PREFIX)/$$(basename $(BINARY_SERVER)).prev; \
 	fi

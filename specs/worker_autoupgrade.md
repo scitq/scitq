@@ -666,7 +666,11 @@ define install_with_backup
 	install -m 755 $(1) $(INSTALL_PREFIX)/
 endef
 
-install-server: build-server
+# UI_PREREQ is required: the server binary `//go:embed`s the UI at
+# compile time. Without this the new server would ship with whatever
+# was last in server/public/. Override with SKIP_UI=1 for backend-only
+# iteration.
+install-server: $(UI_PREREQ) build-server
 	$(call install_with_backup,$(BINARY_SERVER))
 
 install-client: build-client
