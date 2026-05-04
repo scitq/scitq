@@ -210,28 +210,32 @@ func TestRequestWorkerUpgrade_Validation(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, st.Code())
 }
 
-func TestRequestWorkerUpgrade_RequiresAdmin(t *testing.T) {
+// RequestWorkerUpgrade is intentionally NOT admin-gated, mirroring the
+// existing permission model for DeleteWorker and UpdateWorker (any
+// authenticated caller). Admin-only would be theater here — a non-admin
+// user could already delete the worker, or flip is_permanent to bypass
+// any "permanent-only" carve-out. This test pins the open access so a
+// future refactor doesn't accidentally reintroduce the gate.
+func TestRequestWorkerUpgrade_AnyAuthenticatedCaller(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	content := []byte("fake scitq client binary admin test\n")
+	content := []byte("fake scitq client binary perm-model test\n")
 	serverAddr, workerToken, _, _, _, _, cleanup := startServerWithClientBinary(t, content)
 	defer cleanup()
 
-	wid := registerWorker(t, serverAddr, workerToken, "wu-admin")
+	wid := registerWorker(t, serverAddr, workerToken, "wu-perm-model")
 
-	// Worker token = NOT admin — RequestWorkerUpgrade is admin-gated.
+	// Worker token (no admin user attached to the context) succeeds.
 	wk, err := lib.CreateClient(serverAddr, workerToken)
 	require.NoError(t, err)
 	defer wk.Close()
-	_, err = wk.Client.RequestWorkerUpgrade(ctx, &pb.WorkerUpgradeRequest{
+	resp, err := wk.Client.RequestWorkerUpgrade(ctx, &pb.WorkerUpgradeRequest{
 		WorkerIds: []int32{wid},
 		Mode:      "normal",
 	})
-	require.Error(t, err)
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	require.Equal(t, codes.PermissionDenied, st.Code())
+	require.NoError(t, err, "non-admin caller should be accepted")
+	require.Equal(t, []int32{wid}, resp.GetAffectedWorkerIds())
 }
 
 // TestClientSha256Endpoint exercises the HTTP sibling that workers hit

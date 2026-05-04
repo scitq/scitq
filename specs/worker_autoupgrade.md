@@ -780,7 +780,7 @@ you no longer need to stop the service before installing.
 |---|---|---|
 | proto | `proto/taskqueue.proto` | drop unused `urgent` field from `ServerVersionResponse`; add `upgrade_requested` string to `TaskQueueClientResponse` (ping reply); new `RequestWorkerUpgrade` RPC + `WorkerUpgradeRequest`/`WorkerUpgradeReply` |
 | migration | new `server/migrations/000027_worker_upgrade_request.up.sql` | `ALTER TABLE worker ADD COLUMN upgrade_requested TEXT;` |
-| server | `server/server.go` (`RequestWorkerUpgrade`, ping path, `RegisterWorker`) | new RPC handler (admin-gated); ping projects column into response; RegisterWorker clears column when worker.commit==server.commit |
+| server | `server/server.go` (`RequestWorkerUpgrade`, ping path, `RegisterWorker`) | new RPC handler (any authenticated caller — same permission model as `DeleteWorker` / `UpdateWorker`; admin-only would be theater since a non-admin can already delete or flip is_permanent); ping projects column into response; RegisterWorker clears column when worker.commit==server.commit |
 | server | `server/http.go` | new handler `GET /scitq-client.sha256?token=...` — streams hex SHA-256 of `cfg.Scitq.ClientBinaryPath`, cached by `(mtime, size)` |
 | server | `server/http_sha256_cache.go` (new, small) | the cache helper for the above |
 | client | `client/client.go` (ping handler, upgrade goroutine) | observe `upgrade_requested`; on `'normal'` wait for full idle then upgrade; on `'emergency'` set status=draining, hard 30-min drain timeout, then upgrade; download from `/scitq-client?token=...`, verify against `/scitq-client.sha256`, atomic rename, exit |

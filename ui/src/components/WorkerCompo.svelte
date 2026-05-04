@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, getUser} from '../lib/api';
-  import { getToken } from '../lib/auth';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star, ArrowUpCircle } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
@@ -25,12 +24,6 @@
    * @type {Record<number, taskqueue.WorkerStats>}
    */
   let workersStatsMap: Record<number, taskqueue.WorkerStats> = {};
-
-  /**
-   * Whether the currently logged-in user is an admin. Drives the
-   * enable state of admin-only worker actions (upgrade, etc.).
-   */
-  let currentUserIsAdmin = false;
 
   /**
    * Count of tasks by worker ID and status
@@ -125,22 +118,6 @@
    * Sets up WS event listeners (no periodic updateWorkerData).
    */
   onMount(() => {
-    // Resolve admin status of the logged-in user — gates the upgrade
-    // button (and any other admin-only actions). Failures default to
-    // not-admin so a user without identity can't accidentally trigger
-    // a server-rejected admin RPC.
-    (async () => {
-      try {
-        const token = await getToken();
-        if (token) {
-          const u = await getUser(token);
-          currentUserIsAdmin = !!u?.isAdmin;
-        }
-      } catch (err) {
-        console.warn('Could not determine admin status; assuming non-admin', err);
-      }
-    })();
-
     // On mount, load all task stats and fetch workers
     getAllTaskStats().then(({ perWorkerStatusCounts, globalStatusCounts, totalCount: t }) => {
       allCount = globalStatusCounts;
@@ -1196,13 +1173,11 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                       class="btn-action"
                       class:btn-upgrade-pending={worker.upgradeRequested === 'normal'}
                       class:btn-upgrade-emergency={worker.upgradeRequested === 'emergency'}
-                      title={!currentUserIsAdmin
-                        ? 'Upgrade is admin-only'
-                        : worker.upgradeRequested
-                          ? `Upgrade pending (${worker.upgradeRequested}) — click to cancel`
-                          : 'Upgrade worker (click=normal idle-wait, shift-click=emergency drain)'}
+                      title={worker.upgradeRequested
+                        ? `Upgrade pending (${worker.upgradeRequested}) — click to cancel`
+                        : 'Upgrade worker (click=normal idle-wait, shift-click=emergency drain)'}
                       on:click={(ev) => upgradeWorker(worker, ev)}
-                      disabled={!currentUserIsAdmin || acting.has(worker.workerId)}
+                      disabled={acting.has(worker.workerId)}
                       data-testid={`upgrade-worker-${worker.workerId}`}
                     >
                       <ArrowUpCircle />

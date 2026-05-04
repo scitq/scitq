@@ -120,6 +120,30 @@ body{
   transform: scale(0.97);
 }
 
+/* Disabled state: visibly inactive. Browsers already block the click,
+   but the default look is identical to an enabled button so the user
+   thinks it's broken. Gray out + not-allowed cursor + suppress hover/
+   active animations. */
+.btn-action:disabled,
+.btn-action[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.btn-action:disabled:hover,
+.btn-action[disabled]:hover {
+  background-color: var(--primary-color);
+  transform: none;
+}
+.btn-action:disabled:active,
+.btn-action[disabled]:active {
+  transform: none;
+}
+.btn-action:disabled:hover svg,
+.btn-action[disabled]:hover svg {
+  color: white;
+}
+
 .btn-action svg {
   width: 14px;
   height: 14px;

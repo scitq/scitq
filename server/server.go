@@ -389,12 +389,13 @@ func (s *taskQueueServer) ServerVersion(ctx context.Context, _ *emptypb.Empty) (
 
 // RequestWorkerUpgrade flags one or many workers for upgrade. The worker
 // reads the resulting column value from its next ping response and acts.
-// See specs/worker_autoupgrade.md (Phase II). Admin-gated.
+// See specs/worker_autoupgrade.md (Phase II).
+//
+// Permission model: any authenticated caller. Aligned with `DeleteWorker`
+// and `UpdateWorker` (both non-admin-gated). Admin-only would be theater
+// here — a non-admin user who wanted to grief could already delete the
+// worker, or flip `is_permanent` to bypass any "permanent-only" carve-out.
 func (s *taskQueueServer) RequestWorkerUpgrade(ctx context.Context, req *pb.WorkerUpgradeRequest) (*pb.WorkerUpgradeReply, error) {
-	if !IsAdmin(ctx) {
-		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
-	}
-
 	var dbValue any
 	switch req.Mode {
 	case "normal", "emergency":
