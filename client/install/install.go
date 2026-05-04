@@ -201,7 +201,12 @@ Environment=PATH=/usr/bin:/usr/local/bin:/usr/sbin
 Type=simple
 KillSignal=SIGTERM
 TimeoutStopSec=1h
-Restart=always
+# Restart=on-failure (not always): preserves clean exit 0 as
+# "deliberately stopped, stay stopped" -- e.g. operator running
+# kill -TERM directly. The worker upgrade flow uses exit code 75
+# (EX_TEMPFAIL) so respawn-on-upgrade still works under this
+# policy. See specs/worker_autoupgrade.md.
+Restart=on-failure
 RestartSec=5
 ExecStart=/usr/local/bin/scitq-client -server %s -install -swap "%f" -concurrency %d -token %s
 

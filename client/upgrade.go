@@ -244,8 +244,13 @@ func performUpgrade(
 		return fmt.Errorf("rename %s -> %s: %w", target, self, err)
 	}
 
-	log.Printf("🚀 Upgrade in place; exiting for supervisor restart.")
-	os.Exit(0)
+	// Exit 75 (EX_TEMPFAIL) — not 0. Sysadmin-recommended worker
+	// service files (docs/install.md) use `Restart=on-failure`, which
+	// only respawns on a non-zero exit. A clean exit 0 leaves the
+	// worker dead until a manual `systemctl start`. Pre-exit log line
+	// makes the intent unambiguous in `journalctl -u scitq-...`.
+	log.Printf("🚀 Upgrade in place; exiting with status 75 to trigger supervisor restart (Restart=on-failure).")
+	os.Exit(75)
 	return nil // unreachable
 }
 

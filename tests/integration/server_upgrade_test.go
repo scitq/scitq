@@ -89,7 +89,9 @@ func TestServerGracefulGate_EndToEnd(t *testing.T) {
 	// admin jobs in this test, so the drain finishes quickly).
 	select {
 	case code := <-exited:
-		require.Equal(t, 0, code, "gate must exit 0")
+		// 75 (EX_TEMPFAIL) so systemd Restart=on-failure respawns;
+		// see runGracefulDrain comments in server.go.
+		require.Equal(t, 75, code, "gate must exit 75 to trigger supervisor restart")
 	case <-time.After(3 * time.Second):
 		t.Fatalf("gate did not call exit within 3s — drain likely stuck")
 	}

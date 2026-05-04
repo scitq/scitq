@@ -68,7 +68,9 @@ func TestRunGracefulDrain_NoActiveJobs(t *testing.T) {
 	}
 
 	require.True(t, exitCalled.Load(), "gateExit should have been called")
-	require.Equal(t, 0, exitCode, "gate should exit 0 on clean drain")
+	// 75 (EX_TEMPFAIL) so systemd Restart=on-failure respawns; see
+	// runGracefulDrain comments.
+	require.Equal(t, 75, exitCode, "gate should exit 75 to trigger supervisor restart")
 
 	// JSON line shape.
 	var payload map[string]any

@@ -121,6 +121,11 @@ Type=simple
 Restart=on-failure
 Environment=HOME=/root
 ExecStart=/usr/local/bin/scitq-client --store /scratch --token MySecretToken  -permanent
+# When the server triggers an in-place worker upgrade (`scitq worker upgrade <id>`),
+# the worker downloads the new binary, atomic-renames it over the running one, and
+# exits with code 75 (EX_TEMPFAIL) so this `Restart=on-failure` policy respawns
+# it on the new binary. A clean exit (0) is preserved as "deliberately stopped,
+# do not restart" — for example, when sent SIGTERM directly outside systemd.
 
 [Install]
 WantedBy=multi-user.target

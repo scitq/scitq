@@ -31,11 +31,12 @@ The driving picture for this spec:
    before kicking the server restart. Phase III installs a SIGUSR1
    handler on the server: `kill -USR1 <pid>` enters a gate that refuses
    new admin jobs, lets in-flight ones complete, emits a JSON status
-   line, and exits cleanly. The supervisor (systemd, docker, the launch
-   script) brings up the new binary the operator already laid down with
-   `make install-server`. No CLI credentials needed on the server host —
-   Unix already gates signals on UID/root, which is exactly the trust
-   boundary we want.
+   line, and exits with code 75 (EX_TEMPFAIL — chosen so a service
+   configured with `Restart=on-failure` respawns automatically). The
+   supervisor (systemd, docker, the launch script) brings up the new
+   binary the operator already laid down with `make install-server`.
+   No CLI credentials needed on the server host — Unix already gates
+   signals on UID/root, which is exactly the trust boundary we want.
 
 The same Phase I detection runs on **the CLI** every time it talks to the
 server: a one-line stderr warning if the CLI binary is older than the
@@ -374,8 +375,13 @@ or the operator cancels.
 4. Emit worker_event 'upgrade_starting' (mode=normal).
 5. atomic rename(scitq-client.new, /usr/local/bin/scitq-client).
    Linux unlink-while-open keeps the running process alive.
-6. Exit cleanly. Supervisor (systemd / docker --restart unless-stopped /
-   the launch script) restarts on the new binary.
+6. Exit with code 75 (EX_TEMPFAIL — non-zero on purpose).
+   Supervisor (systemd `Restart=on-failure` per docs/install.md, or
+   docker `--restart=on-failure`, or the launch script's loop)
+   respawns the worker on the new binary. Exit 0 would NOT respawn
+   under `Restart=on-failure` and the worker would stay dead until
+   manual intervention; the pre-exit log line makes the intent
+   unambiguous to journalctl readers despite the "failure" code.
 7. New binary calls RegisterWorker with new commit; server sees match,
    clears upgrade_requested.
 ```
@@ -547,10 +553,18 @@ RPC, no oneshot binary, no peer-handoff race against the supervisor.
 
      {"event":"server_drained","at":"2026-05-03T16:42:11Z","drain_seconds":47}
 
-5. Server os.Exit(0) cleanly. The supervisor's restart policy
-   (systemd Restart=on-success, docker --restart=on-success,
-   the launch script's loop, etc.) brings up the new binary
-   that the operator already laid down with `make install-server`.
+5. Server `os.Exit(75)` (EX_TEMPFAIL — non-zero on purpose). The
+   supervisor's restart policy (systemd `Restart=on-failure`,
+   docker `--restart=on-failure`, the launch script's loop, etc.)
+   brings up the new binary that the operator already laid down
+   with `make install-server`. **Why non-zero:** `Restart=on-failure`
+   only respawns on a non-zero exit code, so exiting 0 would leave
+   the server dead until a manual `systemctl start`. The pre-exit
+   JSON line + log line make the intent unambiguous to journalctl
+   readers, despite the "failure" exit code. The non-zero choice is
+   intentional — it preserves exit 0 as a clean "deliberately
+   stopped, do not restart" signal (e.g. SIGTERM-driven graceful
+   shutdown), which `Restart=always` would clobber.
 6. Workers' gRPC retry loop reconnects within seconds — no
    client-side action needed.
 ```
@@ -626,12 +640,16 @@ binaries (server, client, CLI). For Phase III we add:
    invisibly side-effecting for someone reading `make install`).
 
 4. **`make server-upgrade` convenience target.** Bundles
-   `install-server` + `pkill -USR1`. Operator does
-   `sudo make server-upgrade` after the build; install puts the new
-   binary in place (with `.prev` backup), the SIGUSR1 tells the
-   running old server to drain-and-exit, the supervisor restarts on
-   the new binary. No `systemctl` invocation, no shell-out specific
-   to one init system.
+   `install-server` + `install-client` + `install-cli` + `pkill -USR1`.
+   All three binaries are refreshed in lockstep so they match the new
+   server's wire version: `install-client` matters because the server
+   serves `cfg.Scitq.ClientBinaryPath` over `/scitq-client?token=...`
+   to workers doing Phase II self-upgrades — letting it go stale would
+   make workers pull a mismatched binary; `install-cli` keeps the
+   local operator's CLI in sync. Then SIGUSR1 tells the running old
+   server to drain-and-exit, and the supervisor restarts on the new
+   binary. No `systemctl` invocation, no shell-out specific to one
+   init system.
 
 ```make
 INSTALL_PREFIX ?= /usr/local/bin
@@ -657,14 +675,16 @@ install-client: build-client
 install-cli: build-cli
 	$(call install_with_backup,$(BINARY_CLI))
 
-# Phase III: install new server binary, then signal the running old
-# server to drain and exit. Supervisor restarts on the new binary.
-# Uses pkill (POSIX) so this works on systemd, runit, launchd, and
+# Phase III: install all three binaries in lockstep (server, client,
+# CLI), then signal the running old server to drain and exit. The
+# supervisor restarts on the new server binary. Workers that
+# self-upgrade later will pull the freshly-installed client. Uses
+# pkill (POSIX) so this works on systemd, runit, launchd, and
 # bare-process deployments alike. Adjust the binary name to match
 # your install layout (scitq-server vs scitq2-server) via
 # SERVER_PROCESS_NAME.
 SERVER_PROCESS_NAME ?= scitq2-server
-server-upgrade: install-server
+server-upgrade: install-server install-client install-cli
 	@if pkill -USR1 -x $(SERVER_PROCESS_NAME); then \
 	    echo "🛠 Sent SIGUSR1 to running $(SERVER_PROCESS_NAME); supervisor will restart on new binary."; \
 	else \
@@ -768,10 +788,10 @@ you no longer need to stop the service before installing.
 | Area | File / module | Change |
 |---|---|---|
 | proto | `proto/taskqueue.proto` | add `bool server_upgrade_in_progress` to `TaskListAndOther` (ping reply); regen |
-| server | `server/server.go` (signal handler, admin-job gate) | install `signal.Notify(syscall.SIGUSR1)`; on receipt set `gating=true`; intercept admin-job submission paths to refuse new jobs while gating; poll until in-flight jobs are zero or 10-minute hard timeout fires; emit `{"event":"server_drained", ...}` JSON line on stdout; `os.Exit(0)` |
+| server | `server/server.go` (signal handler, admin-job gate) | install `signal.Notify(syscall.SIGUSR1)`; on receipt set `gating=true`; intercept admin-job submission paths to refuse new jobs while gating; poll until in-flight jobs are zero or 10-minute hard timeout fires; emit `{"event":"server_drained", ...}` JSON line on stdout; `os.Exit(75)` (EX_TEMPFAIL — non-zero so `Restart=on-failure` respawns) |
 | server | `server/server.go` (ping path) | project `gating` flag into `TaskListAndOther.server_upgrade_in_progress` |
 | client | `client/client.go` (worker loop) | observe `server_upgrade_in_progress`; while true, skip asking for new task slots; keep running existing tasks; gRPC retry loop absorbs the bounce |
-| Makefile | `Makefile` | add `INSTALL_PREFIX`, `install_with_backup` macro, `install-server` / `install-client` / `install-cli` (each with `.prev` backup), `server-upgrade` (install-server + pkill -USR1) |
+| Makefile | `Makefile` | add `INSTALL_PREFIX`, `install_with_backup` macro, `install-server` / `install-client` / `install-cli` (each with `.prev` backup), `server-upgrade` (install all three binaries in lockstep + pkill -USR1) |
 | docs | install/upgrade section | document the SIGUSR1 trigger, the `.prev` rollback, the ETXTBSY note for the manual `cp` antipattern |
 | tests | `tests/integration/server_upgrade_test.go` (new) | start server → submit a long-running admin job → SIGUSR1 → verify new admin jobs are refused → wait for in-flight to finish → verify JSON drained line → verify process exit 0; second test: SIGUSR1 with no in-flight jobs exits within ~1s |
 

@@ -230,15 +230,25 @@ install-cli: build-cli
 	fi
 	install -m 755 $(BINARY_CLI) $(INSTALL_PREFIX)/
 
-# Phase III: install the new server binary, then signal the running
-# old server to drain its in-flight admin jobs and exit. The supervisor
-# (systemd, docker, the launch script) is what actually restarts on the
-# new binary — `pkill` is portable across init systems.
+# Phase III: install all three binaries (server, client, CLI), then
+# signal the running old server to drain its in-flight admin jobs and
+# exit. The supervisor (systemd, docker, the launch script) is what
+# actually restarts on the new server binary — `pkill` is portable
+# across init systems.
+#
+# Why all three:
+# - `install-client` refreshes `cfg.Scitq.ClientBinaryPath`. The
+#   server's `/scitq-client?token=...` endpoint serves that file to
+#   workers doing Phase II self-upgrades; if it stays stale, workers
+#   pulling the new server's expected commit get the OLD client.
+# - `install-cli` keeps the local operator's CLI in sync with the
+#   server's wire version (relevant for any new fields/RPCs added
+#   in this release).
 #
 # Override SERVER_PROCESS_NAME if your install layout uses a different
 # binary name (e.g. `scitq2-server`):
 #   sudo make server-upgrade SERVER_PROCESS_NAME=scitq2-server
-server-upgrade: install-server
+server-upgrade: install-server install-client install-cli
 	@if pkill -USR1 -x $(SERVER_PROCESS_NAME); then \
 	    echo "🛠 Sent SIGUSR1 to running $(SERVER_PROCESS_NAME); supervisor will restart on new binary."; \
 	else \

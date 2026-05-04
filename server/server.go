@@ -330,7 +330,14 @@ func (s *taskQueueServer) runGracefulDrain() {
 		"drain_seconds": drainSeconds,
 	})
 	fmt.Fprintln(gateStdout, string(payload))
-	gateExit(0)
+	// Exit 75 (EX_TEMPFAIL), not 0 — see the sample server service
+	// file (sample_files/scitq.service) which uses `Restart=always`,
+	// but operators with `Restart=on-failure` (the convention for
+	// many long-running daemons) need a non-zero code to trigger a
+	// respawn. Pre-exit JSON line + log line above make the intent
+	// unambiguous to journalctl readers.
+	log.Printf("🚀 Server drained; exiting with status 75 to trigger supervisor restart.")
+	gateExit(75)
 }
 
 func (s *taskQueueServer) countActiveJobs() int {
