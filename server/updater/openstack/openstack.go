@@ -52,12 +52,23 @@ func Run(cfg config.Config, c config.OpenstackConfig) error {
 	}
 	defer gp.Close()
 
+	// Operator-configured include/exclude regex.
+	flavorFilter, err := updater.CompileFlavorFilter(c.FlavorIncludePatterns, c.FlavorExcludePatterns)
+	if err != nil {
+		return fmt.Errorf("compile flavor filter for openstack.%s: %w", c.GetName(), err)
+	}
+
 	// 1) Flavors
 	log.Printf("Fetching OVH flavors for project %q in regions: %v", serviceName, regions)
 	flavors, metrics, err := fetchOVHFlavors(client, gp.ProviderID, serviceName, regions)
 	if err != nil {
 		return err
 	}
+
+	// Drop flavors that don't pass the operator filter. Drop their
+	// metrics too so UpdateFlavorMetrics will mark stale rows as
+	// available=false. See memory/project_recruitment_followups.md.
+	flavors, metrics = applyFlavorFilter(flavorFilter, flavors, metrics)
 
 	// Build index of flavors by name for price/GPU enrichment (mutations to these pointers will be persisted)
 	idxFlavors := make(map[string]*updater.Flavor, len(flavors))
@@ -91,6 +102,34 @@ func Run(cfg config.Config, c config.OpenstackConfig) error {
 		}
 	}
 	return gp.UpdateFlavorMetrics(filtered)
+}
+
+// applyFlavorFilter drops any flavor (and its corresponding metrics)
+// that fails the operator-configured include/exclude regex test. A
+// nil filter is a no-op.
+func applyFlavorFilter(f *updater.FlavorFilter, flavors []*updater.Flavor, metrics []*updater.FlavorMetrics) ([]*updater.Flavor, []*updater.FlavorMetrics) {
+	if f == nil || (len(f.Includes) == 0 && len(f.Excludes) == 0) {
+		return flavors, metrics
+	}
+	allowed := make(map[string]bool, len(flavors))
+	keptFlavors := flavors[:0]
+	for _, fl := range flavors {
+		if f.Allows(fl.Name) {
+			allowed[fl.Name] = true
+			keptFlavors = append(keptFlavors, fl)
+		}
+	}
+	keptMetrics := metrics[:0]
+	for _, m := range metrics {
+		if allowed[m.FlavorName] {
+			keptMetrics = append(keptMetrics, m)
+		}
+	}
+	dropped := len(flavors) - len(keptFlavors)
+	if dropped > 0 {
+		log.Printf("FlavorFilter (openstack): dropped %d flavor(s) of %d via include/exclude rules", dropped, len(flavors))
+	}
+	return keptFlavors, keptMetrics
 }
 
 // ---------- OVH API ----------

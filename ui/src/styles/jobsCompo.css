@@ -66,3 +66,57 @@
 [data-theme="dark"] .jobCompo-progress {
     box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.1); /* Subtle inner glow in dark mode */
 }
+
+/* Provider-error class badge — shown next to Status on failed jobs.
+   The whole point: an operator sees a coloured marker at a glance
+   and knows the failure category without having to open the row or
+   grep journalctl. Hover gives the raw provider error message.
+   See 2026-05-05 incident. */
+.job-error-badge {
+    display: inline-block;
+    padding: 0.1em 0.45em;
+    font-size: 0.72em;
+    font-weight: 600;
+    line-height: 1.4;
+    border-radius: 3px;
+    cursor: help;
+    user-select: none;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+}
+.job-error-auth {
+    /* Red — credentials invalid; recruitment & deletion fully blocked. */
+    background: #dc2626;
+    color: #fef2f2;
+    border: 1px solid #991b1b;
+}
+.job-error-quota {
+    /* Amber — subscription / region cap; operator action needed. */
+    background: #f59e0b;
+    color: #1f2937;
+    border: 1px solid #b45309;
+}
+.job-error-capacity {
+    /* Same amber — same operator action (wait or change region/SKU). */
+    background: #f59e0b;
+    color: #1f2937;
+    border: 1px solid #b45309;
+}
+.job-error-unsupported_flavor {
+    /* Slate — Azure said no on this SKU; permanent answer. */
+    background: #6b7280;
+    color: #f9fafb;
+    border: 1px solid #4b5563;
+}
+.job-error-transient {
+    /* Light blue — temporary; should self-heal on retry. */
+    background: #0891b2;
+    color: #ecfeff;
+    border: 1px solid #155e75;
+}
+.job-error-unknown {
+    /* Faded — investigation needed; tooltip shows raw message. */
+    background: transparent;
+    color: #9ca3af;
+    border: 1px dashed #6b7280;
+}

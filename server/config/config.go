@@ -216,6 +216,15 @@ type AzureConfig struct {
 	UpdatePeriodicity   string            `yaml:"update_periodicity"` // Update periodicity in minutes
 	LocalWorkspaceRoots  map[string]string `yaml:"local_workspaces"` // key: region (or "*" wildcard); value: workspace URI for that region
 	LocalResourceRoots   map[string]string `yaml:"local_resources"`  // key: region (or "*" wildcard); value: resource-root URI for that region
+	// Regex lists applied at flavor-sync time. Logic: include first
+	// (default = include all), then exclude (default = exclude none).
+	// A flavor is synced into the catalog iff it matches at least one
+	// include pattern (or include is empty) AND matches no exclude
+	// pattern. Lets operators take entire VM families (e.g.
+	// confidential `_cc_v\d+$`) out of recruitment without having to
+	// disable each flavor individually after every Azure catalog update.
+	FlavorIncludePatterns []string `yaml:"flavor_include_patterns"`
+	FlavorExcludePatterns []string `yaml:"flavor_exclude_patterns"`
 }
 
 type AzureImage struct {
@@ -264,6 +273,10 @@ type OpenstackConfig struct {
 	LocalWorkspaceRoots  map[string]string      `yaml:"local_workspaces"` // key: region (or "*" wildcard); value: workspace URI for that region
 	LocalResourceRoots   map[string]string      `yaml:"local_resources"`  // key: region (or "*" wildcard); value: resource-root URI for that region
 	Keypair              string                 `yaml:"keypair"`          // Name of the keypair to use for SSH access
+	// See AzureConfig.FlavorIncludePatterns / FlavorExcludePatterns —
+	// same semantics for OVH/Openstack catalogs.
+	FlavorIncludePatterns []string `yaml:"flavor_include_patterns"`
+	FlavorExcludePatterns []string `yaml:"flavor_exclude_patterns"`
 }
 
 type LocalConfig struct {

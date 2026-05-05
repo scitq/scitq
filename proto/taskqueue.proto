@@ -570,6 +570,12 @@ message Job {
   string log = 10;
   optional string worker_name = 11;
   optional string flavor_info = 12; // e.g. "Standard_D8s_v3 — 8 CPU, 32GB mem"
+  // Provider-error category. Set on F-status jobs by classifyProviderError.
+  // One of: "auth", "quota", "capacity", "unsupported_flavor",
+  // "transient", "unknown". Empty/absent for non-failed jobs.
+  // See specs / 2026-05-05 incident.
+  optional string error_class   = 13;
+  optional string error_message = 14;  // raw provider error text
 }
 
 message JobId {

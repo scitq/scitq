@@ -106,6 +106,7 @@ type Azure struct {
 	Regions          []string
 	Quotas           map[string]config.Quota
 	FlavorMetricsMap map[string]*updater.FlavorMetrics // key: "flavor|region"
+	FlavorFilter     *updater.FlavorFilter             // operator-configured include/exclude regex
 }
 
 // NewAzure creates a new Azure updater.
@@ -120,6 +121,11 @@ func NewAzure(cfg config.Config, providerCfg config.AzureConfig) (*Azure, error)
 		return nil, err
 	}
 
+	filter, err := updater.CompileFlavorFilter(providerCfg.FlavorIncludePatterns, providerCfg.FlavorExcludePatterns)
+	if err != nil {
+		return nil, fmt.Errorf("compile flavor filter for azure.%s: %w", providerCfg.GetName(), err)
+	}
+
 	return &Azure{
 		GenericProvider:  gp,
 		SubscriptionID:   providerCfg.SubscriptionID,
@@ -127,6 +133,7 @@ func NewAzure(cfg config.Config, providerCfg config.AzureConfig) (*Azure, error)
 		Regions:          providerCfg.Regions,
 		Quotas:           providerCfg.Quotas,
 		FlavorMetricsMap: make(map[string]*updater.FlavorMetrics),
+		FlavorFilter:     filter,
 	}, nil
 }
 
@@ -230,6 +237,17 @@ func (az *Azure) GetFlavors() error {
 				continue
 			}
 			if strings.Contains(option, "p") {
+				continue
+			}
+			// Operator-configured include/exclude regex from
+			// AzureConfig.Flavor{Include,Exclude}Patterns. Filtering at
+			// sync source: anything we drop here doesn't enter the
+			// catalog or its flavor_region rows, so recruitment never
+			// sees it. Existing rows that no longer pass the filter
+			// fall out via UpdateFlavorMetrics' "missing in new list →
+			// available=false" logic. See
+			// memory/project_recruitment_followups.md.
+			if !az.FlavorFilter.Allows(vm.Name) {
 				continue
 			}
 			if !seenFlavors[vm.Name] {

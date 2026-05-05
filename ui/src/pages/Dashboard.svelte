@@ -5,6 +5,7 @@ import { getJobs, delWorker, delJob } from '../lib/api';
   import WorkerCompo from '../components/WorkerCompo.svelte';
   import CreateForm from '../components/CreateForm.svelte';
   import JobCompo from '../components/JobsCompo.svelte';
+  import AlertBanner from '../components/AlertBanner.svelte';
   import '../styles/dashboard.css';
 
 
@@ -80,6 +81,32 @@ import { getJobs, delWorker, delJob } from '../lib/api';
    * @type {NodeJS.Timeout}
    */
   let alertTimeout: NodeJS.Timeout;
+
+  /**
+   * Active operator-facing alerts derived from the loaded jobs.
+   * Currently only auth — extend this when more emergency types
+   * become surface-worthy. Recompute reactively whenever jobs
+   * changes (WS pushes update the array). See AlertBanner.svelte.
+   */
+  $: alerts = (() => {
+    const out: Array<{ class: 'auth' | 'capacity' | 'quota' | 'warning' | 'info'; title: string; body?: string }> = [];
+    if (!jobs || jobs.length === 0) return out;
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const isRecentFailure = (j: any) =>
+      j.status === 'F' &&
+      j.errorClass &&
+      j.modifiedAt &&
+      new Date(j.modifiedAt).getTime() > oneHourAgo;
+
+    if (jobs.some((j: any) => isRecentFailure(j) && j.errorClass === 'auth')) {
+      out.push({
+        class: 'auth',
+        title: '🚨 Provider authentication failed — recruitment and deletion are blocked',
+        body: 'A cloud provider rejected our credentials in the last hour. Rotate the service principal secret (Azure: Microsoft Entra ID → App registrations → your scitq SP → Certificates & secrets), update /etc/scitq.yaml, then `sudo systemctl restart scitq`.',
+      });
+    }
+    return out;
+  })();
 
   /**
    * Component lifecycle hook that runs on mount
@@ -182,6 +209,8 @@ import { getJobs, delWorker, delJob } from '../lib/api';
 <div class="dashboard-scroll-wrapper">
   <!-- Main dashboard container -->
   <div class="dashboard-content" data-testid="dashboard-page">
+  <!-- Operator-facing alerts (e.g. provider auth failure) -->
+  <AlertBanner {alerts} />
   <!-- Workers section -->
   <div class="dashboard-worker-section">
     <WorkerCompo />

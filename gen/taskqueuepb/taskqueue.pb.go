@@ -3711,19 +3711,25 @@ func (x *ListJobsRequest) GetOffset() int32 {
 }
 
 type Job struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         int32                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	FlavorId      int32                  `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
-	Retry         int32                  `protobuf:"varint,4,opt,name=retry,proto3" json:"retry,omitempty"`
-	WorkerId      int32                  `protobuf:"varint,5,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
-	Action        string                 `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`
-	CreatedAt     string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	ModifiedAt    string                 `protobuf:"bytes,8,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`
-	Progression   int32                  `protobuf:"varint,9,opt,name=progression,proto3" json:"progression,omitempty"`
-	Log           string                 `protobuf:"bytes,10,opt,name=log,proto3" json:"log,omitempty"`
-	WorkerName    *string                `protobuf:"bytes,11,opt,name=worker_name,json=workerName,proto3,oneof" json:"worker_name,omitempty"`
-	FlavorInfo    *string                `protobuf:"bytes,12,opt,name=flavor_info,json=flavorInfo,proto3,oneof" json:"flavor_info,omitempty"` // e.g. "Standard_D8s_v3 — 8 CPU, 32GB mem"
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	JobId       int32                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Status      string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	FlavorId    int32                  `protobuf:"varint,3,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
+	Retry       int32                  `protobuf:"varint,4,opt,name=retry,proto3" json:"retry,omitempty"`
+	WorkerId    int32                  `protobuf:"varint,5,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	Action      string                 `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`
+	CreatedAt   string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ModifiedAt  string                 `protobuf:"bytes,8,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`
+	Progression int32                  `protobuf:"varint,9,opt,name=progression,proto3" json:"progression,omitempty"`
+	Log         string                 `protobuf:"bytes,10,opt,name=log,proto3" json:"log,omitempty"`
+	WorkerName  *string                `protobuf:"bytes,11,opt,name=worker_name,json=workerName,proto3,oneof" json:"worker_name,omitempty"`
+	FlavorInfo  *string                `protobuf:"bytes,12,opt,name=flavor_info,json=flavorInfo,proto3,oneof" json:"flavor_info,omitempty"` // e.g. "Standard_D8s_v3 — 8 CPU, 32GB mem"
+	// Provider-error category. Set on F-status jobs by classifyProviderError.
+	// One of: "auth", "quota", "capacity", "unsupported_flavor",
+	// "transient", "unknown". Empty/absent for non-failed jobs.
+	// See specs / 2026-05-05 incident.
+	ErrorClass    *string `protobuf:"bytes,13,opt,name=error_class,json=errorClass,proto3,oneof" json:"error_class,omitempty"`
+	ErrorMessage  *string `protobuf:"bytes,14,opt,name=error_message,json=errorMessage,proto3,oneof" json:"error_message,omitempty"` // raw provider error text
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3838,6 +3844,20 @@ func (x *Job) GetWorkerName() string {
 func (x *Job) GetFlavorInfo() string {
 	if x != nil && x.FlavorInfo != nil {
 		return *x.FlavorInfo
+	}
+	return ""
+}
+
+func (x *Job) GetErrorClass() string {
+	if x != nil && x.ErrorClass != nil {
+		return *x.ErrorClass
+	}
+	return ""
+}
+
+func (x *Job) GetErrorMessage() string {
+	if x != nil && x.ErrorMessage != nil {
+		return *x.ErrorMessage
 	}
 	return ""
 }
@@ -10400,7 +10420,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05limit\x18\x01 \x01(\x05H\x00R\x05limit\x88\x01\x01\x12\x1b\n" +
 	"\x06offset\x18\x02 \x01(\x05H\x01R\x06offset\x88\x01\x01B\b\n" +
 	"\x06_limitB\t\n" +
-	"\a_offset\"\xfc\x02\n" +
+	"\a_offset\"\xee\x03\n" +
 	"\x03Job\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1b\n" +
@@ -10418,9 +10438,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\vworker_name\x18\v \x01(\tH\x00R\n" +
 	"workerName\x88\x01\x01\x12$\n" +
 	"\vflavor_info\x18\f \x01(\tH\x01R\n" +
-	"flavorInfo\x88\x01\x01B\x0e\n" +
+	"flavorInfo\x88\x01\x01\x12$\n" +
+	"\verror_class\x18\r \x01(\tH\x02R\n" +
+	"errorClass\x88\x01\x01\x12(\n" +
+	"\rerror_message\x18\x0e \x01(\tH\x03R\ferrorMessage\x88\x01\x01B\x0e\n" +
 	"\f_worker_nameB\x0e\n" +
-	"\f_flavor_info\"\x1e\n" +
+	"\f_flavor_infoB\x0e\n" +
+	"\f_error_classB\x10\n" +
+	"\x0e_error_message\"\x1e\n" +
 	"\x05JobId\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\x05R\x05jobId\".\n" +
 	"\bJobsList\x12\"\n" +

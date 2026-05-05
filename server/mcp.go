@@ -466,6 +466,17 @@ func (h *mcpHandler) listTools() []mcpTool {
 			InputSchema: inputSchema{Type: "object"},
 		},
 		{
+			Name:        "list_jobs",
+			Description: "List server-internal jobs (worker create/delete/restart). Each entry includes status (P/R/S/F/X) and on failures the provider error_class — one of 'auth' (credentials invalid: rotate the SP secret), 'quota' (regional/family cap), 'capacity' (region/zone stockout), 'unsupported_flavor' (provider rejected the SKU), 'transient' (timeout/5xx — retried), 'unknown'. error_message holds the raw provider error text. THIS IS THE FIRST PLACE TO LOOK when recruitment or deletion is failing — auth errors in particular are silent in worker_events and only surface here.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"limit":  {Type: "integer", Description: "Max jobs (default 50)"},
+					"status": {Type: "string", Description: "Filter by status: P (pending), R (running), S (succeeded), F (failed), X (cancelled)"},
+				},
+			},
+		},
+		{
 			Name:        "deploy_worker",
 			Description: "Deploy new worker instances on a cloud provider.",
 			InputSchema: inputSchema{
@@ -906,6 +917,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolTaskStatusCounts(authCtx, call.Arguments)
 	case "list_workers":
 		return h.toolListWorkers(authCtx)
+	case "list_jobs":
+		return h.toolListJobs(authCtx, call.Arguments)
 	case "deploy_worker":
 		return h.toolDeployWorker(authCtx, call.Arguments)
 	case "delete_worker":
@@ -1238,6 +1251,37 @@ func (h *mcpHandler) toolListWorkers(ctx context.Context) (any, *rpcError) {
 		return errorResult(err), nil
 	}
 	return jsonResult(res.Workers), nil
+}
+
+func (h *mcpHandler) toolListJobs(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		Limit  int32  `json:"limit"`
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(args, &p)
+	req := &pb.ListJobsRequest{}
+	if p.Limit > 0 {
+		req.Limit = &p.Limit
+	} else {
+		def := int32(50)
+		req.Limit = &def
+	}
+	res, err := h.server.ListJobs(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	jobs := res.GetJobs()
+	if p.Status != "" {
+		filtered := make([]*pb.Job, 0, len(jobs))
+		want := strings.ToUpper(p.Status)
+		for _, j := range jobs {
+			if j.GetStatus() == want {
+				filtered = append(filtered, j)
+			}
+		}
+		jobs = filtered
+	}
+	return jsonResult(jobs), nil
 }
 
 func (h *mcpHandler) toolDeployWorker(ctx context.Context, args json.RawMessage) (any, *rpcError) {

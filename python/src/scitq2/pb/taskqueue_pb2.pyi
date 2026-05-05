@@ -675,7 +675,7 @@ class ListJobsRequest(_message.Message):
     def __init__(self, limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
 class Job(_message.Message):
-    __slots__ = ("job_id", "status", "flavor_id", "retry", "worker_id", "action", "created_at", "modified_at", "progression", "log", "worker_name", "flavor_info")
+    __slots__ = ("job_id", "status", "flavor_id", "retry", "worker_id", "action", "created_at", "modified_at", "progression", "log", "worker_name", "flavor_info", "error_class", "error_message")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     FLAVOR_ID_FIELD_NUMBER: _ClassVar[int]
@@ -688,6 +688,8 @@ class Job(_message.Message):
     LOG_FIELD_NUMBER: _ClassVar[int]
     WORKER_NAME_FIELD_NUMBER: _ClassVar[int]
     FLAVOR_INFO_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CLASS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     status: str
     flavor_id: int
@@ -700,7 +702,9 @@ class Job(_message.Message):
     log: str
     worker_name: str
     flavor_info: str
-    def __init__(self, job_id: _Optional[int] = ..., status: _Optional[str] = ..., flavor_id: _Optional[int] = ..., retry: _Optional[int] = ..., worker_id: _Optional[int] = ..., action: _Optional[str] = ..., created_at: _Optional[str] = ..., modified_at: _Optional[str] = ..., progression: _Optional[int] = ..., log: _Optional[str] = ..., worker_name: _Optional[str] = ..., flavor_info: _Optional[str] = ...) -> None: ...
+    error_class: str
+    error_message: str
+    def __init__(self, job_id: _Optional[int] = ..., status: _Optional[str] = ..., flavor_id: _Optional[int] = ..., retry: _Optional[int] = ..., worker_id: _Optional[int] = ..., action: _Optional[str] = ..., created_at: _Optional[str] = ..., modified_at: _Optional[str] = ..., progression: _Optional[int] = ..., log: _Optional[str] = ..., worker_name: _Optional[str] = ..., flavor_info: _Optional[str] = ..., error_class: _Optional[str] = ..., error_message: _Optional[str] = ...) -> None: ...
 
 class JobId(_message.Message):
     __slots__ = ("job_id",)

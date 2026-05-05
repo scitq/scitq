@@ -268,6 +268,7 @@
           <th>Job</th>
           <th>Target</th>
           <th>Status</th>
+          <th>Error</th>
           <th>Latest Update</th>
           <th>Action</th>
         </tr>
@@ -301,6 +302,15 @@
                 title={getJobStatusText(job.status)}
                 data-testid={`status-pill-${job.jobId}`}
               ></div>
+            </td>
+            <td>
+              {#if job.errorClass}
+                <span
+                  class="job-error-badge job-error-{job.errorClass}"
+                  title={job.errorMessage || job.errorClass}
+                  data-testid={`error-class-${job.jobId}`}
+                >{job.errorClass}</span>
+              {/if}
             </td>
             <td>{new Date(job.modifiedAt).toLocaleString()}</td>
             <td class="workerCompo-actions">

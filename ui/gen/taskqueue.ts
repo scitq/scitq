@@ -1297,6 +1297,19 @@ export interface Job {
      * @generated from protobuf field: optional string flavor_info = 12
      */
     flavorInfo?: string; // e.g. "Standard_D8s_v3 — 8 CPU, 32GB mem"
+    /**
+     * Provider-error category. Set on F-status jobs by classifyProviderError.
+     * One of: "auth", "quota", "capacity", "unsupported_flavor",
+     * "transient", "unknown". Empty/absent for non-failed jobs.
+     * See specs / 2026-05-05 incident.
+     *
+     * @generated from protobuf field: optional string error_class = 13
+     */
+    errorClass?: string;
+    /**
+     * @generated from protobuf field: optional string error_message = 14
+     */
+    errorMessage?: string; // raw provider error text
 }
 /**
  * @generated from protobuf message taskqueue.JobId
@@ -6963,7 +6976,9 @@ class Job$Type extends MessageType<Job> {
             { no: 9, name: "progression", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 10, name: "log", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 11, name: "worker_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 12, name: "flavor_info", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 12, name: "flavor_info", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 13, name: "error_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 14, name: "error_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Job>): Job {
@@ -7023,6 +7038,12 @@ class Job$Type extends MessageType<Job> {
                 case /* optional string flavor_info */ 12:
                     message.flavorInfo = reader.string();
                     break;
+                case /* optional string error_class */ 13:
+                    message.errorClass = reader.string();
+                    break;
+                case /* optional string error_message */ 14:
+                    message.errorMessage = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7071,6 +7092,12 @@ class Job$Type extends MessageType<Job> {
         /* optional string flavor_info = 12; */
         if (message.flavorInfo !== undefined)
             writer.tag(12, WireType.LengthDelimited).string(message.flavorInfo);
+        /* optional string error_class = 13; */
+        if (message.errorClass !== undefined)
+            writer.tag(13, WireType.LengthDelimited).string(message.errorClass);
+        /* optional string error_message = 14; */
+        if (message.errorMessage !== undefined)
+            writer.tag(14, WireType.LengthDelimited).string(message.errorMessage);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -173,6 +173,15 @@ type Attr struct {
 		} `arg:"subcommand:enable" help:"Re-enable a previously-disabled flavor for recruitment"`
 	} `arg:"subcommand:flavor" help:"Find / manage flavors"`
 
+	// Job (server-internal worker create/delete/restart operations) commands
+	Job *struct {
+		List *struct {
+			Limit  int     `arg:"--limit" help:"Max jobs to fetch" default:"50"`
+			Status *string `arg:"--status" help:"Filter to a single status: P (pending), R (running), S (succeeded), F (failed), X (cancelled)"`
+			Long   bool    `arg:"-l,--long" help:"Show the full provider error message (otherwise just the class)"`
+		} `arg:"subcommand:list" help:"List server-internal jobs (worker create / delete / restart). Use to spot persistent provider failures (auth, quota, capacity)."`
+	} `arg:"subcommand:job" help:"Inspect server-internal jobs"`
+
 	// User commands
 	User *struct {
 		List   *struct{} `arg:"subcommand:list" help:"List all users"`
@@ -1147,6 +1156,78 @@ func (c *CLI) FlavorSetAvailability(enable bool) error {
 	}
 	fmt.Printf("🔧 Flavor '%s' %s in %s (%s): %d row(s) updated\n",
 		sub.FlavorName, verb, sub.Provider, scope, resp.GetAffectedRows())
+	return nil
+}
+
+// JobList prints the server-internal job queue with provider error
+// classes surfaced. Born from the 2026-05-05 incident: an Azure SP
+// credential expired and recruitment hung silently for hours because
+// nothing on the operator's main surfaces showed *why* deletes and
+// creates were failing. The error_class column makes the failure mode
+// visible at a glance ("auth", "quota", "capacity", ...) without
+// having to grep journalctl.
+func (c *CLI) JobList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.ListJobsRequest{}
+	if c.Attr.Job.List.Limit > 0 {
+		l := int32(c.Attr.Job.List.Limit)
+		req.Limit = &l
+	}
+	resp, err := c.QC.Client.ListJobs(ctx, req)
+	if err != nil {
+		return fmt.Errorf("ListJobs: %w", err)
+	}
+
+	statusFilter := ""
+	if c.Attr.Job.List.Status != nil {
+		statusFilter = strings.ToUpper(*c.Attr.Job.List.Status)
+	}
+
+	count := 0
+	for _, j := range resp.GetJobs() {
+		if statusFilter != "" && j.GetStatus() != statusFilter {
+			continue
+		}
+		count++
+		errClass := ""
+		if v := j.GetErrorClass(); v != "" {
+			errClass = " [" + v + "]"
+		}
+		target := j.GetWorkerName()
+		if target == "" {
+			target = fmt.Sprintf("worker_id=%d", j.GetWorkerId())
+		}
+		fmt.Printf("🛠 #%-7d %s  %s  %s  %s%s\n",
+			j.GetJobId(),
+			j.GetAction(),
+			j.GetStatus(),
+			target,
+			j.GetModifiedAt(),
+			errClass,
+		)
+		if c.Attr.Job.List.Long && j.GetErrorMessage() != "" {
+			// Indent the raw provider error so the multi-line shape is
+			// obvious. Truncate visually at 4 lines so a single
+			// chatty error doesn't drown the rest of the output.
+			lines := strings.Split(j.GetErrorMessage(), "\n")
+			for i, line := range lines {
+				if i >= 4 {
+					fmt.Printf("        ... (%d more lines suppressed; full text in DB)\n", len(lines)-4)
+					break
+				}
+				fmt.Printf("        %s\n", line)
+			}
+		}
+	}
+	if count == 0 {
+		if statusFilter != "" {
+			fmt.Printf("No jobs with status=%s\n", statusFilter)
+		} else {
+			fmt.Println("No jobs.")
+		}
+	}
 	return nil
 }
 
@@ -2955,6 +3036,11 @@ func Run(c CLI) error {
 			err = c.FlavorSetAvailability(false)
 		case c.Attr.Flavor.Enable != nil:
 			err = c.FlavorSetAvailability(true)
+		}
+	case c.Attr.Job != nil:
+		switch {
+		case c.Attr.Job.List != nil:
+			err = c.JobList()
 		}
 	// In Run(), after handling Flavor, add:
 	case c.Attr.User != nil:

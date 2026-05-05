@@ -3187,7 +3187,9 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
             CASE WHEN f.flavor_name IS NOT NULL
                 THEN f.flavor_name || ' — ' || f.cpu || ' CPU, ' || ROUND(f.mem::numeric) || 'GB mem'
                 ELSE NULL
-            END
+            END,
+            j.error_class,
+            j.error_message
         FROM job j
         LEFT JOIN worker w ON w.worker_id = j.worker_id
         LEFT JOIN flavor f ON f.flavor_id = j.flavor_id
@@ -3216,7 +3218,7 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 	var jobs []*pb.Job
 	for rows.Next() {
 		var job pb.Job
-		var workerName, flavorInfo sql.NullString
+		var workerName, flavorInfo, errorClass, errorMessage sql.NullString
 		err := rows.Scan(
 			&job.JobId,
 			&job.Status,
@@ -3230,6 +3232,8 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 			&job.Log,
 			&workerName,
 			&flavorInfo,
+			&errorClass,
+			&errorMessage,
 		)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan job: %v", err)
@@ -3237,6 +3241,8 @@ func (s *taskQueueServer) ListJobs(ctx context.Context, req *pb.ListJobsRequest)
 		}
 		job.WorkerName = utils.NullStringToPtr(workerName)
 		job.FlavorInfo = utils.NullStringToPtr(flavorInfo)
+		job.ErrorClass = utils.NullStringToPtr(errorClass)
+		job.ErrorMessage = utils.NullStringToPtr(errorMessage)
 		jobs = append(jobs, &job)
 	}
 

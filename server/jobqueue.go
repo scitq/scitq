@@ -71,19 +71,14 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 
 	select {
 	case <-ctx.Done():
-		// Check if context was cancelled or timed out
 		if ctx.Err() == context.Canceled {
 			log.Printf("🛑 Job %d cancelled", job.JobID)
-			// Update job status to cancelled
 			if err := s.updateJobStatus(job.JobID, "X"); err != nil {
 				log.Printf("⚠️ Failed to update job status to cancelled: %v", err)
 			}
 		} else {
 			log.Printf("⚠️ Job %d timed out", job.JobID)
-			// Handle timeout (e.g., mark job as failed)
-			if err := s.updateJobStatus(job.JobID, "F"); err != nil {
-				log.Printf("⚠️ Failed to update job status to failed: %v", err)
-			}
+			s.failJob(job.JobID, ctx.Err())
 			if job.Retry > 0 {
 				job.Retry--
 				s.addJob(job) // Retry job
@@ -92,30 +87,34 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 	case err := <-done:
 		if err != nil {
 			log.Printf("⚠️ Failed to process job %d: %v", job.JobID, err)
-			// Instance limit errors are non-transient: learn the limit and don't retry
-			if errors.Is(err, providers.ErrInstanceLimitReached) {
+			class := classifyProviderError(err)
+
+			// Sentinel errors with side-effects (quota / blacklist
+			// learning) are handled first; they're always non-retryable.
+			switch {
+			case errors.Is(err, providers.ErrInstanceLimitReached):
 				log.Printf("🚫 Job %d: instance limit reached for %s/%s — not retrying", job.JobID, job.Region, job.ProviderName)
 				s.qm.RegisterInstanceLimit(s.db, job.Region, job.ProviderName)
-				if err := s.updateJobStatus(job.JobID, "F"); err != nil {
-					log.Printf("⚠️ Failed to update job status to failed: %v", err)
-				}
-			} else if errors.Is(err, providers.ErrUnsupportedFlavor) {
+				s.failJobWithClass(job.JobID, class, err)
+			case errors.Is(err, providers.ErrUnsupportedFlavor):
 				log.Printf("🚫 Job %d: flavor %s unsupported in %s/%s — blacklisting, not retrying", job.JobID, job.Flavor, job.Region, job.ProviderName)
 				s.qm.BlacklistFlavor(job.Region, job.ProviderName, job.Flavor)
-				if err := s.updateJobStatus(job.JobID, "F"); err != nil {
-					log.Printf("⚠️ Failed to update job status to failed: %v", err)
-				}
-			} else if job.Retry > 0 {
+				s.failJobWithClass(job.JobID, class, err)
+			case isNonRetryable(class):
+				// 2026-05-05 incident: auth errors persist until the
+				// operator rotates credentials. Retrying just floods
+				// the log and the job table with identical failures
+				// for hours. Mark F immediately so the UI banner +
+				// `scitq job list` light up within seconds.
+				log.Printf("🚫 Job %d: %s error is non-retryable (%s) — marking F immediately", job.JobID, class, err.Error())
+				s.failJobWithClass(job.JobID, class, err)
+			case job.Retry > 0:
 				job.Retry--
 				s.addJob(job) // Retry job
-			} else {
-				// Update job status to failed
-				if err := s.updateJobStatus(job.JobID, "F"); err != nil {
-					log.Printf("⚠️ Failed to update job status to failed: %v", err)
-				}
+			default:
+				s.failJobWithClass(job.JobID, class, err)
 			}
 		} else {
-			// Update job status to success
 			if err := s.updateJobStatus(job.JobID, "S"); err != nil {
 				log.Printf("⚠️ Failed to update job status to success: %v", err)
 			} else {
@@ -123,6 +122,63 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 			}
 		}
 	}
+}
+
+// failJob is the convenience form for cases where we don't yet know
+// the class; it classifies the error and delegates.
+func (s *taskQueueServer) failJob(jobID int32, err error) {
+	s.failJobWithClass(jobID, classifyProviderError(err), err)
+}
+
+// failJobWithClass marks a job F and persists the provider error class
+// + raw message so the UI / CLI / banner can surface them. errMsg is
+// truncated to 4 KiB to keep the column from growing unbounded on
+// very chatty providers.
+func (s *taskQueueServer) failJobWithClass(jobID int32, class string, err error) {
+	const maxLen = 4096
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+		if len(msg) > maxLen {
+			msg = msg[:maxLen] + "...[truncated]"
+		}
+	}
+	if _, dbErr := s.db.Exec(`
+		UPDATE job
+		   SET status        = 'F',
+		       modified_at   = NOW(),
+		       error_class   = NULLIF($2, ''),
+		       error_message = NULLIF($3, '')
+		 WHERE job_id = $1
+	`, jobID, class, msg); dbErr != nil {
+		log.Printf("⚠️ Failed to update job %d to F (class=%q): %v", jobID, class, dbErr)
+		return
+	}
+	// Mirror the WS notification updateJobStatus emits — same field
+	// names and types so the UI's existing job.updated handler can pick
+	// up errorClass / errorMessage as optional extras without needing
+	// to know about a second message shape.
+	failed := "F"
+	ws.EmitWS("job", jobID, "updated", struct {
+		JobId        int32     `json:"jobId"`
+		Status       *string   `json:"status,omitempty"`
+		ErrorClass   *string   `json:"errorClass,omitempty"`
+		ErrorMessage *string   `json:"errorMessage,omitempty"`
+		ModifiedAt   time.Time `json:"modifiedAt"`
+	}{
+		JobId:        jobID,
+		Status:       &failed,
+		ErrorClass:   nullIfEmpty(class),
+		ErrorMessage: nullIfEmpty(msg),
+		ModifiedAt:   time.Now(),
+	})
+}
+
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // processJob executes the job and updates the database.
