@@ -37,6 +37,12 @@ service TaskQueue {
     rpc ListProviders(google.protobuf.Empty) returns (ProviderList);
     rpc ListRegions(google.protobuf.Empty) returns (RegionList);
     rpc CreateFlavor(FlavorCreateRequest) returns (FlavorId);
+    // Operator: mark a flavor as (un)available for new recruitment in a
+    // specific provider/region (or all regions of that provider).
+    // Existing workers are untouched. The flavor stays in the catalog;
+    // only `flavor_region.available` is flipped. See
+    // specs/worker_autoupgrade.md / docs.
+    rpc SetFlavorAvailability(FlavorAvailability) returns (FlavorAvailabilityReply);
     rpc GetRcloneConfig(google.protobuf.Empty) returns (RcloneRemotes);
     rpc GetDockerCredentials(google.protobuf.Empty) returns (DockerCredentials);
     rpc Login(LoginRequest) returns (LoginResponse);
@@ -528,6 +534,22 @@ message Flavor {
 
 message FlavorsList {
     repeated Flavor flavors = 1;
+}
+
+// Operator-driven flavor (de)activation. `provider` is the canonical
+// "providerName.configName" form (e.g. "azure.primary"). `region` is
+// optional — empty means "every region of that provider". `available`
+// = false disables the flavor for new recruitment but leaves existing
+// workers running and recyclable.
+message FlavorAvailability {
+    string flavor_name = 1;
+    string provider    = 2;
+    optional string region = 3;
+    bool available     = 4;
+}
+
+message FlavorAvailabilityReply {
+    int32 affected_rows = 1;     // number of flavor_region rows updated
 }
 
 message ListJobsRequest {

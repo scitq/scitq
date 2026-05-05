@@ -648,6 +648,24 @@ class FlavorsList(_message.Message):
     flavors: _containers.RepeatedCompositeFieldContainer[Flavor]
     def __init__(self, flavors: _Optional[_Iterable[_Union[Flavor, _Mapping]]] = ...) -> None: ...
 
+class FlavorAvailability(_message.Message):
+    __slots__ = ("flavor_name", "provider", "region", "available")
+    FLAVOR_NAME_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    REGION_FIELD_NUMBER: _ClassVar[int]
+    AVAILABLE_FIELD_NUMBER: _ClassVar[int]
+    flavor_name: str
+    provider: str
+    region: str
+    available: bool
+    def __init__(self, flavor_name: _Optional[str] = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., available: bool = ...) -> None: ...
+
+class FlavorAvailabilityReply(_message.Message):
+    __slots__ = ("affected_rows",)
+    AFFECTED_ROWS_FIELD_NUMBER: _ClassVar[int]
+    affected_rows: int
+    def __init__(self, affected_rows: _Optional[int] = ...) -> None: ...
+
 class ListJobsRequest(_message.Message):
     __slots__ = ("limit", "offset")
     LIMIT_FIELD_NUMBER: _ClassVar[int]

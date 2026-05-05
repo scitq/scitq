@@ -41,9 +41,26 @@ import (
 var serverStartMu sync.Mutex
 var cliMu sync.Mutex // protects os.Args in runCLICommand
 
+// dbURLByAddr maps serverAddr → its Postgres URL so tests that need
+// direct DB access (e.g. to simulate stuck-D worker rows) can retrieve
+// it without changing startServerForTest's already-busy return tuple.
+// Populated by startServerForTest, read by dbURLForAddr.
+var dbURLByAddr sync.Map
+
 // Shared Python venv (created once, reused by all tests to avoid pip races)
 var sharedPythonVenv string
 var sharedPythonOnce sync.Once
+
+// dbURLForAddr returns the Postgres URL of the test server identified
+// by serverAddr. Used by tests that need to read/write tables directly.
+func dbURLForAddr(t *testing.T, serverAddr string) string {
+	t.Helper()
+	v, ok := dbURLByAddr.Load(serverAddr)
+	if !ok {
+		t.Fatalf("no DB URL recorded for server %s — startServerForTest must run first", serverAddr)
+	}
+	return v.(string)
+}
 
 // extractToken finds a JWT token (eyJ...) in CLI output, which may contain
 // other text from concurrent goroutines (Python bootstrap, server logs).
@@ -348,6 +365,9 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	time.Sleep(2 * time.Second)
 
 	serverAddr = fmt.Sprintf("localhost:%d", serverPort)
+	// Record DB URL for tests that need direct DB access. See
+	// dbURLForAddr above the function definitions.
+	dbURLByAddr.Store(serverAddr, dbURL)
 
 	// Wait for gRPC server readiness
 	deadline := time.Now().Add(60 * time.Second) // Python venv bootstrap can be slow on CI

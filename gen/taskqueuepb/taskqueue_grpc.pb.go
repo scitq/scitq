@@ -50,6 +50,7 @@ const (
 	TaskQueue_ListProviders_FullMethodName             = "/taskqueue.TaskQueue/ListProviders"
 	TaskQueue_ListRegions_FullMethodName               = "/taskqueue.TaskQueue/ListRegions"
 	TaskQueue_CreateFlavor_FullMethodName              = "/taskqueue.TaskQueue/CreateFlavor"
+	TaskQueue_SetFlavorAvailability_FullMethodName     = "/taskqueue.TaskQueue/SetFlavorAvailability"
 	TaskQueue_GetRcloneConfig_FullMethodName           = "/taskqueue.TaskQueue/GetRcloneConfig"
 	TaskQueue_GetDockerCredentials_FullMethodName      = "/taskqueue.TaskQueue/GetDockerCredentials"
 	TaskQueue_Login_FullMethodName                     = "/taskqueue.TaskQueue/Login"
@@ -144,6 +145,12 @@ type TaskQueueClient interface {
 	ListProviders(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ProviderList, error)
 	ListRegions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RegionList, error)
 	CreateFlavor(ctx context.Context, in *FlavorCreateRequest, opts ...grpc.CallOption) (*FlavorId, error)
+	// Operator: mark a flavor as (un)available for new recruitment in a
+	// specific provider/region (or all regions of that provider).
+	// Existing workers are untouched. The flavor stays in the catalog;
+	// only `flavor_region.available` is flipped. See
+	// specs/worker_autoupgrade.md / docs.
+	SetFlavorAvailability(ctx context.Context, in *FlavorAvailability, opts ...grpc.CallOption) (*FlavorAvailabilityReply, error)
 	GetRcloneConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RcloneRemotes, error)
 	GetDockerCredentials(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*DockerCredentials, error)
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
@@ -547,6 +554,16 @@ func (c *taskQueueClient) CreateFlavor(ctx context.Context, in *FlavorCreateRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FlavorId)
 	err := c.cc.Invoke(ctx, TaskQueue_CreateFlavor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) SetFlavorAvailability(ctx context.Context, in *FlavorAvailability, opts ...grpc.CallOption) (*FlavorAvailabilityReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FlavorAvailabilityReply)
+	err := c.cc.Invoke(ctx, TaskQueue_SetFlavorAvailability_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1167,6 +1184,12 @@ type TaskQueueServer interface {
 	ListProviders(context.Context, *emptypb.Empty) (*ProviderList, error)
 	ListRegions(context.Context, *emptypb.Empty) (*RegionList, error)
 	CreateFlavor(context.Context, *FlavorCreateRequest) (*FlavorId, error)
+	// Operator: mark a flavor as (un)available for new recruitment in a
+	// specific provider/region (or all regions of that provider).
+	// Existing workers are untouched. The flavor stays in the catalog;
+	// only `flavor_region.available` is flipped. See
+	// specs/worker_autoupgrade.md / docs.
+	SetFlavorAvailability(context.Context, *FlavorAvailability) (*FlavorAvailabilityReply, error)
 	GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneRemotes, error)
 	GetDockerCredentials(context.Context, *emptypb.Empty) (*DockerCredentials, error)
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
@@ -1344,6 +1367,9 @@ func (UnimplementedTaskQueueServer) ListRegions(context.Context, *emptypb.Empty)
 }
 func (UnimplementedTaskQueueServer) CreateFlavor(context.Context, *FlavorCreateRequest) (*FlavorId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateFlavor not implemented")
+}
+func (UnimplementedTaskQueueServer) SetFlavorAvailability(context.Context, *FlavorAvailability) (*FlavorAvailabilityReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetFlavorAvailability not implemented")
 }
 func (UnimplementedTaskQueueServer) GetRcloneConfig(context.Context, *emptypb.Empty) (*RcloneRemotes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRcloneConfig not implemented")
@@ -2051,6 +2077,24 @@ func _TaskQueue_CreateFlavor_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).CreateFlavor(ctx, req.(*FlavorCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_SetFlavorAvailability_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FlavorAvailability)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).SetFlavorAvailability(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_SetFlavorAvailability_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).SetFlavorAvailability(ctx, req.(*FlavorAvailability))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3213,6 +3257,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateFlavor",
 			Handler:    _TaskQueue_CreateFlavor_Handler,
+		},
+		{
+			MethodName: "SetFlavorAvailability",
+			Handler:    _TaskQueue_SetFlavorAvailability_Handler,
 		},
 		{
 			MethodName: "GetRcloneConfig",

@@ -129,7 +129,8 @@ type Attr struct {
 			Prefetch    int    `arg:"--prefetch" default:"0" help:"Worker initial prefetch"`
 		} `arg:"subcommand:deploy" help:"Create and deploy a new worker instance"`
 		Delete *struct {
-			WorkerId int32 `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
+			WorkerId   int32 `arg:"--worker-id,required" help:"The ID of the worker to be deleted"`
+			Undeployed bool  `arg:"--undeployed" help:"Skip the cloud-side delete (assume the VM is already gone). Soft-deletes the DB row, releases quota, clears watchdog state. Use when a normal delete is wedged."`
 		} `arg:"subcommand:delete" help:"Delete a worker instance"`
 		Update *struct {
 			WorkerId        int32   `arg:"--worker-id,required" help:"The ID of the worker to update"`
@@ -160,7 +161,17 @@ type Attr struct {
 			Limit  int    `arg:"--limit" help:"Limit the number of answers" default:"10"`
 			Filter string `arg:"--filter" help:"Filter flavor by a filter string like 'cpu>=12:mem>=30'"`
 		} `arg:"subcommand:list" help:"List flavors"`
-	} `arg:"subcommand:flavor" help:"Find flavors"`
+		Disable *struct {
+			Provider   string  `arg:"--provider,required" help:"Provider in <name>.<config> form, e.g. azure.primary"`
+			FlavorName string  `arg:"--flavor,required" help:"Flavor name to disable, e.g. Standard_DC32ads_cc_v5"`
+			Region     *string `arg:"--region" help:"Restrict to one region (default: every region of that provider)"`
+		} `arg:"subcommand:disable" help:"Mark a flavor as unavailable for new recruitment in a provider/region; existing workers untouched"`
+		Enable *struct {
+			Provider   string  `arg:"--provider,required" help:"Provider in <name>.<config> form, e.g. azure.primary"`
+			FlavorName string  `arg:"--flavor,required" help:"Flavor name to re-enable"`
+			Region     *string `arg:"--region" help:"Restrict to one region (default: every region of that provider)"`
+		} `arg:"subcommand:enable" help:"Re-enable a previously-disabled flavor for recruitment"`
+	} `arg:"subcommand:flavor" help:"Find / manage flavors"`
 
 	// User commands
 	User *struct {
@@ -1086,6 +1097,59 @@ func (c *CLI) FlavorList(limit int32, filter string) error {
 	return nil
 }
 
+// FlavorSetAvailability flips `flavor_region.available` for the given
+// flavor in a provider/region. With `enable=false`, the recruiter
+// stops considering this flavor for new deployments; existing workers
+// of the same flavor keep running. Mirrors the SetFlavorAvailability
+// gRPC handler.
+func (c *CLI) FlavorSetAvailability(enable bool) error {
+	var sub *struct {
+		Provider   string
+		FlavorName string
+		Region     *string
+	}
+	if enable {
+		sub = &struct {
+			Provider   string
+			FlavorName string
+			Region     *string
+		}{c.Attr.Flavor.Enable.Provider, c.Attr.Flavor.Enable.FlavorName, c.Attr.Flavor.Enable.Region}
+	} else {
+		sub = &struct {
+			Provider   string
+			FlavorName string
+			Region     *string
+		}{c.Attr.Flavor.Disable.Provider, c.Attr.Flavor.Disable.FlavorName, c.Attr.Flavor.Disable.Region}
+	}
+
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	req := &pb.FlavorAvailability{
+		FlavorName: sub.FlavorName,
+		Provider:   sub.Provider,
+		Available:  enable,
+	}
+	if sub.Region != nil && *sub.Region != "" {
+		req.Region = sub.Region
+	}
+	resp, err := c.QC.Client.SetFlavorAvailability(ctx, req)
+	if err != nil {
+		return fmt.Errorf("SetFlavorAvailability: %w", err)
+	}
+	verb := "disabled"
+	if enable {
+		verb = "enabled"
+	}
+	scope := "all regions"
+	if sub.Region != nil && *sub.Region != "" {
+		scope = "region " + *sub.Region
+	}
+	fmt.Printf("🔧 Flavor '%s' %s in %s (%s): %d row(s) updated\n",
+		sub.FlavorName, verb, sub.Provider, scope, resp.GetAffectedRows())
+	return nil
+}
+
 // WorkerDeploy deploys a new worker instance.
 func (c *CLI) WorkerDeploy() error {
 	ctx, cancel := c.WithTimeout()
@@ -1119,19 +1183,30 @@ func (c *CLI) WorkerDelete() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
 
-	// Call the gRPC DeleteWorker RPC.
-	res, err := c.QC.Client.DeleteWorker(ctx, &pb.WorkerDeletion{WorkerId: int32(c.Attr.Worker.Delete.WorkerId)})
+	req := &pb.WorkerDeletion{WorkerId: int32(c.Attr.Worker.Delete.WorkerId)}
+	if c.Attr.Worker.Delete.Undeployed {
+		t := true
+		req.Undeployed = &t
+	}
+
+	res, err := c.QC.Client.DeleteWorker(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error deleting worker: %w", err)
 	}
 
-	if res.JobId != 0 {
-		fmt.Printf("✅ Worker %d is being deleted\n", c.Attr.Worker.Delete.WorkerId)
-		return nil
-	} else {
-		return fmt.Errorf("deletion order is in an unknown status for worker %d", c.Attr.Worker.Delete.WorkerId)
+	// Two valid response shapes:
+	//   - JobId != 0: cloud-side delete job queued (normal path).
+	//   - JobId == 0: soft-delete completed inline (`--undeployed`, or
+	//     a permanent worker that was offline). Either is success.
+	switch {
+	case c.Attr.Worker.Delete.Undeployed:
+		fmt.Printf("✅ Worker %d soft-deleted (no cloud-side delete attempted)\n", c.Attr.Worker.Delete.WorkerId)
+	case res.JobId != 0:
+		fmt.Printf("✅ Worker %d is being deleted (job %d)\n", c.Attr.Worker.Delete.WorkerId, res.JobId)
+	default:
+		fmt.Printf("✅ Worker %d soft-deleted\n", c.Attr.Worker.Delete.WorkerId)
 	}
-
+	return nil
 }
 
 // WorkerUpdate updates worker settings (user-scoped).
@@ -2876,6 +2951,10 @@ func Run(c CLI) error {
 		switch {
 		case c.Attr.Flavor.List != nil:
 			err = c.FlavorList(int32(c.Attr.Flavor.List.Limit), c.Attr.Flavor.List.Filter)
+		case c.Attr.Flavor.Disable != nil:
+			err = c.FlavorSetAvailability(false)
+		case c.Attr.Flavor.Enable != nil:
+			err = c.FlavorSetAvailability(true)
 		}
 	// In Run(), after handling Flavor, add:
 	case c.Attr.User != nil:

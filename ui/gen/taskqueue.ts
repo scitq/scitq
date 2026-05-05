@@ -1197,6 +1197,42 @@ export interface FlavorsList {
     flavors: Flavor[];
 }
 /**
+ * Operator-driven flavor (de)activation. `provider` is the canonical
+ * "providerName.configName" form (e.g. "azure.primary"). `region` is
+ * optional — empty means "every region of that provider". `available`
+ * = false disables the flavor for new recruitment but leaves existing
+ * workers running and recyclable.
+ *
+ * @generated from protobuf message taskqueue.FlavorAvailability
+ */
+export interface FlavorAvailability {
+    /**
+     * @generated from protobuf field: string flavor_name = 1
+     */
+    flavorName: string;
+    /**
+     * @generated from protobuf field: string provider = 2
+     */
+    provider: string;
+    /**
+     * @generated from protobuf field: optional string region = 3
+     */
+    region?: string;
+    /**
+     * @generated from protobuf field: bool available = 4
+     */
+    available: boolean;
+}
+/**
+ * @generated from protobuf message taskqueue.FlavorAvailabilityReply
+ */
+export interface FlavorAvailabilityReply {
+    /**
+     * @generated from protobuf field: int32 affected_rows = 1
+     */
+    affectedRows: number; // number of flavor_region rows updated
+}
+/**
  * @generated from protobuf message taskqueue.ListJobsRequest
  */
 export interface ListJobsRequest {
@@ -6742,6 +6778,123 @@ class FlavorsList$Type extends MessageType<FlavorsList> {
  * @generated MessageType for protobuf message taskqueue.FlavorsList
  */
 export const FlavorsList = new FlavorsList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FlavorAvailability$Type extends MessageType<FlavorAvailability> {
+    constructor() {
+        super("taskqueue.FlavorAvailability", [
+            { no: 1, name: "flavor_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "provider", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "region", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "available", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FlavorAvailability>): FlavorAvailability {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.flavorName = "";
+        message.provider = "";
+        message.available = false;
+        if (value !== undefined)
+            reflectionMergePartial<FlavorAvailability>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FlavorAvailability): FlavorAvailability {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string flavor_name */ 1:
+                    message.flavorName = reader.string();
+                    break;
+                case /* string provider */ 2:
+                    message.provider = reader.string();
+                    break;
+                case /* optional string region */ 3:
+                    message.region = reader.string();
+                    break;
+                case /* bool available */ 4:
+                    message.available = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FlavorAvailability, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string flavor_name = 1; */
+        if (message.flavorName !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.flavorName);
+        /* string provider = 2; */
+        if (message.provider !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.provider);
+        /* optional string region = 3; */
+        if (message.region !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.region);
+        /* bool available = 4; */
+        if (message.available !== false)
+            writer.tag(4, WireType.Varint).bool(message.available);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.FlavorAvailability
+ */
+export const FlavorAvailability = new FlavorAvailability$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FlavorAvailabilityReply$Type extends MessageType<FlavorAvailabilityReply> {
+    constructor() {
+        super("taskqueue.FlavorAvailabilityReply", [
+            { no: 1, name: "affected_rows", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FlavorAvailabilityReply>): FlavorAvailabilityReply {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.affectedRows = 0;
+        if (value !== undefined)
+            reflectionMergePartial<FlavorAvailabilityReply>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FlavorAvailabilityReply): FlavorAvailabilityReply {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 affected_rows */ 1:
+                    message.affectedRows = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FlavorAvailabilityReply, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 affected_rows = 1; */
+        if (message.affectedRows !== 0)
+            writer.tag(1, WireType.Varint).int32(message.affectedRows);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.FlavorAvailabilityReply
+ */
+export const FlavorAvailabilityReply = new FlavorAvailabilityReply$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListJobsRequest$Type extends MessageType<ListJobsRequest> {
     constructor() {
@@ -13280,6 +13433,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListProviders", options: {}, I: Empty, O: ProviderList },
     { name: "ListRegions", options: {}, I: Empty, O: RegionList },
     { name: "CreateFlavor", options: {}, I: FlavorCreateRequest, O: FlavorId },
+    { name: "SetFlavorAvailability", options: {}, I: FlavorAvailability, O: FlavorAvailabilityReply },
     { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneRemotes },
     { name: "GetDockerCredentials", options: {}, I: Empty, O: DockerCredentials },
     { name: "Login", options: {}, I: LoginRequest, O: LoginResponse },

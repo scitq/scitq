@@ -21,3 +21,19 @@ func SetGateExit(f func(int)) { gateExit = f }
 // gate uses to emit its drained-line JSON. Tests substitute a buffer.
 func GateStdout() io.Writer        { return gateStdout }
 func SetGateStdout(w io.Writer)    { gateStdout = w }
+
+// TriggerStuckDeleteCleanup runs one synchronous tick of the stuck-delete
+// janitor. The janitor's regular schedule (~5 min) is too slow for
+// tests; this seam lets the integration test fire it on demand. Returns
+// nil if the server hasn't started its janitor yet (the trigger is only
+// armed inside startStuckDeleteCleanup).
+func TriggerStuckDeleteCleanup() error {
+	if stuckDeleteCleanupTrigger == nil {
+		return nil
+	}
+	return stuckDeleteCleanupTrigger()
+}
+
+// stuckDeleteCleanupTrigger is wired in startStuckDeleteCleanup so the
+// test can run the janitor synchronously.
+var stuckDeleteCleanupTrigger func() error

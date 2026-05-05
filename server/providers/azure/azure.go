@@ -463,7 +463,11 @@ func (ap *AzureProvider) List(location string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create credential: %w", err)
 	}
-	ctx := context.Background()
+	// Bounded — same reason as Delete: this is called from the
+	// list-check fallback after a Delete error, so a hang here would
+	// mask the very recovery path it's supposed to drive.
+	ctx, cancel := context.WithTimeout(context.Background(), providerDeleteTimeout)
+	defer cancel()
 
 	rgClient, err := createClient(func() (*armresources.ResourceGroupsClient, error) {
 		return armresources.NewResourceGroupsClient(ap.az.SubscriptionID, cred, nil)
@@ -534,6 +538,16 @@ func (ap *AzureProvider) List(location string) (map[string]string, error) {
 	return workers, nil
 }
 
+// providerDeleteTimeout caps every Azure API poll inside Delete. Without
+// this, a hung Azure operation (capacity wedge, half-allocated VM) makes
+// PollUntilDone block indefinitely on a context.Background — the caller
+// (jobqueue.processJob) sits on it forever, retries never fire, and the
+// list-check fallback at jobqueue.go:180-187 never sees an error to
+// react to. Bounding each poll turns the hang into a clean error so the
+// fallback can verify via List() and either confirm the VM is gone or
+// return cleanly to the retry loop. See specs / 2026-05-04 incident.
+const providerDeleteTimeout = 3 * time.Minute
+
 // Delete removes the VM and its resource group for the given worker with retry logic.
 func (ap *AzureProvider) Delete(workerName, region string) error {
 	vmName := workerName
@@ -543,7 +557,10 @@ func (ap *AzureProvider) Delete(workerName, region string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create credential: %w", err)
 	}
-	ctx := context.Background()
+	// Each retry attempt creates its own bounded sub-context so a single
+	// wedged poll can't burn through all retries while time.Sleep is
+	// already counted against the outer job timeout.
+	parentCtx := context.Background()
 
 	// Create the VM client.
 	vmClient, err := createClient(func() (*armcompute.VirtualMachinesClient, error) {
@@ -553,8 +570,11 @@ func (ap *AzureProvider) Delete(workerName, region string) error {
 		return err
 	}
 
-	// Delete the VM with retries.
+	// Delete the VM with retries. Each attempt gets its own bounded
+	// context so a single hung Azure poll can't block forever.
 	err = retry(func() error {
+		ctx, cancel := context.WithTimeout(parentCtx, providerDeleteTimeout)
+		defer cancel()
 		poller, err := vmClient.BeginDelete(ctx, rgName, vmName, nil)
 		if err != nil {
 			var respErr *azcore.ResponseError
@@ -580,28 +600,34 @@ func (ap *AzureProvider) Delete(workerName, region string) error {
 	log.Printf("VM %s deleted successfully", vmName)
 
 	// Delete NIC then public IP explicitly to free the IP slot immediately
-	// (resource group deletion is slow and the IP stays allocated until it completes)
+	// (resource group deletion is slow and the IP stays allocated until it completes).
+	// Each sub-resource cleanup gets its own bounded context for the same reason
+	// the VM delete does.
 	nicClient, err := createClient(func() (*armnetwork.InterfacesClient, error) {
 		return armnetwork.NewInterfacesClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err == nil {
 		nicName := workerName + "-nic"
-		nicPoller, err := nicClient.BeginDelete(ctx, rgName, nicName, nil)
+		nicCtx, nicCancel := context.WithTimeout(parentCtx, providerDeleteTimeout)
+		nicPoller, err := nicClient.BeginDelete(nicCtx, rgName, nicName, nil)
 		if err == nil {
-			nicPoller.PollUntilDone(ctx, nil)
+			nicPoller.PollUntilDone(nicCtx, nil)
 			log.Printf("NIC %s deleted", nicName)
 		}
+		nicCancel()
 	}
 	pipClient, err := createClient(func() (*armnetwork.PublicIPAddressesClient, error) {
 		return armnetwork.NewPublicIPAddressesClient(ap.az.SubscriptionID, cred, nil)
 	})
 	if err == nil {
 		pipName := workerName + "-nic-pip"
-		pipPoller, err := pipClient.BeginDelete(ctx, rgName, pipName, nil)
+		pipCtx, pipCancel := context.WithTimeout(parentCtx, providerDeleteTimeout)
+		pipPoller, err := pipClient.BeginDelete(pipCtx, rgName, pipName, nil)
 		if err == nil {
-			pipPoller.PollUntilDone(ctx, nil)
+			pipPoller.PollUntilDone(pipCtx, nil)
 			log.Printf("Public IP %s deleted (freed slot)", pipName)
 		}
+		pipCancel()
 	}
 
 	// Create the Resource Group client.
@@ -614,6 +640,8 @@ func (ap *AzureProvider) Delete(workerName, region string) error {
 
 	// Delete the resource group with retries.
 	err = retry(func() error {
+		ctx, cancel := context.WithTimeout(parentCtx, providerDeleteTimeout)
+		defer cancel()
 		rgPoller, err := rgClient.BeginDelete(ctx, rgName, nil)
 		if err != nil {
 			var respErr *azcore.ResponseError

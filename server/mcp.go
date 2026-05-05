@@ -484,10 +484,13 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "delete_worker",
-			Description: "Delete a worker (destroys the VM if cloud-deployed).",
+			Description: "Delete a worker (normally destroys the VM if cloud-deployed). With undeployed=true, skips the cloud-side delete entirely (soft-deletes DB row + releases quota + clears watchdog state). Use undeployed only when you have verified out-of-band that the VM no longer exists in the cloud — otherwise it leaks cost (the VM keeps running on your bill, owned by no DB row, until the orphan_cleanup goroutine sweeps it within ~10 min).",
 			InputSchema: inputSchema{
-				Type:     "object",
-				Properties: map[string]schemaProperty{"worker_id": {Type: "integer", Description: "Worker ID"}},
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"worker_id":  {Type: "integer", Description: "Worker ID"},
+					"undeployed": {Type: "boolean", Description: "If true, skip the cloud-side Delete call. Cost-leak risk if the VM is actually still running — verify in the cloud console first."},
+				},
 				Required: []string{"worker_id"},
 			},
 		},
@@ -1271,11 +1274,22 @@ func (h *mcpHandler) toolDeployWorker(ctx context.Context, args json.RawMessage)
 }
 
 func (h *mcpHandler) toolDeleteWorker(ctx context.Context, args json.RawMessage) (any, *rpcError) {
-	var p struct{ WorkerID int32 `json:"worker_id"` }
+	var p struct {
+		WorkerID   int32 `json:"worker_id"`
+		Undeployed bool  `json:"undeployed"`
+	}
 	json.Unmarshal(args, &p)
-	_, err := h.server.DeleteWorker(ctx, &pb.WorkerDeletion{WorkerId: p.WorkerID})
+	req := &pb.WorkerDeletion{WorkerId: p.WorkerID}
+	if p.Undeployed {
+		t := true
+		req.Undeployed = &t
+	}
+	_, err := h.server.DeleteWorker(ctx, req)
 	if err != nil {
 		return errorResult(err), nil
+	}
+	if p.Undeployed {
+		return textResult(fmt.Sprintf("Worker %d soft-deleted (cloud-side delete skipped — verify the VM is actually gone in your cloud console; cost leaks until orphan_cleanup catches up)", p.WorkerID)), nil
 	}
 	return textResult(fmt.Sprintf("Worker %d deletion initiated", p.WorkerID)), nil
 }

@@ -185,6 +185,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.FlavorCreateRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.FlavorId.FromString,
                 _registered_method=True)
+        self.SetFlavorAvailability = channel.unary_unary(
+                '/taskqueue.TaskQueue/SetFlavorAvailability',
+                request_serializer=taskqueue__pb2.FlavorAvailability.SerializeToString,
+                response_deserializer=taskqueue__pb2.FlavorAvailabilityReply.FromString,
+                _registered_method=True)
         self.GetRcloneConfig = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetRcloneConfig',
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
@@ -661,6 +666,17 @@ class TaskQueueServicer(object):
 
     def CreateFlavor(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetFlavorAvailability(self, request, context):
+        """Operator: mark a flavor as (un)available for new recruitment in a
+        specific provider/region (or all regions of that provider).
+        Existing workers are untouched. The flavor stays in the catalog;
+        only `flavor_region.available` is flipped. See
+        specs/worker_autoupgrade.md / docs.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -1185,6 +1201,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.CreateFlavor,
                     request_deserializer=taskqueue__pb2.FlavorCreateRequest.FromString,
                     response_serializer=taskqueue__pb2.FlavorId.SerializeToString,
+            ),
+            'SetFlavorAvailability': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetFlavorAvailability,
+                    request_deserializer=taskqueue__pb2.FlavorAvailability.FromString,
+                    response_serializer=taskqueue__pb2.FlavorAvailabilityReply.SerializeToString,
             ),
             'GetRcloneConfig': grpc.unary_unary_rpc_method_handler(
                     servicer.GetRcloneConfig,
@@ -2287,6 +2308,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/CreateFlavor',
             taskqueue__pb2.FlavorCreateRequest.SerializeToString,
             taskqueue__pb2.FlavorId.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetFlavorAvailability(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/SetFlavorAvailability',
+            taskqueue__pb2.FlavorAvailability.SerializeToString,
+            taskqueue__pb2.FlavorAvailabilityReply.FromString,
             options,
             channel_credentials,
             insecure,

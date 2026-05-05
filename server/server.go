@@ -5699,6 +5699,70 @@ func (s *taskQueueServer) CreateFlavor(ctx context.Context, req *pb.FlavorCreate
 	return &pb.FlavorId{FlavorId: flavorID}, nil
 }
 
+// SetFlavorAvailability flips `flavor_region.available` for an
+// operator-specified flavor in a provider/region (or all regions of
+// that provider). Existing workers are untouched. Admin-gated. See
+// docs/install.md for usage.
+func (s *taskQueueServer) SetFlavorAvailability(ctx context.Context, req *pb.FlavorAvailability) (*pb.FlavorAvailabilityReply, error) {
+	if !IsAdmin(ctx) {
+		return nil, status.Error(codes.PermissionDenied, "admin privileges required")
+	}
+	if req.FlavorName == "" {
+		return nil, status.Error(codes.InvalidArgument, "flavor_name is required")
+	}
+	if req.Provider == "" {
+		return nil, status.Error(codes.InvalidArgument, "provider is required (form: <providerName>.<configName>, e.g. azure.primary)")
+	}
+	parts := strings.SplitN(req.Provider, ".", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "provider must be of the form <providerName>.<configName> (got %q)", req.Provider)
+	}
+	providerName, configName := parts[0], parts[1]
+
+	// Single update; Postgres rowcount tells us how many region bindings
+	// flipped, which the operator can use to verify scope.
+	var res sql.Result
+	var err error
+	if req.Region != nil && *req.Region != "" {
+		res, err = s.db.ExecContext(ctx, `
+			UPDATE flavor_region SET available = $1
+			WHERE flavor_id IN (
+				SELECT f.flavor_id FROM flavor f
+				JOIN provider p ON f.provider_id = p.provider_id
+				WHERE f.flavor_name = $2 AND p.provider_name = $3 AND p.config_name = $4
+			)
+			AND region_id IN (
+				SELECT r.region_id FROM region r
+				JOIN provider p ON r.provider_id = p.provider_id
+				WHERE r.region_name = $5 AND p.provider_name = $3 AND p.config_name = $4
+			)
+		`, req.Available, req.FlavorName, providerName, configName, *req.Region)
+	} else {
+		res, err = s.db.ExecContext(ctx, `
+			UPDATE flavor_region SET available = $1
+			WHERE flavor_id IN (
+				SELECT f.flavor_id FROM flavor f
+				JOIN provider p ON f.provider_id = p.provider_id
+				WHERE f.flavor_name = $2 AND p.provider_name = $3 AND p.config_name = $4
+			)
+		`, req.Available, req.FlavorName, providerName, configName)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "update flavor_region.available: %v", err)
+	}
+	n, _ := res.RowsAffected()
+	scope := "all regions"
+	if req.Region != nil && *req.Region != "" {
+		scope = "region " + *req.Region
+	}
+	verb := "enabled"
+	if !req.Available {
+		verb = "disabled"
+	}
+	log.Printf("🔧 Flavor '%s' %s in %s (%s): %d row(s)", req.FlavorName, verb, req.Provider, scope, n)
+	return &pb.FlavorAvailabilityReply{AffectedRows: int32(n)}, nil
+}
+
 func applyMigrations(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -5900,6 +5964,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		s.startJobQueue()
 		s.startFlavorStatsJobs()
 		s.startOrphanCleanup()
+		s.startStuckDeleteCleanup()
 		pb.RegisterTaskQueueServer(grpcServer, s)
 
 		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))
