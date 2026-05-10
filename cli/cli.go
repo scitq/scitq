@@ -253,6 +253,7 @@ type Attr struct {
 		List *struct {
 			NameLike string `arg:"--name-like" help:"Filter workflows by name"`
 			Long     bool   `arg:"-l,--long" help:"Show params used to launch each workflow"`
+			Limit    int32  `arg:"--limit" default:"10" help:"Maximum number of workflows to return (default 10, use 0 for no limit)"`
 		} `arg:"subcommand:list" help:"List workflows"`
 		Create *struct {
 			Name           string `arg:"--name,required" help:"Workflow name"`
@@ -1598,6 +1599,9 @@ func (c *CLI) WorkflowList() error {
 	req := &pb.WorkflowFilter{NameLike: nil}
 	if c.Attr.Workflow.List.NameLike != "" {
 		req.NameLike = &c.Attr.Workflow.List.NameLike
+	}
+	if c.Attr.Workflow.List.Limit > 0 {
+		req.Limit = &c.Attr.Workflow.List.Limit
 	}
 
 	res, err := c.QC.Client.ListWorkflows(ctx, req)

@@ -311,14 +311,18 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
+  /* Pad-left clears the fixed hamburger button (30px wide at left:0).
+     The hamburger is fixed at top:1rem with height 36px (its visual center
+     sits ~34px from top), so the row needs enough vertical room for the
+     search input's center to align with the hamburger's center. */
   .wf-search-row {
-    padding: 0.5rem 0.75rem;
+    padding: 0.6rem 0.5rem 0.4rem 2.4rem;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
   }
   .wf-search-input {
     width: 100%;
-    padding: 0.4rem 0.6rem;
+    padding: 0.3rem 0.5rem;
     border: 1px solid var(--border-color);
     border-radius: 6px;
     background: var(--bg-primary);
