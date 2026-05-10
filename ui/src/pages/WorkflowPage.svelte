@@ -28,8 +28,47 @@
   // Number of workflows to load at once
   const WORKFLOWS_CHUNK_SIZE = 25;
 
-  // Name filter (case-insensitive substring match server-side)
-  let nameFilter = '';
+  // Persistence: search filter goes to URL hash (link-shareable, survives reload),
+  // pagination count + scroll go to sessionStorage (transient, restore-on-return).
+  const ROUTE_HASH = '#/workflows';
+  const STORAGE_KEY = 'wf:state';
+
+  function readUrlSearch(): string {
+    const hash = window.location.hash;
+    const qIdx = hash.indexOf('?');
+    if (qIdx < 0) return '';
+    return new URLSearchParams(hash.slice(qIdx + 1)).get('search') || '';
+  }
+
+  function writeUrlSearch(value: string) {
+    const newHash = value ? `${ROUTE_HASH}?search=${encodeURIComponent(value)}` : ROUTE_HASH;
+    if (window.location.hash !== newHash) {
+      history.replaceState(null, '', newHash);
+    }
+  }
+
+  function readSessionState(): { loaded: number; scrollTop: number } | null {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSessionState(loaded: number, scrollTop: number) {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ loaded, scrollTop }));
+    } catch {}
+  }
+
+  function clearSessionState() {
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+  }
+
+  // Name filter (case-insensitive substring match server-side). Initialized
+  // from the URL so the filter survives navigation and is link-shareable.
+  let nameFilter = readUrlSearch();
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // WebSocket unsubscribe function
@@ -51,14 +90,24 @@
    * @async
    */
   onMount(async () => {
-    workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0);
-    hasMoreWorkflows = workflows.length === WORKFLOWS_CHUNK_SIZE;
+    // Restore loaded count from sessionStorage so coming back from a task
+    // detail page doesn't reset the user to chunk 1.
+    const saved = readSessionState();
+    const targetCount = saved?.loaded && saved.loaded > 0 ? saved.loaded : WORKFLOWS_CHUNK_SIZE;
+    workflows = await getWorkFlow(nameFilter || undefined, targetCount, 0);
+    // If we asked for N and got exactly N back, assume more might exist.
+    // Worst case: a no-op "Load more" click (acceptable).
+    hasMoreWorkflows = workflows.length === targetCount;
     workers = await getWorkers();
     workersPerStepId = mapWorkersToStepIds(workers);
-    console.log('Loaded workers:', workers);
-    console.log('Workers per stepId map:', workersPerStepId);
     // Subscribe to workflow + step-stats events
     unsubscribeWS = wsClient.subscribeWithTopics({ workflow: [], 'step-stats': [] }, handleMessage);
+    // Restore scroll after the list has rendered.
+    if (saved?.scrollTop && saved.scrollTop > 0) {
+      requestAnimationFrame(() => {
+        if (listContainer) listContainer.scrollTop = saved.scrollTop;
+      });
+    }
   });
 
   /**
@@ -82,10 +131,14 @@
   }
 
   // Debounced re-fetch on search input. 250ms feels responsive without
-  // hammering the server while the user is typing.
+  // hammering the server while the user is typing. Also writes the filter
+  // to the URL hash and clears the session-stored loaded count (which is
+  // meaningless under a different filter).
   function onSearchInput() {
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(async () => {
+      writeUrlSearch(nameFilter);
+      clearSessionState();
       isLoading = true;
       try {
         workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0);
@@ -93,6 +146,7 @@
         pendingWorkflows = [];
         showNewWorkflowsNotification = false;
         newWorkflowsCount = 0;
+        if (listContainer) listContainer.scrollTop = 0;
       } finally {
         isLoading = false;
       }
@@ -102,13 +156,15 @@
 
 
   /**
-   * Component cleanup - unsubscribes from WebSocket
+   * Component cleanup - unsubscribes from WebSocket and persists list state
+   * so navigating away and back restores loaded count + scroll position.
    */
   onDestroy(() => {
     if (unsubscribeWS) {
       unsubscribeWS();
       unsubscribeWS = null;
     }
+    writeSessionState(workflows.length, listContainer?.scrollTop || 0);
   });
 
   /**
@@ -224,9 +280,10 @@
     const { scrollTop } = listContainer;
     isScrolledToTop = scrollTop <= 10;
 
-    // If scrolled to top with pending workflows, refresh the list
+    // If scrolled to top with pending workflows, refresh the list. Pass the
+    // current name filter so an active search isn't silently dropped.
     if (isScrolledToTop && showNewWorkflowsNotification) {
-      workflows = await getWorkFlow(undefined, workflows.length + newWorkflowsCount, 0);
+      workflows = await getWorkFlow(nameFilter || undefined, workflows.length + newWorkflowsCount, 0);
       showNewWorkflowsNotification = false;
       newWorkflowsCount = 0;
     }
