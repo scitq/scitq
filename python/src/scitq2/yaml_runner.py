@@ -133,9 +133,17 @@ _LITERAL_FORMATTERS = {
 }
 
 
-def _resolve_refs(val, params, itervar=None, extra_vars=None, literal_format=None):
-    """Resolve {params.x}, {ITER_VAR}, and {var|filter} references in a string."""
+def _resolve_refs(val, params, itervar=None, extra_vars=None, literal_format=None, _depth=0):
+    """Resolve {params.x}, {ITER_VAR}, and {var|filter} references in a string.
+
+    Recurses on resolved values so that a param default like
+    `"azure://.../{params.bioproject|name}/{params.depth}/"` gets fully
+    expanded when the param is referenced. Capped at depth 8 to break
+    accidental cycles between mutually-referencing defaults.
+    """
     if not isinstance(val, str):
+        return val
+    if _depth > 8:
         return val
     def repl(m):
         expr = m.group(1)
@@ -156,7 +164,7 @@ def _resolve_refs(val, params, itervar=None, extra_vars=None, literal_format=Non
             val = getattr(params, attr, None)
             if val is None:
                 if default is not None:
-                    return default
+                    return _resolve_refs(default, params, itervar, extra_vars, _depth=_depth + 1)
                 return ''
             resolved = str(val)
         elif itervar and ref in itervar:
@@ -165,8 +173,13 @@ def _resolve_refs(val, params, itervar=None, extra_vars=None, literal_format=Non
             resolved = str(extra_vars[ref])
         else:
             if default is not None:
-                return default
+                return _resolve_refs(default, params, itervar, extra_vars, _depth=_depth + 1)
             return m.group(0)
+
+        # Recursively expand any {…} placeholders inside the resolved value
+        # before applying filters, so filters see the fully-substituted text.
+        if '{' in resolved:
+            resolved = _resolve_refs(resolved, params, itervar, extra_vars, _depth=_depth + 1)
 
         # Apply filters
         for f in filters:
