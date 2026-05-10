@@ -1047,9 +1047,17 @@ func (s *taskQueueServer) ListTemplateRuns(ctx context.Context, req *pb.Template
 		LEFT JOIN scitq_user u ON r.run_by = u.user_id
 	`
 	args := []interface{}{}
+	conds := []string{}
 	if req.WorkflowTemplateId != nil {
-		query += " WHERE workflow_template_id = $1"
+		conds = append(conds, fmt.Sprintf("r.workflow_template_id = $%d", len(args)+1))
 		args = append(args, *req.WorkflowTemplateId)
+	}
+	if req.TemplateRunId != nil {
+		conds = append(conds, fmt.Sprintf("r.template_run_id = $%d", len(args)+1))
+		args = append(args, *req.TemplateRunId)
+	}
+	if len(conds) > 0 {
+		query += " WHERE " + strings.Join(conds, " AND ")
 	}
 	query += " ORDER BY created_at DESC"
 

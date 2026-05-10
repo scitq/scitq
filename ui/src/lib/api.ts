@@ -683,6 +683,21 @@ export async function runTemp(workflowTemplateId: number, paramValuesJson: strin
   }
 }
 
+/**
+ * Fetches a single template run by id, including its param_values_json,
+ * template name/version, and run metadata.
+ */
+export async function getTemplateRun(templateRunId: number): Promise<taskqueue.TemplateRun | null> {
+  try {
+    const filter: taskqueue.TemplateRunFilter = { templateRunId };
+    const res = await client.listTemplateRuns(filter, await callOptionsUserToken());
+    return res.response?.runs?.[0] ?? null;
+  } catch (error) {
+    console.error("Error while retrieving template run:", error);
+    return null;
+  }
+}
+
 /* -------------------------------- WORKFLOWS -------------------------------- */ 
 
 /**

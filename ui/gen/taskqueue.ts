@@ -2510,6 +2510,10 @@ export interface TemplateRunFilter {
      * @generated from protobuf field: optional int32 workflow_template_id = 1
      */
     workflowTemplateId?: number;
+    /**
+     * @generated from protobuf field: optional int32 template_run_id = 2
+     */
+    templateRunId?: number;
 }
 /**
  * @generated from protobuf message taskqueue.UpdateTemplateRunRequest
@@ -11164,7 +11168,8 @@ export const TemplateRunList = new TemplateRunList$Type();
 class TemplateRunFilter$Type extends MessageType<TemplateRunFilter> {
     constructor() {
         super("taskqueue.TemplateRunFilter", [
-            { no: 1, name: "workflow_template_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 1, name: "workflow_template_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "template_run_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<TemplateRunFilter>): TemplateRunFilter {
@@ -11181,6 +11186,9 @@ class TemplateRunFilter$Type extends MessageType<TemplateRunFilter> {
                 case /* optional int32 workflow_template_id */ 1:
                     message.workflowTemplateId = reader.int32();
                     break;
+                case /* optional int32 template_run_id */ 2:
+                    message.templateRunId = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11196,6 +11204,9 @@ class TemplateRunFilter$Type extends MessageType<TemplateRunFilter> {
         /* optional int32 workflow_template_id = 1; */
         if (message.workflowTemplateId !== undefined)
             writer.tag(1, WireType.Varint).int32(message.workflowTemplateId);
+        /* optional int32 template_run_id = 2; */
+        if (message.templateRunId !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.templateRunId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

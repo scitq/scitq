@@ -1,8 +1,13 @@
-<script lang="ts"> 
+<script lang="ts">
   import StepList from './StepList.svelte';
-  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronRight, ChevronDown } from 'lucide-svelte';
+  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronRight, ChevronDown, HelpCircle } from 'lucide-svelte';
   import {delWorkflow} from '../lib/api';
   import { onMount } from 'svelte';
+  import TemplateRunModal from './TemplateRunModal.svelte';
+
+  let modalRunId: number | null = null;
+  function openModal(id: number) { modalRunId = id; }
+  function closeModal() { modalRunId = null; }
   
   /**
    * List of workflows passed as a prop to the component
@@ -97,6 +102,15 @@
           <a href={`#/tasks?workflowId=${wf.workflowId}`}
              class="wf-name"
              title={launchSummary(wf) ? `Launched by: ${launchSummary(wf)}` : undefined}>{wf.name}</a>
+          {#if wf.templateRunId}
+            <button
+              class="wf-info-btn"
+              on:click|stopPropagation={() => openModal(wf.templateRunId)}
+              title="Show template run details"
+              aria-label="Show template run details"
+              data-testid={`info-btn-${wf.workflowId}`}
+            ><HelpCircle size="16" /></button>
+          {/if}
           {#if wf.totalTasks > 0}
             {@const t = wf.totalTasks}
             {@const pctSuccess = wf.succeededTasks / t * 100}
@@ -136,3 +150,25 @@
   <!-- Empty state message when no workflows exist -->
   <p class="workerCompo-empty-state">No Workflow found.</p>
 {/if}
+
+{#if modalRunId !== null}
+  <TemplateRunModal templateRunId={modalRunId} onClose={closeModal} />
+{/if}
+
+<style>
+  .wf-info-btn {
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    margin-left: 4px;
+    cursor: pointer;
+    color: var(--text-secondary, var(--text-primary));
+    display: inline-flex;
+    align-items: center;
+    border-radius: 4px;
+  }
+  .wf-info-btn:hover {
+    color: var(--primary-color);
+    background: var(--bg-secondary);
+  }
+</style>

@@ -252,6 +252,7 @@ type Attr struct {
 	Workflow *struct {
 		List *struct {
 			NameLike string `arg:"--name-like" help:"Filter workflows by name"`
+			Long     bool   `arg:"-l,--long" help:"Show params used to launch each workflow"`
 		} `arg:"subcommand:list" help:"List workflows"`
 		Create *struct {
 			Name           string `arg:"--name,required" help:"Workflow name"`
@@ -1620,6 +1621,18 @@ func (c *CLI) WorkflowList() error {
 			fmt.Printf(" | Launched: %s", src)
 		}
 		fmt.Println()
+
+		if c.Attr.Workflow.List.Long && w.TemplateRunId != nil {
+			runs, err := c.QC.Client.ListTemplateRuns(ctx, &pb.TemplateRunFilter{TemplateRunId: w.TemplateRunId})
+			if err != nil || runs == nil || len(runs.Runs) == 0 {
+				continue
+			}
+			r := runs.Runs[0]
+			if r.RunByUsername != nil && *r.RunByUsername != "" {
+				fmt.Printf("    Run by: %s\n", *r.RunByUsername)
+			}
+			fmt.Printf("    Params: %s\n", r.ParamValuesJson)
+		}
 	}
 	return nil
 }

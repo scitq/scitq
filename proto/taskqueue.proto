@@ -1000,6 +1000,7 @@ message TemplateRunList {
 
 message TemplateRunFilter {
   optional int32 workflow_template_id = 1;
+  optional int32 template_run_id = 2;
 }
 
 message UpdateTemplateRunRequest {

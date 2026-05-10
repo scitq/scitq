@@ -4776,10 +4776,13 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
     `
 	var args []interface{}
 
-	// Add name filter if provided
+	// Add name filter if provided. Wrap with % wildcards on the server so
+	// callers send a plain substring (e.g. "biomscope") without having to
+	// know about SQL LIKE syntax. Idempotent: %biomscope% becomes %%biomscope%%
+	// which ILIKE evaluates the same way.
 	if req.NameLike != nil {
 		query += " WHERE w.workflow_name ILIKE $1"
-		args = append(args, req.NameLike)
+		args = append(args, "%"+*req.NameLike+"%")
 	}
 	query += " ORDER BY w.workflow_id DESC"
 

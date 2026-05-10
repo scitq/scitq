@@ -7760,6 +7760,7 @@ func (x *TemplateRunList) GetRuns() []*TemplateRun {
 type TemplateRunFilter struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	WorkflowTemplateId *int32                 `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3,oneof" json:"workflow_template_id,omitempty"`
+	TemplateRunId      *int32                 `protobuf:"varint,2,opt,name=template_run_id,json=templateRunId,proto3,oneof" json:"template_run_id,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -7797,6 +7798,13 @@ func (*TemplateRunFilter) Descriptor() ([]byte, []int) {
 func (x *TemplateRunFilter) GetWorkflowTemplateId() int32 {
 	if x != nil && x.WorkflowTemplateId != nil {
 		return *x.WorkflowTemplateId
+	}
+	return 0
+}
+
+func (x *TemplateRunFilter) GetTemplateRunId() int32 {
+	if x != nil && x.TemplateRunId != nil {
+		return *x.TemplateRunId
 	}
 	return 0
 }
@@ -10849,10 +10857,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_script_nameB\x10\n" +
 	"\x0e_script_sha256\"=\n" +
 	"\x0fTemplateRunList\x12*\n" +
-	"\x04runs\x18\x01 \x03(\v2\x16.taskqueue.TemplateRunR\x04runs\"c\n" +
+	"\x04runs\x18\x01 \x03(\v2\x16.taskqueue.TemplateRunR\x04runs\"\xa4\x01\n" +
 	"\x11TemplateRunFilter\x125\n" +
-	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01B\x17\n" +
-	"\x15_workflow_template_id\"\xea\x01\n" +
+	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01\x12+\n" +
+	"\x0ftemplate_run_id\x18\x02 \x01(\x05H\x01R\rtemplateRunId\x88\x01\x01B\x17\n" +
+	"\x15_workflow_template_idB\x12\n" +
+	"\x10_template_run_id\"\xea\x01\n" +
 	"\x18UpdateTemplateRunRequest\x12&\n" +
 	"\x0ftemplate_run_id\x18\x01 \x01(\x05R\rtemplateRunId\x12$\n" +
 	"\vworkflow_id\x18\x02 \x01(\x05H\x00R\n" +

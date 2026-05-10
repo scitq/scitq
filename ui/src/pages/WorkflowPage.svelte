@@ -28,6 +28,10 @@
   // Number of workflows to load at once
   const WORKFLOWS_CHUNK_SIZE = 25;
 
+  // Name filter (case-insensitive substring match server-side)
+  let nameFilter = '';
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   // WebSocket unsubscribe function
   let unsubscribeWS: (() => void) | null = null;
 
@@ -47,7 +51,7 @@
    * @async
    */
   onMount(async () => {
-    workflows = await getWorkFlow(undefined, WORKFLOWS_CHUNK_SIZE, 0);
+    workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0);
     hasMoreWorkflows = workflows.length === WORKFLOWS_CHUNK_SIZE;
     workers = await getWorkers();
     workersPerStepId = mapWorkersToStepIds(workers);
@@ -66,7 +70,7 @@
     if (isLoading || !hasMoreWorkflows) return;
     isLoading = true;
     try {
-      const next = await getWorkFlow(undefined, WORKFLOWS_CHUNK_SIZE, workflows.length);
+      const next = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, workflows.length);
       // Filter out any overlap caused by concurrent deletions/insertions.
       const seen = new Set(workflows.map(w => w.workflowId));
       const fresh = next.filter(w => !seen.has(w.workflowId));
@@ -75,6 +79,24 @@
     } finally {
       isLoading = false;
     }
+  }
+
+  // Debounced re-fetch on search input. 250ms feels responsive without
+  // hammering the server while the user is typing.
+  function onSearchInput() {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(async () => {
+      isLoading = true;
+      try {
+        workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0);
+        hasMoreWorkflows = workflows.length === WORKFLOWS_CHUNK_SIZE;
+        pendingWorkflows = [];
+        showNewWorkflowsNotification = false;
+        newWorkflowsCount = 0;
+      } finally {
+        isLoading = false;
+      }
+    }, 250);
   }
 
 
@@ -214,7 +236,20 @@
 <!-- ----------- MAIN CONTAINER ----------- -->
 <div class="wf-container" data-testid="wf-page">
   <div class="workflow-content">
-    
+
+    <!-- Search bar -->
+    <div class="wf-search-row">
+      <input
+        type="text"
+        class="wf-search-input"
+        bind:value={nameFilter}
+        on:input={onSearchInput}
+        placeholder="Search workflows by name…"
+        aria-label="Search workflows by name"
+        data-testid="wf-search-input"
+      />
+    </div>
+
     <!-- New workflows notification button -->
     {#if showNewWorkflowsNotification}
       <button 
@@ -275,5 +310,24 @@
   .load-more-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+  .wf-search-row {
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+  }
+  .wf-search-input {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    box-sizing: border-box;
+  }
+  .wf-search-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
   }
 </style>
