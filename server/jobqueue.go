@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -98,7 +99,16 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 				s.failJobWithClass(job.JobID, class, err)
 			case errors.Is(err, providers.ErrUnsupportedFlavor):
 				log.Printf("🚫 Job %d: flavor %s unsupported in %s/%s — blacklisting, not retrying", job.JobID, job.Flavor, job.Region, job.ProviderName)
+				// In-memory blacklist (covers the rest of this server's
+				// lifetime).
 				s.qm.BlacklistFlavor(job.Region, job.ProviderName, job.Flavor)
+				// Persist so the decision survives a restart. Provider
+				// returning ErrUnsupportedFlavor is the one signal we
+				// can confidently auto-disable on — Azure won't change
+				// its mind on a "VM size unavailable in this region"
+				// answer. Operator can re-enable via
+				// `scitq flavor enable` if they want to retry.
+				s.persistFlavorBlacklist(job.WorkerID, job.ProviderName, job.Region, job.Flavor)
 				s.failJobWithClass(job.JobID, class, err)
 			case isNonRetryable(class):
 				// 2026-05-05 incident: auth errors persist until the
@@ -179,6 +189,70 @@ func nullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// persistFlavorBlacklist sets flavor_region.available=false for a
+// (provider, region, flavor) that the cloud provider has hard-rejected
+// (ErrUnsupportedFlavor). Reuses the same column the operator's
+// `scitq flavor disable` flips, so re-enabling is the same one-line
+// CLI. Best-effort: any DB error is logged but doesn't block the job
+// failure path. See specs/recruitment-followups for the rationale —
+// this is the *only* error class we auto-blacklist on, by design.
+//
+// providerName is the canonical "providerName.configName" form (e.g.
+// "azure.primary") that's stored on the Job struct.
+func (s *taskQueueServer) persistFlavorBlacklist(workerID int32, providerName, region, flavorName string) {
+	parts := strings.SplitN(providerName, ".", 2)
+	if len(parts) != 2 {
+		log.Printf("⚠️ persistFlavorBlacklist: unexpected provider name %q (want providerName.configName)", providerName)
+		return
+	}
+	pName, cName := parts[0], parts[1]
+
+	res, err := s.db.Exec(`
+		UPDATE flavor_region
+		   SET available = false
+		 WHERE flavor_id IN (
+		       SELECT f.flavor_id FROM flavor f
+		       JOIN provider p ON f.provider_id = p.provider_id
+		        WHERE f.flavor_name = $1
+		          AND p.provider_name = $2
+		          AND p.config_name   = $3
+		 )
+		   AND region_id IN (
+		       SELECT r.region_id FROM region r
+		       JOIN provider p ON r.provider_id = p.provider_id
+		        WHERE r.region_name = $4
+		          AND p.provider_name = $2
+		          AND p.config_name   = $3
+		 )
+		   AND available = true
+	`, flavorName, pName, cName, region)
+	if err != nil {
+		log.Printf("⚠️ persistFlavorBlacklist: %s in %s/%s: %v", flavorName, providerName, region, err)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// Already disabled (or row absent). Nothing to do.
+		return
+	}
+	log.Printf("🚫 Auto-disabled flavor %s in %s/%s (%d row(s) — provider rejected as unsupported)",
+		flavorName, providerName, region, n)
+	// Audit-trail event tied to the worker that surfaced the rejection.
+	// 'I' level: the recruiter / operator can re-enable the flavor any
+	// time, so this isn't an error — it's a *decision* the system made.
+	if workerID > 0 {
+		if _, evErr := s.db.Exec(`
+			INSERT INTO worker_event (worker_id, event_class, level, message, details_json)
+			VALUES ($1, 'lifecycle', 'I', $2, $3::jsonb)
+		`, workerID,
+			fmt.Sprintf("auto-disabled flavor %s in %s/%s (provider rejected as unsupported)", flavorName, providerName, region),
+			fmt.Sprintf(`{"flavor":"%s","provider":"%s","region":"%s","reason":"unsupported_flavor","action":"set flavor_region.available=false"}`,
+				flavorName, providerName, region)); evErr != nil {
+			log.Printf("⚠️ persistFlavorBlacklist: failed to record audit event for worker %d: %v", workerID, evErr)
+		}
+	}
 }
 
 // processJob executes the job and updates the database.
