@@ -22,13 +22,25 @@ all: tgz-python-src build-server build-client build-cli
 GIT_TAG    := $(shell git describe --tags --always --dirty)
 GIT_SHA    := $(shell git rev-parse --short HEAD)
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILD_TS   := $(shell date -u +"%Y%m%d%H%M%S")
 
 
-# Normalize version for Python (PEP 440 compliant)
-normalize_pep440 = git describe --tags --always --dirty | \
-	sed -E 's/^v//' | \
-	sed -E 's/-dirty/.dev0/; s/-([0-9]+)-g([0-9a-f]+)/.dev\1+g\2/; s/-/./g; /^[0-9a-f]{3,40}$$/s/^/0.0.0+/'
-PY_PEP440_TAG = $(shell $(normalize_pep440))
+# Compose the PEP 440 version for the Python DSL package.
+#
+#   1. Normalize git describe output:
+#        v0.8.1                       -> 0.8.1
+#        v0.8.1-4-g4726a86            -> 0.8.1.dev4+g4726a86
+#        v0.8.1-dirty                 -> 0.8.1.dev0
+#        v0.8.1-4-g4726a86-dirty      -> 0.8.1.dev4+g4726a86.dev0
+#
+#   2. When the working tree is dirty, append a build-timestamp local
+#      segment so two rebuilds from the same dirty state produce DIFFERENT
+#      versions. Required because the server embeds the Python source and
+#      bootstraps via `pip install --upgrade`, which is a NO-OP when the
+#      version is unchanged — without this, edits to Python files (e.g.
+#      yaml_runner.py) never reach the running server's venv even after
+#      `make server-upgrade`.
+PY_PEP440_TAG := $(shell tag=$$(echo '$(GIT_TAG)' | sed -E 's/^v//' | sed -E 's/-dirty/.dev0/; s/-([0-9]+)-g([0-9a-f]+)/.dev\1+g\2/; s/-/./g; /^[0-9a-f]{3,40}$$/s/^/0.0.0+/'); if echo '$(GIT_TAG)' | grep -q -- '-dirty'; then if echo "$$tag" | grep -q '+'; then printf '%s.b%s\n' "$$tag" '$(BUILD_TS)'; else printf '%s+b%s\n' "$$tag" '$(BUILD_TS)'; fi; else printf '%s\n' "$$tag"; fi)
 
 LDFLAGS    := -X 'github.com/scitq/scitq/internal/version.Version=$(GIT_TAG)' \
               -X 'github.com/scitq/scitq/internal/version.Commit=$(GIT_SHA)' \
@@ -39,7 +51,12 @@ STATIC_LDFLAGS := $(LDFLAGS) -extldflags "-static"
 $(BINARY_DIR):
 	@mkdir -p $(BINARY_DIR)
 
-build-server: copy-docs | $(BINARY_DIR)
+# `tgz-python-src` is a prerequisite because the server embeds the Python
+# source tarball via `//go:embed python-src.tgz` (python/embed.go). Without
+# this, edits to python/src/* never reach the embedded tarball, so
+# `make server-upgrade` ships a binary with a stale Python DSL —
+# Bootstrap then re-installs the same old yaml_runner.py into the venv.
+build-server: tgz-python-src copy-docs | $(BINARY_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_SERVER) $(SRC_SERVER)
 
 copy-docs:
