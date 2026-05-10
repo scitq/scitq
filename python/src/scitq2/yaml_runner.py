@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+from datetime import date, datetime, timezone
 from itertools import product as itertools_product
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -1592,7 +1593,14 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     #   pass 2 — after iterations are built and _COUNT/_S are known,
     #            re-resolve user vars from their ORIGINAL expressions so
     #            any unresolved _COUNT placeholders get filled in.
-    workflow_vars = {'RESOURCE_ROOT': resource_root}
+    # Built-in vars available to every YAML workflow. TODAY/NOW are seeded at
+    # workflow-build time so e.g. final_output paths can include today's date
+    # without the user having to thread it through. User `vars:` can shadow these.
+    workflow_vars = {
+        'RESOURCE_ROOT': resource_root,
+        'TODAY': date.today().isoformat(),
+        'NOW': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    }
     user_vars_raw = data.get('vars', {})
     for var_name, var_expr in user_vars_raw.items():
         workflow_vars[var_name] = _resolve_field(var_expr, params, extra_vars=workflow_vars)
