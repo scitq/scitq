@@ -88,7 +88,10 @@ scitq module upgrade --apply
 | `origin=bundled`, same SHA | Skip | `bundled  up-to-date` |
 | `origin=bundled`, different SHA at the **same** version | Refuse (packaging bug on our side) unless `--force` | `CONFLICT same (path,version) re-shipped with different bytes` |
 | `origin=forked` at the same version | Skip — never clobber a fork | `forked   keep (local edits detected)` |
-| `origin=local` at the same version | Refuse — local uploads must not collide with bundled versions | `CONFLICT local upload collides with a bundled version number` |
+| `origin=local` at the same version, **byte-identical** to bundled | Silently flip row to `origin=bundled` (auto-resolution) | `📦 promoted identical local copy back to bundled` |
+| `origin=local` at the same version, **different bytes** | Refuse to overwrite; record bundled SHA on the row for `module conflicts` | `CONFLICT local upload diverges from bundled` |
+
+The "byte-identical L→B" auto-resolution covers the common case where someone uploaded a local copy of a bundled module (typically pre-library workflows pushing legacy YAMLs); on the next server start the row is reclassified for free, no operator action needed. True divergences (operator actually changed the bytes) keep the local copy in place, populate `bundled_sha` on the row so `scitq module conflicts` can spot them, and surface a warning pointing at `scitq module delete <path>@<version>` as the revert path.
 
 Bundled modules that ship a *new* version for an existing path just get a new row — the old `bundled` / `forked` / `local` rows at older versions stay untouched, visible via `module list --versions <path>`.
 
@@ -145,6 +148,8 @@ The YAML content must carry a top-level `version:` field — uploads without it 
 | `scitq module origin <ref>` | Print provenance: origin, content SHA, bundled SHA (on forks), uploader, description, and a flag if a fork is outdated. |
 | `scitq module fork <ref> --new-version V` | **Admin**: clone a module row into a new `(path, V)` with `origin=forked`. |
 | `scitq module upgrade [--apply]` | **Admin**: seed/update bundled rows from the installed `scitq2_modules` package. Dry-run by default. |
+| `scitq module conflicts` | List `local` rows that diverge in bytes from a bundled module at the same `(path, version)`. Identical-byte L copies are silently auto-promoted to `bundled` on server start and never appear here. |
+| `scitq module delete <path>@<version>` | **Admin**: drop a module row (DB + on-disk file). Next auto-upgrade pass reinserts the bundled copy if one exists. Required form is `path@version` — no version → refuses. |
 
 ---
 

@@ -1428,8 +1428,33 @@ func (s *taskQueueServer) autoUpgradeBundledModules(ctx context.Context) {
 				conflicts++
 			}
 		case "L":
-			log.Printf("⚠️ auto-upgrade modules: local upload collides with bundled %s@%s — not overwritten", e.Path, versionStr)
-			conflicts++
+			// Two sub-cases:
+			//   sha matches → operator re-uploaded a byte-identical copy
+			//     of the bundled module. Silently flip origin back to 'B'
+			//     so we don't repeat this check forever and the upgrade
+			//     path stays unblocked.
+			//   sha differs → real local divergence. Record the bundled
+			//     sha on the row (so `scitq module conflicts` is a pure
+			//     DB query, no Python subprocess) and warn.
+			if existingSha.String == e.ContentSha256 {
+				if _, uErr := s.db.ExecContext(ctx,
+					`UPDATE module SET origin='B', bundled_sha=$1 WHERE path=$2 AND version=$3`,
+					e.ContentSha256, e.Path, versionStr); uErr != nil {
+					log.Printf("⚠️ auto-upgrade modules: failed to auto-promote identical L→B for %s@%s: %v", e.Path, versionStr, uErr)
+					conflicts++
+				} else {
+					log.Printf("📦 auto-upgrade modules: promoted identical local copy %s@%s back to bundled", e.Path, versionStr)
+					matched++
+				}
+			} else {
+				if _, uErr := s.db.ExecContext(ctx,
+					`UPDATE module SET bundled_sha=$1 WHERE path=$2 AND version=$3 AND (bundled_sha IS DISTINCT FROM $1)`,
+					e.ContentSha256, e.Path, versionStr); uErr != nil {
+					log.Printf("⚠️ auto-upgrade modules: failed to record bundled_sha on L row %s@%s: %v", e.Path, versionStr, uErr)
+				}
+				log.Printf("⚠️ auto-upgrade modules: local upload diverges from bundled %s@%s — not overwritten (use `scitq module delete %s@%s` then restart to revert to bundled)", e.Path, versionStr, e.Path, versionStr)
+				conflicts++
+			}
 		}
 	}
 
@@ -1581,6 +1606,42 @@ func (s *taskQueueServer) ForkModule(ctx context.Context, req *pb.ForkModuleRequ
 		return nil, fmt.Errorf("failed to create fork %s@%s: %w", path, req.NewVersion, err)
 	}
 	log.Printf("📦 Module forked: %s@%s → %s@%s (origin=F)", path, srcVersion, path, req.NewVersion)
+	return &pb.Ack{Success: true}, nil
+}
+
+// DeleteModule drops a (path, version) module row from the DB and removes
+// the on-disk content. After deletion, the next auto-upgrade pass (or
+// server restart) reinserts the bundled copy if one exists at the same
+// (path, version) — that's the canonical way to revert a local fork or
+// upload back to the shipped version.
+func (s *taskQueueServer) DeleteModule(ctx context.Context, req *pb.DeleteModuleRequest) (*pb.Ack, error) {
+	if u := GetUserFromContext(ctx); u == nil || !u.IsAdmin {
+		return nil, fmt.Errorf("admin privileges required to delete a module")
+	}
+	path, err := normalizeModulePath(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	if req.Version == "" {
+		return nil, fmt.Errorf("version is required (refusing to delete every version at path %q)", path)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM module WHERE path=$1 AND version=$2`,
+		path, req.Version)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete module %q@%q: %w", path, req.Version, err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return nil, fmt.Errorf("module %q@%q not found", path, req.Version)
+	}
+	// Best-effort: remove the on-disk file. A missing file is fine (the
+	// row was authoritative anyway). Any other error is logged but does
+	// not roll back the DB delete — the row is the source of truth.
+	if err := os.Remove(moduleFilePath(s.cfg.Scitq.ModulesRoot, path, req.Version)); err != nil && !os.IsNotExist(err) {
+		log.Printf("⚠️ Module deleted from DB but on-disk file lingered for %s@%s: %v", path, req.Version, err)
+	}
+	log.Printf("📦 Module deleted: %s@%s", path, req.Version)
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -2023,7 +2084,7 @@ func (s *taskQueueServer) UploadModule(ctx context.Context, req *pb.UploadModule
 // flat `modules` string list and the structured `entries`. Old clients
 // reading only `modules` keep working unchanged.
 func (s *taskQueueServer) ListModules(ctx context.Context, _ *emptypb.Empty) (*pb.ModuleList, error) {
-	return s.listModulesCore(ctx, "", false, "")
+	return s.listModulesCore(ctx, "", false, "", false)
 }
 
 // ListModulesFiltered is the v2 surface taking an optional path filter and
@@ -2058,10 +2119,11 @@ func (s *taskQueueServer) ListModulesFiltered(ctx context.Context, req *pb.Modul
 			return nil, fmt.Errorf("unknown origin %q: expected one of bundled, local, forked (or B/L/F)", *req.Origin)
 		}
 	}
-	return s.listModulesCore(ctx, pathFilter, latestOnly, originFilter)
+	conflictsOnly := req.ConflictsOnly != nil && *req.ConflictsOnly
+	return s.listModulesCore(ctx, pathFilter, latestOnly, originFilter, conflictsOnly)
 }
 
-func (s *taskQueueServer) listModulesCore(ctx context.Context, pathFilter string, latestOnly bool, originFilter string) (*pb.ModuleList, error) {
+func (s *taskQueueServer) listModulesCore(ctx context.Context, pathFilter string, latestOnly bool, originFilter string, conflictsOnly bool) (*pb.ModuleList, error) {
 	query := `
 		SELECT path, version, origin, COALESCE(description, '')
 		  FROM module
@@ -2075,6 +2137,13 @@ func (s *taskQueueServer) listModulesCore(ctx context.Context, pathFilter string
 	if originFilter != "" {
 		args = append(args, originFilter)
 		where = append(where, fmt.Sprintf("origin = $%d", len(args)))
+	}
+	if conflictsOnly {
+		// L row whose bundled_sha has been populated by auto-upgrade —
+		// i.e. an L upload still in place at a path/version that also
+		// has a bundled entry whose bytes differ. Identical-byte L copies
+		// get auto-promoted to 'B' on server start, so they're not here.
+		where = append(where, "origin = 'L'", "bundled_sha IS NOT NULL")
 	}
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")

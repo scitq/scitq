@@ -391,6 +391,12 @@ type Attr struct {
 			Source     string `arg:"positional,required" help:"Source reference (e.g. 'genetic/fastp@1.0.0'; bare name forks the latest)"`
 			NewVersion string `arg:"--new-version,required" help:"Version of the forked row (e.g. '1.0.0-site')"`
 		} `arg:"subcommand:fork" help:"Clone a module version into a new local fork (admin-only)"`
+
+		Delete *struct {
+			Name string `arg:"positional,required" help:"Module reference 'path@version' (e.g. 'genomics/fastp@1.0.0')"`
+		} `arg:"subcommand:delete" help:"Delete a module row (admin-only). Bundled modules at the same path@version are reinserted on next server start."`
+
+		Conflicts *struct{} `arg:"subcommand:conflicts" help:"List modules where a local upload diverges from a bundled module at the same path/version"`
 	} `arg:"subcommand:module" help:"Manage YAML modules (versioned library, bundled + local)"`
 
 	// (Workflow) Template run commands
@@ -2319,6 +2325,61 @@ func (c *CLI) ModuleFork() error {
 	return nil
 }
 
+func (c *CLI) ModuleDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	ref := c.Attr.Module.Delete.Name
+	idx := strings.LastIndex(ref, "@")
+	if idx < 0 {
+		return fmt.Errorf("expected 'path@version' (got %q): module delete refuses to drop every version at a path", ref)
+	}
+	path := ref[:idx]
+	version := ref[idx+1:]
+	if version == "" {
+		return fmt.Errorf("missing version after '@' in %q", ref)
+	}
+
+	_, err := c.QC.Client.DeleteModule(ctx, &pb.DeleteModuleRequest{
+		Path:    path,
+		Version: version,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete module: %w", err)
+	}
+	fmt.Printf("🗑️  Deleted %s@%s (bundled copy at the same version will be reinserted on next server start)\n", path, version)
+	return nil
+}
+
+func (c *CLI) ModuleConflicts() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	conflictsOnly := true
+	res, err := c.QC.Client.ListModulesFiltered(ctx, &pb.ModuleListFilter{
+		ConflictsOnly: &conflictsOnly,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list conflicts: %w", err)
+	}
+	if c.jsonOut(res.Entries) {
+		return nil
+	}
+	if len(res.Entries) == 0 {
+		fmt.Println("No module conflicts.")
+		return nil
+	}
+	fmt.Printf("⚠️  %d local module(s) diverge from a bundled version at the same path/version:\n", len(res.Entries))
+	for _, e := range res.Entries {
+		fmt.Printf("   %s@%s  (origin=%s)\n", e.Path, e.Version, e.Origin)
+	}
+	fmt.Println()
+	fmt.Println("Resolution: `scitq module origin <path>@<version>` to inspect, then either")
+	fmt.Println("  * keep the local copy (rename via `scitq module fork ... --new-version <new>`), or")
+	fmt.Println("  * revert to bundled with `scitq module delete <path>@<version>` (next server start reinserts the bundled row).")
+	return nil
+}
+
 func (c *CLI) ModuleList() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
@@ -3171,6 +3232,10 @@ func Run(c CLI) error {
 			err = c.ModuleOrigin()
 		case c.Attr.Module.Fork != nil:
 			err = c.ModuleFork()
+		case c.Attr.Module.Delete != nil:
+			err = c.ModuleDelete()
+		case c.Attr.Module.Conflicts != nil:
+			err = c.ModuleConflicts()
 		}
 	case c.Attr.Run != nil:
 		switch {

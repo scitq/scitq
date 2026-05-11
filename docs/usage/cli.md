@@ -390,13 +390,25 @@ They define the logical flow of computation — for example, preprocessing → a
 
 #### `workflow list`
 
-Lists all workflows currently registered on the server.
+Lists workflows currently registered on the server.
 
 ```sh
-scitq workflow list
+scitq workflow list [--name-like <substring>] [--limit <N>] [-l|--long]
 ```
 
-Displays for each workflow its ID, name, run strategy, and maximum allowed workers (if any).
+Displays for each workflow its ID, name, run strategy, maximum allowed workers (if any), and a `Launched:` suffix when the workflow was started via a template (`template <name>@<version>`) or a local script (`script <name>`).
+
+Options:
+
+- `--name-like <substring>`: case-insensitive substring filter on the workflow name. Useful when the list grows: `scitq workflow list --name-like biomscope` shows only biomscope workflows.
+- `--limit <N>`: cap the number of rows returned (default `10`, use `0` for no limit).
+- `-l`, `--long`: for each workflow, also print **who launched it** (`Run by:`) and the **JSON-encoded params** that were passed at `run_template` time. This pulls the matching `template_run` row, so workflows that were started outside the template system (no `template_run_id`) show the regular one-line summary only.
+
+Example:
+
+```sh
+scitq workflow list --name-like biomscope --long
+```
 
 #### `workflow create`
 
@@ -781,6 +793,35 @@ Example:
 
 ```sh
 scitq module fork genomics/fastp@1.0.0 --new-version 1.0.0-site
+```
+
+#### `module conflicts`
+
+Lists modules where a local upload (`origin=local`) diverges in bytes from a bundled module at the same `path@version`. Identical-byte L copies are silently auto-promoted to `bundled` during the auto-upgrade pass on server start, so they never appear here — the list only contains real divergences worth reviewing.
+
+```sh
+scitq module conflicts
+```
+
+Empty output (`No module conflicts.`) is the steady state. Otherwise the list shows the offending `path@version` rows and a short prompt: keep the local copy by renaming it via `module fork`, or revert to bundled with `module delete` (next server start reinserts the bundled row).
+
+Inspect a single conflict with `scitq module origin <path>@<version>` — the response includes both the active `sha256:` and the `bundled sha:`, so you can compare exactly what differs.
+
+#### `module delete` (admin)
+
+Drops a module row from the DB and removes its on-disk content. After deletion, the next auto-upgrade pass (or server restart) reinserts the bundled copy if one exists at the same `path@version` — this is the canonical way to revert a local fork or a stale local upload back to the shipped version.
+
+```sh
+scitq module delete <path>@<version>
+```
+
+The `@<version>` suffix is required (no version, no delete — refuses to drop every version at a path).
+
+Example: revert a local override of `genomics/fastp@1.0.0` to the bundled version.
+
+```sh
+scitq module delete genomics/fastp@1.0.0
+# Server restart (or next auto-upgrade) reinserts the bundled row.
 ```
 
 #### `module upgrade` (admin)

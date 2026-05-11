@@ -25,6 +25,7 @@ import type { ModuleOriginResponse } from "./taskqueue";
 import type { ModuleOriginRequest } from "./taskqueue";
 import type { UpgradeBundledModulesResponse } from "./taskqueue";
 import type { UpgradeBundledModulesRequest } from "./taskqueue";
+import type { DeleteModuleRequest } from "./taskqueue";
 import type { DownloadModuleRequest } from "./taskqueue";
 import type { ModuleListFilter } from "./taskqueue";
 import type { ModuleList } from "./taskqueue";
@@ -457,6 +458,10 @@ export interface ITaskQueueClient {
      * @generated from protobuf rpc: DownloadModule
      */
     downloadModule(input: DownloadModuleRequest, options?: RpcOptions): UnaryCall<DownloadModuleRequest, FileContent>;
+    /**
+     * @generated from protobuf rpc: DeleteModule
+     */
+    deleteModule(input: DeleteModuleRequest, options?: RpcOptions): UnaryCall<DeleteModuleRequest, Ack>;
     /**
      * @generated from protobuf rpc: UpgradeBundledModules
      */
@@ -1089,45 +1094,52 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
         return stackIntercept<DownloadModuleRequest, FileContent>("unary", this._transport, method, opt, input);
     }
     /**
+     * @generated from protobuf rpc: DeleteModule
+     */
+    deleteModule(input: DeleteModuleRequest, options?: RpcOptions): UnaryCall<DeleteModuleRequest, Ack> {
+        const method = this.methods[74], opt = this._transport.mergeOptions(options);
+        return stackIntercept<DeleteModuleRequest, Ack>("unary", this._transport, method, opt, input);
+    }
+    /**
      * @generated from protobuf rpc: UpgradeBundledModules
      */
     upgradeBundledModules(input: UpgradeBundledModulesRequest, options?: RpcOptions): UnaryCall<UpgradeBundledModulesRequest, UpgradeBundledModulesResponse> {
-        const method = this.methods[74], opt = this._transport.mergeOptions(options);
+        const method = this.methods[75], opt = this._transport.mergeOptions(options);
         return stackIntercept<UpgradeBundledModulesRequest, UpgradeBundledModulesResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: GetModuleOrigin
      */
     getModuleOrigin(input: ModuleOriginRequest, options?: RpcOptions): UnaryCall<ModuleOriginRequest, ModuleOriginResponse> {
-        const method = this.methods[75], opt = this._transport.mergeOptions(options);
+        const method = this.methods[76], opt = this._transport.mergeOptions(options);
         return stackIntercept<ModuleOriginRequest, ModuleOriginResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: ForkModule
      */
     forkModule(input: ForkModuleRequest, options?: RpcOptions): UnaryCall<ForkModuleRequest, Ack> {
-        const method = this.methods[76], opt = this._transport.mergeOptions(options);
+        const method = this.methods[77], opt = this._transport.mergeOptions(options);
         return stackIntercept<ForkModuleRequest, Ack>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: GetWorkspaceRoot
      */
     getWorkspaceRoot(input: WorkspaceRootRequest, options?: RpcOptions): UnaryCall<WorkspaceRootRequest, WorkspaceRootResponse> {
-        const method = this.methods[77], opt = this._transport.mergeOptions(options);
+        const method = this.methods[78], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkspaceRootRequest, WorkspaceRootResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: GetResourceRoot
      */
     getResourceRoot(input: WorkspaceRootRequest, options?: RpcOptions): UnaryCall<WorkspaceRootRequest, WorkspaceRootResponse> {
-        const method = this.methods[78], opt = this._transport.mergeOptions(options);
+        const method = this.methods[79], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkspaceRootRequest, WorkspaceRootResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: RegisterSpecifications
      */
     registerSpecifications(input: ResourceSpec, options?: RpcOptions): UnaryCall<ResourceSpec, Ack> {
-        const method = this.methods[79], opt = this._transport.mergeOptions(options);
+        const method = this.methods[80], opt = this._transport.mergeOptions(options);
         return stackIntercept<ResourceSpec, Ack>("unary", this._transport, method, opt, input);
     }
     /**
@@ -1136,42 +1148,42 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
      * @generated from protobuf rpc: ReportWorkerEvent
      */
     reportWorkerEvent(input: WorkerEvent, options?: RpcOptions): UnaryCall<WorkerEvent, Ack> {
-        const method = this.methods[80], opt = this._transport.mergeOptions(options);
+        const method = this.methods[81], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkerEvent, Ack>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: ListWorkerEvents
      */
     listWorkerEvents(input: WorkerEventFilter, options?: RpcOptions): UnaryCall<WorkerEventFilter, WorkerEventList> {
-        const method = this.methods[81], opt = this._transport.mergeOptions(options);
+        const method = this.methods[82], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkerEventFilter, WorkerEventList>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: DeleteWorkerEvent
      */
     deleteWorkerEvent(input: WorkerEventId, options?: RpcOptions): UnaryCall<WorkerEventId, Ack> {
-        const method = this.methods[82], opt = this._transport.mergeOptions(options);
+        const method = this.methods[83], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkerEventId, Ack>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: PruneWorkerEvents
      */
     pruneWorkerEvents(input: WorkerEventPruneFilter, options?: RpcOptions): UnaryCall<WorkerEventPruneFilter, WorkerEventPruneResult> {
-        const method = this.methods[83], opt = this._transport.mergeOptions(options);
+        const method = this.methods[84], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkerEventPruneFilter, WorkerEventPruneResult>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: GetTaskStatusCounts
      */
     getTaskStatusCounts(input: TaskStatusCountsRequest, options?: RpcOptions): UnaryCall<TaskStatusCountsRequest, TaskStatusCountsResponse> {
-        const method = this.methods[84], opt = this._transport.mergeOptions(options);
+        const method = this.methods[85], opt = this._transport.mergeOptions(options);
         return stackIntercept<TaskStatusCountsRequest, TaskStatusCountsResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: SignalTask
      */
     signalTask(input: TaskSignalRequest, options?: RpcOptions): UnaryCall<TaskSignalRequest, Ack> {
-        const method = this.methods[85], opt = this._transport.mergeOptions(options);
+        const method = this.methods[86], opt = this._transport.mergeOptions(options);
         return stackIntercept<TaskSignalRequest, Ack>("unary", this._transport, method, opt, input);
     }
     /**
@@ -1182,7 +1194,7 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
      * @generated from protobuf rpc: ServerVersion
      */
     serverVersion(input: Empty, options?: RpcOptions): UnaryCall<Empty, ServerVersionResponse> {
-        const method = this.methods[86], opt = this._transport.mergeOptions(options);
+        const method = this.methods[87], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, ServerVersionResponse>("unary", this._transport, method, opt, input);
     }
     /**
@@ -1194,7 +1206,7 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
      * @generated from protobuf rpc: RequestWorkerUpgrade
      */
     requestWorkerUpgrade(input: WorkerUpgradeRequest, options?: RpcOptions): UnaryCall<WorkerUpgradeRequest, WorkerUpgradeReply> {
-        const method = this.methods[87], opt = this._transport.mergeOptions(options);
+        const method = this.methods[88], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkerUpgradeRequest, WorkerUpgradeReply>("unary", this._transport, method, opt, input);
     }
     /**
@@ -1206,7 +1218,7 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
      * @generated from protobuf rpc: GetClientUpgradeInfo
      */
     getClientUpgradeInfo(input: Empty, options?: RpcOptions): UnaryCall<Empty, ClientUpgradeInfo> {
-        const method = this.methods[88], opt = this._transport.mergeOptions(options);
+        const method = this.methods[89], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, ClientUpgradeInfo>("unary", this._transport, method, opt, input);
     }
 }

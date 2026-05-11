@@ -94,6 +94,7 @@ service TaskQueue {
     rpc ListModules(google.protobuf.Empty) returns (ModuleList);
     rpc ListModulesFiltered(ModuleListFilter) returns (ModuleList);
     rpc DownloadModule(DownloadModuleRequest) returns (FileContent);
+    rpc DeleteModule(DeleteModuleRequest) returns (Ack);
     rpc UpgradeBundledModules(UpgradeBundledModulesRequest) returns (UpgradeBundledModulesResponse);
     rpc GetModuleOrigin(ModuleOriginRequest) returns (ModuleOriginResponse);
     rpc ForkModule(ForkModuleRequest) returns (Ack);
@@ -1082,10 +1083,25 @@ message ModuleListFilter {
   // pre-library files that were auto-imported as origin=local at server
   // startup.
   optional string origin = 3;
+  // If true, return only modules where a local upload (origin='L')
+  // diverges from a bundled module at the same path/version. The auto-
+  // upgrade pass records bundled_sha on L rows that collide with a
+  // bundled entry; this filter is a pure DB query against that column.
+  // Identical-byte L copies are auto-promoted to 'B' on server start,
+  // so they never appear here. Matches `scitq module conflicts`.
+  optional bool conflicts_only = 4;
 }
 
 message DownloadModuleRequest {
   string filename = 1;
+}
+
+// Admin-only: drop a module row from the DB. After deletion, the next
+// auto-upgrade pass (or server restart) reinserts the bundled copy if
+// one exists at the same path/version.
+message DeleteModuleRequest {
+  string path = 1;
+  string version = 2;
 }
 
 // `scitq module upgrade` seeds/updates bundled YAML modules in the server-side

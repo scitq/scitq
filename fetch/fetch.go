@@ -13,8 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"log"
+
 	"github.com/rclone/rclone/fs/config/configfile"
 	"github.com/rclone/rclone/fs/config/configmap"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/walk"
 
 	//"github.com/rclone/rclone/fs/config/registry"
@@ -68,6 +71,51 @@ import (
 const DefaultRcloneConfig = "/etc/rclone.conf"
 
 var configMu sync.Mutex
+
+// Defaults for RetryAfter-aware copy. Sized for swift cold storage where
+// `Retrieval-Delay` is typically 5–15 minutes per object. maxWait caps the
+// per-attempt sleep so a wedged backend can't pin us indefinitely;
+// maxAttempts is the total number of CopyFile invocations (1 = no retry).
+const (
+	copyMaxAttempts = 5
+	copyMaxWait     = 30 * time.Minute
+)
+
+// copyFileWithRetryAfter wraps operations.CopyFile so that rclone backends
+// returning an ErrorRetryAfter (e.g. swift cold-storage unsealing) trigger a
+// sleep-until-retryAt and re-attempt, instead of bubbling the error up
+// immediately. The rclone CLI does this via its outer retry loop; the
+// library function does not, so callers using operations.CopyFile directly
+// (us) must opt in.
+func copyFileWithRetryAfter(ctx context.Context, dstFs fs.Fs, srcFs fs.Fs, dstPath, srcPath string) error {
+	var lastErr error
+	for attempt := 1; attempt <= copyMaxAttempts; attempt++ {
+		err := operations.CopyFile(ctx, dstFs, srcFs, dstPath, srcPath)
+		if err == nil {
+			return nil
+		}
+		retryAt := fserrors.RetryAfterErrorTime(err)
+		if retryAt.IsZero() {
+			return err
+		}
+		wait := time.Until(retryAt)
+		if wait <= 0 {
+			lastErr = err
+			continue
+		}
+		if wait > copyMaxWait {
+			return fmt.Errorf("retry-after wait %s exceeds cap %s for %s: %w", wait, copyMaxWait, srcPath, err)
+		}
+		log.Printf("copy %s: backend requested retry after %s (attempt %d/%d), sleeping", srcPath, wait.Round(time.Second), attempt, copyMaxAttempts)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		lastErr = err
+	}
+	return fmt.Errorf("copy %s exhausted %d attempts: %w", srcPath, copyMaxAttempts, lastErr)
+}
 
 func CopyFilesWithProgress(srcFs fs.Fs, srcPath string, dstFs fs.Fs, dstPath string) error {
 	// Create a context for the operation
@@ -379,7 +427,7 @@ func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI
 				target = path.Join(target, path.Base(relPath))
 			}
 
-			err = operations.CopyFile(ctx, otherFs.rcloneFs, rb.rcloneFs, target, relPath)
+			err = copyFileWithRetryAfter(ctx, otherFs.rcloneFs, rb.rcloneFs, target, relPath)
 			if err != nil {
 				return fmt.Errorf("copy failed for %q: %v", relPath, err)
 			}
@@ -416,9 +464,9 @@ func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI
 
 	var err error
 	if selfIsSource {
-		err = operations.CopyFile(ctx, otherFs.rcloneFs, rb.rcloneFs, dst.CompletePath(), src.CompletePath())
+		err = copyFileWithRetryAfter(ctx, otherFs.rcloneFs, rb.rcloneFs, dst.CompletePath(), src.CompletePath())
 	} else {
-		err = operations.CopyFile(ctx, rb.rcloneFs, otherFs.rcloneFs, dst.CompletePath(), src.CompletePath())
+		err = copyFileWithRetryAfter(ctx, rb.rcloneFs, otherFs.rcloneFs, dst.CompletePath(), src.CompletePath())
 	}
 	if err != nil {
 		return fmt.Errorf("failed to copy file: %v", err)

@@ -94,6 +94,7 @@ const (
 	TaskQueue_ListModules_FullMethodName               = "/taskqueue.TaskQueue/ListModules"
 	TaskQueue_ListModulesFiltered_FullMethodName       = "/taskqueue.TaskQueue/ListModulesFiltered"
 	TaskQueue_DownloadModule_FullMethodName            = "/taskqueue.TaskQueue/DownloadModule"
+	TaskQueue_DeleteModule_FullMethodName              = "/taskqueue.TaskQueue/DeleteModule"
 	TaskQueue_UpgradeBundledModules_FullMethodName     = "/taskqueue.TaskQueue/UpgradeBundledModules"
 	TaskQueue_GetModuleOrigin_FullMethodName           = "/taskqueue.TaskQueue/GetModuleOrigin"
 	TaskQueue_ForkModule_FullMethodName                = "/taskqueue.TaskQueue/ForkModule"
@@ -202,6 +203,7 @@ type TaskQueueClient interface {
 	ListModules(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ModuleList, error)
 	ListModulesFiltered(ctx context.Context, in *ModuleListFilter, opts ...grpc.CallOption) (*ModuleList, error)
 	DownloadModule(ctx context.Context, in *DownloadModuleRequest, opts ...grpc.CallOption) (*FileContent, error)
+	DeleteModule(ctx context.Context, in *DeleteModuleRequest, opts ...grpc.CallOption) (*Ack, error)
 	UpgradeBundledModules(ctx context.Context, in *UpgradeBundledModulesRequest, opts ...grpc.CallOption) (*UpgradeBundledModulesResponse, error)
 	GetModuleOrigin(ctx context.Context, in *ModuleOriginRequest, opts ...grpc.CallOption) (*ModuleOriginResponse, error)
 	ForkModule(ctx context.Context, in *ForkModuleRequest, opts ...grpc.CallOption) (*Ack, error)
@@ -1000,6 +1002,16 @@ func (c *taskQueueClient) DownloadModule(ctx context.Context, in *DownloadModule
 	return out, nil
 }
 
+func (c *taskQueueClient) DeleteModule(ctx context.Context, in *DeleteModuleRequest, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_DeleteModule_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) UpgradeBundledModules(ctx context.Context, in *UpgradeBundledModulesRequest, opts ...grpc.CallOption) (*UpgradeBundledModulesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpgradeBundledModulesResponse)
@@ -1241,6 +1253,7 @@ type TaskQueueServer interface {
 	ListModules(context.Context, *emptypb.Empty) (*ModuleList, error)
 	ListModulesFiltered(context.Context, *ModuleListFilter) (*ModuleList, error)
 	DownloadModule(context.Context, *DownloadModuleRequest) (*FileContent, error)
+	DeleteModule(context.Context, *DeleteModuleRequest) (*Ack, error)
 	UpgradeBundledModules(context.Context, *UpgradeBundledModulesRequest) (*UpgradeBundledModulesResponse, error)
 	GetModuleOrigin(context.Context, *ModuleOriginRequest) (*ModuleOriginResponse, error)
 	ForkModule(context.Context, *ForkModuleRequest) (*Ack, error)
@@ -1499,6 +1512,9 @@ func (UnimplementedTaskQueueServer) ListModulesFiltered(context.Context, *Module
 }
 func (UnimplementedTaskQueueServer) DownloadModule(context.Context, *DownloadModuleRequest) (*FileContent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DownloadModule not implemented")
+}
+func (UnimplementedTaskQueueServer) DeleteModule(context.Context, *DeleteModuleRequest) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteModule not implemented")
 }
 func (UnimplementedTaskQueueServer) UpgradeBundledModules(context.Context, *UpgradeBundledModulesRequest) (*UpgradeBundledModulesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpgradeBundledModules not implemented")
@@ -2873,6 +2889,24 @@ func _TaskQueue_DownloadModule_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_DeleteModule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteModuleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DeleteModule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DeleteModule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DeleteModule(ctx, req.(*DeleteModuleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_UpgradeBundledModules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpgradeBundledModulesRequest)
 	if err := dec(in); err != nil {
@@ -3433,6 +3467,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DownloadModule",
 			Handler:    _TaskQueue_DownloadModule_Handler,
+		},
+		{
+			MethodName: "DeleteModule",
+			Handler:    _TaskQueue_DeleteModule_Handler,
 		},
 		{
 			MethodName: "UpgradeBundledModules",

@@ -2707,6 +2707,17 @@ export interface ModuleListFilter {
      * @generated from protobuf field: optional string origin = 3
      */
     origin?: string;
+    /**
+     * If true, return only modules where a local upload (origin='L')
+     * diverges from a bundled module at the same path/version. The auto-
+     * upgrade pass records bundled_sha on L rows that collide with a
+     * bundled entry; this filter is a pure DB query against that column.
+     * Identical-byte L copies are auto-promoted to 'B' on server start,
+     * so they never appear here. Matches `scitq module conflicts`.
+     *
+     * @generated from protobuf field: optional bool conflicts_only = 4
+     */
+    conflictsOnly?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.DownloadModuleRequest
@@ -2716,6 +2727,23 @@ export interface DownloadModuleRequest {
      * @generated from protobuf field: string filename = 1
      */
     filename: string;
+}
+/**
+ * Admin-only: drop a module row from the DB. After deletion, the next
+ * auto-upgrade pass (or server restart) reinserts the bundled copy if
+ * one exists at the same path/version.
+ *
+ * @generated from protobuf message taskqueue.DeleteModuleRequest
+ */
+export interface DeleteModuleRequest {
+    /**
+     * @generated from protobuf field: string path = 1
+     */
+    path: string;
+    /**
+     * @generated from protobuf field: string version = 2
+     */
+    version: string;
 }
 /**
  * `scitq module upgrade` seeds/updates bundled YAML modules in the server-side
@@ -11760,7 +11788,8 @@ class ModuleListFilter$Type extends MessageType<ModuleListFilter> {
         super("taskqueue.ModuleListFilter", [
             { no: 1, name: "path", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "latest_only", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "origin", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "origin", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "conflicts_only", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<ModuleListFilter>): ModuleListFilter {
@@ -11783,6 +11812,9 @@ class ModuleListFilter$Type extends MessageType<ModuleListFilter> {
                 case /* optional string origin */ 3:
                     message.origin = reader.string();
                     break;
+                case /* optional bool conflicts_only */ 4:
+                    message.conflictsOnly = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11804,6 +11836,9 @@ class ModuleListFilter$Type extends MessageType<ModuleListFilter> {
         /* optional string origin = 3; */
         if (message.origin !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.origin);
+        /* optional bool conflicts_only = 4; */
+        if (message.conflictsOnly !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.conflictsOnly);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11861,6 +11896,61 @@ class DownloadModuleRequest$Type extends MessageType<DownloadModuleRequest> {
  * @generated MessageType for protobuf message taskqueue.DownloadModuleRequest
  */
 export const DownloadModuleRequest = new DownloadModuleRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteModuleRequest$Type extends MessageType<DeleteModuleRequest> {
+    constructor() {
+        super("taskqueue.DeleteModuleRequest", [
+            { no: 1, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "version", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteModuleRequest>): DeleteModuleRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.path = "";
+        message.version = "";
+        if (value !== undefined)
+            reflectionMergePartial<DeleteModuleRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteModuleRequest): DeleteModuleRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string path */ 1:
+                    message.path = reader.string();
+                    break;
+                case /* string version */ 2:
+                    message.version = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteModuleRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string path = 1; */
+        if (message.path !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.path);
+        /* string version = 2; */
+        if (message.version !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.version);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.DeleteModuleRequest
+ */
+export const DeleteModuleRequest = new DeleteModuleRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpgradeBundledModulesRequest$Type extends MessageType<UpgradeBundledModulesRequest> {
     constructor() {
@@ -13515,6 +13605,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListModules", options: {}, I: Empty, O: ModuleList },
     { name: "ListModulesFiltered", options: {}, I: ModuleListFilter, O: ModuleList },
     { name: "DownloadModule", options: {}, I: DownloadModuleRequest, O: FileContent },
+    { name: "DeleteModule", options: {}, I: DeleteModuleRequest, O: Ack },
     { name: "UpgradeBundledModules", options: {}, I: UpgradeBundledModulesRequest, O: UpgradeBundledModulesResponse },
     { name: "GetModuleOrigin", options: {}, I: ModuleOriginRequest, O: ModuleOriginResponse },
     { name: "ForkModule", options: {}, I: ForkModuleRequest, O: Ack },

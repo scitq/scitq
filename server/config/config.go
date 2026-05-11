@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/creasty/defaults"
@@ -549,18 +550,41 @@ func (cfg *Config) GetProviders() []ProviderConfig {
 	return providers
 }
 
+// envVarBraceRE matches the *brace* form of an env-var reference only:
+// `${NAME}`. Bare `$NAME` is deliberately NOT matched — existing passwords
+// or connection strings containing literal `$` characters (e.g. a DB URL
+// with `$` in the password) must stay untouched. Using the brace form as
+// the only expansion syntax makes the substitution opt-in per value and
+// keeps backwards compatibility with every config file written before this
+// feature existed.
+var envVarBraceRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
 // LoadConfig reads a YAML file and returns a Config structure.
+//
+// Environment-variable expansion: `${VAR}` references in the YAML are
+// replaced with the corresponding environment variable at load time.
+// Unset variables expand to the empty string. Bare `$VAR` (no braces) is
+// left literal — only the brace form is recognised, so this is safe to
+// turn on for existing configs that may contain `$` characters in
+// passwords or URLs. Typical use: keep secrets out of scitq.yaml and
+// source them from a systemd EnvironmentFile, docker --env-file, k8s
+// Secret, etc.
 func LoadConfig(file string) (*Config, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
+	expanded := envVarBraceRE.ReplaceAllStringFunc(string(data), func(match string) string {
+		// match looks like "${NAME}" — strip the wrapper.
+		name := match[2 : len(match)-1]
+		return os.Getenv(name)
+	})
 	var cfg Config
 	// Set defaults based on struct tags.
 	if err := defaults.Set(&cfg); err != nil {
 		log.Printf("failed to set defaults: %v", err)
 	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, err
 	}
 	// Then set defaults on any zero-valued fields.

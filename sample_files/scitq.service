@@ -9,6 +9,7 @@ TimeoutStopSec=1h
 Restart=always
 RestartSec=5
 Environment=HOME=/root
+EnvironmentFile=-/etc/scitq-secrets/env
 ExecStart=/usr/local/bin/scitq-server -config /etc/scitq.yaml
 
 [Install]

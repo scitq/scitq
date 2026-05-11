@@ -1,5 +1,74 @@
 # Configuration reference
 
+## Environment-variable substitution
+
+Any `${VAR}` reference in `scitq.yaml` is replaced with the value of the
+corresponding environment variable at config-load time. Typical use:
+keep secrets (rclone crypt passwords, cloud-provider access keys, JWT
+secret, etc.) out of `scitq.yaml` and source them from a systemd
+`EnvironmentFile`, a docker `--env-file`, or a Kubernetes `Secret` —
+whichever fits your deployment.
+
+Rules:
+
+- **Brace form only.** `${VAR}` triggers substitution. Bare `$VAR` is left
+  literal — so a `DBURL` like
+  `postgres://scitq:p@ss$word@db.host/scitq` is **not** affected. This is
+  deliberate, so adding `${...}` references to a long-lived config never
+  retroactively breaks existing values with `$` in them.
+- **Valid identifiers only.** What sits inside the braces must be a
+  POSIX-style identifier (`[A-Za-z_][A-Za-z0-9_]*`). Anything else —
+  `${X:default}`, `${X-default}`, `${X.Y}`, `${1BAD}`, `${}`, `${...` —
+  is left literal and **not** substituted.
+- **Unset variables expand to empty string.** No error, no warning. If
+  scitq tries to use the empty value at runtime (e.g. an empty crypt
+  password), the failure surfaces at that point.
+- **Partial substitution is allowed.** Compose env values inside larger
+  strings: `account_url: https://${AZURE_ACCOUNT}.blob.core.windows.net/`.
+
+### Example: rclone crypt password from a systemd EnvironmentFile
+
+`scitq.yaml`:
+
+```yaml
+rclone:
+  azure_archive:
+    type: azureblob
+    account: <storage-account-name>
+    key: ${SCITQ_AZURE_KEY}        # literal Azure access key — NOT obscured
+  crypt_archive:
+    type: crypt
+    remote: azure_archive:cegat-archive
+    password:  ${SCITQ_CRYPT_PASSWORD_OBSCURED}   # `rclone obscure <pw>` output
+    password2: ${SCITQ_CRYPT_PASSWORD2_OBSCURED}  # `rclone obscure <pw2>` output
+    filename_encryption: "off"
+    directory_name_encryption: "false"
+```
+
+`/etc/scitq-secrets/env` (chmod `0400` owned by the scitq daemon user):
+
+```
+SCITQ_AZURE_KEY=<storage-account-access-key>
+SCITQ_CRYPT_PASSWORD_OBSCURED=<output of `rclone obscure <plaintext>`>
+SCITQ_CRYPT_PASSWORD2_OBSCURED=<output of `rclone obscure <plaintext2>`>
+```
+
+systemd unit `/etc/systemd/system/scitq.service` (under `[Service]`):
+
+```ini
+EnvironmentFile=-/etc/scitq-secrets/env
+```
+
+The leading `-` on the path makes the file optional — if it's absent
+(e.g. on a dev machine that has no encrypted backend configured), the
+service starts normally and the env vars resolve to empty. The
+secret-using workflow will fail at use-time with a clear "wrong
+password" error from rclone, rather than the service refusing to start.
+
+After editing: `systemctl daemon-reload && systemctl restart scitq`.
+
+## Settings reference
+
 | Section | Field | YAML key | Default | Type | Description |
 |---------|-------|-----------|----------|------|-------------|
 | Scitq |  | `scitq` |  |  | Scitq contains configuration parameters specific to the scitq server. |

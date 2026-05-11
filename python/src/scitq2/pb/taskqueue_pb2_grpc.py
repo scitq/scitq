@@ -405,6 +405,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.DownloadModuleRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.FileContent.FromString,
                 _registered_method=True)
+        self.DeleteModule = channel.unary_unary(
+                '/taskqueue.TaskQueue/DeleteModule',
+                request_serializer=taskqueue__pb2.DeleteModuleRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
         self.UpgradeBundledModules = channel.unary_unary(
                 '/taskqueue.TaskQueue/UpgradeBundledModules',
                 request_serializer=taskqueue__pb2.UpgradeBundledModulesRequest.SerializeToString,
@@ -947,6 +952,12 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DeleteModule(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def UpgradeBundledModules(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1421,6 +1432,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.DownloadModule,
                     request_deserializer=taskqueue__pb2.DownloadModuleRequest.FromString,
                     response_serializer=taskqueue__pb2.FileContent.SerializeToString,
+            ),
+            'DeleteModule': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteModule,
+                    request_deserializer=taskqueue__pb2.DeleteModuleRequest.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
             'UpgradeBundledModules': grpc.unary_unary_rpc_method_handler(
                     servicer.UpgradeBundledModules,
@@ -3496,6 +3512,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/DownloadModule',
             taskqueue__pb2.DownloadModuleRequest.SerializeToString,
             taskqueue__pb2.FileContent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteModule(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/DeleteModule',
+            taskqueue__pb2.DeleteModuleRequest.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
             options,
             channel_credentials,
             insecure,
