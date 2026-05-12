@@ -51,6 +51,7 @@ type Attr struct {
 			Output       string   `arg:"--output,separate" help:"Output folder where results are copied for the task"`
 			StepId       *int32   `arg:"--step-id" help:"Step ID if task is affected to a step"`
 			Dependencies []int32  `arg:"--dependency,separate" help:"IDs of tasks that this task depends on (can be repeated)"`
+			ScitqAuth    bool     `arg:"--scitq-auth" help:"Worker injects SCITQ_SERVER + SCITQ_TOKEN env vars and bind-mounts the scitq CLI into the container (lets the task call 'scitq file copy' etc. without rclone config exposure)"`
 		} `arg:"subcommand:create" help:"Create a new task"`
 
 		List *struct {
@@ -495,6 +496,10 @@ func (c *CLI) TaskCreate() error {
 		StepId:     c.Attr.Task.Create.StepId,
 		TaskName:   c.Attr.Task.Create.Name,
 		Dependency: c.Attr.Task.Create.Dependencies,
+	}
+	if c.Attr.Task.Create.ScitqAuth {
+		auth := true
+		req.ScitqAuth = &auth
 	}
 	res, err := c.QC.Client.SubmitTask(ctx, req)
 	if err != nil {

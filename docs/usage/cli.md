@@ -162,6 +162,18 @@ Note: while mainly used for resources, URI action also works for inputs. They ar
 
 A task may depend on other tasks, this is declared by the `--dependency <task id>` flag which can be repeated. A task created with dependencies will wait (see waiting status below) until all the tasks it depends upon succeed.
 
+##### `--scitq-auth` — let the task use the `scitq` CLI
+
+```sh
+scitq task create --container alpine --command "scitq file copy /input/x s3://bucket/dst/x" --scitq-auth
+```
+
+With `--scitq-auth`, the worker injects two environment variables into the task — `SCITQ_SERVER` (the address the worker registered with) and `SCITQ_TOKEN` (the worker's own auth token) — and bind-mounts the worker's `/usr/local/bin/scitq` into the container, read-only. The task can then call `scitq file copy <src> <dst>` (or any other `scitq` subcommand) and authenticate against the server as the worker.
+
+The server's rclone configuration — including any encrypted-archive crypt password or cloud-provider access key — never reaches the container; the task only ever holds a token. Typical use: a step that needs to publish the same file to two unrelated destinations (e.g. S3 raw + encrypted Azure archive) in a single task, beyond what scitq's native single-`publish:` mechanism expresses.
+
+Default: off. Most tasks never see scitq credentials. The bind-mounted `scitq` is the worker's own binary, kept in sync with the server by `make server-upgrade` for collocated workers and by Phase II auto-upgrade for cloud workers (the upgrade pass refreshes the CLI alongside the worker binary).
+
 #### `task list`
 
 List action exists for almost all objects and list this kind of object.

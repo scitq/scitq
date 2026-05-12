@@ -473,6 +473,41 @@ Named outputs let downstream steps reference specific file patterns:
 
 Without named outputs, the step exposes its entire `/output/` directory.
 
+### Task spec
+
+`task_spec:` declares per-task settings — resource budget for the dynamic-concurrency scheduler, and a couple of opt-in worker-side behaviours.
+
+```yaml
+  - name: align
+    task_spec:
+      cpu: 8           # tasks of this step want 8 cpu each
+      mem: 30          # …and 30 GB RAM each
+      disk: 100        # …and 100 GB disk each
+      concurrency: 4   # OR: static concurrency (mutually exclusive with cpu/mem/disk)
+      prefetch: "50%"  # download up to N task inputs in advance (N = concurrency * prefetch)
+      scitq_auth: true # see below
+```
+
+At least one of `concurrency`, `cpu`, or `mem` is required. `cpu`/`mem`/`disk` drive dynamic concurrency (scitq picks a per-worker concurrency that fits the worker's flavour and these per-task budgets); `concurrency` pins it to a static value.
+
+#### `scitq_auth: true` — the task can call `scitq file copy`
+
+When `task_spec.scitq_auth: true`, the worker, before launching the task, does two extra things:
+
+1. Injects `SCITQ_SERVER` (the address the worker registered with) and `SCITQ_TOKEN` (the worker's own auth token) as environment variables in the task.
+2. For docker tasks, bind-mounts the worker's `/usr/local/bin/scitq` into the container at the same path, read-only.
+
+The task can then call `scitq file copy <src> <dst>` (or any other `scitq` CLI subcommand) and authenticate against the server as the worker. The server's rclone configuration — including any encrypted-archive crypt password or cloud-provider access key — never reaches the container; the task only ever holds a token.
+
+Use cases:
+
+- The same file must land at two different destinations (e.g. an S3 raw bucket and an encrypted Azure archive) in a single task.
+- The destination layout doesn't fit one fixed `publish:` URI per step (asymmetric paths like `s3://rnd/raw/<gmt>/...` vs `s3://rnd/raw/<gmt>.meta/...`).
+
+The bind-mounted `scitq` is the worker's own binary, kept in sync with the server by `make server-upgrade` for collocated workers and by Phase II auto-upgrade for cloud workers (the upgrade pass refreshes the CLI alongside the worker binary).
+
+Default: `false`. Most tasks never see scitq credentials.
+
 ### Worker pool
 
 The worker pool defines what kind of machines to recruit:

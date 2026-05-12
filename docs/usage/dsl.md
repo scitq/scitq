@@ -256,6 +256,18 @@ A TaskSpec can either specify concurrency (e.g. static concurrency) or specify o
 
 Note that this does not impact the worker pool itself, just how many tasks each worker within this pool can do.
 
+#### `scitq_auth`: let the task call `scitq file copy`
+
+`TaskSpec` accepts one more option, `scitq_auth: bool` (default `False`). When set to `True` the worker, before launching the task, injects two environment variables into the container — `SCITQ_SERVER` (the address the worker registered with) and `SCITQ_TOKEN` (the worker's own auth token) — and bind-mounts the worker's `/usr/local/bin/scitq` into the container at the same path (read-only).
+
+The task can then call `scitq file copy <src> <dst>` (or any other `scitq` CLI subcommand) and authenticate against the server as the worker. The server's rclone configuration — including any crypt passwords or cloud-provider access keys — never reaches the container; the task only ever holds a token. Useful for steps that need a side-channel move beyond what scitq's native publish mechanism can express, e.g. publishing the same file to both an S3 bucket and an encrypted Azure archive in a single task.
+
+```python
+TaskSpec(cpu=2, mem=4, scitq_auth=True)
+```
+
+The bind-mounted `scitq` binary is the worker's own — kept in sync with the server by `make server-upgrade` for permanent workers and by Phase II auto-upgrade for cloud workers (the upgrade pass refreshes the CLI alongside the worker binary).
+
 ### depends, inputs
 
 The second step uses two new attributes, depends and inputs:
