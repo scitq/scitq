@@ -231,13 +231,18 @@ func (ap *AzureProvider) Create(workerName, flavor, location string, jobId int32
 		vmName := workerName
 		rgName := ap.resourceGroupName(workerName)
 
-		// Prepare the cloud-init script.
+		// Prepare the cloud-init script. The scitq CLI is downloaded
+		// alongside scitq-client so tasks opting into `scitq_auth` can
+		// use it without extra setup on the worker.
 		cloudInit := fmt.Sprintf(`#cloud-config
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
+  - curl -ksSL https://%s/scitq-cli?token=%s -o /usr/local/bin/scitq || true
+  - chmod a+x /usr/local/bin/scitq || true
   - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d -provider "%s" -region "%s"
   - systemctl start scitq-client`,
+			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
 			ap.cfg.Scitq.SwapProportion, ap.cfg.Scitq.WorkerToken,

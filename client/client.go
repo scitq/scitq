@@ -234,7 +234,7 @@ func getScriptExtension(shell string) string {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string, noBare bool) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string, noBare bool, serverAddr string, workerToken string) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -288,6 +288,15 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		containerName = fmt.Sprintf("scitq-%s-task-%d", workerName, task.TaskId)
 	}
 
+	// scitq_auth: per-task opt-in. When true the task gets SCITQ_SERVER and
+	// SCITQ_TOKEN in its env (so `scitq file copy` etc. can authenticate as
+	// the worker), and docker tasks additionally bind-mount the worker's
+	// scitq CLI binary at /usr/local/bin/scitq:ro so the binary is available
+	// regardless of what's baked into the container image. The worker's own
+	// auth token is reused — same identity as the worker's other RPCs, no
+	// new credential surface.
+	scitqAuth := task.ScitqAuth != nil && *task.ScitqAuth
+
 	if isBare {
 		// Bare execution: run command directly without Docker
 		shell := "sh"
@@ -308,6 +317,9 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			fmt.Sprintf("THREADS=%d", cpu),
 			fmt.Sprintf("MEM=%d", memGB),
 		)
+		if scitqAuth {
+			cmd.Env = append(cmd.Env, "SCITQ_SERVER="+serverAddr, "SCITQ_TOKEN="+workerToken)
+		}
 		log.Printf("🛠️  Running bare command: %s -c %s", shell, task.Command)
 	} else {
 		// Docker execution: existing logic (containerName hoisted above).
@@ -317,6 +329,18 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		// SIGKILL the cmd. The defer below is responsible for cleanup so
 		// the daemon doesn't accumulate stopped containers.
 		command := []string{"run", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
+		if scitqAuth {
+			// Token + server reach the container via -e so the task can
+			// authenticate as the worker. Binary is bind-mounted in
+			// case the container image doesn't include it (most don't).
+			// Assumes /usr/local/bin/scitq on the worker is the static
+			// build (CGO_ENABLED=0) — see Makefile / install-cli.
+			command = append(command,
+				"-e", "SCITQ_SERVER="+serverAddr,
+				"-e", "SCITQ_TOKEN="+workerToken,
+				"-v", "/usr/local/bin/scitq:/usr/local/bin/scitq:ro",
+			)
+		}
 		option := ""
 		for _, folder := range []string{"input", "output", "tmp", "resource", "scripts"} {
 			if folder == "resource" || folder == "scripts" {
@@ -1121,6 +1145,8 @@ func excuterThread(
 	activeTasks *sync.Map,
 	workerName string,
 	noBare bool,
+	serverAddr string,
+	workerToken string,
 ) {
 	var wg sync.WaitGroup
 
@@ -1169,7 +1195,7 @@ func excuterThread(
 			}
 			log.Printf("Available CPU threads estimated to %d, memory to %d GB", cpu, memGB)
 			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu, "mem_gb": memGB})
-			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName, noBare)
+			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName, noBare, serverAddr, workerToken)
 
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
@@ -1246,7 +1272,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token)
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, um, taskWeights, activeTasks)

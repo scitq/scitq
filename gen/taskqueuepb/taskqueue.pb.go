@@ -253,8 +253,17 @@ type TaskRequest struct {
 	Publish          *string                `protobuf:"bytes,20,opt,name=publish,proto3,oneof" json:"publish,omitempty"`                                // Publish path (copied from output on success only)
 	ReuseKey         *string                `protobuf:"bytes,21,opt,name=reuse_key,json=reuseKey,proto3,oneof" json:"reuse_key,omitempty"`              // SHA-256 hex for opportunistic reuse — producer side: always set when content is reuse-eligible (step not untrusted)
 	ConsumeReuse     *bool                  `protobuf:"varint,22,opt,name=consume_reuse,json=consumeReuse,proto3,oneof" json:"consume_reuse,omitempty"` // If true, server may reuse a cached result for this task (consumer side, set from workflow-level `opportunistic` flag)
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Opt-in: when true, the worker injects SCITQ_SERVER + SCITQ_TOKEN env
+	// vars into the task and (for docker tasks) bind-mounts the worker's
+	// scitq CLI into the container at /usr/local/bin/scitq. Lets the task
+	// call `scitq file copy <src> <dst>` for moves that scitq's native
+	// publish mechanism can't express (e.g. two different destinations per
+	// file, asymmetric path layouts). Default false — most tasks never
+	// need it. Token shape today: the worker's own auth token (the same
+	// token the worker uses for its own RPCs), inherited by the task.
+	ScitqAuth     *bool `protobuf:"varint,23,opt,name=scitq_auth,json=scitqAuth,proto3,oneof" json:"scitq_auth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskRequest) Reset() {
@@ -441,6 +450,13 @@ func (x *TaskRequest) GetConsumeReuse() bool {
 	return false
 }
 
+func (x *TaskRequest) GetScitqAuth() bool {
+	if x != nil && x.ScitqAuth != nil {
+		return *x.ScitqAuth
+	}
+	return false
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -475,8 +491,10 @@ type Task struct {
 	UploadDuration   *int32                 `protobuf:"varint,30,opt,name=upload_duration,json=uploadDuration,proto3,oneof" json:"upload_duration,omitempty"`       // seconds spent uploading outputs
 	QualityScore     *float64               `protobuf:"fixed64,31,opt,name=quality_score,json=qualityScore,proto3,oneof" json:"quality_score,omitempty"`            // quality score (higher is better)
 	QualityVars      *string                `protobuf:"bytes,32,opt,name=quality_vars,json=qualityVars,proto3,oneof" json:"quality_vars,omitempty"`                 // JSON: extracted quality variables
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// See TaskRequest.scitq_auth.
+	ScitqAuth     *bool `protobuf:"varint,33,opt,name=scitq_auth,json=scitqAuth,proto3,oneof" json:"scitq_auth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -731,6 +749,13 @@ func (x *Task) GetQualityVars() string {
 		return *x.QualityVars
 	}
 	return ""
+}
+
+func (x *Task) GetScitqAuth() bool {
+	if x != nil && x.ScitqAuth != nil {
+		return *x.ScitqAuth
+	}
+	return false
 }
 
 type TaskList struct {
@@ -1661,8 +1686,15 @@ type ClientUpgradeInfo struct {
 	BinaryUrl          string                 `protobuf:"bytes,1,opt,name=binary_url,json=binaryUrl,proto3" json:"binary_url,omitempty"`                               // GET → bytes; auth token already embedded
 	Sha256Url          string                 `protobuf:"bytes,2,opt,name=sha256_url,json=sha256Url,proto3" json:"sha256_url,omitempty"`                               // GET → hex digest; auth token already embedded
 	InsecureSkipVerify bool                   `protobuf:"varint,3,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3" json:"insecure_skip_verify,omitempty"` // server uses an embedded self-signed cert; worker should skip TLS verify
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// scitq CLI binary — refreshed in the same upgrade pass so the binary
+	// bind-mounted into task containers (`task_spec.scitq_auth: true`)
+	// stays in sync with the worker version. Empty when the server hasn't
+	// got a CLI binary to ship (older deploys, dev setups).
+	CliBinaryUrl   string `protobuf:"bytes,4,opt,name=cli_binary_url,json=cliBinaryUrl,proto3" json:"cli_binary_url,omitempty"`
+	CliSha256Url   string `protobuf:"bytes,5,opt,name=cli_sha256_url,json=cliSha256Url,proto3" json:"cli_sha256_url,omitempty"`
+	CliInstallPath string `protobuf:"bytes,6,opt,name=cli_install_path,json=cliInstallPath,proto3" json:"cli_install_path,omitempty"` // absolute path on the worker, e.g. /usr/local/bin/scitq
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ClientUpgradeInfo) Reset() {
@@ -1714,6 +1746,27 @@ func (x *ClientUpgradeInfo) GetInsecureSkipVerify() bool {
 		return x.InsecureSkipVerify
 	}
 	return false
+}
+
+func (x *ClientUpgradeInfo) GetCliBinaryUrl() string {
+	if x != nil {
+		return x.CliBinaryUrl
+	}
+	return ""
+}
+
+func (x *ClientUpgradeInfo) GetCliSha256Url() string {
+	if x != nil {
+		return x.CliSha256Url
+	}
+	return ""
+}
+
+func (x *ClientUpgradeInfo) GetCliInstallPath() string {
+	if x != nil {
+		return x.CliInstallPath
+	}
+	return ""
 }
 
 type TaskUpdate struct {
@@ -10091,7 +10144,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xcd\a\n" +
+	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\x80\b\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -10119,7 +10172,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0eaccept_failure\x18\x13 \x01(\bR\racceptFailure\x12\x1d\n" +
 	"\apublish\x18\x14 \x01(\tH\vR\apublish\x88\x01\x01\x12 \n" +
 	"\treuse_key\x18\x15 \x01(\tH\fR\breuseKey\x88\x01\x01\x12(\n" +
-	"\rconsume_reuse\x18\x16 \x01(\bH\rR\fconsumeReuse\x88\x01\x01B\b\n" +
+	"\rconsume_reuse\x18\x16 \x01(\bH\rR\fconsumeReuse\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"scitq_auth\x18\x17 \x01(\bH\x0eR\tscitqAuth\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -10137,7 +10192,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_publishB\f\n" +
 	"\n" +
 	"_reuse_keyB\x10\n" +
-	"\x0e_consume_reuse\"\xdd\v\n" +
+	"\x0e_consume_reuseB\r\n" +
+	"\v_scitq_auth\"\x90\f\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -10175,7 +10231,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\frun_duration\x18\x1d \x01(\x05H\x13R\vrunDuration\x88\x01\x01\x12,\n" +
 	"\x0fupload_duration\x18\x1e \x01(\x05H\x14R\x0euploadDuration\x88\x01\x01\x12(\n" +
 	"\rquality_score\x18\x1f \x01(\x01H\x15R\fqualityScore\x88\x01\x01\x12&\n" +
-	"\fquality_vars\x18  \x01(\tH\x16R\vqualityVars\x88\x01\x01B\b\n" +
+	"\fquality_vars\x18  \x01(\tH\x16R\vqualityVars\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"scitq_auth\x18! \x01(\bH\x17R\tscitqAuth\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -10203,7 +10261,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\r_run_durationB\x12\n" +
 	"\x10_upload_durationB\x10\n" +
 	"\x0e_quality_scoreB\x0f\n" +
-	"\r_quality_vars\"1\n" +
+	"\r_quality_varsB\r\n" +
+	"\v_scitq_auth\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +
@@ -10312,13 +10371,16 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x03all\x18\x02 \x01(\bR\x03all\x12\x12\n" +
 	"\x04mode\x18\x03 \x01(\tR\x04mode\"D\n" +
 	"\x12WorkerUpgradeReply\x12.\n" +
-	"\x13affected_worker_ids\x18\x01 \x03(\x05R\x11affectedWorkerIds\"\x83\x01\n" +
+	"\x13affected_worker_ids\x18\x01 \x03(\x05R\x11affectedWorkerIds\"\xf9\x01\n" +
 	"\x11ClientUpgradeInfo\x12\x1d\n" +
 	"\n" +
 	"binary_url\x18\x01 \x01(\tR\tbinaryUrl\x12\x1d\n" +
 	"\n" +
 	"sha256_url\x18\x02 \x01(\tR\tsha256Url\x120\n" +
-	"\x14insecure_skip_verify\x18\x03 \x01(\bR\x12insecureSkipVerify\"$\n" +
+	"\x14insecure_skip_verify\x18\x03 \x01(\bR\x12insecureSkipVerify\x12$\n" +
+	"\x0ecli_binary_url\x18\x04 \x01(\tR\fcliBinaryUrl\x12$\n" +
+	"\x0ecli_sha256_url\x18\x05 \x01(\tR\fcliSha256Url\x12(\n" +
+	"\x10cli_install_path\x18\x06 \x01(\tR\x0ecliInstallPath\"$\n" +
 	"\n" +
 	"TaskUpdate\x12\x16\n" +
 	"\x06weight\x18\x01 \x01(\x01R\x06weight\"\xa5\x01\n" +

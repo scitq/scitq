@@ -171,6 +171,19 @@ export interface TaskRequest {
      * @generated from protobuf field: optional bool consume_reuse = 22
      */
     consumeReuse?: boolean; // If true, server may reuse a cached result for this task (consumer side, set from workflow-level `opportunistic` flag)
+    /**
+     * Opt-in: when true, the worker injects SCITQ_SERVER + SCITQ_TOKEN env
+     * vars into the task and (for docker tasks) bind-mounts the worker's
+     * scitq CLI into the container at /usr/local/bin/scitq. Lets the task
+     * call `scitq file copy <src> <dst>` for moves that scitq's native
+     * publish mechanism can't express (e.g. two different destinations per
+     * file, asymmetric path layouts). Default false — most tasks never
+     * need it. Token shape today: the worker's own auth token (the same
+     * token the worker uses for its own RPCs), inherited by the task.
+     *
+     * @generated from protobuf field: optional bool scitq_auth = 23
+     */
+    scitqAuth?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.Task
@@ -304,6 +317,12 @@ export interface Task {
      * @generated from protobuf field: optional string quality_vars = 32
      */
     qualityVars?: string; // JSON: extracted quality variables
+    /**
+     * See TaskRequest.scitq_auth.
+     *
+     * @generated from protobuf field: optional bool scitq_auth = 33
+     */
+    scitqAuth?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -631,6 +650,23 @@ export interface ClientUpgradeInfo {
      * @generated from protobuf field: bool insecure_skip_verify = 3
      */
     insecureSkipVerify: boolean; // server uses an embedded self-signed cert; worker should skip TLS verify
+    /**
+     * scitq CLI binary — refreshed in the same upgrade pass so the binary
+     * bind-mounted into task containers (`task_spec.scitq_auth: true`)
+     * stays in sync with the worker version. Empty when the server hasn't
+     * got a CLI binary to ship (older deploys, dev setups).
+     *
+     * @generated from protobuf field: string cli_binary_url = 4
+     */
+    cliBinaryUrl: string;
+    /**
+     * @generated from protobuf field: string cli_sha256_url = 5
+     */
+    cliSha256Url: string;
+    /**
+     * @generated from protobuf field: string cli_install_path = 6
+     */
+    cliInstallPath: string; // absolute path on the worker, e.g. /usr/local/bin/scitq
 }
 /**
  * @generated from protobuf message taskqueue.TaskUpdate
@@ -3465,7 +3501,8 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 19, name: "accept_failure", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 20, name: "publish", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 21, name: "reuse_key", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 22, name: "consume_reuse", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 22, name: "consume_reuse", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 23, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<TaskRequest>): TaskRequest {
@@ -3557,6 +3594,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                 case /* optional bool consume_reuse */ 22:
                     message.consumeReuse = reader.bool();
                     break;
+                case /* optional bool scitq_auth */ 23:
+                    message.scitqAuth = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3639,6 +3679,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         /* optional bool consume_reuse = 22; */
         if (message.consumeReuse !== undefined)
             writer.tag(22, WireType.Varint).bool(message.consumeReuse);
+        /* optional bool scitq_auth = 23; */
+        if (message.scitqAuth !== undefined)
+            writer.tag(23, WireType.Varint).bool(message.scitqAuth);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3684,7 +3727,8 @@ class Task$Type extends MessageType<Task> {
             { no: 29, name: "run_duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 30, name: "upload_duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 31, name: "quality_score", kind: "scalar", opt: true, T: 1 /*ScalarType.DOUBLE*/ },
-            { no: 32, name: "quality_vars", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 32, name: "quality_vars", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 33, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -3803,6 +3847,9 @@ class Task$Type extends MessageType<Task> {
                 case /* optional string quality_vars */ 32:
                     message.qualityVars = reader.string();
                     break;
+                case /* optional bool scitq_auth */ 33:
+                    message.scitqAuth = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3911,6 +3958,9 @@ class Task$Type extends MessageType<Task> {
         /* optional string quality_vars = 32; */
         if (message.qualityVars !== undefined)
             writer.tag(32, WireType.LengthDelimited).string(message.qualityVars);
+        /* optional bool scitq_auth = 33; */
+        if (message.scitqAuth !== undefined)
+            writer.tag(33, WireType.Varint).bool(message.scitqAuth);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4866,7 +4916,10 @@ class ClientUpgradeInfo$Type extends MessageType<ClientUpgradeInfo> {
         super("taskqueue.ClientUpgradeInfo", [
             { no: 1, name: "binary_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "sha256_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "insecure_skip_verify", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 3, name: "insecure_skip_verify", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "cli_binary_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "cli_sha256_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "cli_install_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<ClientUpgradeInfo>): ClientUpgradeInfo {
@@ -4874,6 +4927,9 @@ class ClientUpgradeInfo$Type extends MessageType<ClientUpgradeInfo> {
         message.binaryUrl = "";
         message.sha256Url = "";
         message.insecureSkipVerify = false;
+        message.cliBinaryUrl = "";
+        message.cliSha256Url = "";
+        message.cliInstallPath = "";
         if (value !== undefined)
             reflectionMergePartial<ClientUpgradeInfo>(this, message, value);
         return message;
@@ -4891,6 +4947,15 @@ class ClientUpgradeInfo$Type extends MessageType<ClientUpgradeInfo> {
                     break;
                 case /* bool insecure_skip_verify */ 3:
                     message.insecureSkipVerify = reader.bool();
+                    break;
+                case /* string cli_binary_url */ 4:
+                    message.cliBinaryUrl = reader.string();
+                    break;
+                case /* string cli_sha256_url */ 5:
+                    message.cliSha256Url = reader.string();
+                    break;
+                case /* string cli_install_path */ 6:
+                    message.cliInstallPath = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4913,6 +4978,15 @@ class ClientUpgradeInfo$Type extends MessageType<ClientUpgradeInfo> {
         /* bool insecure_skip_verify = 3; */
         if (message.insecureSkipVerify !== false)
             writer.tag(3, WireType.Varint).bool(message.insecureSkipVerify);
+        /* string cli_binary_url = 4; */
+        if (message.cliBinaryUrl !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.cliBinaryUrl);
+        /* string cli_sha256_url = 5; */
+        if (message.cliSha256Url !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.cliSha256Url);
+        /* string cli_install_path = 6; */
+        if (message.cliInstallPath !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.cliInstallPath);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

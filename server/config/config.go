@@ -52,6 +52,14 @@ type Config struct {
 		// This is used for automated client installation.
 		ClientBinaryPath string `yaml:"client_binary_path" default:"/usr/local/bin/scitq-client"`
 
+		// CliBinaryPath is the filesystem path to the scitq CLI binary. Served
+		// from `/scitq-cli` so worker bootstrap scripts (and any task using
+		// `task_spec.scitq_auth: true`) can keep their CLI in sync with the
+		// rest of the deployment. Must be a fully-static build
+		// (`CGO_ENABLED=0`) so it runs inside alpine/distroless containers
+		// when bind-mounted — see `make build-cli`.
+		CliBinaryPath string `yaml:"cli_binary_path" default:"/usr/local/bin/scitq"`
+
 		// ClientDownloadToken is a secret token used to authorize client binary downloads.
 		// If not set, a random token is generated at startup.
 		ClientDownloadToken string `yaml:"client_download_token"`

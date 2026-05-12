@@ -350,6 +350,7 @@ class Task:
         self.reuse_key = computed_reuse_key
 
         status = "W" if resolved_depends else DEFAULT_TASK_STATUS
+        scitq_auth = bool(getattr(self.step.task_spec, 'scitq_auth', False)) if self.step.task_spec is not None else False
         self.task_id = client.submit_task(
                 step_id=self.step.step_id,
                 command=resolved_command,
@@ -367,6 +368,7 @@ class Task:
                 accept_failure=self.accept_failure,
                 reuse_key=computed_reuse_key,
                 consume_reuse=opportunistic,
+                scitq_auth=scitq_auth,
             )
 
 
@@ -418,8 +420,9 @@ class Task:
 
 
 class TaskSpec:
-    def __init__(self, *, cpu: Optional[int]=None, mem: Optional[float]=None, disk: Optional[float]=None, 
-                 concurrency: Optional[int]=None, prefetch: Optional[Union[str,int]]=None):
+    def __init__(self, *, cpu: Optional[int]=None, mem: Optional[float]=None, disk: Optional[float]=None,
+                 concurrency: Optional[int]=None, prefetch: Optional[Union[str,int]]=None,
+                 scitq_auth: bool=False):
         if concurrency is None and cpu is None and mem is None:
             raise ValueError("TaskSpec must define at least one of concurrency, cpu or mem")
         self.cpu = cpu
@@ -427,6 +430,12 @@ class TaskSpec:
         self.disk = disk
         self.concurrency = concurrency
         self.prefetch = self._parse_prefetch(prefetch)
+        # scitq_auth: when True, the worker injects SCITQ_SERVER + SCITQ_TOKEN
+        # env vars into the task and bind-mounts the worker's scitq CLI into
+        # docker containers. Opt-in per step — lets the task call
+        # `scitq file copy` for moves that the native publish mechanism can't
+        # express (multiple destinations per file, asymmetric paths).
+        self.scitq_auth = bool(scitq_auth)
 
     def _parse_prefetch(self, p):
         if p is None:
@@ -437,11 +446,11 @@ class TaskSpec:
 
     def __eq__(self, other):
         return isinstance(other, TaskSpec) and (
-            self.cpu, self.mem, self.disk, self.concurrency, self.prefetch
-        ) == (other.cpu, other.mem, other.disk, other.concurrency, other.prefetch)
-    
+            self.cpu, self.mem, self.disk, self.concurrency, self.prefetch, self.scitq_auth
+        ) == (other.cpu, other.mem, other.disk, other.concurrency, other.prefetch, other.scitq_auth)
+
     def __str__(self):
-        return f"TaskSpec(cpu={self.cpu}, mem={self.mem}, disk={self.disk} concurrency={self.concurrency}, prefetch={self.prefetch})"
+        return f"TaskSpec(cpu={self.cpu}, mem={self.mem}, disk={self.disk} concurrency={self.concurrency}, prefetch={self.prefetch}, scitq_auth={self.scitq_auth})"
 
 
 def underscore_join(*args: str) -> str:

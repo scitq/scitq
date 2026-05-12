@@ -143,9 +143,13 @@ func (p *Provider) effectiveUserData(jobId int32, region string) []byte {
 runcmd:
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
+  - curl -ksSL https://%s/scitq-cli?token=%s -o /usr/local/bin/scitq || true
+  - chmod a+x /usr/local/bin/scitq || true
   - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d -provider "%s" -region "%s"
   - systemctl start scitq-client
 `,
+		p.cfg.Scitq.ServerFQDN,
+		p.cfg.Scitq.ClientDownloadToken,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.ClientDownloadToken,
 		p.cfg.Scitq.ServerFQDN,

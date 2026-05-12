@@ -490,10 +490,26 @@ func (s *taskQueueServer) GetClientUpgradeInfo(ctx context.Context, _ *emptypb.E
 		base = fmt.Sprintf("https://%s:%d", host, port)
 	}
 	tok := s.cfg.Scitq.WorkerToken
+	cliBinaryUrl := ""
+	cliSha256Url := ""
+	cliInstallPath := ""
+	if s.cfg.Scitq.CliBinaryPath != "" {
+		if _, err := os.Stat(s.cfg.Scitq.CliBinaryPath); err == nil {
+			cliBinaryUrl = fmt.Sprintf("%s/scitq-cli?token=%s", base, tok)
+			cliSha256Url = fmt.Sprintf("%s/scitq-cli.sha256?token=%s", base, tok)
+			cliInstallPath = s.cfg.Scitq.CliBinaryPath
+		}
+		// If the server's local CLI binary is missing, leave the three CLI
+		// fields empty — workers older than this build will ignore them
+		// anyway, and the new code path treats empty as "skip CLI refresh".
+	}
 	return &pb.ClientUpgradeInfo{
 		BinaryUrl:          fmt.Sprintf("%s/scitq-client?token=%s", base, tok),
 		Sha256Url:          fmt.Sprintf("%s/scitq-client.sha256?token=%s", base, tok),
 		InsecureSkipVerify: !s.cfg.Scitq.DisableHTTPS, // matches the cloud-init `curl -k` posture for embedded self-signed certs
+		CliBinaryUrl:       cliBinaryUrl,
+		CliSha256Url:       cliSha256Url,
+		CliInstallPath:     cliInstallPath,
 	}, nil
 }
 
@@ -535,13 +551,13 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              command, shell, container, container_options, step_id,
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
-             status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, created_at
+             status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
-             $15, $16, $17, $18, $19, $20, NOW()
+             $15, $16, $17, $18, $19, $20, $21, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -551,7 +567,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
-		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(),
+		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(),
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -1234,7 +1250,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					retry, is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, previous_task_id, retry_count,
-					task_name, publish, reuse_key, consume_reuse
+					task_name, publish, reuse_key, consume_reuse, scitq_auth
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -1243,7 +1259,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					GREATEST(retry - 1, 0), is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, task_id, retry_count + 1,
-					task_name, publish, reuse_key, consume_reuse
+					task_name, publish, reuse_key, consume_reuse, scitq_auth
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id
@@ -1673,7 +1689,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				output, output_files, output_is_compressed,
 				retry, is_final, uses_cache,
 				download_timeout, running_timeout, upload_timeout,
-				input_hash, previous_task_id, retry_count, task_name
+				input_hash, previous_task_id, retry_count, task_name, scitq_auth
 			)
 			SELECT
 				t.step_id, t.command, t.shell, t.container, t.container_options,
@@ -1681,7 +1697,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				t.output, '{}', FALSE,
 				COALESCE($2, (SELECT initial_retry FROM root)), t.is_final, t.uses_cache,
 				t.download_timeout, t.running_timeout, t.upload_timeout,
-				t.input_hash, t.task_id, 0, t.task_name
+				t.input_hash, t.task_id, 0, t.task_name, t.scitq_auth
 			FROM task t
 			WHERE t.task_id = (SELECT task_id FROM validated)
 			RETURNING task_id
@@ -3679,7 +3695,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
 			download_timeout, running_timeout, upload_timeout,
-			status, weight, publish
+			status, weight, publish, scitq_auth
 		FROM task
 		WHERE worker_id = $1
 		  AND NOT hidden
@@ -3694,13 +3710,17 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		var task pb.Task
 		var status string
 		var weight sql.NullFloat64
+		var scitqAuth bool
 
 		var publishNull sql.NullString
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
+		}
+		if scitqAuth {
+			task.ScitqAuth = proto.Bool(true)
 		}
 		task.Input = []string(input)
 		task.Resource = []string(resource)
@@ -6044,6 +6064,9 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 
 	// 🧲 Static files and binary client
 	mux.Handle("/scitq-client", staticHandler)
+	mux.Handle("/scitq-client.sha256", staticHandler)
+	mux.Handle("/scitq-cli", staticHandler)
+	mux.Handle("/scitq-cli.sha256", staticHandler)
 	mux.Handle("/", staticHandler)
 
 	// 🔄 11. Final handler with gRPC-Web + fallback

@@ -89,6 +89,35 @@ func HttpServer(cfg config.Config) (tls.Certificate, string, http.Handler, error
 		fmt.Fprintln(w, hash)
 	})
 
+	// scitq CLI download (mirrors /scitq-client). Workers bind-mount this
+	// binary into task containers when a task opts in via
+	// `task_spec.scitq_auth: true`. Same auth model as the client binary
+	// download — accepts either the cloud-init download token or the
+	// worker token.
+	mux.HandleFunc("/scitq-cli", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizedDownload(r) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=scitq")
+		http.ServeFile(w, r, cfg.Scitq.CliBinaryPath)
+	})
+	mux.HandleFunc("/scitq-cli.sha256", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizedDownload(r) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		hash, err := clientBinaryHash(cfg.Scitq.CliBinaryPath)
+		if err != nil {
+			http.Error(w, "cli binary unavailable", http.StatusInternalServerError)
+			log.Printf("⚠️ /scitq-cli.sha256: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=us-ascii")
+		fmt.Fprintln(w, hash)
+	})
+
 	// Serve embedded Svelte frontend
 	sub, err := fs.Sub(publicFiles, "public")
 	if err != nil {

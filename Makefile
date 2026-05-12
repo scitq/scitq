@@ -66,8 +66,12 @@ copy-docs:
 build-client: | $(BINARY_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLIENT) $(SRC_CLIENT)
 
+# `CGO_ENABLED=0` produces a fully-static binary so the worker can
+# bind-mount /usr/local/bin/scitq into task containers regardless of the
+# container's libc (alpine/musl, distroless, etc.) — see the
+# `task_spec.scitq_auth` opt-in flag in client/client.go.
 build-cli: | $(BINARY_DIR)
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLI) $(SRC_CLI)
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLI) $(SRC_CLI)
 
 static-all: static-server static-client static-cli
 

@@ -246,6 +246,7 @@ class Scitq2Client:
         publish: Optional[str] = None,
         reuse_key: Optional[str] = None,
         consume_reuse: bool = False,
+        scitq_auth: bool = False,
     ) -> int:
         """
         Submits a task to a specific step.
@@ -297,6 +298,8 @@ class Scitq2Client:
             request.reuse_key = reuse_key
         if consume_reuse:
             request.consume_reuse = True
+        if scitq_auth:
+            request.scitq_auth = True
         response = self.stub.SubmitTask(request)
         return response.task_id
 

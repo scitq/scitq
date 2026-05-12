@@ -229,6 +229,54 @@ func performUpgrade(
 		return fmt.Errorf("chmod %s: %w", target, err)
 	}
 
+	// Refresh the scitq CLI binary BEFORE the worker swap so that tasks
+	// using `task_spec.scitq_auth: true` get the matching CLI version
+	// from the very next assignment. The CLI doesn't run as a daemon, so
+	// we just download → verify hash → atomic rename — no exit/restart
+	// dance. Skipped silently when the server has no CLI to ship
+	// (`CliBinaryUrl == ""`) so older deploys keep upgrading worker-only.
+	// A CLI refresh failure is logged but does NOT abort the worker
+	// upgrade: an upgraded worker with a stale CLI is strictly better
+	// than a worker that never upgrades because the CLI was unavailable.
+	if info.CliBinaryUrl != "" && info.CliInstallPath != "" {
+		cliExpected, cliErr := fetchExpectedHash(info.CliSha256Url, info.InsecureSkipVerify)
+		if cliErr == nil {
+			cliTarget := info.CliInstallPath + ".new"
+			cliGot, dlErr := downloadToFileAndHash(info.CliBinaryUrl, cliTarget, info.InsecureSkipVerify)
+			if dlErr == nil && cliGot == cliExpected {
+				if chmodErr := os.Chmod(cliTarget, 0o755); chmodErr == nil {
+					if renameErr := os.Rename(cliTarget, info.CliInstallPath); renameErr == nil {
+						reporter.Event("I", "lifecycle", "scitq CLI refreshed", map[string]any{
+							"path":   info.CliInstallPath,
+							"sha256": cliExpected,
+						})
+					} else {
+						_ = os.Remove(cliTarget)
+						reporter.Event("W", "lifecycle", "scitq CLI rename failed — leaving previous version in place", map[string]any{
+							"path":  info.CliInstallPath,
+							"error": renameErr.Error(),
+						})
+					}
+				} else {
+					_ = os.Remove(cliTarget)
+					reporter.Event("W", "lifecycle", "scitq CLI chmod failed", map[string]any{"error": chmodErr.Error()})
+				}
+			} else {
+				_ = os.Remove(cliTarget)
+				if dlErr != nil {
+					reporter.Event("W", "lifecycle", "scitq CLI download failed — keeping previous", map[string]any{"error": dlErr.Error()})
+				} else {
+					reporter.Event("W", "lifecycle", "scitq CLI hash mismatch — keeping previous", map[string]any{
+						"got":      cliGot,
+						"expected": cliExpected,
+					})
+				}
+			}
+		} else {
+			reporter.Event("W", "lifecycle", "scitq CLI sha256 fetch failed — keeping previous", map[string]any{"error": cliErr.Error()})
+		}
+	}
+
 	reporter.Event("I", "lifecycle", "upgrade ready: swapping binary and exiting for supervisor restart", map[string]any{
 		"mode":        mode,
 		"from_commit": currentCommit(),

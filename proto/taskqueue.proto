@@ -175,6 +175,15 @@ message TaskRequest {
     optional string publish = 20; // Publish path (copied from output on success only)
     optional string reuse_key = 21; // SHA-256 hex for opportunistic reuse — producer side: always set when content is reuse-eligible (step not untrusted)
     optional bool consume_reuse = 22; // If true, server may reuse a cached result for this task (consumer side, set from workflow-level `opportunistic` flag)
+    // Opt-in: when true, the worker injects SCITQ_SERVER + SCITQ_TOKEN env
+    // vars into the task and (for docker tasks) bind-mounts the worker's
+    // scitq CLI into the container at /usr/local/bin/scitq. Lets the task
+    // call `scitq file copy <src> <dst>` for moves that scitq's native
+    // publish mechanism can't express (e.g. two different destinations per
+    // file, asymmetric path layouts). Default false — most tasks never
+    // need it. Token shape today: the worker's own auth token (the same
+    // token the worker uses for its own RPCs), inherited by the task.
+    optional bool scitq_auth = 23;
 }
 
 message Task {
@@ -210,6 +219,8 @@ message Task {
     optional int32 upload_duration = 30;   // seconds spent uploading outputs
     optional double quality_score = 31;    // quality score (higher is better)
     optional string quality_vars = 32;     // JSON: extracted quality variables
+    // See TaskRequest.scitq_auth.
+    optional bool scitq_auth = 33;
 }
 
 message TaskList {
@@ -333,6 +344,13 @@ message ClientUpgradeInfo {
     string binary_url = 1;     // GET → bytes; auth token already embedded
     string sha256_url = 2;     // GET → hex digest; auth token already embedded
     bool insecure_skip_verify = 3;  // server uses an embedded self-signed cert; worker should skip TLS verify
+    // scitq CLI binary — refreshed in the same upgrade pass so the binary
+    // bind-mounted into task containers (`task_spec.scitq_auth: true`)
+    // stays in sync with the worker version. Empty when the server hasn't
+    // got a CLI binary to ship (older deploys, dev setups).
+    string cli_binary_url = 4;
+    string cli_sha256_url = 5;
+    string cli_install_path = 6;  // absolute path on the worker, e.g. /usr/local/bin/scitq
 }
 
 message TaskUpdate {
