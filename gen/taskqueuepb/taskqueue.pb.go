@@ -5307,12 +5307,22 @@ func (x *RecruiterList) GetRecruiters() []*Recruiter {
 }
 
 type WorkflowFilter struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NameLike      *string                `protobuf:"bytes,1,opt,name=name_like,json=nameLike,proto3,oneof" json:"name_like,omitempty"`
-	Limit         *int32                 `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
-	Offset        *int32                 `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	NameLike *string                `protobuf:"bytes,1,opt,name=name_like,json=nameLike,proto3,oneof" json:"name_like,omitempty"`
+	Limit    *int32                 `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	Offset   *int32                 `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
+	// User filter (resolved against the workflow's launching template_run.run_by):
+	//   - unset            → no user filter (returns every workflow)
+	//   - "@me"            → resolve to the authenticated caller
+	//   - "<username>"     → filter by that user
+	//
+	// The "@me" sentinel lets clients send a fixed marker and have the server
+	// resolve it from the call context, avoiding a separate whoami round-trip.
+	// Workflows without a template_run_id (pre-template legacy rows) have no
+	// attributable user; they appear only when this filter is unset.
+	UsernameFilter *string `protobuf:"bytes,4,opt,name=username_filter,json=usernameFilter,proto3,oneof" json:"username_filter,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkflowFilter) Reset() {
@@ -5364,6 +5374,13 @@ func (x *WorkflowFilter) GetOffset() int32 {
 		return *x.Offset
 	}
 	return 0
+}
+
+func (x *WorkflowFilter) GetUsernameFilter() string {
+	if x != nil && x.UsernameFilter != nil {
+		return *x.UsernameFilter
+	}
+	return ""
 }
 
 type WorkflowId struct {
@@ -10661,15 +10678,17 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\rRecruiterList\x124\n" +
 	"\n" +
 	"recruiters\x18\x01 \x03(\v2\x14.taskqueue.RecruiterR\n" +
-	"recruiters\"\x8d\x01\n" +
+	"recruiters\"\xcf\x01\n" +
 	"\x0eWorkflowFilter\x12 \n" +
 	"\tname_like\x18\x01 \x01(\tH\x00R\bnameLike\x88\x01\x01\x12\x19\n" +
 	"\x05limit\x18\x02 \x01(\x05H\x01R\x05limit\x88\x01\x01\x12\x1b\n" +
-	"\x06offset\x18\x03 \x01(\x05H\x02R\x06offset\x88\x01\x01B\f\n" +
+	"\x06offset\x18\x03 \x01(\x05H\x02R\x06offset\x88\x01\x01\x12,\n" +
+	"\x0fusername_filter\x18\x04 \x01(\tH\x03R\x0eusernameFilter\x88\x01\x01B\f\n" +
 	"\n" +
 	"_name_likeB\b\n" +
 	"\x06_limitB\t\n" +
-	"\a_offset\"-\n" +
+	"\a_offsetB\x12\n" +
+	"\x10_username_filter\"-\n" +
 	"\n" +
 	"WorkflowId\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05R\n" +

@@ -707,7 +707,7 @@ export async function getTemplateRun(templateRunId: number): Promise<taskqueue.T
  * @param {number} [offset] - Optional pagination offset
  * @returns {Promise<taskqueue.Workflow[]>} Promise resolving to array of workflows
  */
-export async function getWorkFlow(name?: string, limit?: number, offset?: number): Promise<taskqueue.Workflow[]> {
+export async function getWorkFlow(name?: string, limit?: number, offset?: number, usernameFilter?: string): Promise<taskqueue.Workflow[]> {
   try {
     const request: taskqueue.WorkflowFilter = {};
 
@@ -719,6 +719,11 @@ export async function getWorkFlow(name?: string, limit?: number, offset?: number
     }
     if (offset) {
       request.offset = offset;
+    }
+    if (usernameFilter !== undefined) {
+      // Empty string is "no filter" (server's natural meaning when unset);
+      // we map both empty and undefined to "omit" to keep the wire stable.
+      if (usernameFilter !== '') request.usernameFilter = usernameFilter;
     }
     const wfUnary = await client.listWorkflows(request, await callOptionsUserToken());
     return wfUnary.response?.workflows || [];

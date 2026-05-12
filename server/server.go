@@ -4761,11 +4761,12 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 }
 
 func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFilter) (*pb.WorkflowList, error) {
-	// Join to template_run + workflow_template so every row carries its
-	// launch provenance (template name/version for RunTemplate-launched
-	// workflows, script_name for local-Python ad-hoc runs). LEFT JOINs
-	// throughout: older workflows created before the template_run link
-	// existed stay visible with NULLs.
+	// Join to template_run + workflow_template + scitq_user so every row
+	// carries its launch provenance (template name/version for RunTemplate-
+	// launched workflows, script_name for local-Python ad-hoc runs) and so
+	// we can filter by username in a single SQL pass — no separate
+	// scitq_user lookup. LEFT JOINs throughout: older workflows created
+	// before the template_run link existed stay visible with NULLs.
 	query := `
         SELECT w.workflow_id, w.workflow_name, w.status, w.run_strategy, w.maximum_workers, w.live,
                tr.template_run_id, wt.name, wt.version,
@@ -4773,21 +4774,43 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
         FROM workflow w
         LEFT JOIN template_run tr ON tr.workflow_id = w.workflow_id
         LEFT JOIN workflow_template wt ON wt.workflow_template_id = tr.workflow_template_id
+        LEFT JOIN scitq_user u ON u.user_id = tr.run_by
     `
 	var args []interface{}
 
-	// Add name filter if provided. Wrap with % wildcards on the server so
-	// callers send a plain substring (e.g. "biomscope") without having to
-	// know about SQL LIKE syntax. Idempotent: %biomscope% becomes %%biomscope%%
-	// which ILIKE evaluates the same way.
+	// WHERE clauses are accumulated and joined below; pagination params are
+	// appended after WHERE/ORDER BY using the running $N count.
+	where := []string{}
 	if req.NameLike != nil {
-		query += " WHERE w.workflow_name ILIKE $1"
+		// Wrap with % wildcards on the server so callers send a plain
+		// substring (e.g. "biomscope") without having to know about SQL
+		// LIKE syntax. Idempotent: %biomscope% becomes %%biomscope%% which
+		// ILIKE evaluates the same way.
 		args = append(args, "%"+*req.NameLike+"%")
+		where = append(where, fmt.Sprintf("w.workflow_name ILIKE $%d", len(args)))
+	}
+	if req.UsernameFilter != nil && *req.UsernameFilter != "" {
+		// Resolve "@me" to the authenticated caller; anything else is a
+		// literal username. The username→user_id resolution is folded
+		// into the main query via the scitq_user join — no separate
+		// lookup. Unknown usernames produce zero rows (intentional;
+		// callers can validate against ListUsers if they need a hard
+		// error).
+		username := *req.UsernameFilter
+		if username == "@me" {
+			caller := GetUserFromContext(ctx)
+			if caller == nil {
+				return nil, fmt.Errorf("username_filter '@me' requires an authenticated session")
+			}
+			username = caller.Username
+		}
+		args = append(args, username)
+		where = append(where, fmt.Sprintf("u.username = $%d", len(args)))
+	}
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += " ORDER BY w.workflow_id DESC"
-
-	// Handle pagination parameters
-	paramCount := len(args)
 
 	// Add LIMIT clause if provided
 	if req.Limit != nil {
@@ -4796,8 +4819,7 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 			limit = 1 // Ensure at least 1 result
 		}
 		args = append(args, limit)
-		query += fmt.Sprintf(" LIMIT $%d", paramCount+1)
-		paramCount++
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
 	}
 
 	// Add OFFSET clause if provided
@@ -4807,7 +4829,7 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 			offset = 0 // No negative offset
 		}
 		args = append(args, offset)
-		query += fmt.Sprintf(" OFFSET $%d", paramCount+1)
+		query += fmt.Sprintf(" OFFSET $%d", len(args))
 	}
 
 	// Execute the query with context

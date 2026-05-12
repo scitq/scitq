@@ -254,6 +254,8 @@ type Attr struct {
 			NameLike string `arg:"--name-like" help:"Filter workflows by name"`
 			Long     bool   `arg:"-l,--long" help:"Show params used to launch each workflow"`
 			Limit    int32  `arg:"--limit" default:"10" help:"Maximum number of workflows to return (default 10, use 0 for no limit)"`
+			User     string `arg:"--user" help:"Filter workflows by username (default: current user)"`
+			AllUsers bool   `arg:"--all-users" help:"Show workflows from all users (overrides --user)"`
 		} `arg:"subcommand:list" help:"List workflows"`
 		Create *struct {
 			Name           string `arg:"--name,required" help:"Workflow name"`
@@ -1608,6 +1610,16 @@ func (c *CLI) WorkflowList() error {
 	}
 	if c.Attr.Workflow.List.Limit > 0 {
 		req.Limit = &c.Attr.Workflow.List.Limit
+	}
+	// User filter — `--all-users` overrides everything else, otherwise
+	// either the explicit `--user X` or the implicit "@me" sentinel which
+	// the server resolves to the caller from the call context.
+	if !c.Attr.Workflow.List.AllUsers {
+		username := c.Attr.Workflow.List.User
+		if username == "" {
+			username = "@me"
+		}
+		req.UsernameFilter = &username
 	}
 
 	res, err := c.QC.Client.ListWorkflows(ctx, req)

@@ -1728,6 +1728,19 @@ export interface WorkflowFilter {
      * @generated from protobuf field: optional int32 offset = 3
      */
     offset?: number;
+    /**
+     * User filter (resolved against the workflow's launching template_run.run_by):
+     *   - unset            → no user filter (returns every workflow)
+     *   - "@me"            → resolve to the authenticated caller
+     *   - "<username>"     → filter by that user
+     * The "@me" sentinel lets clients send a fixed marker and have the server
+     * resolve it from the call context, avoiding a separate whoami round-trip.
+     * Workflows without a template_run_id (pre-template legacy rows) have no
+     * attributable user; they appear only when this filter is unset.
+     *
+     * @generated from protobuf field: optional string username_filter = 4
+     */
+    usernameFilter?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkflowId
@@ -8681,7 +8694,8 @@ class WorkflowFilter$Type extends MessageType<WorkflowFilter> {
         super("taskqueue.WorkflowFilter", [
             { no: 1, name: "name_like", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "offset", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 3, name: "offset", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "username_filter", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkflowFilter>): WorkflowFilter {
@@ -8704,6 +8718,9 @@ class WorkflowFilter$Type extends MessageType<WorkflowFilter> {
                 case /* optional int32 offset */ 3:
                     message.offset = reader.int32();
                     break;
+                case /* optional string username_filter */ 4:
+                    message.usernameFilter = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8725,6 +8742,9 @@ class WorkflowFilter$Type extends MessageType<WorkflowFilter> {
         /* optional int32 offset = 3; */
         if (message.offset !== undefined)
             writer.tag(3, WireType.Varint).int32(message.offset);
+        /* optional string username_filter = 4; */
+        if (message.usernameFilter !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.usernameFilter);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

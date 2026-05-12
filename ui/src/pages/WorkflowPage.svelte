@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getWorkFlow, getWorkers } from '../lib/api';
+  import { getWorkFlow, getWorkers, getListUser } from '../lib/api';
   // Workers and mapping by stepId (passed down to WorkflowList → StepList)
   let workers: taskqueue.Worker[] = [];
   let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
@@ -33,15 +33,26 @@
   const ROUTE_HASH = '#/workflows';
   const STORAGE_KEY = 'wf:state';
 
-  function readUrlSearch(): string {
+  // URL hash is the source of truth for page-level filters (search, user)
+  // so navigation/reload/link-share all preserve the same view. Empty
+  // values are omitted from the hash to keep the URL minimal.
+  function readUrlParam(name: string): string {
     const hash = window.location.hash;
     const qIdx = hash.indexOf('?');
     if (qIdx < 0) return '';
-    return new URLSearchParams(hash.slice(qIdx + 1)).get('search') || '';
+    return new URLSearchParams(hash.slice(qIdx + 1)).get(name) || '';
   }
 
-  function writeUrlSearch(value: string) {
-    const newHash = value ? `${ROUTE_HASH}?search=${encodeURIComponent(value)}` : ROUTE_HASH;
+  function writeUrlParams(updates: Record<string, string>) {
+    const hash = window.location.hash;
+    const qIdx = hash.indexOf('?');
+    const params = new URLSearchParams(qIdx >= 0 ? hash.slice(qIdx + 1) : '');
+    for (const [k, v] of Object.entries(updates)) {
+      if (v === '' || v === null || v === undefined) params.delete(k);
+      else params.set(k, v);
+    }
+    const qs = params.toString();
+    const newHash = qs ? `${ROUTE_HASH}?${qs}` : ROUTE_HASH;
     if (window.location.hash !== newHash) {
       history.replaceState(null, '', newHash);
     }
@@ -68,8 +79,34 @@
 
   // Name filter (case-insensitive substring match server-side). Initialized
   // from the URL so the filter survives navigation and is link-shareable.
-  let nameFilter = readUrlSearch();
+  let nameFilter = readUrlParam('search');
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // User filter, also in the URL hash (same survival/sharing semantics as
+  // the search box). The sentinel "@me" means "the authenticated caller"
+  // (the server resolves it from the session). Empty string = "All users".
+  // Default on first visit: "@me".
+  //   URL ?user=@me      → current user
+  //   URL ?user=alice    → that user
+  //   URL with no `user` → all users (explicit "All users" choice)
+  // The first-load fallback (when the URL doesn't yet have a `user`
+  // param at all) uses "@me" so a fresh visit shows the caller's own
+  // workflows by default.
+  const currentUsername = (typeof localStorage !== 'undefined' && localStorage.getItem('username')) || '';
+  // Other users for the dropdown. Loaded once on mount via getListUser (any
+  // logged-in user can list). We include everyone; selecting a user with
+  // no workflows simply shows an empty list — cheap, no special server
+  // round-trip to compute "users with workflows", and we explicitly avoid
+  // deriving the list from already-loaded workflows since pagination
+  // would silently hide users whose runs haven't been fetched yet.
+  let otherUsers: string[] = [];
+  let userFilter: string = (() => {
+    const hash = window.location.hash;
+    const qIdx = hash.indexOf('?');
+    const params = qIdx >= 0 ? new URLSearchParams(hash.slice(qIdx + 1)) : new URLSearchParams();
+    if (params.has('user')) return params.get('user') || '';  // explicit empty = All users
+    return '@me';                                              // never visited → default
+  })();
 
   // WebSocket unsubscribe function
   let unsubscribeWS: (() => void) | null = null;
@@ -94,12 +131,23 @@
     // detail page doesn't reset the user to chunk 1.
     const saved = readSessionState();
     const targetCount = saved?.loaded && saved.loaded > 0 ? saved.loaded : WORKFLOWS_CHUNK_SIZE;
-    workflows = await getWorkFlow(nameFilter || undefined, targetCount, 0);
+    workflows = await getWorkFlow(nameFilter || undefined, targetCount, 0, userFilter || undefined);
     // If we asked for N and got exactly N back, assume more might exist.
     // Worst case: a no-op "Load more" click (acceptable).
     hasMoreWorkflows = workflows.length === targetCount;
     workers = await getWorkers();
     workersPerStepId = mapWorkersToStepIds(workers);
+    // Populate the user-filter dropdown. Exclude the current user from the
+    // "other users" list so they don't appear twice (once as "me", once by name).
+    try {
+      const allUsers = await getListUser();
+      otherUsers = allUsers
+        .map(u => u.username)
+        .filter(n => !!n && n !== currentUsername)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      otherUsers = []; // dropdown degrades gracefully to "me / all users" only
+    }
     // Subscribe to workflow + step-stats events
     unsubscribeWS = wsClient.subscribeWithTopics({ workflow: [], 'step-stats': [] }, handleMessage);
     // Restore scroll after the list has rendered.
@@ -119,7 +167,7 @@
     if (isLoading || !hasMoreWorkflows) return;
     isLoading = true;
     try {
-      const next = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, workflows.length);
+      const next = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, workflows.length, userFilter || undefined);
       // Filter out any overlap caused by concurrent deletions/insertions.
       const seen = new Set(workflows.map(w => w.workflowId));
       const fresh = next.filter(w => !seen.has(w.workflowId));
@@ -137,11 +185,11 @@
   function onSearchInput() {
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(async () => {
-      writeUrlSearch(nameFilter);
+      writeUrlParams({ search: nameFilter });
       clearSessionState();
       isLoading = true;
       try {
-        workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0);
+        workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0, userFilter || undefined);
         hasMoreWorkflows = workflows.length === WORKFLOWS_CHUNK_SIZE;
         pendingWorkflows = [];
         showNewWorkflowsNotification = false;
@@ -151,6 +199,27 @@
         isLoading = false;
       }
     }, 250);
+  }
+
+  // Re-fetch when the user filter changes. No debounce — it's a discrete
+  // dropdown event, not typing.
+  async function onUserFilterChange() {
+    // "All users" means: drop the URL param entirely. Otherwise write
+    // the literal value (including "@me", so a shared link keeps the
+    // "current user" semantics for whoever opens it).
+    writeUrlParams({ user: userFilter });
+    clearSessionState();
+    isLoading = true;
+    try {
+      workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0, userFilter || undefined);
+      hasMoreWorkflows = workflows.length === WORKFLOWS_CHUNK_SIZE;
+      pendingWorkflows = [];
+      showNewWorkflowsNotification = false;
+      newWorkflowsCount = 0;
+      if (listContainer) listContainer.scrollTop = 0;
+    } finally {
+      isLoading = false;
+    }
   }
 
 
@@ -281,9 +350,9 @@
     isScrolledToTop = scrollTop <= 10;
 
     // If scrolled to top with pending workflows, refresh the list. Pass the
-    // current name filter so an active search isn't silently dropped.
+    // current name + user filters so the refresh doesn't silently widen.
     if (isScrolledToTop && showNewWorkflowsNotification) {
-      workflows = await getWorkFlow(nameFilter || undefined, workflows.length + newWorkflowsCount, 0);
+      workflows = await getWorkFlow(nameFilter || undefined, workflows.length + newWorkflowsCount, 0, userFilter || undefined);
       showNewWorkflowsNotification = false;
       newWorkflowsCount = 0;
     }
@@ -305,6 +374,27 @@
         aria-label="Search workflows by name"
         data-testid="wf-search-input"
       />
+      <select
+        class="wf-user-select"
+        bind:value={userFilter}
+        on:change={onUserFilterChange}
+        aria-label="Filter workflows by user"
+        data-testid="wf-user-select"
+      >
+        <option value="@me">{currentUsername ? `${currentUsername} (me)` : 'Me'}</option>
+        <option value="">All users</option>
+        {#each otherUsers as u}
+          <option value={u}>{u}</option>
+        {/each}
+        <!-- Stale-URL safeguard: if the URL pins a username that's not in
+             the loaded list (deleted user, mid-load before getListUser
+             returns, …), surface it as an extra option so the <select>
+             reflects the actual filter instead of silently snapping to the
+             first option. -->
+        {#if userFilter && userFilter !== '@me' && userFilter !== '' && userFilter !== currentUsername && !otherUsers.includes(userFilter)}
+          <option value={userFilter}>{userFilter}</option>
+        {/if}
+      </select>
     </div>
 
     <!-- New workflows notification button -->
@@ -376,9 +466,12 @@
     padding: 0.6rem 0.5rem 0.4rem 2.4rem;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
   }
   .wf-search-input {
-    width: 100%;
+    flex: 1;
     padding: 0.3rem 0.5rem;
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -388,6 +481,26 @@
     box-sizing: border-box;
   }
   .wf-search-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+  }
+  .wf-user-select {
+    /* Fixed narrow width so the search box (flex: 1) gets the lion's
+       share of the row. Long usernames are truncated visually in the
+       collapsed state, but the open dropdown renders at content width
+       so picking them is fine. */
+    flex: 0 0 9rem;
+    width: 9rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    box-sizing: border-box;
+    cursor: pointer;
+  }
+  .wf-user-select:focus {
     outline: none;
     border-color: var(--primary-color);
   }

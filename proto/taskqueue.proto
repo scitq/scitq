@@ -727,6 +727,15 @@ message WorkflowFilter {
     optional string name_like = 1;
     optional int32 limit = 2;
     optional int32 offset = 3;
+    // User filter (resolved against the workflow's launching template_run.run_by):
+    //   - unset            → no user filter (returns every workflow)
+    //   - "@me"            → resolve to the authenticated caller
+    //   - "<username>"     → filter by that user
+    // The "@me" sentinel lets clients send a fixed marker and have the server
+    // resolve it from the call context, avoiding a separate whoami round-trip.
+    // Workflows without a template_run_id (pre-template legacy rows) have no
+    // attributable user; they appear only when this filter is unset.
+    optional string username_filter = 4;
 }
 
 message WorkflowId {

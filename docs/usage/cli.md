@@ -403,11 +403,16 @@ Options:
 - `--name-like <substring>`: case-insensitive substring filter on the workflow name. Useful when the list grows: `scitq workflow list --name-like biomscope` shows only biomscope workflows.
 - `--limit <N>`: cap the number of rows returned (default `10`, use `0` for no limit).
 - `-l`, `--long`: for each workflow, also print **who launched it** (`Run by:`) and the **JSON-encoded params** that were passed at `run_template` time. This pulls the matching `template_run` row, so workflows that were started outside the template system (no `template_run_id`) show the regular one-line summary only.
+- `--user <username>`: filter to workflows launched by that user. Default behaviour (with neither `--user` nor `--all-users` set) is to filter by the **currently authenticated user** — the server resolves an internal `@me` sentinel sent by the CLI, no extra `whoami` round-trip needed.
+- `--all-users`: include workflows launched by every user (and legacy workflows without a `template_run_id` whose author is unknown). Overrides `--user`.
 
-Example:
+Examples:
 
 ```sh
-scitq workflow list --name-like biomscope --long
+scitq workflow list                                    # my workflows (default)
+scitq workflow list --user alice                       # alice's workflows
+scitq workflow list --all-users                        # everyone's workflows
+scitq workflow list --name-like biomscope --long       # my biomscope runs, with params
 ```
 
 #### `workflow create`
