@@ -412,7 +412,7 @@ func startClientForTest(t *testing.T, serverAddr, workerName, workerToken string
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		client.Run(ctx, serverAddr, int32(concurrency), workerName, store, workerToken, true, nil, nil)
+		client.Run(ctx, serverAddr, int32(concurrency), workerName, store, workerToken, true, nil, nil, 0, 0)
 	}()
 
 	// t.TempDir() handles cleanup

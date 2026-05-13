@@ -141,6 +141,8 @@ func main() {
 	isPermanent := flag.Bool("permanent", false, "Register this worker as permanent (won't be deleted by the watchdog, use with care)")
 	provider := flag.String("provider", "", "Region ID (if applicable)")
 	region := flag.String("region", "", "Region ID (if applicable)")
+	maxCPU := flag.Uint("max-cpu", 0, "Cap advertised CPUs (0=autodetect). For shared nodes that should only contribute part of their hardware. Rejected if greater than host capacity.")
+	maxMem := flag.Float64("max-mem", 0, "Cap advertised memory in GiB (0=autodetect). Rejected if greater than host capacity.")
 
 	// Get the hostname
 	hostname, err := os.Hostname()
@@ -196,5 +198,5 @@ func main() {
 	// Start the client
 	ctx := context.Background()
 
-	log.Print(client.Run(ctx, *serverAddr, int32(*concurrency), *name, *store, *token, *isPermanent, provider, region))
+	log.Print(client.Run(ctx, *serverAddr, int32(*concurrency), *name, *store, *token, *isPermanent, provider, region, int32(*maxCPU), float32(*maxMem)))
 }

@@ -51,6 +51,14 @@ type WorkerConfig struct {
 	Provider    *string
 	Region      *string
 	NoBare      bool // reject bare tasks
+	// MaxCPU / MaxMem cap what this worker advertises to scitq, for
+	// shared nodes that should only contribute part of their hardware.
+	// Zero means "autodetect" (runtime.NumCPU / total memory). Validated
+	// against the real machine in registerSpecs — a value larger than
+	// the hardware is rejected, since the server uses these numbers
+	// directly for flavor matching and $CPU/$MEM injection.
+	MaxCPU int32
+	MaxMem float32 // GiB
 }
 
 var lostTrackSeen sync.Map   // map[int32]time.Time
@@ -94,8 +102,16 @@ func (w *WorkerConfig) registerSpecs(client pb.TaskQueueClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 1. CPU
-	cpuCount := int32(runtime.NumCPU())
+	// 1. CPU — honor MaxCPU cap if set, but never advertise more than the
+	//    machine actually has.
+	hostCPU := int32(runtime.NumCPU())
+	cpuCount := hostCPU
+	if w.MaxCPU > 0 {
+		if w.MaxCPU > hostCPU {
+			log.Fatalf("--max-cpu=%d exceeds host capacity (%d CPUs)", w.MaxCPU, hostCPU)
+		}
+		cpuCount = w.MaxCPU
+	}
 
 	// 2. Memory
 	vmem, err := mem.VirtualMemory()
@@ -103,7 +119,14 @@ func (w *WorkerConfig) registerSpecs(client pb.TaskQueueClient) {
 		log.Printf("⚠️ Could not detect memory: %v", err)
 		return
 	}
-	totalMem := float32(vmem.Total) / (1024 * 1024 * 1024)
+	hostMem := float32(vmem.Total) / (1024 * 1024 * 1024)
+	totalMem := hostMem
+	if w.MaxMem > 0 {
+		if w.MaxMem > hostMem {
+			log.Fatalf("--max-mem=%.2f GiB exceeds host capacity (%.2f GiB)", w.MaxMem, hostMem)
+		}
+		totalMem = w.MaxMem
+	}
 
 	// 3. Disk under store path
 	var stat syscall.Statfs_t
@@ -795,6 +818,13 @@ func (w *WorkerConfig) fetchTasks(
 		log.Printf("⚠️ Error could not collect stats: %v", err)
 		query = &pb.PingAndGetNewTasksRequest{WorkerId: id}
 	} else {
+		// Apply MaxCPU cap to the reported stat so what scitq sees from
+		// this worker stays consistent with what we advertised at
+		// registration. (Memory % stays accurate against the real host —
+		// the percent doesn't depend on the cap.)
+		if w.MaxCPU > 0 && w.MaxCPU < ws.NumCPUs {
+			ws.NumCPUs = w.MaxCPU
+		}
 		query = &pb.PingAndGetNewTasksRequest{WorkerId: id, Stats: ws.ToProto()}
 	}
 
@@ -1147,6 +1177,8 @@ func excuterThread(
 	noBare bool,
 	serverAddr string,
 	workerToken string,
+	maxCPU int32, // 0 = autodetect from runtime.NumCPU()
+	maxMem float32, // 0 = autodetect from host memory; GiB
 ) {
 	var wg sync.WaitGroup
 
@@ -1188,10 +1220,24 @@ func excuterThread(
 			})
 			log.Printf("✅ Acquired semaphore for task %d (weight=%.3f)", t.TaskId, w)
 
-			cpu := max(int32(float64(runtime.NumCPU())/sem.Size()), 1)
+			// Per-task $CPU / $MEM derive from what we *advertised* to
+			// scitq (maxCPU/maxMem when set), not the raw host — otherwise
+			// a partial-contribution worker would expose more resources to
+			// each task than it actually offered.
+			advertisedCPU := float64(runtime.NumCPU())
+			if maxCPU > 0 {
+				advertisedCPU = float64(maxCPU)
+			}
+			cpu := max(int32(advertisedCPU/sem.Size()), 1)
 			var memGB int32
-			if vmem, err := mem.VirtualMemory(); err == nil {
-				memGB = max(int32(float64(vmem.Total)/(1024*1024*1024)/sem.Size()), 1)
+			advertisedMem := float64(0)
+			if maxMem > 0 {
+				advertisedMem = float64(maxMem)
+			} else if vmem, err := mem.VirtualMemory(); err == nil {
+				advertisedMem = float64(vmem.Total) / (1024 * 1024 * 1024)
+			}
+			if advertisedMem > 0 {
+				memGB = max(int32(advertisedMem/sem.Size()), 1)
 			}
 			log.Printf("Available CPU threads estimated to %d, memory to %d GB", cpu, memGB)
 			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu, "mem_gb": memGB})
@@ -1214,7 +1260,7 @@ func excuterThread(
 }
 
 // / client launcher
-func Run(ctx context.Context, serverAddr string, concurrency int32, name, store, token string, isPermanent bool, provider *string, region *string, noBare ...bool) error {
+func Run(ctx context.Context, serverAddr string, concurrency int32, name, store, token string, isPermanent bool, provider *string, region *string, maxCPU int32, maxMem float32, noBare ...bool) error {
 
 	// Ensure store directory exists
 	if err := os.MkdirAll(store, 0777); err != nil {
@@ -1225,7 +1271,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 		log.Printf("Using a temporary store.")
 	}
 	noBareFlag := len(noBare) > 0 && noBare[0]
-	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token, IsPermanent: isPermanent, Provider: provider, Region: region, NoBare: noBareFlag}
+	config := WorkerConfig{ServerAddr: serverAddr, Concurrency: concurrency, Name: name, Store: store, Token: token, IsPermanent: isPermanent, Provider: provider, Region: region, NoBare: noBareFlag, MaxCPU: maxCPU, MaxMem: maxMem}
 	taskWeights := &sync.Map{}
 	activeTasks := &sync.Map{}
 
@@ -1272,7 +1318,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, config.MaxCPU, config.MaxMem)
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, um, taskWeights, activeTasks)

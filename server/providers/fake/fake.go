@@ -110,7 +110,7 @@ func (f *FakeProvider) Create(workerName, flavor, location string, jobId int32) 
 				}
 
 				// Run the worker client with concurrency=1, block until context is canceled.
-				err = client.Run(ctx, f.ServerAddr, 1, workerNameCopy, storePath, f.WorkerToken, false, &f.Name, &region)
+				err = client.Run(ctx, f.ServerAddr, 1, workerNameCopy, storePath, f.WorkerToken, false, &f.Name, &region, 0, 0)
 				if err != nil {
 					log.Printf("Worker client %s exited with error: %v", workerNameCopy, err)
 				} else {
