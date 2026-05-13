@@ -288,13 +288,21 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 // skipExistingTasks checks all pending tasks with skip_if_exists=true and promotes
 // them to S if their output already contains files.
+//
+// The check is one-shot per task: after a task has been examined (whether
+// or not it was skipped), `skip_checked` is set TRUE so the next assign
+// tick doesn't re-list the same remote path. Without this, a workflow
+// with N pending non-skippable tasks generates N rclone listings every
+// ~5 seconds for the entire run.
 func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
-	// Find pending tasks with skip_if_exists=true and a non-empty output/publish path
+	// Find pending tasks that haven't been skip-checked yet and have a
+	// non-empty output/publish path.
 	rows, err := tx.Query(`
 		SELECT task_id, COALESCE(publish, output), step_id
 		FROM task
 		WHERE status = 'P'
 		  AND skip_if_exists = TRUE
+		  AND skip_checked = FALSE
 		  AND COALESCE(publish, output) IS NOT NULL
 		  AND COALESCE(publish, output) <> ''
 	`)
@@ -320,6 +328,15 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 
 	if len(candidates) == 0 {
 		return
+	}
+
+	// Collect every candidate's ID so we can stamp skip_checked at the end
+	// in one batched UPDATE. Tasks that get skipped will move to S below;
+	// the flag is still set on them for consistency (harmless since the
+	// status filter excludes non-P rows on the next tick).
+	checkedIDs := make([]int32, 0, len(candidates))
+	for _, c := range candidates {
+		checkedIDs = append(checkedIDs, c.taskID)
 	}
 
 	skipped := map[int32]bool{}
@@ -367,6 +384,17 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 			TaskId int32  `json:"taskId"`
 			Status string `json:"status"`
 		}{TaskId: c.taskID, Status: "S"})
+	}
+
+	// Stamp every examined task as skip-checked in one shot. After this,
+	// the WHERE clause above filters them out on subsequent ticks.
+	if len(checkedIDs) > 0 {
+		if _, err := tx.Exec(
+			`UPDATE task SET skip_checked = TRUE WHERE task_id = ANY($1::int[])`,
+			pq.Array(checkedIDs),
+		); err != nil {
+			log.Printf("⚠️ skip-if-exists: failed to stamp skip_checked: %v", err)
+		}
 	}
 
 	// Promote W→P for dependents whose prerequisites are now all S

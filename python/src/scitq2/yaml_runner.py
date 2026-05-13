@@ -9,6 +9,7 @@ Usage:
     python -m scitq2.yaml_runner pipeline.yaml --values '...' --dry-run
 """
 import argparse
+import difflib
 import hashlib
 import importlib
 import json
@@ -353,6 +354,70 @@ def _build_iterations(iterate_def, params, workflow_vars: Optional[Dict] = None)
     return items, source_type
 
 
+# ---------------------------------------------------------------------------
+# Strict YAML schema validation
+# ---------------------------------------------------------------------------
+#
+# Catches typos like `resources:` for `resource:` (silently ignored before
+# this validator existed) by enumerating every key each parser actually
+# reads at each YAML level and rejecting anything outside that set.
+#
+# Allowed-key sets are deliberately conservative — module steps
+# (`import:` / `module:`) pass arbitrary kwargs through to user-defined
+# Python, so they're exempted from step-level validation.
+
+def _check_unknown_keys(d: dict, allowed: set, context: str) -> None:
+    """Fail loudly if `d` contains keys not in `allowed`.
+    Suggests near-matches via difflib so typos are easy to spot.
+    Keys starting with `_` are reserved for internal markers and skipped.
+    """
+    if not isinstance(d, dict):
+        return
+    unknown = [k for k in d.keys()
+               if k not in allowed and not (isinstance(k, str) and k.startswith('_'))]
+    if not unknown:
+        return
+    lines = [f"❌ {context}: unknown key(s)"]
+    for k in unknown:
+        match = difflib.get_close_matches(str(k), [str(a) for a in allowed], n=1)
+        if match:
+            lines.append(f"   - {k!r}: did you mean {match[0]!r}?")
+        else:
+            lines.append(f"   - {k!r}")
+    lines.append(f"   Allowed: {sorted(allowed)}")
+    print("\n".join(lines), file=sys.stderr)
+    sys.exit(1)
+
+
+TOPLEVEL_KEYS = {
+    'format', 'name', 'version', 'description', 'tag',
+    'params', 'vars', 'iterate', 'steps',
+    'worker_pool', 'workspace', 'language', 'retry',
+    'opportunistic', 'untrusted', 'publish_root', 'container',
+    'optimize', 'run_strategy', 'skip_if_exists', 'no_recruiters',
+    'scores',
+}
+
+# Native step (inline command/container). Module steps (import: / module:)
+# forward arbitrary kwargs and are intentionally exempt from this list.
+STEP_NATIVE_KEYS = {
+    'name', 'container', 'tag', 'inputs', 'resource', 'command',
+    'outputs', 'publish', 'task_spec', 'vars', 'depends', 'when',
+    'worker_pool', 'skip_if_exists', 'accept_failure', 'language',
+    'quality', 'retry', 'grouped', 'per_sample',
+    # adhoc container builders (conda / apt / binary / pip)
+    'conda', 'apt', 'binary', 'pip',
+}
+
+WORKER_POOL_KEYS = {
+    'provider', 'region', 'cpu', 'mem', 'disk', 'gpumem',
+    'max_recruited', 'task_batches',
+}
+
+PARAM_ENTRY_KEYS = {
+    'type', 'required', 'default', 'choices', 'help', 'requires',
+}
+
 # Per-source attribute schemas. Each entry lists the keys an iterator
 # of that source recognises. _build_single_iterator validates iter_def
 # against the matching schema — unknown keys raise instead of being
@@ -364,11 +429,11 @@ def _build_iterations(iterate_def, params, workflow_vars: Optional[Dict] = None)
 # reject anything outside the schema.
 ITERATOR_SCHEMAS: Dict[str, set] = {
     'uri':   {'name', 'source', 'uri', 'group_by', 'filter',
-              'match', 'fastq_pair_filtering'},
+              'match', 'fastq_pair_filtering', 'download_method'},
     'ena':   {'name', 'source', 'identifier', 'group_by', 'where', 'filter',
-              'match', 'fastq_pair_filtering'},
+              'match', 'fastq_pair_filtering', 'download_method'},
     'sra':   {'name', 'source', 'identifier', 'group_by', 'where', 'filter',
-              'match', 'fastq_pair_filtering'},
+              'match', 'fastq_pair_filtering', 'download_method'},
     'range': {'name', 'source', 'start', 'end', 'step'},
     'list':  {'name', 'source', 'values'},
     'lines': {'name', 'source', 'file'},
@@ -504,6 +569,17 @@ def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, s
     # equivalent logic ourselves on the raw URI list.
     biology_layout = 'SINGLE' if fastq_pair_filtering else 'AUTO'
 
+    # Resolve download_method: explicit iter_def field wins, else fall back
+    # to the workflow `download_method` param (the biomscope/hermes
+    # convention — users declare the param and expect it to flow into the
+    # iterator automatically). "any" means "no override, use scitq's
+    # built-in transport default."
+    download_method = _resolve_refs(str(iter_def.get('download_method', '')), params)
+    if not download_method and hasattr(params, 'download_method'):
+        download_method = str(getattr(params, 'download_method') or '')
+    if download_method == 'any':
+        download_method = ''
+
     if source == 'uri':
         from scitq2.uri import URI
         from scitq2.biology import find_sample_parity, PAIRED
@@ -537,7 +613,11 @@ def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, s
         if filter_def and isinstance(filter_def, dict):
             conditions = [getattr(S, k) == v for k, v in filter_def.items()]
             sf = SampleFilter(*conditions) if conditions else None
-        samples = ENA(identifier=identifier, group_by=group_by, filter=sf, layout=biology_layout)
+        samples = ENA(
+            identifier=identifier, group_by=group_by, filter=sf, layout=biology_layout,
+            use_ftp=(download_method == 'ena-ftp'),
+            use_aspera=(download_method == 'ena-aspera'),
+        )
         for sample in samples:
             if named_groups:
                 sample.file_groups = {k: sample.fastqs for k in named_groups}
@@ -549,7 +629,11 @@ def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, s
         identifier = _resolve_refs(iter_def.get('identifier', ''), params)
         group_by = iter_def.get('group_by', 'sample_accession')
         # v2: where: for SRA too
-        samples = SRA(identifier=identifier, group_by=group_by, layout=biology_layout)
+        sra_method = download_method if download_method in ('sra-tools', 'sra-aws') else 'sra-aws'
+        samples = SRA(
+            identifier=identifier, group_by=group_by, layout=biology_layout,
+            download_method=sra_method,
+        )
         for sample in samples:
             if named_groups:
                 sample.file_groups = {k: sample.fastqs for k in named_groups}
@@ -565,6 +649,7 @@ def _discover_samples(iter_def: dict, params, named_groups: Optional[Dict[str, s
 
 def _build_worker_pool(wp_def: dict, params, extra_vars: Optional[Dict] = None) -> WorkerPool:
     """Build a WorkerPool from YAML definition."""
+    _check_unknown_keys(wp_def, WORKER_POOL_KEYS, "worker_pool")
     filters = []
 
     # Provider/region from explicit field. Accepts:
@@ -1273,6 +1358,12 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
             else:
                 return func(workflow, **kwargs)
 
+    # Strict: native steps have a fixed key surface. Module steps
+    # (`import:` / `module:`) forward arbitrary kwargs to user-defined
+    # Python and are exempt — they returned early above.
+    _step_label = step_def.get('name', '<unnamed>')
+    _check_unknown_keys(step_def, STEP_NATIVE_KEYS, f"step '{_step_label}'")
+
     # Resolve ad-hoc container (conda/apt/binary/pip)
     adhoc_image, prep_step = _resolve_adhoc_container(step_def, workflow)
 
@@ -1457,8 +1548,13 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     # YAML format version (default: 1 for backward compat)
     yaml_format = int(data.get('format', 1))
 
+    # Strict: unknown top-level keys are typos.
+    _check_unknown_keys(data, TOPLEVEL_KEYS, "top-level YAML")
+
     # Build params
     params_def = data.get('params', {})
+    for _pname, _pdef in (params_def or {}).items():
+        _check_unknown_keys(_pdef, PARAM_ENTRY_KEYS, f"param '{_pname}'")
     ParamsClass = _build_params_class(params_def)
     params = ParamsClass.parse(params_values or {})
 
@@ -1727,8 +1823,15 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         if step is not None:
             step_map[step.name] = step
 
-    # Strip recruiters if requested
-    if no_recruiters:
+    # Strip recruiters if requested — either by the CLI/API flag, or
+    # declared in the YAML itself (typically wired to a param so the
+    # template exposes a user-facing auto-vs-manual toggle). The CLI/API
+    # flag still wins when set; the YAML field opts in without needing
+    # the caller to remember it each time.
+    yaml_no_recruiters = data.get('no_recruiters', False)
+    if isinstance(yaml_no_recruiters, str):
+        yaml_no_recruiters = str(_resolve_refs(yaml_no_recruiters, params)).lower() in ('true', '1', 'yes')
+    if no_recruiters or yaml_no_recruiters:
         workflow.worker_pool = None
         for step in workflow.steps:
             step.worker_pool = None
