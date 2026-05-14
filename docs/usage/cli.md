@@ -363,6 +363,46 @@ scitq worker deploy --provider azure.primary --region swedencentral --flavor Sta
 
 This deploys two workers on Azure, each able to execute four tasks concurrently for step ID 14.
 
+#### `worker update`
+
+Adjusts settings on an *existing* worker live, without restarting it. Useful on permanent workers (shared machines) where the operating envelope changes over time.
+
+```sh
+scitq worker update --worker-id <id> [--concurrency <n>] [--prefetch <n>] \
+                                     [--max-cpu <n>] [--max-mem <g>] \
+                                     [--step-id <id> | --workflow-name <name> [--step-name <name>]] \
+                                     [--permanent | --no-permanent] \
+                                     [--recyclable-scope <S|W|G>]
+```
+
+Options:
+
+- `--worker-id` (required): ID of the worker to update.
+- `--concurrency`: number of tasks the worker may run in parallel. Resizes the worker's semaphore live on the next ping.
+- `--prefetch`: how many tasks to pre-download while others run.
+- `--max-cpu`: advertised CPU cap. Updates the worker's flavor `cpu` server-side; the new value is pushed to the running client on its next heartbeat (≈5 s). The next task to start picks up the new `$CPU` (= `max_cpu / concurrency`). In-flight tasks keep the value they were dispatched with.
+- `--max-mem`: advertised memory cap in GiB. Same live-resize semantics as `--max-cpu`. The `$MEM` env var of newly-launched tasks is `max_mem / concurrency`.
+- `--step-id`: reassign the worker to a step. Alternatively, use `--workflow-name` (and optionally `--step-name`) to resolve the step by name.
+- `--permanent` / `--no-permanent`: protect the worker from idle-watchdog deletion, or undo that protection.
+- `--recyclable-scope`: when a worker may be reused — `S` (same step), `W` (same workflow), `G` (global).
+
+Validation: the running client refuses any cap larger than its real machine (`runtime.NumCPU()`, total RAM) and logs a warning. The server-side flavor row is still updated, so other tooling sees the new value, but the per-task numbers stay at the prior cap until you provide a viable one.
+
+Examples:
+
+```sh
+# Reduce a shared dev box's contribution while a colleague compiles something else
+scitq worker update --worker-id 603 --max-cpu 8 --max-mem 32
+
+# Increase concurrency on a permanent worker that's mostly I/O-bound
+scitq worker update --worker-id 603 --concurrency 6
+
+# Move a worker onto a different step in the same workflow
+scitq worker update --worker-id 603 --workflow-name biomscope --step-name align
+```
+
+The static `--max-cpu` / `--max-mem` flags on `scitq-client` startup (see [Install — Partial-contribution workers](../install.md#partial-contribution-workers-max-cpu-max-mem)) seed the initial value. After registration, the server is the authoritative source — anything you change via `worker update` overrides what was on the command line, and persists across server restarts (it lives on the worker's flavor row).
+
 #### `worker delete`
 
 Deletes a worker by its ID.

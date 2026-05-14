@@ -134,15 +134,17 @@ type Attr struct {
 			Undeployed bool  `arg:"--undeployed" help:"Skip the cloud-side delete (assume the VM is already gone). Soft-deletes the DB row, releases quota, clears watchdog state. Use when a normal delete is wedged."`
 		} `arg:"subcommand:delete" help:"Delete a worker instance"`
 		Update *struct {
-			WorkerId        int32   `arg:"--worker-id,required" help:"The ID of the worker to update"`
-			StepId          *int32  `arg:"--step-id" help:"Step ID to assign the worker to"`
-			WorkflowName    *string `arg:"--workflow-name" help:"Workflow name to resolve step (lowest step_id if --step-name omitted)"`
-			StepName        *string `arg:"--step-name" help:"Step name to resolve step (requires --workflow-name)"`
-			Concurrency     *int32  `arg:"--concurrency" help:"Update worker concurrency"`
-			Prefetch        *int32  `arg:"--prefetch" help:"Update worker prefetch"`
-			Permanent       bool    `arg:"--permanent" help:"Set worker as permanent"`
-			NoPermanent     bool    `arg:"--no-permanent" help:"Unset permanent status"`
-			RecyclableScope *string `arg:"--recyclable-scope" help:"Update recyclable scope"`
+			WorkerId        int32    `arg:"--worker-id,required" help:"The ID of the worker to update"`
+			StepId          *int32   `arg:"--step-id" help:"Step ID to assign the worker to"`
+			WorkflowName    *string  `arg:"--workflow-name" help:"Workflow name to resolve step (lowest step_id if --step-name omitted)"`
+			StepName        *string  `arg:"--step-name" help:"Step name to resolve step (requires --workflow-name)"`
+			Concurrency     *int32   `arg:"--concurrency" help:"Update worker concurrency"`
+			Prefetch        *int32   `arg:"--prefetch" help:"Update worker prefetch"`
+			Permanent       bool     `arg:"--permanent" help:"Set worker as permanent"`
+			NoPermanent     bool     `arg:"--no-permanent" help:"Unset permanent status"`
+			RecyclableScope *string  `arg:"--recyclable-scope" help:"Update recyclable scope"`
+			MaxCpu          *int32   `arg:"--max-cpu" help:"Update advertised CPU cap. Live-pushed to the running worker on its next ping. Client refuses values larger than the real host."`
+			MaxMem          *float32 `arg:"--max-mem" help:"Update advertised memory cap in GiB. Same live-resize semantics as --max-cpu."`
 		} `arg:"subcommand:update" help:"Update worker settings"`
 		Stats *struct {
 			WorkerIds []int32 `arg:"--worker-id,separate,required" help:"Worker IDs to get stats for"`
@@ -1348,6 +1350,12 @@ func (c *CLI) WorkerUpdate() error {
 	}
 	if c.Attr.Worker.Update.RecyclableScope != nil {
 		req.RecyclableScope = c.Attr.Worker.Update.RecyclableScope
+	}
+	if c.Attr.Worker.Update.MaxCpu != nil {
+		req.MaxCpu = c.Attr.Worker.Update.MaxCpu
+	}
+	if c.Attr.Worker.Update.MaxMem != nil {
+		req.MaxMem = c.Attr.Worker.Update.MaxMem
 	}
 
 	_, err := c.QC.Client.UserUpdateWorker(ctx, req)

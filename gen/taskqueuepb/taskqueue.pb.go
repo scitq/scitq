@@ -1935,8 +1935,16 @@ type TaskListAndOther struct {
 	// (existing in-flight tasks continue; the gRPC retry loop will
 	// absorb the brief bounce). See specs/worker_autoupgrade.md.
 	ServerUpgradeInProgress bool `protobuf:"varint,8,opt,name=server_upgrade_in_progress,json=serverUpgradeInProgress,proto3" json:"server_upgrade_in_progress,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// Server-pushed resource caps. The server sends what *it* currently
+	// believes the worker should advertise (the worker's flavor cpu/mem,
+	// editable live via UpdateWorker). The client compares against its
+	// local cap and resizes if changed — letting an operator dial a
+	// shared node's contribution up or down without restarting the
+	// client. Optional so older servers still work with newer clients.
+	MaxCpu        *int32   `protobuf:"varint,9,opt,name=max_cpu,json=maxCpu,proto3,oneof" json:"max_cpu,omitempty"`
+	MaxMem        *float32 `protobuf:"fixed32,10,opt,name=max_mem,json=maxMem,proto3,oneof" json:"max_mem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskListAndOther) Reset() {
@@ -2016,6 +2024,20 @@ func (x *TaskListAndOther) GetServerUpgradeInProgress() bool {
 		return x.ServerUpgradeInProgress
 	}
 	return false
+}
+
+func (x *TaskListAndOther) GetMaxCpu() int32 {
+	if x != nil && x.MaxCpu != nil {
+		return *x.MaxCpu
+	}
+	return 0
+}
+
+func (x *TaskListAndOther) GetMaxMem() float32 {
+	if x != nil && x.MaxMem != nil {
+		return *x.MaxMem
+	}
+	return 0
 }
 
 type TaskSignalRequest struct {
@@ -3221,8 +3243,14 @@ type WorkerUpdateRequest struct {
 	RecyclableScope *string                `protobuf:"bytes,9,opt,name=recyclable_scope,json=recyclableScope,proto3,oneof" json:"recyclable_scope,omitempty"`
 	WorkflowName    *string                `protobuf:"bytes,10,opt,name=workflow_name,json=workflowName,proto3,oneof" json:"workflow_name,omitempty"`
 	StepName        *string                `protobuf:"bytes,11,opt,name=step_name,json=stepName,proto3,oneof" json:"step_name,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Dynamic resource caps. When set, the server updates the worker's
+	// flavor cpu/mem and the new value is pushed to the worker on its
+	// next ping (via TaskListAndOther.max_cpu / max_mem). Mirrors the
+	// existing concurrency-resize hook.
+	MaxCpu        *int32   `protobuf:"varint,12,opt,name=max_cpu,json=maxCpu,proto3,oneof" json:"max_cpu,omitempty"`
+	MaxMem        *float32 `protobuf:"fixed32,13,opt,name=max_mem,json=maxMem,proto3,oneof" json:"max_mem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkerUpdateRequest) Reset() {
@@ -3330,6 +3358,20 @@ func (x *WorkerUpdateRequest) GetStepName() string {
 		return *x.StepName
 	}
 	return ""
+}
+
+func (x *WorkerUpdateRequest) GetMaxCpu() int32 {
+	if x != nil && x.MaxCpu != nil {
+		return *x.MaxCpu
+	}
+	return 0
+}
+
+func (x *WorkerUpdateRequest) GetMaxMem() float32 {
+	if x != nil && x.MaxMem != nil {
+		return *x.MaxMem
+	}
+	return 0
 }
 
 type ListFlavorsRequest struct {
@@ -10394,7 +10436,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
 	"\fgrace_period\x18\x03 \x01(\x05H\x00R\vgracePeriod\x88\x01\x01B\x0f\n" +
-	"\r_grace_period\"\xce\x02\n" +
+	"\r_grace_period\"\xa2\x03\n" +
 	"\x10TaskListAndOther\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\x12 \n" +
 	"\vconcurrency\x18\x02 \x01(\x05R\vconcurrency\x123\n" +
@@ -10402,7 +10444,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\factive_tasks\x18\x04 \x03(\x05R\vactiveTasks\x12/\n" +
 	"\asignals\x18\x06 \x03(\v2\x15.taskqueue.TaskSignalR\asignals\x12+\n" +
 	"\x11upgrade_requested\x18\a \x01(\tR\x10upgradeRequested\x12;\n" +
-	"\x1aserver_upgrade_in_progress\x18\b \x01(\bR\x17serverUpgradeInProgress\"}\n" +
+	"\x1aserver_upgrade_in_progress\x18\b \x01(\bR\x17serverUpgradeInProgress\x12\x1c\n" +
+	"\amax_cpu\x18\t \x01(\x05H\x00R\x06maxCpu\x88\x01\x01\x12\x1c\n" +
+	"\amax_mem\x18\n" +
+	" \x01(\x02H\x01R\x06maxMem\x88\x01\x01B\n" +
+	"\n" +
+	"\b_max_cpuB\n" +
+	"\n" +
+	"\b_max_mem\"}\n" +
 	"\x11TaskSignalRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
@@ -10509,7 +10558,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bprefetch\x18\x06 \x01(\x05R\bprefetch\x12\x1c\n" +
 	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
 	"\n" +
-	"\b_step_id\"\xc1\x04\n" +
+	"\b_step_id\"\x95\x05\n" +
 	"\x13WorkerUpdateRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12$\n" +
 	"\vprovider_id\x18\x02 \x01(\x05H\x00R\n" +
@@ -10523,7 +10572,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10recyclable_scope\x18\t \x01(\tH\aR\x0frecyclableScope\x88\x01\x01\x12(\n" +
 	"\rworkflow_name\x18\n" +
 	" \x01(\tH\bR\fworkflowName\x88\x01\x01\x12 \n" +
-	"\tstep_name\x18\v \x01(\tH\tR\bstepName\x88\x01\x01B\x0e\n" +
+	"\tstep_name\x18\v \x01(\tH\tR\bstepName\x88\x01\x01\x12\x1c\n" +
+	"\amax_cpu\x18\f \x01(\x05H\n" +
+	"R\x06maxCpu\x88\x01\x01\x12\x1c\n" +
+	"\amax_mem\x18\r \x01(\x02H\vR\x06maxMem\x88\x01\x01B\x0e\n" +
 	"\f_provider_idB\f\n" +
 	"\n" +
 	"_flavor_idB\f\n" +
@@ -10537,7 +10589,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x11_recyclable_scopeB\x10\n" +
 	"\x0e_workflow_nameB\f\n" +
 	"\n" +
-	"_step_name\"B\n" +
+	"_step_nameB\n" +
+	"\n" +
+	"\b_max_cpuB\n" +
+	"\n" +
+	"\b_max_mem\"B\n" +
 	"\x12ListFlavorsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xa9\x03\n" +
@@ -11736,6 +11792,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[13].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[15].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[21].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[22].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[23].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[24].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[26].OneofWrappers = []any{}

@@ -2864,17 +2864,58 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 		i++
 	}
 
-	if len(sets) == 0 {
+	// max_cpu / max_mem update the worker's flavor row, not the worker
+	// row. On the next ping, the new values get pushed back to the
+	// client via TaskListAndOther.max_cpu / max_mem so the client can
+	// resize its semaphore + per-task $CPU/$MEM without restart. If
+	// these are the only fields in the request, len(sets) may be 0 —
+	// we handle that case after running the flavor update.
+	updateFlavor := req.MaxCpu != nil || req.MaxMem != nil
+
+	if len(sets) == 0 && !updateFlavor {
 		return &pb.Ack{Success: false}, fmt.Errorf("no fields provided to update")
 	}
 
-	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d AND deleted_at IS NULL", i)
-	args = append(args, req.GetWorkerId())
+	if len(sets) > 0 {
+		query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d AND deleted_at IS NULL", i)
+		args = append(args, req.GetWorkerId())
 
-	_, err = tx.Exec(query, args...)
-	if err != nil {
-		log.Printf("⚠️ Failed to execute update: %v", err)
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker: %w", err)
+		_, err = tx.Exec(query, args...)
+		if err != nil {
+			log.Printf("⚠️ Failed to execute update: %v", err)
+			return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker: %w", err)
+		}
+	}
+
+	if updateFlavor {
+		flavorSets := []string{}
+		flavorArgs := []interface{}{}
+		fi := 1
+		if req.MaxCpu != nil {
+			if req.GetMaxCpu() <= 0 {
+				return &pb.Ack{Success: false}, fmt.Errorf("max_cpu must be > 0")
+			}
+			flavorSets = append(flavorSets, fmt.Sprintf("cpu=$%d", fi))
+			flavorArgs = append(flavorArgs, req.GetMaxCpu())
+			fi++
+		}
+		if req.MaxMem != nil {
+			if req.GetMaxMem() <= 0 {
+				return &pb.Ack{Success: false}, fmt.Errorf("max_mem must be > 0")
+			}
+			flavorSets = append(flavorSets, fmt.Sprintf("mem=$%d", fi))
+			flavorArgs = append(flavorArgs, req.GetMaxMem())
+			fi++
+		}
+		flavorArgs = append(flavorArgs, req.GetWorkerId())
+		flavorQuery := fmt.Sprintf(
+			"UPDATE flavor SET %s WHERE flavor_id = (SELECT flavor_id FROM worker WHERE worker_id=$%d)",
+			strings.Join(flavorSets, ", "), fi,
+		)
+		if _, err = tx.Exec(flavorQuery, flavorArgs...); err != nil {
+			log.Printf("⚠️ Failed to update flavor caps: %v", err)
+			return &pb.Ack{Success: false}, fmt.Errorf("failed to update flavor caps: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -3674,12 +3715,23 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		shell            sql.NullString
 		taskUpdateList   = make(map[int32]*pb.TaskUpdate)
 		activeTaskIDs    []int32
+		// Pushed back to the client every ping. The worker compares to
+		// its local cap; if they differ it resizes (semaphore + per-task
+		// $CPU/$MEM). NullFloat32 doesn't exist — use sql.NullFloat64
+		// and downcast.
+		flavorCPU sql.NullInt32
+		flavorMem sql.NullFloat64
 	)
 
-	// 1️⃣ Fetch concurrency + any pending operator-triggered upgrade request.
+	// 1️⃣ Fetch concurrency + any pending operator-triggered upgrade
+	//    request + the worker's current flavor cpu/mem (which IS the
+	//    cap, since registerSpecs reports the capped value).
 	err := s.db.QueryRow(`
-		SELECT concurrency, upgrade_requested FROM worker WHERE worker_id = $1 AND deleted_at IS NULL
-	`, req.WorkerId).Scan(&concurrency, &upgradeReqNull)
+		SELECT w.concurrency, w.upgrade_requested, f.cpu, f.mem
+		FROM worker w
+		LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
+		WHERE w.worker_id = $1 AND w.deleted_at IS NULL
+	`, req.WorkerId).Scan(&concurrency, &upgradeReqNull, &flavorCPU, &flavorMem)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("worker ID %d not found", req.WorkerId)
@@ -3797,7 +3849,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		}
 	}
 
-	return &pb.TaskListAndOther{
+	resp := &pb.TaskListAndOther{
 		Tasks:                    tasks,
 		ActiveTasks:              activeTaskIDs,
 		Concurrency:              concurrency,
@@ -3805,7 +3857,15 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		Signals:                  signals,
 		UpgradeRequested:         upgradeReqNull.String,
 		ServerUpgradeInProgress:  s.gating.Load(),
-	}, nil
+	}
+	if flavorCPU.Valid {
+		resp.MaxCpu = &flavorCPU.Int32
+	}
+	if flavorMem.Valid {
+		m := float32(flavorMem.Float64)
+		resp.MaxMem = &m
+	}
+	return resp, nil
 }
 
 func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*pb.WorkersList, error) {

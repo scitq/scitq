@@ -109,6 +109,29 @@ scitq-client --store /scratch --token MySecretToken  -permanent
 ```
 Where MySecretToken match server YAML `scitq.worker_token`.
 
+#### Partial-contribution workers (`--max-cpu` / `--max-mem`)
+
+By default the worker advertises the whole host (`runtime.NumCPU()` CPUs and the total memory reported by the OS) to scitq, and `$CPU` / `$MEM` in tasks are sized from those numbers divided by `--concurrency`. On a shared machine you usually want the worker to claim only a *part* of the host.
+
+Pass `--max-cpu N` and/or `--max-mem F` (GiB) at launch:
+
+```sh
+scitq-client --store /scratch --token MySecretToken -permanent \
+    --concurrency 4 --max-cpu 20 --max-mem 120
+```
+
+What changes when these flags are set:
+
+- The worker registers with the *capped* values; scitq's flavor matching, recruitment, and statistics treat the worker as if the host had only that much hardware.
+- Per-task `$CPU` / `$MEM` are derived from the cap (`max_cpu / concurrency`, `max_mem / concurrency`), not from the real host. With `--concurrency 4 --max-cpu 20`, each task sees `$CPU=5`.
+- Each cap is sanity-checked against the real machine at startup. Asking for more than the host has (`--max-cpu 64` on a 16-core box) aborts immediately with a clear error rather than silently advertising vapor capacity.
+
+Leave a flag at `0` (the default) to keep autodetection for that resource.
+
+The caps can also be **changed live** without restarting the worker — see [`scitq worker update --max-cpu / --max-mem`](usage/cli.md#worker-update) in the CLI reference.
+
+#### Systemd unit
+
 You can set it up as a service by creating `/etc/systemd/system/scitq-client.service`:
 
 ```ini

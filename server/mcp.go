@@ -507,7 +507,7 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "update_worker",
-			Description: "Update worker settings (step assignment, concurrency, prefetch, permanent flag, recyclable scope).",
+			Description: "Update worker settings (step assignment, concurrency, prefetch, permanent flag, recyclable scope, resource caps).",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
@@ -517,6 +517,8 @@ func (h *mcpHandler) listTools() []mcpTool {
 					"prefetch":         {Type: "integer", Description: "New prefetch (optional)"},
 					"permanent":        {Type: "boolean", Description: "Set as permanent (optional)"},
 					"recyclable_scope": {Type: "string", Description: "Recyclable scope: S (step), W (workflow), G (global) (optional)"},
+					"max_cpu":          {Type: "integer", Description: "New advertised CPU cap (optional). Updates the worker's flavor cpu; pushed to the running client on its next ping. Client rejects values larger than its host."},
+					"max_mem":          {Type: "number", Description: "New advertised memory cap in GiB (optional). Same live-resize semantics as max_cpu."},
 				},
 				Required: []string{"worker_id"},
 			},
@@ -1340,12 +1342,14 @@ func (h *mcpHandler) toolDeleteWorker(ctx context.Context, args json.RawMessage)
 
 func (h *mcpHandler) toolUpdateWorker(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
-		WorkerID        int32  `json:"worker_id"`
-		StepID          int32  `json:"step_id"`
-		Concurrency     int32  `json:"concurrency"`
-		Prefetch        int32  `json:"prefetch"`
-		Permanent       bool   `json:"permanent"`
-		RecyclableScope string `json:"recyclable_scope"`
+		WorkerID        int32   `json:"worker_id"`
+		StepID          int32   `json:"step_id"`
+		Concurrency     int32   `json:"concurrency"`
+		Prefetch        int32   `json:"prefetch"`
+		Permanent       bool    `json:"permanent"`
+		RecyclableScope string  `json:"recyclable_scope"`
+		MaxCPU          int32   `json:"max_cpu"`
+		MaxMem          float32 `json:"max_mem"`
 	}
 	json.Unmarshal(args, &p)
 	req := &pb.WorkerUpdateRequest{WorkerId: p.WorkerID}
@@ -1364,6 +1368,12 @@ func (h *mcpHandler) toolUpdateWorker(ctx context.Context, args json.RawMessage)
 	}
 	if p.RecyclableScope != "" {
 		req.RecyclableScope = &p.RecyclableScope
+	}
+	if p.MaxCPU != 0 {
+		req.MaxCpu = &p.MaxCPU
+	}
+	if p.MaxMem != 0 {
+		req.MaxMem = &p.MaxMem
 	}
 	_, err := h.server.UserUpdateWorker(ctx, req)
 	if err != nil {

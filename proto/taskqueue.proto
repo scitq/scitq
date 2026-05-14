@@ -384,6 +384,14 @@ message TaskListAndOther {
     // (existing in-flight tasks continue; the gRPC retry loop will
     // absorb the brief bounce). See specs/worker_autoupgrade.md.
     bool server_upgrade_in_progress = 8;
+    // Server-pushed resource caps. The server sends what *it* currently
+    // believes the worker should advertise (the worker's flavor cpu/mem,
+    // editable live via UpdateWorker). The client compares against its
+    // local cap and resizes if changed — letting an operator dial a
+    // shared node's contribution up or down without restarting the
+    // client. Optional so older servers still work with newer clients.
+    optional int32 max_cpu = 9;
+    optional float max_mem = 10;
 }
 
 message TaskSignalRequest {
@@ -522,6 +530,12 @@ message WorkerUpdateRequest {
     optional string recyclable_scope = 9;
     optional string workflow_name = 10;
     optional string step_name = 11;
+    // Dynamic resource caps. When set, the server updates the worker's
+    // flavor cpu/mem and the new value is pushed to the worker on its
+    // next ping (via TaskListAndOther.max_cpu / max_mem). Mirrors the
+    // existing concurrency-resize hook.
+    optional int32 max_cpu = 12;
+    optional float max_mem = 13;
 }
 
 message ListFlavorsRequest {

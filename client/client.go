@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,30 @@ const fetchTaskErrorThreshold = 5
 // - the main loop (essentially this file)
 //
 //
+
+// LiveCaps holds the worker's resource caps in a form that can be
+// read by per-task goroutines (excuterThread) and updated from the
+// fetchTasks loop on every ping. Atomic so neither side needs to take
+// a lock on the hot path.
+//
+// Zero (the default) means "autodetect": fall back to runtime.NumCPU()
+// / host memory at read time, matching the static-flag behaviour.
+type LiveCaps struct {
+	cpu atomic.Int32
+	mem atomic.Uint32 // float32 stored as bits, since atomic.Float32 doesn't exist
+}
+
+func NewLiveCaps(cpu int32, memGiB float32) *LiveCaps {
+	lc := &LiveCaps{}
+	lc.SetCPU(cpu)
+	lc.SetMem(memGiB)
+	return lc
+}
+
+func (l *LiveCaps) CPU() int32      { return l.cpu.Load() }
+func (l *LiveCaps) Mem() float32    { return math.Float32frombits(l.mem.Load()) }
+func (l *LiveCaps) SetCPU(v int32)  { l.cpu.Store(v) }
+func (l *LiveCaps) SetMem(v float32) { l.mem.Store(math.Float32bits(v)) }
 
 // WorkerConfig holds worker settings from CLI args.
 type WorkerConfig struct {
@@ -800,7 +825,10 @@ func cleanupTaskWorkingDir(store string, taskID int32, reporter *event.Reporter)
 // the operator-triggered upgrade flag (if any), and whether the server
 // itself is in a graceful-drain window — all carried in the same ping
 // response.
-func (w *WorkerConfig) fetchTasks(
+// fetchTasks: `caps` points to the shared LiveCaps so that any
+// server-pushed change to max_cpu / max_mem on the ping response can be
+// applied here and immediately visible to per-task goroutines.
+func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	ctx context.Context,
 	client pb.TaskQueueClient,
 	reporter *event.Reporter,
@@ -818,12 +846,13 @@ func (w *WorkerConfig) fetchTasks(
 		log.Printf("⚠️ Error could not collect stats: %v", err)
 		query = &pb.PingAndGetNewTasksRequest{WorkerId: id}
 	} else {
-		// Apply MaxCPU cap to the reported stat so what scitq sees from
-		// this worker stays consistent with what we advertised at
-		// registration. (Memory % stays accurate against the real host —
-		// the percent doesn't depend on the cap.)
-		if w.MaxCPU > 0 && w.MaxCPU < ws.NumCPUs {
-			ws.NumCPUs = w.MaxCPU
+		// Apply current CPU cap to the reported stat so what scitq sees
+		// from this worker stays consistent with what we advertised.
+		// Reads through caps so a server-pushed change is reflected on
+		// the very next heartbeat. (Memory % is a percentage of the real
+		// host, independent of the cap — left alone.)
+		if c := caps.CPU(); c > 0 && c < ws.NumCPUs {
+			ws.NumCPUs = c
 		}
 		query = &pb.PingAndGetNewTasksRequest{WorkerId: id, Stats: ws.ToProto()}
 	}
@@ -832,6 +861,38 @@ func (w *WorkerConfig) fetchTasks(
 	if err != nil {
 		log.Printf("⚠️ Error calling fetch tasks: %v", err)
 		return nil, "", false, err
+	}
+
+	// Apply any server-pushed cap change. The server's view of the
+	// worker's flavor.cpu/mem is the authoritative cap; if the operator
+	// edited it via UpdateWorker, the new value arrives here. Validate
+	// against host capacity client-side — the server doesn't know the
+	// real machine size, only what we advertised at registration time.
+	if res.MaxCpu != nil {
+		newCPU := res.GetMaxCpu()
+		if newCPU > 0 && newCPU != caps.CPU() {
+			if hostCPU := int32(runtime.NumCPU()); newCPU > hostCPU {
+				log.Printf("⚠️ Server pushed max_cpu=%d exceeds host capacity (%d) — ignoring", newCPU, hostCPU)
+			} else {
+				log.Printf("⚙️  Resizing CPU cap %d → %d (server-pushed)", caps.CPU(), newCPU)
+				caps.SetCPU(newCPU)
+			}
+		}
+	}
+	if res.MaxMem != nil {
+		newMem := res.GetMaxMem()
+		if newMem > 0 && newMem != caps.Mem() {
+			var hostMem float32
+			if vmem, err := mem.VirtualMemory(); err == nil {
+				hostMem = float32(vmem.Total) / (1024 * 1024 * 1024)
+			}
+			if hostMem > 0 && newMem > hostMem {
+				log.Printf("⚠️ Server pushed max_mem=%.2f GiB exceeds host capacity (%.2f GiB) — ignoring", newMem, hostMem)
+			} else {
+				log.Printf("⚙️  Resizing memory cap %.2f → %.2f GiB (server-pushed)", caps.Mem(), newMem)
+				caps.SetMem(newMem)
+			}
+		}
 	}
 
 	// Apply task weights if any
@@ -995,7 +1056,7 @@ func (w *WorkerConfig) fetchTasks(
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
+func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
 	store := dm.Store
 
 	var consecErrors int
@@ -1053,7 +1114,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			break
 		}
 
-		tasks, upgradeReq, serverGating, err := config.fetchTasks(ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
+		tasks, upgradeReq, serverGating, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -1177,8 +1238,7 @@ func excuterThread(
 	noBare bool,
 	serverAddr string,
 	workerToken string,
-	maxCPU int32, // 0 = autodetect from runtime.NumCPU()
-	maxMem float32, // 0 = autodetect from host memory; GiB
+	caps *LiveCaps, // shared cap state; 0 = autodetect from runtime.NumCPU / host mem
 ) {
 	var wg sync.WaitGroup
 
@@ -1221,18 +1281,20 @@ func excuterThread(
 			log.Printf("✅ Acquired semaphore for task %d (weight=%.3f)", t.TaskId, w)
 
 			// Per-task $CPU / $MEM derive from what we *advertised* to
-			// scitq (maxCPU/maxMem when set), not the raw host — otherwise
-			// a partial-contribution worker would expose more resources to
-			// each task than it actually offered.
+			// scitq (caps), not the raw host — otherwise a
+			// partial-contribution worker would expose more resources to
+			// each task than it actually offered. Reads through caps so
+			// a server-pushed change takes effect on the *next* task
+			// without restarting the client.
 			advertisedCPU := float64(runtime.NumCPU())
-			if maxCPU > 0 {
-				advertisedCPU = float64(maxCPU)
+			if c := caps.CPU(); c > 0 {
+				advertisedCPU = float64(c)
 			}
 			cpu := max(int32(advertisedCPU/sem.Size()), 1)
 			var memGB int32
 			advertisedMem := float64(0)
-			if maxMem > 0 {
-				advertisedMem = float64(maxMem)
+			if m := caps.Mem(); m > 0 {
+				advertisedMem = float64(m)
 			} else if vmem, err := mem.VirtualMemory(); err == nil {
 				advertisedMem = float64(vmem.Total) / (1024 * 1024 * 1024)
 			}
@@ -1306,6 +1368,12 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	createHelpers(config.Store)
 	sem := utils.NewResizableSemaphore(float64(config.Concurrency))
 
+	// Shared live-resizable caps. Seeded from the CLI flags; the
+	// fetchTasks loop reconciles them with the server's view on every
+	// ping, so an operator can change them via UpdateWorker without
+	// restarting the client.
+	caps := NewLiveCaps(config.MaxCPU, config.MaxMem)
+
 	reporter := event.NewReporter(qclient.Client, config.WorkerId, config.Name, 5*time.Second)
 	defer reporter.StopOutbox()
 
@@ -1318,10 +1386,10 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, config.MaxCPU, config.MaxMem)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps)
 
 	// Start processing tasks
-	go workerLoop(ctx, qclient.Client, reporter, config, sem, dm, um, taskWeights, activeTasks)
+	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks)
 
 	// 🔎 Periodic diagnostics: detect tasks stuck active but not executing (likely in O)
 	go func() {

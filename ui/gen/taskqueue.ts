@@ -748,6 +748,21 @@ export interface TaskListAndOther {
      * @generated from protobuf field: bool server_upgrade_in_progress = 8
      */
     serverUpgradeInProgress: boolean;
+    /**
+     * Server-pushed resource caps. The server sends what *it* currently
+     * believes the worker should advertise (the worker's flavor cpu/mem,
+     * editable live via UpdateWorker). The client compares against its
+     * local cap and resizes if changed — letting an operator dial a
+     * shared node's contribution up or down without restarting the
+     * client. Optional so older servers still work with newer clients.
+     *
+     * @generated from protobuf field: optional int32 max_cpu = 9
+     */
+    maxCpu?: number;
+    /**
+     * @generated from protobuf field: optional float max_mem = 10
+     */
+    maxMem?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskSignalRequest
@@ -1136,6 +1151,19 @@ export interface WorkerUpdateRequest {
      * @generated from protobuf field: optional string step_name = 11
      */
     stepName?: string;
+    /**
+     * Dynamic resource caps. When set, the server updates the worker's
+     * flavor cpu/mem and the new value is pushed to the worker on its
+     * next ping (via TaskListAndOther.max_cpu / max_mem). Mirrors the
+     * existing concurrency-resize hook.
+     *
+     * @generated from protobuf field: optional int32 max_cpu = 12
+     */
+    maxCpu?: number;
+    /**
+     * @generated from protobuf field: optional float max_mem = 13
+     */
+    maxMem?: number;
 }
 /**
  * @generated from protobuf message taskqueue.ListFlavorsRequest
@@ -5183,7 +5211,9 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
             { no: 4, name: "active_tasks", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "signals", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => TaskSignal },
             { no: 7, name: "upgrade_requested", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 8, name: "server_upgrade_in_progress", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 8, name: "server_upgrade_in_progress", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 9, name: "max_cpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "max_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<TaskListAndOther>): TaskListAndOther {
@@ -5228,6 +5258,12 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
                 case /* bool server_upgrade_in_progress */ 8:
                     message.serverUpgradeInProgress = reader.bool();
                     break;
+                case /* optional int32 max_cpu */ 9:
+                    message.maxCpu = reader.int32();
+                    break;
+                case /* optional float max_mem */ 10:
+                    message.maxMem = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5265,6 +5301,12 @@ class TaskListAndOther$Type extends MessageType<TaskListAndOther> {
         /* bool server_upgrade_in_progress = 8; */
         if (message.serverUpgradeInProgress !== false)
             writer.tag(8, WireType.Varint).bool(message.serverUpgradeInProgress);
+        /* optional int32 max_cpu = 9; */
+        if (message.maxCpu !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.maxCpu);
+        /* optional float max_mem = 10; */
+        if (message.maxMem !== undefined)
+            writer.tag(10, WireType.Bit32).float(message.maxMem);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6538,7 +6580,9 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
             { no: 8, name: "is_permanent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 9, name: "recyclable_scope", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 10, name: "workflow_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 11, name: "step_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 11, name: "step_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 12, name: "max_cpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 13, name: "max_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerUpdateRequest>): WorkerUpdateRequest {
@@ -6586,6 +6630,12 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
                 case /* optional string step_name */ 11:
                     message.stepName = reader.string();
                     break;
+                case /* optional int32 max_cpu */ 12:
+                    message.maxCpu = reader.int32();
+                    break;
+                case /* optional float max_mem */ 13:
+                    message.maxMem = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6631,6 +6681,12 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
         /* optional string step_name = 11; */
         if (message.stepName !== undefined)
             writer.tag(11, WireType.LengthDelimited).string(message.stepName);
+        /* optional int32 max_cpu = 12; */
+        if (message.maxCpu !== undefined)
+            writer.tag(12, WireType.Varint).int32(message.maxCpu);
+        /* optional float max_mem = 13; */
+        if (message.maxMem !== undefined)
+            writer.tag(13, WireType.Bit32).float(message.maxMem);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
