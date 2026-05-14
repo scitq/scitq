@@ -3019,17 +3019,56 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 		i++
 	}
 
-	if len(sets) == 0 {
+	// max_cpu / max_mem update the worker's flavor row, not the worker
+	// row. Mirrors the handling in UpdateWorker — both code paths must
+	// accept these fields for the CLI (UserUpdateWorker) and admin
+	// (UpdateWorker) paths to behave the same.
+	updateFlavor := req.MaxCpu != nil || req.MaxMem != nil
+
+	if len(sets) == 0 && !updateFlavor {
 		return &pb.Ack{Success: false}, status.Error(codes.InvalidArgument, "no fields provided to update")
 	}
 
-	query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d AND deleted_at IS NULL", i)
-	args = append(args, req.GetWorkerId())
+	if len(sets) > 0 {
+		query += strings.Join(sets, ", ") + fmt.Sprintf(" WHERE worker_id=$%d AND deleted_at IS NULL", i)
+		args = append(args, req.GetWorkerId())
 
-	_, err = tx.Exec(query, args...)
-	if err != nil {
-		log.Printf("⚠️ Failed to execute update: %v", err)
-		return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker: %w", err)
+		_, err = tx.Exec(query, args...)
+		if err != nil {
+			log.Printf("⚠️ Failed to execute update: %v", err)
+			return &pb.Ack{Success: false}, fmt.Errorf("failed to update worker: %w", err)
+		}
+	}
+
+	if updateFlavor {
+		flavorSets := []string{}
+		flavorArgs := []interface{}{}
+		fi := 1
+		if req.MaxCpu != nil {
+			if req.GetMaxCpu() <= 0 {
+				return &pb.Ack{Success: false}, status.Error(codes.InvalidArgument, "max_cpu must be > 0")
+			}
+			flavorSets = append(flavorSets, fmt.Sprintf("cpu=$%d", fi))
+			flavorArgs = append(flavorArgs, req.GetMaxCpu())
+			fi++
+		}
+		if req.MaxMem != nil {
+			if req.GetMaxMem() <= 0 {
+				return &pb.Ack{Success: false}, status.Error(codes.InvalidArgument, "max_mem must be > 0")
+			}
+			flavorSets = append(flavorSets, fmt.Sprintf("mem=$%d", fi))
+			flavorArgs = append(flavorArgs, req.GetMaxMem())
+			fi++
+		}
+		flavorArgs = append(flavorArgs, req.GetWorkerId())
+		flavorQuery := fmt.Sprintf(
+			"UPDATE flavor SET %s WHERE flavor_id = (SELECT flavor_id FROM worker WHERE worker_id=$%d)",
+			strings.Join(flavorSets, ", "), fi,
+		)
+		if _, err = tx.Exec(flavorQuery, flavorArgs...); err != nil {
+			log.Printf("⚠️ Failed to update flavor caps: %v", err)
+			return &pb.Ack{Success: false}, fmt.Errorf("failed to update flavor caps: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
