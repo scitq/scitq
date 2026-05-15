@@ -508,9 +508,9 @@ Rules:
 
 - **Mutually exclusive with `cpu` / `mem`.** Concurrency and per-task budget come from the topology; expressing them again is overdetermined and rejected by the DSL.
 - **Positive integer.** `numa: 0` is rejected; `numa: 2` spans two adjacent NUMA nodes (useful when one node's memory is too small for a single task).
-- **Concurrency must be set explicitly** (or via the `--concurrency` flag at worker launch). v1 doesn't auto-derive it from `numa` and the host topology — pick `concurrency = floor(host_numa_nodes / numa)` yourself. The worker logs a clear warning and falls back to unbound execution if the request can't be satisfied (more nodes requested than the host has, or all slots already taken).
+- **Concurrency is auto-derived on first contact.** The first time a worker receives a task with `numa: N`, it computes `concurrency = floor(host_nodes / N)` and pushes that back to the server via `UpdateWorker`. So `numa: 1` on a 4-NUMA-node host gives concurrency 4 automatically — no need to set `--concurrency` at launch. The derivation happens **once per worker boot**; if you afterwards prefer a different value, `scitq worker update --worker-id N --concurrency M` sets it and the worker won't fight you. The auto-derive log line looks like: `📐 Auto-deriving concurrency from numa: 1 → 4 (host has 4 NUMA node(s), task wants 1)`.
 - **Docker-only in v1.** Bare tasks (no container) run without binding even when `numa` is set; bare-task NUMA binding via `numactl` is a planned follow-up.
-- **Non-NUMA hosts** (single-node, or `/sys/devices/system/node/` absent — e.g. macOS dev boxes) treat `numa: N` as a no-op: the task runs, with one warning logged.
+- **Non-NUMA hosts** (single-node, or `/sys/devices/system/node/` absent — e.g. macOS dev boxes) are treated as if they had one NUMA node: `numa: 1` gives concurrency 1, the task runs unbound, and a warning is logged once. `numa: N` with N>1 also runs unbound with concurrency 1 — the YAML still works on small dev boxes, just with reduced parallelism.
 
 #### `scitq_auth: true` — the task can call `scitq file copy`
 

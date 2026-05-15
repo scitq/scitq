@@ -98,13 +98,28 @@ func NewNumaAllocator(topo *NumaTopology) *NumaAllocator {
 }
 
 // NumaNodeCount returns the number of NUMA nodes the worker can pin to,
-// or 0 if the host is NUMA-unaware. Callers use this to derive
-// concurrency from task_spec.numa: concurrency = floor(node_count / numa).
+// or 0 if the host is NUMA-unaware. Callers use this to gate physical
+// binding (allocator returns false when count is 0).
 func (a *NumaAllocator) NumaNodeCount() int {
 	if a == nil || a.topology == nil {
 		return 0
 	}
 	return len(a.topology.Nodes)
+}
+
+// EffectiveNodeCount is NumaNodeCount() with a floor of 1. For the
+// purpose of *deriving concurrency* from task_spec.numa, a non-NUMA
+// host is treated as if it had a single NUMA node: a step with
+// `numa: 1` runs one task at a time on it (and falls through the
+// allocator's unbound-fallback at dispatch time). This keeps the DSL
+// usable across heterogeneous fleets — a YAML written for EPYC still
+// works (with reduced parallelism) on a single-socket dev box.
+func (a *NumaAllocator) EffectiveNodeCount() int {
+	n := a.NumaNodeCount()
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // Allocation describes what NumaAllocator.Allocate handed out. Fields

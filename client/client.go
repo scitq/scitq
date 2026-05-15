@@ -847,6 +847,8 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	sem *utils.ResizableSemaphore,
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
+	numaAllocator *NumaAllocator,
+	numaDerivedOnce *sync.Once,
 ) ([]*pb.Task, string, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -918,6 +920,47 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		w.Concurrency = res.Concurrency
 	} else {
 		sem.ResizeTasks(updates)
+	}
+
+	// Auto-derive concurrency from NUMA on the first batch of numa-bound
+	// tasks we see, once per worker boot. The DSL's `task_spec.numa: N`
+	// implies "give each task N nodes," and the natural concurrency on
+	// this host is floor(host_nodes / N). Doing this here means the
+	// operator doesn't have to remember to set `--concurrency` to match
+	// the topology when starting a numa-aware step — `numa: 1` on a
+	// 4-node EPYC just works. EffectiveNodeCount() floors at 1 so a
+	// non-NUMA host still behaves sensibly (concurrency=1 for numa:1).
+	// After this fires once, the operator can still override via
+	// `scitq worker update --concurrency M` and the worker won't fight
+	// them — sync.Once guards re-derivation.
+	for _, t := range res.Tasks {
+		if t.Numa == nil || t.GetNuma() < 1 {
+			continue
+		}
+		nodes := numaAllocator.EffectiveNodeCount()
+		desired := int32(nodes / int(t.GetNuma()))
+		if desired < 1 {
+			desired = 1
+		}
+		if desired != w.Concurrency {
+			numaDerivedOnce.Do(func() {
+				log.Printf("📐 Auto-deriving concurrency from numa: %d → %d (host has %d NUMA node(s), task wants %d)",
+					w.Concurrency, desired, nodes, t.GetNuma())
+				if _, err := client.UpdateWorker(ctx, &pb.WorkerUpdateRequest{
+					WorkerId:    w.WorkerId,
+					Concurrency: &desired,
+				}); err != nil {
+					log.Printf("⚠️ Auto-derive: UpdateWorker failed: %v — staying at %d", err, w.Concurrency)
+					return
+				}
+				// Resize locally too so the executer thread starts using
+				// the new value immediately; the next ping will push the
+				// same value back from the server, which is idempotent.
+				sem.ResizeAll(float64(desired), updates)
+				w.Concurrency = desired
+			})
+		}
+		break // every task in a step shares the same numa value
 	}
 
 	// Check activeTasks map
@@ -1067,7 +1110,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map) {
+func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map, numaAllocator *NumaAllocator, numaDerivedOnce *sync.Once) {
 	store := dm.Store
 
 	var consecErrors int
@@ -1125,7 +1168,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			break
 		}
 
-		tasks, upgradeReq, serverGating, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks)
+		tasks, upgradeReq, serverGating, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, numaDerivedOnce)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -1437,6 +1480,10 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 		// inherit their NUMA assignments so we don't double-book a node.
 		numaAlloc.RebuildFromDocker(ctx, config.Name)
 	}
+	// Once-per-boot guard for the numa→concurrency auto-derivation in
+	// fetchTasks. Lets the worker self-resize on first numa task receipt
+	// while letting later manual `worker update --concurrency M` stick.
+	var numaDerivedOnce sync.Once
 
 	reporter := event.NewReporter(qclient.Client, config.WorkerId, config.Name, 5*time.Second)
 	defer reporter.StopOutbox()
@@ -1453,7 +1500,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc)
 
 	// Start processing tasks
-	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks)
+	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &numaDerivedOnce)
 
 	// 🔎 Periodic diagnostics: detect tasks stuck active but not executing (likely in O)
 	go func() {
