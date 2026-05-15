@@ -182,7 +182,16 @@ class WorkerPool:
             options["concurrency"] = 1
             options["prefetch"] = 0
         else:
-            if task_spec.concurrency is None:
+            # NUMA-bound task_specs derive concurrency from the worker's
+            # topology at runtime (workerLoop self-resizes on first numa
+            # task — see client/client.go). The recruiter still needs a
+            # placeholder so server-side validation passes; concurrency=1
+            # is the right floor (a single-NUMA-node host runs one task).
+            if getattr(task_spec, 'numa', None) and task_spec.concurrency is None \
+                    and task_spec.cpu is None and task_spec.mem is None:
+                options["concurrency"] = 1
+                options["prefetch_percent"] = int(task_spec.prefetch * 100)
+            elif task_spec.concurrency is None:
                 options["cpu_per_task"]=task_spec.cpu
                 options["memory_per_task"]=task_spec.mem
                 options["disk_per_task"]=task_spec.disk

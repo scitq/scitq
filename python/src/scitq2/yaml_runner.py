@@ -248,6 +248,50 @@ def _resolve_cond(val, params, itervar=None, step_fields=None, extra_vars=None):
     raise ValueError(f"cond: no match for '{resolved}' in {list(k for k in val if k != 'cond')}")
 
 
+def _resolve_task_spec(ts_def, params, itervar=None, extra_vars=None):
+    """Resolve a `task_spec:` block, including an optional top-level
+    `cond:` that selects one of several override sub-dicts.
+
+    Unlike `_resolve_field`, which discards sibling keys when it sees a
+    `cond:`, `task_spec` lets the workflow mix always-applied scalar
+    fields (e.g. `prefetch: "100%"`) with cond-switched overrides:
+
+        task_spec:
+          prefetch: "100%"          # always set
+          cond: "{NUMA}"            # branch on NUMA value
+          true:
+            numa: "{NUMA}"          # NUMA-bound branch
+          false:
+            cpu: 32                 # cpu/mem branch
+            mem: 64
+
+    Returns a flat dict ready to be passed as `**ts_def` to TaskSpec.
+    All `{var}` references (params, iter vars, step vars) are resolved.
+    """
+    if not isinstance(ts_def, dict):
+        return ts_def
+    if 'cond' not in ts_def:
+        # No cond: just resolve references in each value.
+        return {k: _resolve_field(v, params, itervar, step_fields=ts_def, extra_vars=extra_vars)
+                for k, v in ts_def.items()}
+    # Split top-level keys: scalars/lists stay as always-applied
+    # siblings; dict-valued keys are treated as branch overrides.
+    siblings = {}
+    branches = {'cond': ts_def['cond']}
+    for k, v in ts_def.items():
+        if k == 'cond':
+            continue
+        if isinstance(v, dict):
+            branches[k] = v
+        else:
+            siblings[k] = v
+    chosen = _resolve_cond(branches, params, itervar, extra_vars=extra_vars)
+    merged = {**siblings, **(chosen if isinstance(chosen, dict) else {})}
+    # Resolve `{NUMA}`, `{params.x}` etc. in every value.
+    return {k: _resolve_field(v, params, itervar, step_fields=merged, extra_vars=extra_vars)
+            for k, v in merged.items()}
+
+
 def _resolve_field(val, params, itervar=None, step_fields=None, extra_vars=None, literal_format=None):
     """Resolve a field value: handles cond: blocks, param references, filters, and arithmetic.
 
@@ -1593,8 +1637,12 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
             out_kwargs['publish'] = True if publish is True else _resolve_field(publish, params, itervar, extra_vars=extra_vars)
         step_kwargs['outputs'] = Outputs(**out_kwargs)
 
-    # TaskSpec
-    ts_def = step_def.get('task_spec', {})
+    # TaskSpec — resolve cond: and reference templates ({NUMA},
+    # {params.x}, ...) before constructing. The cond resolver here is
+    # task-spec-aware: scalar siblings (e.g. prefetch: "100%") survive
+    # the cond switch.
+    ts_def = _resolve_task_spec(step_def.get('task_spec', {}), params,
+                                itervar=itervar, extra_vars=extra_vars)
     if ts_def:
         step_kwargs['task_spec'] = TaskSpec(**ts_def)
 

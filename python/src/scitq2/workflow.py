@@ -431,7 +431,14 @@ class TaskSpec:
         # from task_spec.cpu/mem, so setting `numa` together with either
         # is overdetermined and rejected here.
         if numa is not None:
-            if not isinstance(numa, int) or numa < 1:
+            # Accept int-coercible values (e.g. "4" from a YAML
+            # interpolation like `numa: "{NUMA}"`). Reject anything that
+            # doesn't cleanly parse as an integer.
+            try:
+                numa = int(numa)
+            except (TypeError, ValueError):
+                raise ValueError(f"TaskSpec(numa=...) must be a positive integer; got {numa!r}")
+            if numa < 1:
                 raise ValueError(f"TaskSpec(numa=...) must be a positive integer; got {numa!r}")
             if cpu is not None or mem is not None:
                 raise ValueError("TaskSpec: `numa` is mutually exclusive with `cpu` and `mem` — concurrency and per-task budget are derived from the host NUMA topology")
