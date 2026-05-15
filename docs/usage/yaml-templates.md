@@ -104,9 +104,28 @@ params:
     default: true
 ```
 
-Supported types: `string`, `integer`, `boolean`, `enum` (with `choices`), `provider_region`, `path`.
+Supported types: `string`, `integer`, `boolean`, `enum` (with `choices`), `provider_region`, `path`, `file_content`.
 
 Parameters are referenced in the template as `{params.name}`. Optional parameters use the syntax `{params.name:default_value}` — the default is used when the parameter is not provided.
+
+#### `file_content` — ship a local file's content as a param value
+
+`type: file_content` is a string-shaped param whose value is the *content* of a file on the operator's machine, not its path. Useful for sample lists, manifests, inline scripts, or anything else that's awkward to retype on the command line.
+
+```yaml
+params:
+  sample_list:
+    type: file_content
+    required: false
+    help: "One glob per line, each resolving to a sample's input fastqs"
+```
+
+How to provide a value:
+- **CLI**: `--param sample_list=@/local/path/to/list.txt` — the leading `@` reads the file and substitutes its content. (Use `\@literal` to pass a literal leading `@`.) The `@file` shorthand works on any string-shaped param, but it's the canonical way to use `file_content`.
+- **UI**: the template-run form renders a file picker plus a textarea; you can either upload a file (read client-side via `FileReader`) or paste content directly.
+- **MCP / API**: pass the content as a normal string in the `param_values_json` payload.
+
+The file does **not** need to exist on the server. The runner only sees a multi-line string.
 
 ### Parameter dependencies (`requires`)
 
@@ -314,7 +333,49 @@ iterate:
   start: 1
   end: 100
   step: 10
+
+# Lines — each non-empty line is one iteration.
+# Two ways to feed it (mutually exclusive):
+iterate:
+  name: sample
+  source: lines
+  file: "/etc/scitq/samples/list.txt"   # path on the runner host
+  # OR:
+  # content: "{params.sample_list}"     # in-memory string, typically from a file_content param
 ```
+
+##### `lines` with `item:` — per-sample input files from a list of globs
+
+When each line is a URI or glob pointing at one sample's input files, set `item:` to the file-group name you want the resolved URIs stored as. The iterator expands each glob at submission time (same primitive as `source: uri`) and attaches the matched URIs to the sample under that name — so `inputs: sample.<item>` in the step resolves the same way as for the URI iterator.
+
+```yaml
+params:
+  sample_list:
+    type: file_content
+    required: true
+
+iterate:
+  name: sample
+  source: lines
+  content: "{params.sample_list}"
+  item: "fastqs"      # each line's matched URIs land in sample.fastqs
+  tag: "folder"       # iteration tag = parent folder name (default when item: is set)
+
+steps:
+  - import: private/megahit
+    inputs: sample.fastqs
+```
+
+With `sample_list` containing:
+```
+s3://rnd/raw/SCAPIS/ERR11457772/*.fastq.gz
+s3://rnd/raw/SCAPIS/ERR11457789/*.fastq.gz
+```
+…each line becomes one task; the task tag is `ERR11457772` / `ERR11457789` (from `tag: folder`); `sample.fastqs` is the list of files matched by the glob.
+
+A line whose glob resolves to nothing logs a warning and is skipped (almost always a misconfiguration). A glob matching files across multiple folders yields one task per folder.
+
+`tag:` currently supports `folder` (parent folder of the matched URIs). When `item:` is set and `tag:` is omitted, `folder` is the default. Without `item:`, each line is taken as the iteration value verbatim (existing behavior, for plain enum-style lists).
 
 ### Conditional iterators
 

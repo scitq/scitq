@@ -515,7 +515,32 @@
                   class:error={showParamErrors && param.required && !userParams[param.name]}
                   placeholder="Enter number"
                 />
-              
+
+              {:else if param.type === 'file_content'}
+                <!-- file_content: upload a local file and embed its
+                     content in the param value, OR paste directly into
+                     the textarea. The runner sees the content as a
+                     multi-line string regardless of how it got there. -->
+                <div class="wfTemp-file-content">
+                  <input
+                    type="file"
+                    on:change={(e) => {
+                      const f = e.target.files && e.target.files[0];
+                      if (!f) return;
+                      const r = new FileReader();
+                      r.onload = () => { userParams[param.name] = r.result; };
+                      r.readAsText(f);
+                    }}
+                  />
+                  <textarea
+                    id={param.name}
+                    rows="6"
+                    bind:value={userParams[param.name]}
+                    class:error={showParamErrors && param.required && !userParams[param.name]}
+                    placeholder={param.help || 'Upload a file or paste content (one item per line)'}
+                  ></textarea>
+                </div>
+
               {:else}
                 <!-- Text input for other parameters -->
                 <input

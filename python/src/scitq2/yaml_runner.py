@@ -294,6 +294,8 @@ def _build_params_class(params_def: Dict[str, dict]) -> type:
             namespace[name] = Param.enum(**kwargs)
         elif typ == 'path':
             namespace[name] = Param.path(**kwargs)
+        elif typ == 'file_content':
+            namespace[name] = Param.file_content(**kwargs)
         elif typ == 'provider_region':
             namespace[name] = Param.provider_region(**kwargs)
         elif typ == 'integer':
@@ -436,7 +438,23 @@ ITERATOR_SCHEMAS: Dict[str, set] = {
               'match', 'fastq_pair_filtering', 'download_method'},
     'range': {'name', 'source', 'start', 'end', 'step'},
     'list':  {'name', 'source', 'values'},
-    'lines': {'name', 'source', 'file'},
+    # `lines`: each non-empty line becomes one iteration.
+    #   file:    path on the YAML-runner host (server-side use).
+    #   content: in-memory multi-line string, typically from a
+    #            `type: file_content` param (CLI ships the file content,
+    #            UI uploads + ships content, or operator pastes directly).
+    #   item:    when set, each line is treated as a URI / glob and
+    #            expanded at submission time; the resolved URIs are
+    #            stored as the named file group <item> on the sample
+    #            (so `inputs: sample.<item>` works the same as the URI
+    #            iterator's `fastqs:` pattern).
+    #   tag:     where the iteration tag (= `{NAME}` substitution) is
+    #            derived from. Accepted values:
+    #              "folder" — parent folder of the matched URIs (default
+    #                         when `item:` is set);
+    #              omitted  — the raw line value (current behavior;
+    #                         default when `item:` is not set).
+    'lines': {'name', 'source', 'file', 'content', 'item', 'tag'},
 }
 FILE_GROUP_SOURCES = {'uri', 'ena', 'sra'}
 # Internal markers added by the runner that are valid on any iterator.
@@ -458,6 +476,36 @@ def _extract_named_file_groups(iter_def: dict) -> Dict[str, str]:
         if isinstance(v, str):
             groups[k] = v
     return groups
+
+
+def _derive_lines_tag(line: str, uris: List[str], kind: Optional[str], fallback: str = "") -> str:
+    """Derive the iteration tag for the `lines` iterator in file-group mode.
+
+    `kind` is the value of the iter-level `tag:` field. Currently only
+    `"folder"` is supported (the parent folder name of the matched URIs).
+    Future kinds could add `"basename"`, `"stem"`, etc.
+
+    When the glob didn't resolve to any URI, we fall back to the basename
+    of the line itself — better than an empty tag, and stable across runs.
+    """
+    if kind in (None, "folder"):
+        # If URI.find resolved something, fallback is the discovered
+        # folder name; prefer it. Otherwise, derive from the line.
+        if fallback:
+            return fallback
+        if uris:
+            # Last-resort: parent folder of the first matched URI
+            sample_uri = uris[0]
+            return sample_uri.rstrip("/").rsplit("/", 2)[-2] if "/" in sample_uri else sample_uri
+        # No URIs at all — derive from the line. Strip a trailing glob
+        # part and take the leaf folder name.
+        bare = line.rstrip("/")
+        if "*" in bare or "?" in bare or "[" in bare:
+            # `s3://.../SRR1234/*.fq.gz` → parent of last `/`
+            head, _, _ = bare.rpartition("/")
+            bare = head
+        return bare.rsplit("/", 1)[-1] if "/" in bare else bare
+    raise ValueError(f"Unsupported `tag:` value for iterator 'lines': {kind!r} (expected 'folder')")
 
 
 def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -520,10 +568,65 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
         return [{uname: str(v)} for v in values], None
 
     elif source == 'lines':
-        filepath = _resolve_refs(iter_def['file'], params)
-        with open(filepath) as f:
-            lines = [l.strip() for l in f if l.strip()]
-        return [{uname: line} for line in lines], None
+        # Two ways to feed the iterator, mutually exclusive:
+        #   file:    a path on the runner host
+        #   content: an in-memory string (typically from a file_content param)
+        # See _derive_lines_tag below for tag derivation rules.
+        has_file = 'file' in iter_def
+        has_content = 'content' in iter_def
+        if has_file == has_content:
+            raise ValueError(
+                "Iterator 'lines' requires exactly one of `file:` or `content:` "
+                f"(got {'both' if has_file else 'neither'})"
+            )
+        if has_file:
+            filepath = _resolve_refs(iter_def['file'], params)
+            with open(filepath) as f:
+                lines = [l.strip() for l in f if l.strip()]
+        else:
+            content = _resolve_refs(iter_def['content'], params)
+            lines = [l.strip() for l in str(content).splitlines() if l.strip()]
+
+        item_name = iter_def.get('item')
+        tag_kind = iter_def.get('tag')
+        if item_name and tag_kind is None:
+            # Default tag derivation when each line is a URI/glob: the
+            # parent folder name. Matches what URI iterator does with
+            # `group_by: folder`.
+            tag_kind = 'folder'
+
+        # Simple mode: no item → each line is the iteration value.
+        # Kept untouched so existing templates using `source: lines` with
+        # only `file:` set behave exactly as before.
+        if not item_name:
+            return [{uname: line} for line in lines], None
+
+        # File-group mode: expand each line into a list of concrete URIs
+        # and attach them to a URIObject with the named file group.
+        # Reuses the same URI.find primitive as the `uri` iterator so
+        # the downstream `inputs: sample.<item>` resolution is identical.
+        from scitq2.uri import URI
+        items = []
+        for line in lines:
+            # Each line is a glob/URI for one sample. URI.find expands
+            # the glob against the underlying storage — same call we
+            # already use for `source: uri`. group_by='folder' so the
+            # tag derivation has a folder name to lift.
+            entries = URI.find(line, group_by='folder',
+                              field_map={"sample_accession": "folder.name", "fastqs": "file.uris"})
+            if not entries:
+                # No files matched. Surface a warning rather than silently
+                # creating an empty iteration — a glob that resolves to
+                # nothing is almost always a misconfiguration.
+                print(f"⚠️ lines iterator: glob {line!r} matched no files; skipping", file=sys.stderr)
+                continue
+            # A glob may resolve to multiple folders (e.g. `s3://.../sample*/*.fq.gz`).
+            # Yield one iteration per folder so each becomes its own task.
+            for s in entries:
+                tag_value = _derive_lines_tag(line, s.fastqs, tag_kind, fallback=s.sample_accession)
+                s.file_groups = {item_name: s.fastqs}
+                items.append({uname: tag_value, '_sample': s, '_source': source})
+        return items, source
 
     else:
         raise ValueError(f"Unknown iterator source: {source}")

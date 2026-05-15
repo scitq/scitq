@@ -42,6 +42,21 @@ class Path(str):
         return Path(value)
 
 
+class FileContent(str):
+    """Marker type for multi-line content sourced from a local file.
+
+    Distinct from `string` so the CLI/UI can render it as a file
+    picker (resp. apply `@path` shorthand by default) and ship the
+    file *content* — not its path — to the server. From the YAML
+    runner's perspective it's just a (potentially large) string.
+    """
+    __type_name__ = "file_content"
+
+    @staticmethod
+    def parse(value: str) -> "FileContent":
+        return FileContent(value)
+
+
 class Param:
     def __init__(
         self,
@@ -92,6 +107,10 @@ class Param:
     @staticmethod
     def path(**kwargs):
         return Param(typ=Path, **kwargs)
+
+    @staticmethod
+    def file_content(**kwargs):
+        return Param(typ=FileContent, **kwargs)
 
     @staticmethod
     def provider_region(**kwargs):

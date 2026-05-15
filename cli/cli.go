@@ -2055,7 +2055,23 @@ func parseCommaSeparatedParams(input string) (string, error) {
 		if len(parts) != 2 {
 			return "", fmt.Errorf("invalid param: %q (expected key=value)", pair)
 		}
-		paramMap[parts[0]] = parts[1]
+		key, val := parts[0], parts[1]
+		// `@/path/to/file` shorthand: substitute the file content. Lets
+		// templates with `type: file_content` (and any other string-shaped
+		// param) accept a local file path on the CLI, with the content
+		// shipped to the server in the JSON payload rather than the path
+		// itself. Use `\@literal` to opt out and pass a literal leading @.
+		if strings.HasPrefix(val, "@") {
+			path := strings.TrimPrefix(val, "@")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return "", fmt.Errorf("@file shorthand on param %q: %w", key, err)
+			}
+			val = string(data)
+		} else if strings.HasPrefix(val, `\@`) {
+			val = val[1:] // drop the backslash escape
+		}
+		paramMap[key] = val
 	}
 	jsonBytes, err := json.Marshal(paramMap)
 	if err != nil {
