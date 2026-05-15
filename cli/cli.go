@@ -2047,15 +2047,66 @@ func (c *CLI) TemplateDetail() error {
 	return nil
 }
 
+// splitCommaQuoted splits `s` on commas, but ignores commas that fall
+// inside matched single- or double-quoted runs. Returns an error on an
+// unmatched quote. This keeps values like `k_list="21,41,61,81,99"` or
+// `note='hello, world'` intact when passed via --param.
+func splitCommaQuoted(s string) ([]string, error) {
+	var tokens []string
+	var cur strings.Builder
+	inSingle, inDouble := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+			cur.WriteByte(c)
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+			cur.WriteByte(c)
+		case c == ',' && !inSingle && !inDouble:
+			tokens = append(tokens, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if inSingle || inDouble {
+		return nil, fmt.Errorf("unmatched quote in --param value")
+	}
+	if cur.Len() > 0 || len(tokens) > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens, nil
+}
+
+// stripMatchedQuotes drops a single layer of matched surrounding quotes
+// from a value — the shell already consumes its own layer, and the CLI
+// strips this second one so the YAML param sees the literal content the
+// user intended (e.g. `k_list="21,41"` → `21,41`, not `"21,41"`).
+func stripMatchedQuotes(s string) string {
+	if len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
 func parseCommaSeparatedParams(input string) (string, error) {
 	paramMap := make(map[string]string)
-	pairs := strings.Split(input, ",")
+	pairs, err := splitCommaQuoted(input)
+	if err != nil {
+		return "", err
+	}
 	for _, pair := range pairs {
 		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(parts) != 2 {
 			return "", fmt.Errorf("invalid param: %q (expected key=value)", pair)
 		}
 		key, val := parts[0], parts[1]
+		val = stripMatchedQuotes(strings.TrimSpace(val))
 		// `@/path/to/file` shorthand: substitute the file content. Lets
 		// templates with `type: file_content` (and any other string-shaped
 		// param) accept a local file path on the CLI, with the content
