@@ -184,6 +184,14 @@ message TaskRequest {
     // need it. Token shape today: the worker's own auth token (the same
     // token the worker uses for its own RPCs), inherited by the task.
     optional bool scitq_auth = 23;
+    // NUMA binding: number of NUMA nodes the task should be pinned to on
+    // the worker. Unset = NUMA-unaware (current behavior). 1 = the
+    // common case (one task per node). N > 1 = task spans N adjacent
+    // nodes. The worker translates this into `--cpuset-cpus` /
+    // `--cpuset-mems` on the docker run. Mutually exclusive with
+    // task_spec.cpu and task_spec.mem in the DSL — concurrency and
+    // per-task budget are derived from the topology.
+    optional int32 numa = 24;
 }
 
 message Task {
@@ -221,6 +229,8 @@ message Task {
     optional string quality_vars = 32;     // JSON: extracted quality variables
     // See TaskRequest.scitq_auth.
     optional bool scitq_auth = 33;
+    // See TaskRequest.numa.
+    optional int32 numa = 34;
 }
 
 message TaskList {

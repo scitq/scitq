@@ -33,3 +33,4 @@
 [ ] implement some timeouts for workflow template scripts
 [ ] implement debug mode
 [ ] implement workflow strategy (sticky)
+[ ] heterogeneous worker pools per step — currently a step has one `worker_pool` and one `task_spec`, which assumes every worker serving the step shares the same per-task budget shape. Some workloads would benefit from declaring N pools per step with paired task_specs (e.g. a NUMA-bound megahit step that recruits both EPYC 7451 boxes and Intel single-socket machines, each with its own `task_spec.numa` derivation). Goes beyond NUMA — same model unlocks "GPU pool + CPU pool serving the same step" and similar. Worth doing once a real workload demands it.

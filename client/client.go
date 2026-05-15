@@ -282,7 +282,7 @@ func getScriptExtension(shell string) string {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string, noBare bool, serverAddr string, workerToken string) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string, noBare bool, serverAddr string, workerToken string, numaAlloc Allocation, numaBound bool) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -377,6 +377,17 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		// SIGKILL the cmd. The defer below is responsible for cleanup so
 		// the daemon doesn't accumulate stopped containers.
 		command := []string{"run", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
+		// NUMA binding: when the allocator handed us a slot, pin both
+		// CPUs and memory through docker's cpuset interface. Both flags
+		// matter — `--cpuset-cpus` alone pins threads but leaves
+		// memory allocations cross-die, defeating the point on
+		// bandwidth-bound workloads like de Bruijn assemblers.
+		if numaBound {
+			command = append(command,
+				"--cpuset-cpus", numaAlloc.Cpuset,
+				"--cpuset-mems", numaAlloc.Memset,
+			)
+		}
 		if scitqAuth {
 			// Token + server reach the container via -e so the task can
 			// authenticate as the worker. Binary is bind-mounted in
@@ -1239,6 +1250,7 @@ func excuterThread(
 	serverAddr string,
 	workerToken string,
 	caps *LiveCaps, // shared cap state; 0 = autodetect from runtime.NumCPU / host mem
+	numaAllocator *NumaAllocator, // NUMA slot manager; nil-safe on non-NUMA hosts
 ) {
 	var wg sync.WaitGroup
 
@@ -1301,10 +1313,49 @@ func excuterThread(
 			if advertisedMem > 0 {
 				memGB = max(int32(advertisedMem/sem.Size()), 1)
 			}
+			// NUMA binding (optional). When task.Numa is set, try to
+			// reserve that many NUMA nodes; on success the docker
+			// command will get --cpuset-cpus / --cpuset-mems and the
+			// per-task $CPU/$MEM are recomputed from the allocated
+			// nodes (rather than from the host-wide cap divided by
+			// concurrency). On failure (host has no NUMA, host has
+			// fewer nodes than requested, or all slots occupied) we
+			// log a warning and run unbound — the task still works.
+			var numaAlloc Allocation
+			var numaOK bool
+			if t.Numa != nil && *t.Numa > 0 {
+				numaAlloc, numaOK = numaAllocator.Allocate(t.TaskId, int(*t.Numa))
+				if numaOK {
+					cpu = int32(numaAlloc.CPUCount)
+					// Approximate per-task memory budget: total advertised mem
+					// scaled by node share. Topology-aware per-node memory
+					// (parsing node*/meminfo) is a refinement for later.
+					if advertisedMem > 0 && numaAllocator.NumaNodeCount() > 0 {
+						memGB = max(int32(advertisedMem*float64(len(numaAlloc.Nodes))/float64(numaAllocator.NumaNodeCount())), 1)
+					}
+					log.Printf("🧩 NUMA-bound task %d → nodes=%v cpuset=%s memset=%s ($CPU=%d $MEM=%d)",
+						t.TaskId, numaAlloc.Nodes, numaAlloc.Cpuset, numaAlloc.Memset, cpu, memGB)
+					reporter.Event("I", "runtime", "numa bound", map[string]any{
+						"task_id": t.TaskId, "numa_nodes": numaAlloc.Nodes,
+						"cpuset": numaAlloc.Cpuset, "memset": numaAlloc.Memset,
+					})
+				} else {
+					log.Printf("⚠️ NUMA request for task %d (numa=%d) could not be honoured on this host — running unbound",
+						t.TaskId, *t.Numa)
+					reporter.Event("W", "runtime", "numa unavailable", map[string]any{
+						"task_id": t.TaskId, "numa_requested": *t.Numa,
+						"host_nodes": numaAllocator.NumaNodeCount(),
+					})
+				}
+			}
+
 			log.Printf("Available CPU threads estimated to %d, memory to %d GB", cpu, memGB)
 			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu, "mem_gb": memGB})
-			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName, noBare, serverAddr, workerToken)
+			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName, noBare, serverAddr, workerToken, numaAlloc, numaOK)
 
+			if numaOK {
+				numaAllocator.Release(t.TaskId)
+			}
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
 
@@ -1374,6 +1425,19 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	// restarting the client.
 	caps := NewLiveCaps(config.MaxCPU, config.MaxMem)
 
+	// NUMA topology + slot manager. nil topology on a non-NUMA host
+	// makes Allocate return ok=false, so tasks with `numa` set on such
+	// hosts just run unbound with a single warning at dispatch.
+	numaTopo := DiscoverNumaTopology()
+	numaAlloc := NewNumaAllocator(numaTopo)
+	if numaTopo != nil {
+		log.Printf("🧩 NUMA topology: %d nodes detected", len(numaTopo.Nodes))
+		// If a previous client process is still draining tasks
+		// (e.g. systemd Restart=on-failure after an in-place upgrade),
+		// inherit their NUMA assignments so we don't double-book a node.
+		numaAlloc.RebuildFromDocker(ctx, config.Name)
+	}
+
 	reporter := event.NewReporter(qclient.Client, config.WorkerId, config.Name, 5*time.Second)
 	defer reporter.StopOutbox()
 
@@ -1386,7 +1450,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc)
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks)

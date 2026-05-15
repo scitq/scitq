@@ -351,6 +351,7 @@ class Task:
 
         status = "W" if resolved_depends else DEFAULT_TASK_STATUS
         scitq_auth = bool(getattr(self.step.task_spec, 'scitq_auth', False)) if self.step.task_spec is not None else False
+        numa = getattr(self.step.task_spec, 'numa', None) if self.step.task_spec is not None else None
         self.task_id = client.submit_task(
                 step_id=self.step.step_id,
                 command=resolved_command,
@@ -369,6 +370,7 @@ class Task:
                 reuse_key=computed_reuse_key,
                 consume_reuse=opportunistic,
                 scitq_auth=scitq_auth,
+                numa=numa,
             )
 
 
@@ -422,9 +424,19 @@ class Task:
 class TaskSpec:
     def __init__(self, *, cpu: Optional[int]=None, mem: Optional[float]=None, disk: Optional[float]=None,
                  concurrency: Optional[int]=None, prefetch: Optional[Union[str,int]]=None,
-                 scitq_auth: bool=False):
-        if concurrency is None and cpu is None and mem is None:
-            raise ValueError("TaskSpec must define at least one of concurrency, cpu or mem")
+                 scitq_auth: bool=False, numa: Optional[int]=None):
+        # numa: pin each task to N NUMA nodes on its worker (docker
+        # --cpuset-cpus / --cpuset-mems). Concurrency and per-task CPU/mem
+        # are then derived from the worker's NUMA topology rather than
+        # from task_spec.cpu/mem, so setting `numa` together with either
+        # is overdetermined and rejected here.
+        if numa is not None:
+            if not isinstance(numa, int) or numa < 1:
+                raise ValueError(f"TaskSpec(numa=...) must be a positive integer; got {numa!r}")
+            if cpu is not None or mem is not None:
+                raise ValueError("TaskSpec: `numa` is mutually exclusive with `cpu` and `mem` — concurrency and per-task budget are derived from the host NUMA topology")
+        if concurrency is None and cpu is None and mem is None and numa is None:
+            raise ValueError("TaskSpec must define at least one of concurrency, cpu, mem or numa")
         self.cpu = cpu
         self.mem = mem
         self.disk = disk
@@ -436,6 +448,7 @@ class TaskSpec:
         # `scitq file copy` for moves that the native publish mechanism can't
         # express (multiple destinations per file, asymmetric paths).
         self.scitq_auth = bool(scitq_auth)
+        self.numa = numa
 
     def _parse_prefetch(self, p):
         if p is None:
@@ -446,11 +459,11 @@ class TaskSpec:
 
     def __eq__(self, other):
         return isinstance(other, TaskSpec) and (
-            self.cpu, self.mem, self.disk, self.concurrency, self.prefetch, self.scitq_auth
-        ) == (other.cpu, other.mem, other.disk, other.concurrency, other.prefetch, other.scitq_auth)
+            self.cpu, self.mem, self.disk, self.concurrency, self.prefetch, self.scitq_auth, self.numa
+        ) == (other.cpu, other.mem, other.disk, other.concurrency, other.prefetch, other.scitq_auth, other.numa)
 
     def __str__(self):
-        return f"TaskSpec(cpu={self.cpu}, mem={self.mem}, disk={self.disk} concurrency={self.concurrency}, prefetch={self.prefetch}, scitq_auth={self.scitq_auth})"
+        return f"TaskSpec(cpu={self.cpu}, mem={self.mem}, disk={self.disk} concurrency={self.concurrency}, prefetch={self.prefetch}, scitq_auth={self.scitq_auth}, numa={self.numa})"
 
 
 def underscore_join(*args: str) -> str:

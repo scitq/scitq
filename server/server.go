@@ -551,13 +551,13 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              command, shell, container, container_options, step_id,
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
-             status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, created_at
+             status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, numa, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
-             $15, $16, $17, $18, $19, $20, $21, NOW()
+             $15, $16, $17, $18, $19, $20, $21, $22, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -567,7 +567,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
-		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(),
+		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(), req.Numa,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -3786,7 +3786,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
 			download_timeout, running_timeout, upload_timeout,
-			status, weight, publish, scitq_auth
+			status, weight, publish, scitq_auth, numa
 		FROM task
 		WHERE worker_id = $1
 		  AND NOT hidden
@@ -3802,16 +3802,20 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		var status string
 		var weight sql.NullFloat64
 		var scitqAuth bool
+		var numa sql.NullInt32
 
 		var publishNull sql.NullString
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
 		if scitqAuth {
 			task.ScitqAuth = proto.Bool(true)
+		}
+		if numa.Valid {
+			task.Numa = &numa.Int32
 		}
 		task.Input = []string(input)
 		task.Resource = []string(resource)

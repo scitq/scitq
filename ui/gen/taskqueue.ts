@@ -184,6 +184,18 @@ export interface TaskRequest {
      * @generated from protobuf field: optional bool scitq_auth = 23
      */
     scitqAuth?: boolean;
+    /**
+     * NUMA binding: number of NUMA nodes the task should be pinned to on
+     * the worker. Unset = NUMA-unaware (current behavior). 1 = the
+     * common case (one task per node). N > 1 = task spans N adjacent
+     * nodes. The worker translates this into `--cpuset-cpus` /
+     * `--cpuset-mems` on the docker run. Mutually exclusive with
+     * task_spec.cpu and task_spec.mem in the DSL — concurrency and
+     * per-task budget are derived from the topology.
+     *
+     * @generated from protobuf field: optional int32 numa = 24
+     */
+    numa?: number;
 }
 /**
  * @generated from protobuf message taskqueue.Task
@@ -323,6 +335,12 @@ export interface Task {
      * @generated from protobuf field: optional bool scitq_auth = 33
      */
     scitqAuth?: boolean;
+    /**
+     * See TaskRequest.numa.
+     *
+     * @generated from protobuf field: optional int32 numa = 34
+     */
+    numa?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -3530,7 +3548,8 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 20, name: "publish", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 21, name: "reuse_key", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 22, name: "consume_reuse", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 23, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 23, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 24, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<TaskRequest>): TaskRequest {
@@ -3625,6 +3644,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                 case /* optional bool scitq_auth */ 23:
                     message.scitqAuth = reader.bool();
                     break;
+                case /* optional int32 numa */ 24:
+                    message.numa = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3710,6 +3732,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         /* optional bool scitq_auth = 23; */
         if (message.scitqAuth !== undefined)
             writer.tag(23, WireType.Varint).bool(message.scitqAuth);
+        /* optional int32 numa = 24; */
+        if (message.numa !== undefined)
+            writer.tag(24, WireType.Varint).int32(message.numa);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3756,7 +3781,8 @@ class Task$Type extends MessageType<Task> {
             { no: 30, name: "upload_duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 31, name: "quality_score", kind: "scalar", opt: true, T: 1 /*ScalarType.DOUBLE*/ },
             { no: 32, name: "quality_vars", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 33, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 33, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 34, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -3878,6 +3904,9 @@ class Task$Type extends MessageType<Task> {
                 case /* optional bool scitq_auth */ 33:
                     message.scitqAuth = reader.bool();
                     break;
+                case /* optional int32 numa */ 34:
+                    message.numa = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3989,6 +4018,9 @@ class Task$Type extends MessageType<Task> {
         /* optional bool scitq_auth = 33; */
         if (message.scitqAuth !== undefined)
             writer.tag(33, WireType.Varint).bool(message.scitqAuth);
+        /* optional int32 numa = 34; */
+        if (message.numa !== undefined)
+            writer.tag(34, WireType.Varint).int32(message.numa);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

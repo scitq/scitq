@@ -486,9 +486,31 @@ Without named outputs, the step exposes its entire `/output/` directory.
       concurrency: 4   # OR: static concurrency (mutually exclusive with cpu/mem/disk)
       prefetch: "50%"  # download up to N task inputs in advance (N = concurrency * prefetch)
       scitq_auth: true # see below
+      numa: 1          # OR: pin each task to N NUMA nodes (see below; mutually exclusive with cpu/mem)
 ```
 
-At least one of `concurrency`, `cpu`, or `mem` is required. `cpu`/`mem`/`disk` drive dynamic concurrency (scitq picks a per-worker concurrency that fits the worker's flavour and these per-task budgets); `concurrency` pins it to a static value.
+At least one of `concurrency`, `cpu`, `mem`, or `numa` is required. `cpu`/`mem`/`disk` drive dynamic concurrency (scitq picks a per-worker concurrency that fits the worker's flavour and these per-task budgets); `concurrency` pins it to a static value; `numa` (see below) derives the per-task CPU and memory budget from the worker's NUMA topology.
+
+#### `numa: <int>` — pin tasks to specific NUMA nodes
+
+When set, each task of this step is launched with `--cpuset-cpus` / `--cpuset-mems` pointing at `numa` consecutive NUMA nodes on its worker. The per-task `$CPU` env var becomes the count of CPUs in those nodes; `$MEM` is approximated from the host's total memory scaled by node share.
+
+```yaml
+  - name: assemble
+    task_spec:
+      numa: 1          # one task per NUMA node (the common case)
+      prefetch: 1
+```
+
+Why use it: memory-bandwidth-bound workloads (de Bruijn graph assemblers like megahit, alignment with large in-RAM indexes) lose substantial throughput on multi-die hosts when threads from different tasks contend for the same memory controller. Binding each task to a single die preserves locality and removes cross-die traffic.
+
+Rules:
+
+- **Mutually exclusive with `cpu` / `mem`.** Concurrency and per-task budget come from the topology; expressing them again is overdetermined and rejected by the DSL.
+- **Positive integer.** `numa: 0` is rejected; `numa: 2` spans two adjacent NUMA nodes (useful when one node's memory is too small for a single task).
+- **Concurrency must be set explicitly** (or via the `--concurrency` flag at worker launch). v1 doesn't auto-derive it from `numa` and the host topology — pick `concurrency = floor(host_numa_nodes / numa)` yourself. The worker logs a clear warning and falls back to unbound execution if the request can't be satisfied (more nodes requested than the host has, or all slots already taken).
+- **Docker-only in v1.** Bare tasks (no container) run without binding even when `numa` is set; bare-task NUMA binding via `numactl` is a planned follow-up.
+- **Non-NUMA hosts** (single-node, or `/sys/devices/system/node/` absent — e.g. macOS dev boxes) treat `numa: N` as a no-op: the task runs, with one warning logged.
 
 #### `scitq_auth: true` — the task can call `scitq file copy`
 

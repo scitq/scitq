@@ -261,7 +261,15 @@ type TaskRequest struct {
 	// file, asymmetric path layouts). Default false — most tasks never
 	// need it. Token shape today: the worker's own auth token (the same
 	// token the worker uses for its own RPCs), inherited by the task.
-	ScitqAuth     *bool `protobuf:"varint,23,opt,name=scitq_auth,json=scitqAuth,proto3,oneof" json:"scitq_auth,omitempty"`
+	ScitqAuth *bool `protobuf:"varint,23,opt,name=scitq_auth,json=scitqAuth,proto3,oneof" json:"scitq_auth,omitempty"`
+	// NUMA binding: number of NUMA nodes the task should be pinned to on
+	// the worker. Unset = NUMA-unaware (current behavior). 1 = the
+	// common case (one task per node). N > 1 = task spans N adjacent
+	// nodes. The worker translates this into `--cpuset-cpus` /
+	// `--cpuset-mems` on the docker run. Mutually exclusive with
+	// task_spec.cpu and task_spec.mem in the DSL — concurrency and
+	// per-task budget are derived from the topology.
+	Numa          *int32 `protobuf:"varint,24,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -457,6 +465,13 @@ func (x *TaskRequest) GetScitqAuth() bool {
 	return false
 }
 
+func (x *TaskRequest) GetNuma() int32 {
+	if x != nil && x.Numa != nil {
+		return *x.Numa
+	}
+	return 0
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -492,7 +507,9 @@ type Task struct {
 	QualityScore     *float64               `protobuf:"fixed64,31,opt,name=quality_score,json=qualityScore,proto3,oneof" json:"quality_score,omitempty"`            // quality score (higher is better)
 	QualityVars      *string                `protobuf:"bytes,32,opt,name=quality_vars,json=qualityVars,proto3,oneof" json:"quality_vars,omitempty"`                 // JSON: extracted quality variables
 	// See TaskRequest.scitq_auth.
-	ScitqAuth     *bool `protobuf:"varint,33,opt,name=scitq_auth,json=scitqAuth,proto3,oneof" json:"scitq_auth,omitempty"`
+	ScitqAuth *bool `protobuf:"varint,33,opt,name=scitq_auth,json=scitqAuth,proto3,oneof" json:"scitq_auth,omitempty"`
+	// See TaskRequest.numa.
+	Numa          *int32 `protobuf:"varint,34,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -756,6 +773,13 @@ func (x *Task) GetScitqAuth() bool {
 		return *x.ScitqAuth
 	}
 	return false
+}
+
+func (x *Task) GetNuma() int32 {
+	if x != nil && x.Numa != nil {
+		return *x.Numa
+	}
+	return 0
 }
 
 type TaskList struct {
@@ -10186,7 +10210,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\x80\b\n" +
+	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xa2\b\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -10216,7 +10240,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\treuse_key\x18\x15 \x01(\tH\fR\breuseKey\x88\x01\x01\x12(\n" +
 	"\rconsume_reuse\x18\x16 \x01(\bH\rR\fconsumeReuse\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"scitq_auth\x18\x17 \x01(\bH\x0eR\tscitqAuth\x88\x01\x01B\b\n" +
+	"scitq_auth\x18\x17 \x01(\bH\x0eR\tscitqAuth\x88\x01\x01\x12\x17\n" +
+	"\x04numa\x18\x18 \x01(\x05H\x0fR\x04numa\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -10235,7 +10260,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_reuse_keyB\x10\n" +
 	"\x0e_consume_reuseB\r\n" +
-	"\v_scitq_auth\"\x90\f\n" +
+	"\v_scitq_authB\a\n" +
+	"\x05_numa\"\xb2\f\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -10275,7 +10301,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\rquality_score\x18\x1f \x01(\x01H\x15R\fqualityScore\x88\x01\x01\x12&\n" +
 	"\fquality_vars\x18  \x01(\tH\x16R\vqualityVars\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"scitq_auth\x18! \x01(\bH\x17R\tscitqAuth\x88\x01\x01B\b\n" +
+	"scitq_auth\x18! \x01(\bH\x17R\tscitqAuth\x88\x01\x01\x12\x17\n" +
+	"\x04numa\x18\" \x01(\x05H\x18R\x04numa\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -10304,7 +10331,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x10_upload_durationB\x10\n" +
 	"\x0e_quality_scoreB\x0f\n" +
 	"\r_quality_varsB\r\n" +
-	"\v_scitq_auth\"1\n" +
+	"\v_scitq_authB\a\n" +
+	"\x05_numa\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +
