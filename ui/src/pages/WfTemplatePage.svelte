@@ -516,12 +516,14 @@
                   placeholder="Enter number"
                 />
 
-              {:else if param.type === 'file_content'}
-                <!-- file_content: upload a local file and embed its
-                     content in the param value, OR paste directly into
-                     the textarea. The runner sees the content as a
-                     multi-line string regardless of how it got there. -->
-                <div class="wfTemp-file-content">
+              {:else if param.type === 'text'}
+                <!-- text: long / multi-line string. Operator can upload
+                     a local file (read client-side via FileReader and
+                     embedded as content) OR paste directly into the
+                     textarea. The runner sees a multi-line string
+                     regardless of how it got there — the "file" path
+                     is just CLI/UI tooling, not a schema concern. -->
+                <div class="wfTemp-text">
                   <input
                     type="file"
                     on:change={(e) => {

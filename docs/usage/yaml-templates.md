@@ -104,28 +104,38 @@ params:
     default: true
 ```
 
-Supported types: `string`, `integer`, `boolean`, `enum` (with `choices`), `provider_region`, `path`, `file_content`.
+Supported types: `string`, `integer`, `boolean`, `enum` (with `choices`), `provider_region`, `path`, `text`.
 
 Parameters are referenced in the template as `{params.name}`. Optional parameters use the syntax `{params.name:default_value}` — the default is used when the parameter is not provided.
 
-#### `file_content` — ship a local file's content as a param value
+#### `text` — long / multi-line string content
 
-`type: file_content` is a string-shaped param whose value is the *content* of a file on the operator's machine, not its path. Useful for sample lists, manifests, inline scripts, or anything else that's awkward to retype on the command line.
+`type: text` is a string-shaped param meant for long, possibly multi-line content (sample lists, manifests, inline scripts, etc.). Server-side it's just a string; the type is a UX hint so the UI renders a textarea with an optional file picker instead of a single-line input.
 
 ```yaml
 params:
   sample_list:
-    type: file_content
+    type: text
     required: false
     help: "One glob per line, each resolving to a sample's input fastqs"
 ```
 
 How to provide a value:
-- **CLI**: `--param sample_list=@/local/path/to/list.txt` — the leading `@` reads the file and substitutes its content. (Use `\@literal` to pass a literal leading `@`.) The `@file` shorthand works on any string-shaped param, but it's the canonical way to use `file_content`.
+- **CLI**: paste it inline, or use the `@file` shorthand to read a local file: `--param sample_list=@/local/path/to/list.txt`. (See the next section — `@file` works on **any** string-shaped param, not just `text`.)
 - **UI**: the template-run form renders a file picker plus a textarea; you can either upload a file (read client-side via `FileReader`) or paste content directly.
 - **MCP / API**: pass the content as a normal string in the `param_values_json` payload.
 
-The file does **not** need to exist on the server. The runner only sees a multi-line string.
+The file does **not** need to exist on the server when the `@file` shorthand is used — the CLI/UI reads it locally and ships the content over the wire.
+
+#### `@file` CLI shorthand
+
+On any string-shaped param (`string`, `text`, etc.), a value starting with `@` is interpreted as a local path; the CLI reads the file and substitutes its content before sending the request:
+
+```sh
+scitq template run --name my_template --param 'manifest=@./manifest.txt,note=hello'
+```
+
+The file is read locally — it does not need to exist on the server. Use `\@literal` to pass a literal leading `@` (e.g. a GitHub handle).
 
 ### Parameter dependencies (`requires`)
 
@@ -341,17 +351,17 @@ iterate:
   source: lines
   file: "/etc/scitq/samples/list.txt"   # path on the runner host
   # OR:
-  # content: "{params.sample_list}"     # in-memory string, typically from a file_content param
+  # content: "{params.sample_list}"     # in-memory string, typically from a text param
 ```
 
 ##### `lines` with `item:` — per-sample input files from a list of globs
 
-When each line is a URI or glob pointing at one sample's input files, set `item:` to the file-group name you want the resolved URIs stored as. The iterator expands each glob at submission time (same primitive as `source: uri`) and attaches the matched URIs to the sample under that name — so `inputs: sample.<item>` in the step resolves the same way as for the URI iterator.
+When each line is a URI or glob pointing at one sample's input files, set `item:` to the file-group name you want the URI stored as. The iterator passes each line through *literally* — globs are **not** expanded at submission time; the worker's downloader expands them at task start via its built-in rclone-filter path. This keeps template-run instant even for thousands of samples (no per-line S3 list call).
 
 ```yaml
 params:
   sample_list:
-    type: file_content
+    type: text
     required: true
 
 iterate:
@@ -371,11 +381,11 @@ With `sample_list` containing:
 s3://rnd/raw/SCAPIS/ERR11457772/*.fastq.gz
 s3://rnd/raw/SCAPIS/ERR11457789/*.fastq.gz
 ```
-…each line becomes one task; the task tag is `ERR11457772` / `ERR11457789` (from `tag: folder`); `sample.fastqs` is the list of files matched by the glob.
+…each line becomes one task; the task tag is `ERR11457772` / `ERR11457789` (from `tag: folder`, derived from the leaf folder before the glob); `sample.fastqs` is the literal glob string. The worker downloads matched files via rclone's filter at task start.
 
-A line whose glob resolves to nothing logs a warning and is skipped (almost always a misconfiguration). A glob matching files across multiple folders yields one task per folder.
+A line whose glob resolves to nothing **at task runtime** results in a clean task failure (no inputs downloaded → the task command can't find its files). This is preferable to silent skip — a typo'd sample becomes a single failed task that's easy to retry, rather than a missing iteration that might go unnoticed.
 
-`tag:` currently supports `folder` (parent folder of the matched URIs). When `item:` is set and `tag:` is omitted, `folder` is the default. Without `item:`, each line is taken as the iteration value verbatim (existing behavior, for plain enum-style lists).
+`tag:` currently supports `folder` — the leaf directory of each glob's prefix, derived locally from the line itself. When `item:` is set and `tag:` is omitted, `folder` is the default. Without `item:`, each line is taken as the iteration value verbatim (existing behavior, for plain enum-style lists).
 
 ### Conditional iterators
 

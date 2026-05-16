@@ -2108,10 +2108,10 @@ func parseCommaSeparatedParams(input string) (string, error) {
 		key, val := parts[0], parts[1]
 		val = stripMatchedQuotes(strings.TrimSpace(val))
 		// `@/path/to/file` shorthand: substitute the file content. Lets
-		// templates with `type: file_content` (and any other string-shaped
-		// param) accept a local file path on the CLI, with the content
-		// shipped to the server in the JSON payload rather than the path
-		// itself. Use `\@literal` to opt out and pass a literal leading @.
+		// templates with `type: text` (and any other string-shaped param)
+		// accept a local file path on the CLI, with the content shipped
+		// to the server in the JSON payload rather than the path itself.
+		// Use `\@literal` to opt out and pass a literal leading @.
 		if strings.HasPrefix(val, "@") {
 			path := strings.TrimPrefix(val, "@")
 			data, err := os.ReadFile(path)

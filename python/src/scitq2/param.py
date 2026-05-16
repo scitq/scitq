@@ -42,19 +42,22 @@ class Path(str):
         return Path(value)
 
 
-class FileContent(str):
-    """Marker type for multi-line content sourced from a local file.
+class Text(str):
+    """Marker type for long, possibly multi-line, text content.
 
-    Distinct from `string` so the CLI/UI can render it as a file
-    picker (resp. apply `@path` shorthand by default) and ship the
-    file *content* — not its path — to the server. From the YAML
-    runner's perspective it's just a (potentially large) string.
+    From the gRPC / yaml_runner perspective it's just a (potentially
+    large) string. The distinction from `string` is a UX hint: the UI
+    renders this as a textarea (with an optional file picker), and the
+    operator typically populates it via `--param key=@/local/file` on
+    the CLI or by uploading / pasting in the UI. The `@file` shorthand
+    is a CLI feature available on any string-shaped param, not
+    specific to this type.
     """
-    __type_name__ = "file_content"
+    __type_name__ = "text"
 
     @staticmethod
-    def parse(value: str) -> "FileContent":
-        return FileContent(value)
+    def parse(value: str) -> "Text":
+        return Text(value)
 
 
 class Param:
@@ -109,8 +112,8 @@ class Param:
         return Param(typ=Path, **kwargs)
 
     @staticmethod
-    def file_content(**kwargs):
-        return Param(typ=FileContent, **kwargs)
+    def text(**kwargs):
+        return Param(typ=Text, **kwargs)
 
     @staticmethod
     def provider_region(**kwargs):

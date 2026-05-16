@@ -1,13 +1,13 @@
 """Tests for the extended `lines` iterator (content/item/tag) and the
-`file_content` param type — the wiring behind the
+`text` param type — the wiring behind the
 `--param sample_list=@local-file.txt` flow used by megahit_assembly.
 
 Three layers exercised:
   1. _derive_lines_tag — pure function, easy to unit-test.
-  2. file_content param round-trip through Param.parse.
+  2. text param round-trip through Param.parse.
   3. _build_single_iterator with `source: lines`, both bare and
-     item-mode (URI.find monkey-patched so the test doesn't touch the
-     network or a real bucket).
+     item-mode (each line passed through literally — worker-side
+     glob expansion).
 """
 import os
 import tempfile
@@ -15,7 +15,7 @@ import tempfile
 import pytest
 
 from scitq2 import yaml_runner
-from scitq2.param import Param, ParamSpec, FileContent
+from scitq2.param import Param, ParamSpec, Text
 
 
 # ---------------------------------------------------------------------------
@@ -72,30 +72,30 @@ def test_derive_lines_tag_rejects_unknown_kind():
 
 
 # ---------------------------------------------------------------------------
-# file_content param round-trip
+# text param round-trip
 # ---------------------------------------------------------------------------
 
-def test_file_content_param_round_trip():
-    """A multi-line string ships through Param.parse as a FileContent value
+def test_text_param_round_trip():
+    """A multi-line string ships through Param.parse as a Text value
     (a str subclass) — the runner downstream treats it like a string."""
     class P(metaclass=ParamSpec):
-        manifest = Param.file_content(required=True, help="t")
+        manifest = Param.text(required=True, help="t")
 
     payload = "line1\nline2 with spaces\nline3\n"
     parsed = P.parse({"manifest": payload})
     val = parsed._values["manifest"]
-    assert isinstance(val, FileContent)
+    assert isinstance(val, Text)
     assert isinstance(val, str)  # for downstream code that doesn't care about the marker
     assert val == payload
 
 
-def test_file_content_schema_exposes_type():
+def test_text_schema_exposes_type():
     class P(metaclass=ParamSpec):
-        manifest = Param.file_content(required=False, help="hi")
+        manifest = Param.text(required=False, help="hi")
 
     schema = P.schema()
     entry = next(p for p in schema if p["name"] == "manifest")
-    assert entry["type"] == "file_content"
+    assert entry["type"] == "text"
     assert entry["required"] is False
     assert entry["help"] == "hi"
 
@@ -155,42 +155,13 @@ def test_lines_rejects_neither_file_nor_content():
 # lines iterator — item mode (URI.find monkey-patched to avoid network)
 # ---------------------------------------------------------------------------
 
-class _FakeURIObject:
-    """Minimal duck-type stand-in for URIObject — same dynamic attribute
-    shape (sample_accession + fastqs) that the URI iterator emits today."""
-    def __init__(self, sample_accession, fastqs):
-        self.sample_accession = sample_accession
-        self.fastqs = list(fastqs)
-
-
-def _patch_uri_find(monkeypatch, mapping):
-    """Make URI.find return entries from a {line -> [URIObject, ...]} dict."""
-    from scitq2 import uri
-
-    def fake_find(line, group_by=None, pattern=None, filter=None,
-                  event_name=None, field_map=None):
-        return list(mapping.get(line, []))
-
-    monkeypatch.setattr(uri.URI, "find", staticmethod(fake_find))
-
-
-def test_lines_item_mode_attaches_file_group_and_tag(monkeypatch):
-    """Each line resolves to one sample folder; the resolved URIs land
-    in sample.<item> and the tag is the folder name (default when item:
-    is set)."""
+def test_lines_item_mode_passes_glob_through():
+    """Each line is passed through *literally* as the file group's value;
+    no submission-time URI.find / S3 list happens. The worker's downloader
+    expands the glob at task-start. Tag derived from the line's parent
+    folder (the leaf folder before the glob)."""
     line_a = "s3://bucket/SAMP_A/*.fq.gz"
     line_b = "s3://bucket/SAMP_B/*.fq.gz"
-    _patch_uri_find(monkeypatch, {
-        line_a: [_FakeURIObject("SAMP_A", [
-            "s3://bucket/SAMP_A/SAMP_A_1.fq.gz",
-            "s3://bucket/SAMP_A/SAMP_A_2.fq.gz",
-        ])],
-        line_b: [_FakeURIObject("SAMP_B", [
-            "s3://bucket/SAMP_B/SAMP_B_1.fq.gz",
-            "s3://bucket/SAMP_B/SAMP_B_2.fq.gz",
-        ])],
-    })
-
     iter_def = {
         "name": "sample",
         "source": "lines",
@@ -202,51 +173,40 @@ def test_lines_item_mode_attaches_file_group_and_tag(monkeypatch):
     assert source == "lines"
     assert len(items) == 2
     assert [it["SAMPLE"] for it in items] == ["SAMP_A", "SAMP_B"]
-    # The named file group is what `inputs: sample.fastqs` will resolve to.
-    for it, expected in zip(items, [
-        ["s3://bucket/SAMP_A/SAMP_A_1.fq.gz", "s3://bucket/SAMP_A/SAMP_A_2.fq.gz"],
-        ["s3://bucket/SAMP_B/SAMP_B_1.fq.gz", "s3://bucket/SAMP_B/SAMP_B_2.fq.gz"],
-    ]):
-        assert it["_sample"].file_groups["fastqs"] == expected
+    # The file group contains the *literal* glob — exactly what gets
+    # stored on task.inputs. The worker expands at download time.
+    assert items[0]["_sample"].file_groups["fastqs"] == [line_a]
+    assert items[1]["_sample"].file_groups["fastqs"] == [line_b]
 
 
-def test_lines_item_mode_skips_empty_glob_with_warning(monkeypatch, capsys):
-    """A line whose glob resolves to nothing logs a warning and produces
-    no iteration. Same behavior the URI iterator wouldn't have, but
-    surfaced here because the user explicitly provided the line —
-    silence would mask a typo."""
-    bad_line = "s3://bucket/typo_*/*.fq.gz"
-    good_line = "s3://bucket/SAMP_C/*.fq.gz"
-    _patch_uri_find(monkeypatch, {
-        bad_line: [],
-        good_line: [_FakeURIObject("SAMP_C", ["s3://bucket/SAMP_C/SAMP_C_1.fq.gz"])],
-    })
+def test_lines_item_mode_no_uri_find_call(monkeypatch):
+    """Submission must not call URI.find — that's the whole point of the
+    pass-through design. Sanity check so future code changes don't
+    accidentally reintroduce per-line S3 listing."""
+    from scitq2 import uri
+
+    called = []
+    def fail_find(*args, **kwargs):
+        called.append((args, kwargs))
+        raise AssertionError("URI.find must not be called in lines+item: pass-through mode")
+    monkeypatch.setattr(uri.URI, "find", staticmethod(fail_find))
 
     iter_def = {
         "name": "sample",
         "source": "lines",
-        "content": f"{bad_line}\n{good_line}\n",
+        "content": "s3://b/SAMP/*.fq.gz\n",
         "item": "fastqs",
     }
     items, _ = yaml_runner._build_single_iterator(iter_def, _empty_params())
-    captured = capsys.readouterr()
-    assert "matched no files" in captured.err
     assert len(items) == 1
-    assert items[0]["SAMPLE"] == "SAMP_C"
+    assert called == []  # belt + braces
 
 
-def test_lines_item_mode_multiple_folders_per_line(monkeypatch):
-    """A glob that resolves across N folders yields N iterations — one
-    task per folder, each with that folder's matching files."""
-    line = "s3://bucket/sample_*/*.fq.gz"
-    _patch_uri_find(monkeypatch, {
-        line: [
-            _FakeURIObject("sample_1", ["s3://bucket/sample_1/sample_1.fq.gz"]),
-            _FakeURIObject("sample_2", ["s3://bucket/sample_2/sample_2.fq.gz"]),
-            _FakeURIObject("sample_3", ["s3://bucket/sample_3/sample_3.fq.gz"]),
-        ],
-    })
-
+def test_lines_item_mode_literal_uri_no_glob():
+    """A line without a glob is also passed through verbatim. The
+    worker's downloader handles literal URIs natively (it already does
+    for the URI iterator output)."""
+    line = "s3://bucket/SAMP_X/SAMP_X_1.fq.gz"
     iter_def = {
         "name": "sample",
         "source": "lines",
@@ -254,8 +214,8 @@ def test_lines_item_mode_multiple_folders_per_line(monkeypatch):
         "item": "fastqs",
     }
     items, _ = yaml_runner._build_single_iterator(iter_def, _empty_params())
-    assert len(items) == 3
-    assert [it["SAMPLE"] for it in items] == ["sample_1", "sample_2", "sample_3"]
+    assert len(items) == 1
+    assert items[0]["_sample"].file_groups["fastqs"] == [line]
 
 
 # ---------------------------------------------------------------------------

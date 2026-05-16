@@ -338,8 +338,8 @@ def _build_params_class(params_def: Dict[str, dict]) -> type:
             namespace[name] = Param.enum(**kwargs)
         elif typ == 'path':
             namespace[name] = Param.path(**kwargs)
-        elif typ == 'file_content':
-            namespace[name] = Param.file_content(**kwargs)
+        elif typ == 'text':
+            namespace[name] = Param.text(**kwargs)
         elif typ == 'provider_region':
             namespace[name] = Param.provider_region(**kwargs)
         elif typ == 'integer':
@@ -485,13 +485,16 @@ ITERATOR_SCHEMAS: Dict[str, set] = {
     # `lines`: each non-empty line becomes one iteration.
     #   file:    path on the YAML-runner host (server-side use).
     #   content: in-memory multi-line string, typically from a
-    #            `type: file_content` param (CLI ships the file content,
-    #            UI uploads + ships content, or operator pastes directly).
+    #            `type: text` param (CLI ships the content via the
+    #            `@file` shorthand, UI uploads + ships content, or
+    #            operator pastes directly).
     #   item:    when set, each line is treated as a URI / glob and
-    #            expanded at submission time; the resolved URIs are
-    #            stored as the named file group <item> on the sample
-    #            (so `inputs: sample.<item>` works the same as the URI
-    #            iterator's `fastqs:` pattern).
+    #            stored verbatim as the named file group <item> on the
+    #            sample (so `inputs: sample.<item>` works the same as
+    #            the URI iterator's `fastqs:` pattern). Globs are
+    #            expanded at task-start by the worker's downloader, not
+    #            at submission, so this is O(1) submission cost even
+    #            for thousands of samples.
     #   tag:     where the iteration tag (= `{NAME}` substitution) is
     #            derived from. Accepted values:
     #              "folder" — parent folder of the matched URIs (default
@@ -614,7 +617,7 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
     elif source == 'lines':
         # Two ways to feed the iterator, mutually exclusive:
         #   file:    a path on the runner host
-        #   content: an in-memory string (typically from a file_content param)
+        #   content: an in-memory string (typically from a text param)
         # See _derive_lines_tag below for tag derivation rules.
         has_file = 'file' in iter_def
         has_content = 'content' in iter_def
@@ -645,31 +648,35 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
         if not item_name:
             return [{uname: line} for line in lines], None
 
-        # File-group mode: expand each line into a list of concrete URIs
-        # and attach them to a URIObject with the named file group.
-        # Reuses the same URI.find primitive as the `uri` iterator so
-        # the downstream `inputs: sample.<item>` resolution is identical.
-        from scitq2.uri import URI
+        # File-group mode: pass each line through as the named file
+        # group's literal value. The worker's downloader
+        # (`fetch/fetch.go:RcloneBackend.List/Copy`) already expands
+        # remote globs via rclone filters at task-start time, so doing
+        # a submission-time URI.find here would be unnecessary work —
+        # 3397 sequential S3 list calls during template-run for a
+        # SCAPIS-sized list was 5+ minutes of dead air before any task
+        # could exist. Skipping the lookup makes submission instant and
+        # parallelizes the expansion across N workers naturally.
+        #
+        # Tradeoffs flagged on purpose:
+        #   - A line whose glob matches nothing fails at the task's
+        #     download phase (clean F status) instead of being skipped
+        #     with a warning at submission. Arguably better — a typo'd
+        #     sample shouldn't silently disappear.
+        #   - `task.inputs` stores the glob string, not pre-expanded
+        #     URIs. UI/debug views show the glob until the worker
+        #     downloads. The actual files downloaded are visible in
+        #     the worker's log.
+        from scitq2.uri import URIObject
         items = []
         for line in lines:
-            # Each line is a glob/URI for one sample. URI.find expands
-            # the glob against the underlying storage — same call we
-            # already use for `source: uri`. group_by='folder' so the
-            # tag derivation has a folder name to lift.
-            entries = URI.find(line, group_by='folder',
-                              field_map={"sample_accession": "folder.name", "fastqs": "file.uris"})
-            if not entries:
-                # No files matched. Surface a warning rather than silently
-                # creating an empty iteration — a glob that resolves to
-                # nothing is almost always a misconfiguration.
-                print(f"⚠️ lines iterator: glob {line!r} matched no files; skipping", file=sys.stderr)
-                continue
-            # A glob may resolve to multiple folders (e.g. `s3://.../sample*/*.fq.gz`).
-            # Yield one iteration per folder so each becomes its own task.
-            for s in entries:
-                tag_value = _derive_lines_tag(line, s.fastqs, tag_kind, fallback=s.sample_accession)
-                s.file_groups = {item_name: s.fastqs}
-                items.append({uname: tag_value, '_sample': s, '_source': source})
+            tag_value = _derive_lines_tag(line, [], tag_kind)
+            sample_obj = URIObject({
+                'sample_accession': tag_value,
+                'fastqs': [line],
+            })
+            sample_obj.file_groups = {item_name: [line]}
+            items.append({uname: tag_value, '_sample': sample_obj, '_source': source})
         return items, source
 
     else:
@@ -1393,10 +1400,19 @@ def _expand_requires(data: dict, pipeline_dir: Optional[str] = None,
         step_def['depends'] = merged[0] if len(merged) == 1 else merged
 
 
+_MODULE_METADATA_KEYS = {'version', 'description', 'format'}
+
+
 def _merge_module_step(module_data: dict, step_def: dict, exclude_key: str) -> dict:
     """Merge module data with step definition. Step overrides module,
-    except 'vars' which are merged (step vars override individual module vars)."""
-    merged = dict(module_data)
+    except 'vars' which are merged (step vars override individual module vars).
+
+    Module-level metadata (`version`, `description`, `format`) is stripped:
+    those describe the module file, not the step, and would otherwise
+    pollute the merged step dict — the strict step-key validator would
+    then reject them as unknown.
+    """
+    merged = {k: v for k, v in module_data.items() if k not in _MODULE_METADATA_KEYS}
     for k, v in step_def.items():
         if k == exclude_key:
             continue
@@ -2404,7 +2420,7 @@ def main():
     parser.add_argument("--values-file", type=str, dest="values_file",
                         help="Path to a JSON file containing parameter values. "
                              "Used by the server for payloads too large for argv "
-                             "(e.g. a file_content param holding thousands of URIs). "
+                             "(e.g. a text param holding thousands of URIs). "
                              "Mutually exclusive with --values.")
     parser.add_argument("--params", action="store_true", help="Print parameter schema as JSON")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")

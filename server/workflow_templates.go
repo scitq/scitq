@@ -83,7 +83,7 @@ func (s *taskQueueServer) scriptRunner(
 		mode = strings.TrimSuffix(mode, "_no_recruiters")
 	}
 
-	// Large param-JSON payloads (e.g. a `file_content` param holding a
+	// Large param-JSON payloads (e.g. a `text` param holding a
 	// list of thousands of sample URIs) blow past Linux's per-argv-entry
 	// limit (~128 KB) long before the total ARG_MAX (~2 MB). Spill the
 	// JSON to a temp file when it's non-trivial in size and pass a
@@ -796,9 +796,9 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		// Allowed param types. Keep in sync with the type names emitted
 		// by python/src/scitq2/param.py — primitives (str/int/float/bool)
 		// plus the marker types whose `__type_name__` is exposed in the
-		// schema: provider_region, path, file_content.
+		// schema: provider_region, path, text.
 		switch param.Type {
-		case "str", "int", "float", "bool", "provider_region", "path", "file_content":
+		case "str", "int", "float", "bool", "provider_region", "path", "text":
 			// OK
 		default:
 			return &pb.UploadTemplateResponse{
