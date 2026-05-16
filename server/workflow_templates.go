@@ -83,6 +83,46 @@ func (s *taskQueueServer) scriptRunner(
 		mode = strings.TrimSuffix(mode, "_no_recruiters")
 	}
 
+	// Large param-JSON payloads (e.g. a `file_content` param holding a
+	// list of thousands of sample URIs) blow past Linux's per-argv-entry
+	// limit (~128 KB) long before the total ARG_MAX (~2 MB). Spill the
+	// JSON to a temp file when it's non-trivial in size and pass a
+	// `--values-file` path instead, which both yaml_runner.py and
+	// runner.py understand. The file is cleaned up after the script
+	// finishes via the deferred unlink below.
+	const valuesArgvThreshold = 64 * 1024 // 64 KB — generous, well below per-arg limit
+	var valuesFile string
+	useValuesFile := len(paramJSON) > valuesArgvThreshold
+	if useValuesFile {
+		f, ferr := os.CreateTemp("", "scitq_values_*.json")
+		if ferr != nil {
+			return "", "", -1, fmt.Errorf("scriptRunner: cannot create values temp file: %w", ferr)
+		}
+		if _, werr := f.WriteString(paramJSON); werr != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return "", "", -1, fmt.Errorf("scriptRunner: cannot write values temp file: %w", werr)
+		}
+		f.Close()
+		// 0o644 so the dropped-privileges script-runner user can read it.
+		if err := os.Chmod(f.Name(), 0o644); err != nil {
+			log.Printf("⚠️ scriptRunner: chmod 0644 on values file failed: %v", err)
+		}
+		valuesFile = f.Name()
+		defer os.Remove(valuesFile)
+	}
+
+	// valuesArgs is what gets appended where `--values <JSON>` used to
+	// live. Either inlines the JSON (small payloads) or points at the
+	// temp file (large payloads). Empty when the mode doesn't take a
+	// values payload.
+	var valuesArgs []string
+	if useValuesFile {
+		valuesArgs = []string{"--values-file", valuesFile}
+	} else if paramJSON != "" {
+		valuesArgs = []string{"--values", paramJSON}
+	}
+
 	var args []string
 	switch mode {
 	case "metadata":
@@ -90,14 +130,16 @@ func (s *taskQueueServer) scriptRunner(
 	case "params":
 		args = []string{scriptPath, "--params"}
 	case "run":
-		args = []string{scriptPath, "--values", paramJSON}
+		args = []string{scriptPath}
+		args = append(args, valuesArgs...)
 		if noRecruiters {
 			args = append(args, "--no-recruiters")
 		}
 	case "yaml_params":
 		args = []string{"-m", "scitq2.yaml_runner", scriptPath, "--params"}
 	case "yaml_run":
-		args = []string{"-m", "scitq2.yaml_runner", scriptPath, "--values", paramJSON}
+		args = []string{"-m", "scitq2.yaml_runner", scriptPath}
+		args = append(args, valuesArgs...)
 		if noRecruiters {
 			args = append(args, "--no-recruiters")
 		}
@@ -751,9 +793,12 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			}, nil
 		}
 
-		// Must be 'string', 'enum', 'int', 'float', etc. (accept 'list'?) or special type "provider_region"
+		// Allowed param types. Keep in sync with the type names emitted
+		// by python/src/scitq2/param.py — primitives (str/int/float/bool)
+		// plus the marker types whose `__type_name__` is exposed in the
+		// schema: provider_region, path, file_content.
 		switch param.Type {
-		case "str", "int", "float", "bool", "provider_region":
+		case "str", "int", "float", "bool", "provider_region", "path", "file_content":
 			// OK
 		default:
 			return &pb.UploadTemplateResponse{

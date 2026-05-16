@@ -174,6 +174,10 @@ def run(func: Callable, live: bool = False):
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", action="store_true", help="Print the parameter schema as JSON.")
     parser.add_argument("--values", type=str, help="JSON dictionary of parameter values.")
+    parser.add_argument("--values-file", type=str, dest="values_file",
+                        help="Path to a JSON file with parameter values. Used by "
+                             "the server for payloads too large for argv. Mutually "
+                             "exclusive with --values.")
     parser.add_argument("--metadata", action="store_true", help="Print workflow metadata (name, version, description).")
     parser.add_argument("--standalone", action="store_true", help="Set workflow to Running after submission (local run).")
     parser.add_argument("--debug", action="store_true", help="Run in Debug mode with interactive task selection.")
@@ -225,12 +229,21 @@ def run(func: Callable, live: bool = False):
 
     result = None
     has_run = False
-    if args.values and args.values!='{}':
+    if args.values and args.values_file:
+        parser.error("--values and --values-file are mutually exclusive")
+    # Materialize the JSON payload from whichever source the caller used.
+    values_payload = None
+    if args.values_file:
+        with open(args.values_file) as _vf:
+            values_payload = _vf.read()
+    elif args.values:
+        values_payload = args.values
+    if values_payload and values_payload != '{}':
         if param_class is None:
             print("❌ --values was provided but the workflow function does not accept parameters.", file=sys.stderr)
             sys.exit(1)
         try:
-            values = json.loads(args.values)
+            values = json.loads(values_payload)
             param_instance = param_class.parse(values)
             result = func(param_instance)
             has_run = True
@@ -282,7 +295,8 @@ def run(func: Callable, live: bool = False):
             if standalone and not os.environ.get("SCITQ_TEMPLATE_RUN_ID") and not args.dry_run:
                 try:
                     script_name, script_sha = _compute_script_identity(func)
-                    param_values_json = args.values if (args.values and args.values != '{}') else "{}"
+                    # Use whichever payload source the caller picked, file or inline.
+                    param_values_json = values_payload if (values_payload and values_payload != '{}') else "{}"
                     module_pins_json = json.dumps({"scitq2": _scitq2_version})
                     tr_id = client.register_adhoc_run(
                         script_name=script_name,

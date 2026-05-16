@@ -2401,6 +2401,11 @@ def main():
     parser = argparse.ArgumentParser(description="Run a YAML scitq pipeline")
     parser.add_argument("input", nargs='?', help="YAML pipeline file")
     parser.add_argument("--values", type=str, help="JSON parameter values")
+    parser.add_argument("--values-file", type=str, dest="values_file",
+                        help="Path to a JSON file containing parameter values. "
+                             "Used by the server for payloads too large for argv "
+                             "(e.g. a file_content param holding thousands of URIs). "
+                             "Mutually exclusive with --values.")
     parser.add_argument("--params", action="store_true", help="Print parameter schema as JSON")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters")
@@ -2440,7 +2445,13 @@ def main():
         print(json.dumps(ParamsClass.schema(), indent=2))
         return
 
-    values = json.loads(args.values) if args.values else {}
+    if args.values and args.values_file:
+        parser.error("--values and --values-file are mutually exclusive")
+    if args.values_file:
+        with open(args.values_file) as _vf:
+            values = json.loads(_vf.read())
+    else:
+        values = json.loads(args.values) if args.values else {}
     standalone = args.standalone or not os.environ.get("SCITQ_TEMPLATE_RUN_ID")
     pipeline_dir = os.path.dirname(os.path.abspath(args.input))
     run_yaml(data, params_values=values, dry_run=args.dry_run, standalone=standalone,
