@@ -848,7 +848,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	taskWeights *sync.Map,
 	activeTasks *sync.Map,
 	numaAllocator *NumaAllocator,
-	numaDerivedOnce *sync.Once,
+	lastDerivedStep *int32, // step_id we last auto-derived concurrency for; 0 = none yet
 ) ([]*pb.Task, string, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -922,20 +922,28 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		sem.ResizeTasks(updates)
 	}
 
-	// Auto-derive concurrency from NUMA on the first batch of numa-bound
-	// tasks we see, once per worker boot. The DSL's `task_spec.numa: N`
+	// Auto-derive concurrency from NUMA the first time we see a
+	// numa-bound task *on a given step*. The DSL's `task_spec.numa: N`
 	// implies "give each task N nodes," and the natural concurrency on
 	// this host is floor(host_nodes / N). Doing this here means the
 	// operator doesn't have to remember to set `--concurrency` to match
-	// the topology when starting a numa-aware step — `numa: 1` on a
-	// 4-node EPYC just works. EffectiveNodeCount() floors at 1 so a
-	// non-NUMA host still behaves sensibly (concurrency=1 for numa:1).
-	// After this fires once, the operator can still override via
-	// `scitq worker update --concurrency M` and the worker won't fight
-	// them — sync.Once guards re-derivation.
+	// the topology — `numa: 1` on a 4-node EPYC just works.
+	// EffectiveNodeCount() floors at 1 so a non-NUMA host still behaves
+	// sensibly (concurrency=1 for numa:1).
+	//
+	// Scoped to "first time per step" rather than "first time ever per
+	// worker boot": a permanent worker that gets recycled across
+	// workflows (recyclable_scope=W) ends up on a fresh step with
+	// concurrency reset by the recruiter's placeholder (=1), so we
+	// re-derive then. Once we've derived for a step we don't fight the
+	// operator if they later `worker update --concurrency M` it.
 	for _, t := range res.Tasks {
 		if t.Numa == nil || t.GetNuma() < 1 {
 			continue
+		}
+		stepID := t.GetStepId()
+		if stepID == 0 || stepID == *lastDerivedStep {
+			break // unstepped task, or already derived for this step
 		}
 		nodes := numaAllocator.EffectiveNodeCount()
 		desired := int32(nodes / int(t.GetNuma()))
@@ -943,23 +951,25 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 			desired = 1
 		}
 		if desired != w.Concurrency {
-			numaDerivedOnce.Do(func() {
-				log.Printf("📐 Auto-deriving concurrency from numa: %d → %d (host has %d NUMA node(s), task wants %d)",
-					w.Concurrency, desired, nodes, t.GetNuma())
-				if _, err := client.UpdateWorker(ctx, &pb.WorkerUpdateRequest{
-					WorkerId:    w.WorkerId,
-					Concurrency: &desired,
-				}); err != nil {
-					log.Printf("⚠️ Auto-derive: UpdateWorker failed: %v — staying at %d", err, w.Concurrency)
-					return
-				}
-				// Resize locally too so the executer thread starts using
-				// the new value immediately; the next ping will push the
-				// same value back from the server, which is idempotent.
-				sem.ResizeAll(float64(desired), updates)
-				w.Concurrency = desired
-			})
+			log.Printf("📐 Auto-deriving concurrency from numa: %d → %d (step %d, host has %d NUMA node(s), task wants %d)",
+				w.Concurrency, desired, stepID, nodes, t.GetNuma())
+			if _, err := client.UpdateWorker(ctx, &pb.WorkerUpdateRequest{
+				WorkerId:    w.WorkerId,
+				Concurrency: &desired,
+			}); err != nil {
+				log.Printf("⚠️ Auto-derive: UpdateWorker failed: %v — staying at %d", err, w.Concurrency)
+				break
+			}
+			// Resize locally too so the executer thread starts using
+			// the new value immediately; the next ping will push the
+			// same value back from the server, which is idempotent.
+			sem.ResizeAll(float64(desired), updates)
+			w.Concurrency = desired
 		}
+		// Mark this step as derived even when desired==current — we
+		// don't want to re-emit the log line on every ping just because
+		// the operator happened to have the right value already.
+		*lastDerivedStep = stepID
 		break // every task in a step shares the same numa value
 	}
 
@@ -1110,7 +1120,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map, numaAllocator *NumaAllocator, numaDerivedOnce *sync.Once) {
+func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map, numaAllocator *NumaAllocator, lastDerivedStep *int32) {
 	store := dm.Store
 
 	var consecErrors int
@@ -1168,7 +1178,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			break
 		}
 
-		tasks, upgradeReq, serverGating, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, numaDerivedOnce)
+		tasks, upgradeReq, serverGating, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, lastDerivedStep)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -1480,10 +1490,14 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 		// inherit their NUMA assignments so we don't double-book a node.
 		numaAlloc.RebuildFromDocker(ctx, config.Name)
 	}
-	// Once-per-boot guard for the numa→concurrency auto-derivation in
-	// fetchTasks. Lets the worker self-resize on first numa task receipt
-	// while letting later manual `worker update --concurrency M` stick.
-	var numaDerivedOnce sync.Once
+	// Per-step memory for the numa→concurrency auto-derivation in
+	// fetchTasks. Stores the step_id we last derived for; the auto-
+	// derive fires whenever the worker arrives on a *new* step
+	// (covering the recycled-permanent-worker case where the recruiter
+	// resets concurrency to its placeholder). A subsequent manual
+	// `worker update --concurrency M` from the operator still wins:
+	// the auto-derive won't re-fire on the same step again.
+	var lastDerivedStep int32 // 0 = nothing derived yet
 
 	reporter := event.NewReporter(qclient.Client, config.WorkerId, config.Name, 5*time.Second)
 	defer reporter.StopOutbox()
@@ -1500,7 +1514,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc)
 
 	// Start processing tasks
-	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &numaDerivedOnce)
+	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &lastDerivedStep)
 
 	// 🔎 Periodic diagnostics: detect tasks stuck active but not executing (likely in O)
 	go func() {
