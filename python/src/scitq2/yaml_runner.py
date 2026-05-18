@@ -1307,15 +1307,21 @@ def _expand_requires(data: dict, pipeline_dir: Optional[str] = None,
     # would publish to its module-default cache slot while the consuming
     # step looks up a different (user-pinned) slot — cache miss with
     # nothing to consume.
-    needed: List[Tuple[str, Dict]] = []  # (path, inherited_vars), in discovery order
+    needed: List[Tuple[str, Dict, Any]] = []  # (path, inherited_vars, inherited_when), in discovery order
     seen: set = set()  # (normalised_path, frozen_vars) already decided on
 
-    def _collect_transitive(ref: str, inherited_vars: Dict) -> None:
+    def _collect_transitive(ref: str, inherited_vars: Dict, inherited_when: Any) -> None:
         norm = _normalise_ref(ref)
         # Dedup on (path, inherited_vars). Two steps requiring the same
         # module with the same vars inject only once; with different
         # vars (e.g. different METAPHLAN_INDEX) each gets its own
-        # injection so each cache slot gets populated.
+        # injection so each cache slot gets populated. `when:` is not
+        # part of the dedup key — if multiple requirers with different
+        # `when` conditions point at the same module + vars, the first
+        # discovered wins. The right answer is OR-of-whens, but that
+        # would need cond-merging logic; in practice today, requirers
+        # that need different conditional gating tend to have different
+        # vars too, so this falls out naturally.
         vars_key = tuple(sorted((k, _freeze_for_dedup(v)) for k, v in inherited_vars.items()))
         if (norm, vars_key) in seen:
             return
@@ -1324,35 +1330,42 @@ def _expand_requires(data: dict, pipeline_dir: Optional[str] = None,
         if not mod:
             return
         for sub_req in mod.get('requires', []) or []:
-            _collect_transitive(sub_req, inherited_vars)
+            _collect_transitive(sub_req, inherited_vars, inherited_when)
         if norm not in explicitly_imported:
-            needed.append((norm, inherited_vars))
+            needed.append((norm, inherited_vars, inherited_when))
 
     # First pass: walk the original steps to discover every transitively-
-    # required module. Each step's own vars are inherited into its
-    # required modules so per-step customisation propagates.
+    # required module. Each step's own vars AND `when:` are inherited
+    # into its required modules so:
+    #   - per-step customisation propagates (vars)
+    #   - skipping the requirer skips its setup deps too (when), so an
+    #     auto-injected catalog download doesn't run for a workflow that
+    #     has the consuming step disabled by `when:`.
     for step_def in steps:
         step_vars = step_def.get('vars') or {}
         if not isinstance(step_vars, dict):
             step_vars = {}
+        step_when = step_def.get('when')
         ref = step_def.get('import') or step_def.get('module')
         if isinstance(ref, str):
             mod = _load(ref)
             if mod:
                 for sub_req in mod.get('requires', []) or []:
-                    _collect_transitive(sub_req, step_vars)
+                    _collect_transitive(sub_req, step_vars, step_when)
         for inline_req in step_def.get('requires', []) or []:
-            _collect_transitive(inline_req, step_vars)
+            _collect_transitive(inline_req, step_vars, step_when)
 
     # Build the final step list: injections first (in discovery order so
     # transitive prerequisites precede their consumers), then the user's
     # original steps in their original order.
     if needed:
         injections = []
-        for path, inherited_vars in needed:
+        for path, inherited_vars, inherited_when in needed:
             inj: Dict[str, Any] = {'import': path}
             if inherited_vars:
                 inj['vars'] = dict(inherited_vars)
+            if inherited_when is not None:
+                inj['when'] = inherited_when
             injections.append(inj)
         final_steps = injections + steps
         data['steps'] = final_steps
