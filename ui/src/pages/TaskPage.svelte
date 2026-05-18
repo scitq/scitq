@@ -924,6 +924,7 @@ async function handleWebSocketMessage(message) {
     <button class="tasks-status-assigned" on:click={() => handleStatusClick('A')}>Assigned</button>
     <button class="tasks-status-accepted" on:click={() => handleStatusClick('C')}>Accepted</button>
     <button class="tasks-status-downloading" on:click={() => handleStatusClick('D')}>Downloading</button>
+    <button class="tasks-status-on-hold" on:click={() => handleStatusClick('O')}>On-hold</button>
     <button class="tasks-status-running" on:click={() => handleStatusClick('R')}>Running</button>
     <button class="tasks-status-uploading-as" on:click={() => handleStatusClick('U')}>Uploading (AS)</button>
     <button class="tasks-status-succeeded" on:click={() => handleStatusClick('S')}>Succeeded</button>

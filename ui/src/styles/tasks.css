@@ -134,6 +134,14 @@
   background: linear-gradient(135deg, #99caed, #b1d7f1);
 }
 
+/* On-hold: input downloaded, waiting for a slot to open up.
+   Sits between Downloading and Running in the lifecycle — pick a
+   teal that reads as "ready, paused" against the surrounding blues. */
+.tasks-status-tabs .tasks-status-on-hold,
+.tasks-status-pill.on-hold {
+  background: linear-gradient(135deg, #88c5c2, #a4d6d3);
+}
+
 .tasks-status-tabs .tasks-status-running,
 .tasks-status-pill.running {
   background: linear-gradient(135deg, #6bb2e6, #85c1ea);

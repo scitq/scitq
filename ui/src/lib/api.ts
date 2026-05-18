@@ -1156,6 +1156,7 @@ export function getJobStatusClass(status: string): string {
     case 'A': return 'assigned';
     case 'C': return 'accepted';
     case 'D': return 'downloading';
+    case 'O': return 'on-hold';
     case 'R': return 'running';
     case 'U': return 'uploading-success';
     case 'V': return 'uploading-failure';
@@ -1180,6 +1181,7 @@ export function getJobStatusText(status: string): string {
     case 'A': return 'Assigned';
     case 'C': return 'Accepted';
     case 'D': return 'Downloading';
+    case 'O': return 'On-hold';
     case 'R': return 'Running';
     case 'U': return 'Uploading (success)';
     case 'V': return 'Uploading (failure)';

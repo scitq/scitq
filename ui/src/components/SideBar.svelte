@@ -156,6 +156,7 @@
             {#if inProgressOpen}
               <div class="dashboard-submenu-items">
                 <a href="#/tasks?status=D">Downloading</a>
+                <a href="#/tasks?status=O">On-hold</a>
                 <a href="#/tasks?status=R">Running</a>
               </div>
             {/if}
