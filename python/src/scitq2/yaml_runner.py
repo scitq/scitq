@@ -453,6 +453,12 @@ STEP_NATIVE_KEYS = {
     'quality', 'retry', 'grouped', 'per_sample',
     # adhoc container builders (conda / apt / binary / pip)
     'conda', 'apt', 'binary', 'pip',
+    # `requires:` lists prerequisite modules that get auto-injected as
+    # synthetic steps by _expand_requires (which runs before _build_step).
+    # The field is dead state by the time the validator runs — already
+    # consumed — but it's a legitimate authored field that both inline
+    # steps and module-imported steps can carry.
+    'requires',
 }
 
 WORKER_POOL_KEYS = {
