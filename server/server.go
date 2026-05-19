@@ -110,6 +110,30 @@ type TaskUpdateBroadcast struct {
 	WorkerId int32
 }
 
+// normalizeURI collapses consecutive `/` runs in a URI's path portion
+// while preserving the `://` scheme separator and an empty authority
+// (e.g. `file:///path` is left alone). Idempotent. Catches the common
+// failure where concatenating `<base>/` with `/<sub>` produces `//`,
+// which rclone then treats as a literal key segment.
+func normalizeURI(uri string) string {
+	idx := strings.Index(uri, "://")
+	if idx < 0 {
+		return uri
+	}
+	schemeEnd := idx + 3
+	rest := uri[schemeEnd:]
+	slash := strings.Index(rest, "/")
+	if slash < 0 {
+		return uri
+	}
+	host := rest[:slash]
+	path := rest[slash:]
+	for strings.Contains(path, "//") {
+		path = strings.ReplaceAll(path, "//", "/")
+	}
+	return uri[:schemeEnd] + host + path
+}
+
 func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx context.Context, cancel context.CancelFunc) *taskQueueServer {
 	s := &taskQueueServer{
 		db:             db,
@@ -519,6 +543,22 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		return nil, fmt.Errorf("command too long (%d characters) without explicit shell definition. "+
 			"Either shorten the command or define an explicit shell using the 'shell' parameter",
 			len(req.Command))
+	}
+
+	// Normalize URI fields. Concatenating `final_output` (often with a
+	// trailing /) with a sub-path (often with a leading /) produces
+	// `s3://bucket/path//sub/` — rclone treats the literal `//` as a
+	// real key segment, so objects end up at an awkward path that the
+	// canonical (single-/) URI doesn't list. Catch it once here so
+	// every persistence + listing downstream sees the canonical form.
+	// Belt-and-braces with the DSL-side normalization in workflow.py.
+	if req.Publish != nil {
+		p := normalizeURI(*req.Publish)
+		req.Publish = &p
+	}
+	if req.Output != nil {
+		o := normalizeURI(*req.Output)
+		req.Output = &o
 	}
 
 	var taskID int32

@@ -13,6 +13,31 @@ from collections.abc import Iterable
 from abc import ABC, abstractmethod
 
 
+def _normalize_uri(uri: str) -> str:
+    """Collapse consecutive slashes in a URI's path portion.
+
+    Preserves the `://` scheme separator and an empty authority
+    (`file:///path` stays valid). Only touches the path *after* the
+    host. So `s3://rnd/results//x/` → `s3://rnd/results/x/`, but
+    `file:///path` is untouched (the leading `/` is the start of the
+    path, not a host separator).
+
+    Idempotent: normalize_uri(normalize_uri(x)) == normalize_uri(x).
+    """
+    if not isinstance(uri, str) or "://" not in uri:
+        return uri
+    scheme_end = uri.index("://") + 3
+    rest = uri[scheme_end:]
+    if "/" not in rest:
+        return uri
+    path_start = rest.index("/")
+    host = rest[:path_start]
+    path = rest[path_start:]
+    while "//" in path:
+        path = path.replace("//", "/")
+    return uri[:scheme_end] + host + path
+
+
 class Quality:
     """Defines quality variable extraction and scoring for a Step.
 
@@ -594,13 +619,13 @@ class Step:
             parts = [root, self.name]
             if tag:
                 parts.append(tag)
-            return "/".join(parts) + "/"
+            return _normalize_uri("/".join(parts) + "/")
         # String publish: absolute URI (contains "://") is used as-is, otherwise relative to publish_root
         if "://" in raw_publish:
-            return raw_publish
+            return _normalize_uri(raw_publish)
         if root is None:
             raise ValueError(f"Step '{self.name}' uses a relative publish path '{raw_publish}' but no publish_root is set on the Workflow.")
-        return f"{root}/{raw_publish.strip('/')}/"
+        return _normalize_uri(f"{root}/{raw_publish.strip('/')}/")
 
     def output(self, name: Optional[str] = None, grouped: bool = False, move: Optional[str] = None, action: Optional[str] = "", task: Optional[Task] = None):
         """Create an Output object for this step last task (or the whole step if grouped is True or a specific task if task is specified)."""
