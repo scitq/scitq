@@ -806,8 +806,24 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 		log.Printf("⚠️ failed to recompute workflow status for %d: %v", workflowID, err)
 		return
 	}
-	// Free workers: promote workflow-scoped workers to global when workflow completes
-	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND deleted_at IS NULL AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, workflowID)
+	// Free workers: promote workflow-scoped workers to global when
+	// workflow completes. See DeleteWorkflow for why the predicate
+	// covers both step_id-on-workflow AND has-tasks-on-workflow —
+	// otherwise a worker that finished its last task and dropped its
+	// step_id before the recompute fires never gets promoted.
+	s.db.Exec(
+		`UPDATE worker SET recyclable_scope='G'
+		   WHERE recyclable_scope='W'
+		     AND deleted_at IS NULL
+		     AND (
+		       step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)
+		       OR worker_id IN (
+		         SELECT DISTINCT t.worker_id FROM task t
+		           JOIN step s ON s.step_id = t.step_id
+		           WHERE s.workflow_id=$1 AND t.worker_id IS NOT NULL
+		       )
+		     )`,
+		workflowID)
 	ws.EmitWS("workflow", workflowID, "status", struct {
 		WorkflowId int32  `json:"workflowId"`
 		Status     string `json:"status"`
@@ -5447,8 +5463,33 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 		}
 	}
 
-	// Free workers: promote workflow-scoped workers to global before cascade nullifies step_id
-	s.db.Exec(`UPDATE worker SET recyclable_scope='G' WHERE recyclable_scope='W' AND deleted_at IS NULL AND step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)`, req.WorkflowId)
+	// Free workers: promote workflow-scoped workers to global. We catch
+	// two flavors of "involved with this workflow":
+	//   (a) currently sitting on one of this workflow's steps
+	//       (worker.step_id IN workflow's steps)
+	//   (b) had at least one task on this workflow, even if the worker
+	//       is currently between assignments (step_id NULL). This is
+	//       the case that previously slipped through and left bioit /
+	//       bioit3 stuck at recyclable_scope='W' after the parent
+	//       workflow was deleted.
+	// Either is sufficient: workflow-scoped workers exist *because of*
+	// this workflow, so deleting it releases them by definition.
+	if _, err := s.db.Exec(
+		`UPDATE worker SET recyclable_scope='G'
+		   WHERE recyclable_scope='W'
+		     AND deleted_at IS NULL
+		     AND (
+		       step_id IN (SELECT step_id FROM step WHERE workflow_id=$1)
+		       OR worker_id IN (
+		         SELECT DISTINCT t.worker_id FROM task t
+		           JOIN step s ON s.step_id = t.step_id
+		           WHERE s.workflow_id=$1 AND t.worker_id IS NOT NULL
+		       )
+		     )`,
+		req.WorkflowId,
+	); err != nil {
+		log.Printf("⚠️ DeleteWorkflow %d: promote-to-G failed: %v", req.WorkflowId, err)
+	}
 	_, err := s.db.Exec(`DELETE FROM workflow WHERE workflow_id = $1`, req.WorkflowId)
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete workflow: %w", err)
