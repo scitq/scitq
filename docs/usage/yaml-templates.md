@@ -1143,6 +1143,8 @@ The output path supports **glob patterns** for more precise checks. Instead of s
 
 This only skips if `.sam` files exist at the publish path — partial output (e.g. log files from a failed run) won't trigger a false skip.
 
+`skip_if_exists` takes precedence over [opportunistic reuse](#opportunistic-reuse): a step with `skip_if_exists: true` is never short-circuited by a reuse cache hit, even when the workflow runs with `opportunistic: true`. The current publish target is the single source of truth.
+
 ## Publishing results
 
 The `publish` field copies task outputs to permanent storage **on success only**. If a task fails, its output is uploaded to the workspace path (for debugging) but never to the publish path. This ensures that `skip_if_exists` checks against the publish path are reliable — if files exist there, the task genuinely succeeded.
@@ -1519,7 +1521,11 @@ Reuse hits are database lookups (instant). If a cached output turns out to be mi
 
 ### Reuse vs skip_if_exists
 
-Both can be active simultaneously. The reuse check runs first (DB lookup, no I/O). If it misses, `skip_if_exists` can still skip based on output path presence. They are complementary:
+`skip_if_exists` **takes precedence over opportunistic reuse**: a task declared with `skip_if_exists: true` is excluded from the reuse path entirely, even when the workflow runs with `opportunistic: true`. Such a task is evaluated only against its current publish target via the file-existence check.
+
+Why: `skip_if_exists` is for resource-driven tasks (catalog downloads, host indexes, anything anchored to `{RESOURCE_ROOT}` or a shared publish location). What matters is whether the publish target exists *now*, in *this* resource context — not whether some prior task with the same `reuse_key` happened to succeed in a different workspace. Reusing a stale cache entry whose publish target has since been evicted would silently break downstream consumers that fetch from the publish path.
+
+For all other tasks (no `skip_if_exists`), the reuse check runs first (DB lookup, no I/O). A reuse miss falls through to the regular dispatch path.
 
 | Feature | `skip_if_exists` | Opportunistic reuse |
 |---|---|---|
@@ -1527,3 +1533,4 @@ Both can be active simultaneously. The reuse check runs first (DB lookup, no I/O
 | Check | File existence at output/publish path | Database key lookup |
 | Speed | Requires I/O (listing remote files) | Instant (DB primary key) |
 | Granularity | Per step | Workflow-level opt-in |
+| Precedence | Wins when both are set | Skipped when `skip_if_exists=true` |

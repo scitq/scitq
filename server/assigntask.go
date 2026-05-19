@@ -517,6 +517,14 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 	// regardless when the step is reuse-eligible) but they won't *consume*.
 	// The reuse_key IS NOT NULL check stays as a no-match guard; with the
 	// consume_reuse=true filter it's redundant in practice but cheap.
+	//
+	// Also exclude skip_if_exists tasks: those are resource-driven
+	// (RESOURCE_ROOT, host catalogs, etc.) and must be evaluated against
+	// the *current* publish target via skipExistingTasks. A prior task with
+	// the same reuse_key may have run under a different resource context
+	// or against a publish target that has since been evicted — reusing
+	// its cached `output` silently breaks downstream dependents that read
+	// from `publish`, not `output`.
 	rows, err := tx.Query(`
 		SELECT t.task_id, t.reuse_key, t.step_id, tr.output_path, tr.task_id AS original_task_id
 		FROM task t
@@ -524,6 +532,7 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 		WHERE t.status = 'P'
 		  AND t.consume_reuse = true
 		  AND t.reuse_key IS NOT NULL
+		  AND t.skip_if_exists = false
 	`)
 	if err != nil {
 		log.Printf("⚠️ reuse-check: failed to query: %v", err)

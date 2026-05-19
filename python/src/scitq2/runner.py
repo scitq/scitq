@@ -183,7 +183,7 @@ def run(func: Callable, live: bool = False):
     parser.add_argument("--debug", action="store_true", help="Run in Debug mode with interactive task selection.")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run", help="Create the workflow, verify it, then delete it without launching.")
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters.")
-    parser.add_argument("--opportunistic", action="store_true", help="Enable opportunistic reuse of previous results.")
+    parser.add_argument("--opportunistic", action="store_true", help="Enable opportunistic reuse of previous results. Steps declared with skip_if_exists=True are excluded — they are evaluated against the current publish target instead.")
     parser.add_argument("--untrusted", type=str, default="", help="Comma-separated step names to force re-execute.")
     parser.add_argument("--live", action="store_true", help="Keep DSL running for dynamic task submission.")
     args = parser.parse_args()

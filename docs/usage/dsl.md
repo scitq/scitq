@@ -1191,6 +1191,8 @@ When `opportunistic=True`, each task gets a **reuse key** computed from its comm
 
 The `untrusted` list forces specific steps to re-execute. Since internal inputs use upstream reuse keys as identity, breaking trust at one step breaks the entire downstream chain.
 
+**Precedence:** a step declared with `skip_if_exists=True` is excluded from opportunistic reuse, even when `run(..., opportunistic=True)`. Such steps are resource-driven (typically anchored to a `RESOURCE_ROOT` publish path) and must be evaluated against the current publish target, not against a per-workflow cache from a different resource context. See [YAML templates — Reuse vs skip_if_exists](yaml-templates.md#reuse-vs-skip_if_exists).
+
 See [YAML templates — Opportunistic reuse](yaml-templates.md#opportunistic-reuse) for the full explanation of the mechanism.
 
 The CLI runner also supports these flags:
