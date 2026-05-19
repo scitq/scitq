@@ -937,13 +937,20 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	// concurrency reset by the recruiter's placeholder (=1), so we
 	// re-derive then. Once we've derived for a step we don't fight the
 	// operator if they later `worker update --concurrency M` it.
-	for _, t := range res.Tasks {
-		if t.Numa == nil || t.GetNuma() < 1 {
-			continue
+	// tryDerive returns true when it acted on this task (either derived for
+	// a new step, or recognised the task is for an already-derived step).
+	// The poll-side loop uses that to stop early; the activeTasks fallback
+	// only stops on an actual new derive — see below.
+	tryDerive := func(t *pb.Task) (acted, stepIsNew bool) {
+		if t == nil || t.Numa == nil || t.GetNuma() < 1 {
+			return false, false
 		}
 		stepID := t.GetStepId()
-		if stepID == 0 || stepID == *lastDerivedStep {
-			break // unstepped task, or already derived for this step
+		if stepID == 0 {
+			return false, false
+		}
+		if stepID == *lastDerivedStep {
+			return true, false // already derived; nothing to do
 		}
 		nodes := numaAllocator.EffectiveNodeCount()
 		desired := int32(nodes / int(t.GetNuma()))
@@ -958,7 +965,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 				Concurrency: &desired,
 			}); err != nil {
 				log.Printf("⚠️ Auto-derive: UpdateWorker failed: %v — staying at %d", err, w.Concurrency)
-				break
+				return true, true
 			}
 			// Resize locally too so the executer thread starts using
 			// the new value immediately; the next ping will push the
@@ -970,7 +977,31 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		// don't want to re-emit the log line on every ping just because
 		// the operator happened to have the right value already.
 		*lastDerivedStep = stepID
-		break // every task in a step shares the same numa value
+		return true, true
+	}
+	derivedNewStep := false
+	for _, t := range res.Tasks {
+		if acted, isNew := tryDerive(t); acted {
+			derivedNewStep = isNew
+			break
+		}
+	}
+	// Fallback for the chicken-and-egg case: a permanent worker upgraded
+	// mid-workflow is already running a numa task at concurrency=1, so the
+	// server has nothing new to push (res.Tasks is empty) and the loop
+	// above never fires. Scan locally-known active tasks — they carry the
+	// same Numa/StepId fields. Stop only on an actual new derive, so we
+	// don't get stuck on a stale active task from the previously-derived
+	// step when a new-step task is also present.
+	if !derivedNewStep {
+		activeTasks.Range(func(_, v any) bool {
+			t, ok := v.(*pb.Task)
+			if !ok {
+				return true
+			}
+			_, isNew := tryDerive(t)
+			return !isNew
+		})
 	}
 
 	// Check activeTasks map
@@ -1239,7 +1270,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 
 			task.Status = "C" // Accepted
 			now := time.Now()
-			activeTasks.Store(task.TaskId, struct{}{})
+			activeTasks.Store(task.TaskId, task)
 			activeSince.Store(task.TaskId, now)
 			reporter.UpdateTaskAsync(task.TaskId, task.Status, "", nil)
 			log.Printf("📝 Task %d accepted at %s", task.TaskId, now.Format(time.RFC3339))
