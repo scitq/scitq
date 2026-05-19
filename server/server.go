@@ -1683,13 +1683,37 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 			  AND NOT t.hidden
 		),
 		cloned AS (
+			-- Clone *every* task field that defines what the task does or
+			-- where its results go. Missing fields here default to NULL
+			-- or zero in the new row, which silently breaks invariants:
+			--   - publish: NULL meant the retry produced outputs only to
+			--     the workspace, leaving the (likely-bad) files at the
+			--     original publish path untouched — exactly what made
+			--     "retry" feel broken before.
+			--   - skip_if_exists / numa / reuse_key / consume_reuse:
+			--     reset-to-default looks innocent until a retry on a
+			--     skip-if-exists step silently re-runs the rclone check,
+			--     or a NUMA-bound task loses its binding, etc.
+			-- Rule: a retry IS the same task, run again. Same publish,
+			-- same task_spec-level fields, same reuse policy.
+			--
+			-- skip_checked: when retrying a successful task that had
+			-- skip_if_exists=true, we set skip_checked=TRUE on the clone
+			-- so skipExistingTasks doesn't immediately re-promote it to
+			-- S via the rclone check (the old outputs are still at the
+			-- publish path and would match, defeating the operator's
+			-- intent — they explicitly retried the successful task,
+			-- they want it to actually run). For retries of failed
+			-- tasks, the old outputs typically don't exist anyway, so
+			-- skip_checked=FALSE is fine (default).
 			INSERT INTO task (
 				step_id, command, shell, container, container_options,
 				status, worker_id, input, resource,
 				output, output_files, output_is_compressed,
 				retry, is_final, uses_cache,
 				download_timeout, running_timeout, upload_timeout,
-				input_hash, previous_task_id, retry_count, task_name, scitq_auth
+				input_hash, previous_task_id, retry_count, task_name, scitq_auth,
+				publish, skip_if_exists, skip_checked, reuse_key, consume_reuse, numa
 			)
 			SELECT
 				t.step_id, t.command, t.shell, t.container, t.container_options,
@@ -1697,7 +1721,10 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				t.output, '{}', FALSE,
 				COALESCE($2, (SELECT initial_retry FROM root)), t.is_final, t.uses_cache,
 				t.download_timeout, t.running_timeout, t.upload_timeout,
-				t.input_hash, t.task_id, 0, t.task_name, t.scitq_auth
+				t.input_hash, t.task_id, 0, t.task_name, t.scitq_auth,
+				t.publish, t.skip_if_exists,
+				(t.status = 'S' AND t.skip_if_exists),
+				t.reuse_key, t.consume_reuse, t.numa
 			FROM task t
 			WHERE t.task_id = (SELECT task_id FROM validated)
 			RETURNING task_id
