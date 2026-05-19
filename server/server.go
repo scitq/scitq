@@ -5369,13 +5369,19 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 	s.emitDeletedTasksForWorkflow(req.WorkflowId)
 
 	// Signal all running tasks of this workflow with SIGKILL *before* the
-	// cascade delete removes the rows. Workers that happen to poll between
-	// this UPDATE and the DELETE below will see signal='K' and run their
-	// normal signal handler (clean docker kill + status update), which is
-	// faster and tidier than the client-side orphan-kill fallback. Tasks
-	// the workers don't poll in time still get cleaned up by that orphan
-	// detection (~9s after the cascade), so this is a "make the common
-	// case fast" optimisation, not a correctness fix.
+	// cascade delete removes the rows. Workers that poll while the signal
+	// is queued will see signal='K' in PingAndTakeNewTasks and run their
+	// normal signal handler (clean docker kill + status update).
+	//
+	// We record `signalAt` and then wait below for every involved worker
+	// to ping AFTER that moment — i.e. each worker has been told about
+	// the SIGKILL — before we cascade-delete. Without this wait the
+	// cascade vacates the task rows in the same DB roundtrip and a
+	// worker that polls 50ms later sees nothing to signal; the tasks
+	// keep running until orphan-detect kicks in (which, on long-running
+	// workers with empty journals, has been unreliable in practice).
+	signalAt := time.Now()
+	var signalledWorkers []int32
 	if res, err := s.db.ExecContext(ctx,
 		`UPDATE task SET signal = 'K'
 		   WHERE step_id IN (SELECT step_id FROM step WHERE workflow_id = $1)
@@ -5385,10 +5391,60 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 			log.Printf("🔪 DeleteWorkflow %d: queued SIGKILL on %d running task(s) before cascade delete",
 				req.WorkflowId, n)
 		}
+		// Collect the workers that had at least one signalled task.
+		// These are the ones whose ack we need to wait for.
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT DISTINCT worker_id FROM task
+			  WHERE step_id IN (SELECT step_id FROM step WHERE workflow_id = $1)
+			    AND signal = 'K' AND worker_id IS NOT NULL`,
+			req.WorkflowId)
+		if err == nil {
+			for rows.Next() {
+				var wid int32
+				if rows.Scan(&wid) == nil {
+					signalledWorkers = append(signalledWorkers, wid)
+				}
+			}
+			rows.Close()
+		}
 	} else {
 		// Non-fatal: the orphan-kill on each worker still cleans up.
 		log.Printf("⚠️ DeleteWorkflow %d: pre-delete signal queue failed (%v); relying on client orphan-kill",
 			req.WorkflowId, err)
+	}
+
+	// Wait until each involved worker has pinged since signalAt — that's
+	// our proof the SIGKILL was actually delivered in a PingAndTakeNewTasks
+	// response and the worker had a chance to act on it. Hard cap at 15s
+	// so an unreachable worker doesn't wedge the delete indefinitely:
+	// past that, fall through and let orphan-detect handle it when the
+	// worker eventually reconnects.
+	if len(signalledWorkers) > 0 {
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			var notReady int
+			err := s.db.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM worker
+				  WHERE worker_id = ANY($1::int[])
+				    AND deleted_at IS NULL
+				    AND (last_ping IS NULL OR last_ping < $2)`,
+				pq.Array(signalledWorkers), signalAt,
+			).Scan(&notReady)
+			if err != nil {
+				log.Printf("⚠️ DeleteWorkflow %d: ping-ack query failed (%v); proceeding to delete", req.WorkflowId, err)
+				break
+			}
+			if notReady == 0 {
+				log.Printf("✅ DeleteWorkflow %d: all %d involved worker(s) acknowledged signal — cascading delete",
+					req.WorkflowId, len(signalledWorkers))
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if time.Now().After(deadline) {
+			log.Printf("⚠️ DeleteWorkflow %d: timed out waiting for worker ping-ack (15s); proceeding to delete — orphan-detect will catch any stragglers",
+				req.WorkflowId)
+		}
 	}
 
 	// Free workers: promote workflow-scoped workers to global before cascade nullifies step_id
