@@ -525,6 +525,19 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 	// or against a publish target that has since been evicted — reusing
 	// its cached `output` silently breaks downstream dependents that read
 	// from `publish`, not `output`.
+	//
+	// Same-workspace-root constraint: only accept a cached output whose
+	// scheme+authority matches the current task's output. Without this, a
+	// reuse hit can silently redirect downstream inputs across cloud regions
+	// (e.g. azswed:// → s3://), turning a free intra-region read into a
+	// paid cross-region egress on every dependent task. The substring regex
+	// extracts the `scheme://authority` prefix (everything up to the first
+	// path '/' after `://`); equality there means same backend root.
+	//
+	// `COALESCE(..., '')` so paths without a scheme (local file paths used
+	// in integration tests, and any future on-host workspace) collapse to
+	// '' on both sides — two local paths match each other, but a local path
+	// never matches a remote URI.
 	rows, err := tx.Query(`
 		SELECT t.task_id, t.reuse_key, t.step_id, tr.output_path, tr.task_id AS original_task_id
 		FROM task t
@@ -533,6 +546,10 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 		  AND t.consume_reuse = true
 		  AND t.reuse_key IS NOT NULL
 		  AND t.skip_if_exists = false
+		  AND t.output IS NOT NULL
+		  AND tr.output_path IS NOT NULL
+		  AND COALESCE(substring(tr.output_path FROM '^[^:]+://[^/]+'), '')
+		      = COALESCE(substring(t.output FROM '^[^:]+://[^/]+'), '')
 	`)
 	if err != nil {
 		log.Printf("⚠️ reuse-check: failed to query: %v", err)

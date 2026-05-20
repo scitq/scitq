@@ -1193,6 +1193,8 @@ The `untrusted` list forces specific steps to re-execute. Since internal inputs 
 
 **Precedence:** a step declared with `skip_if_exists=True` is excluded from opportunistic reuse, even when `run(..., opportunistic=True)`. Such steps are resource-driven (typically anchored to a `RESOURCE_ROOT` publish path) and must be evaluated against the current publish target, not against a per-workflow cache from a different resource context. See [YAML templates — Reuse vs skip_if_exists](yaml-templates.md#reuse-vs-skip_if_exists).
 
+**Same-workspace-root constraint:** a reuse hit is only accepted when the cached output and the current task's output share the same `scheme://authority` (e.g. both `s3://rnd/...`). Cross-region/cross-cloud reuse is intentionally suppressed — the redirect would turn intra-region reads into paid cross-region egress on every dependent task. Write an explicit import workflow if you genuinely need to pull a remote artefact in. See [YAML templates — Same-workspace-root constraint](yaml-templates.md#same-workspace-root-constraint).
+
 See [YAML templates — Opportunistic reuse](yaml-templates.md#opportunistic-reuse) for the full explanation of the mechanism.
 
 The CLI runner also supports these flags:

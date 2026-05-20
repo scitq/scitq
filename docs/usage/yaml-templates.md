@@ -1527,6 +1527,12 @@ Why: `skip_if_exists` is for resource-driven tasks (catalog downloads, host inde
 
 For all other tasks (no `skip_if_exists`), the reuse check runs first (DB lookup, no I/O). A reuse miss falls through to the regular dispatch path.
 
+### Same-workspace-root constraint
+
+Opportunistic reuse only fires when the cached output and the current task's output share the same `scheme://authority` (e.g. both on `s3://rnd/…`, or both on `azswed://rnd/…`). A `task_reuse` row whose `output_path` lives on a different cloud/region is ignored.
+
+Reusing across regions silently turns intra-region reads into paid cross-region egress on every dependent task that consumes the redirected input. Co-locality is the only signal we have at assign time that the redirect is cheap, so it is required. If you genuinely want to consume a remote artefact, write an explicit import workflow that copies it into the current workspace — that makes the transfer cost visible and one-shot rather than amortised across every dependent.
+
 | Feature | `skip_if_exists` | Opportunistic reuse |
 |---|---|---|
 | Scope | Single task, output path check | Cross-workflow, content-addressed |
