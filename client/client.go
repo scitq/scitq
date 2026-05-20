@@ -849,7 +849,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	activeTasks *sync.Map,
 	numaAllocator *NumaAllocator,
 	lastDerivedStep *int32, // step_id we last auto-derived concurrency for; 0 = none yet
-) ([]*pb.Task, string, bool, error) {
+) ([]*pb.Task, string, bool, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -873,7 +873,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	res, err := client.PingAndTakeNewTasks(ctx, query)
 	if err != nil {
 		log.Printf("⚠️ Error calling fetch tasks: %v", err)
-		return nil, "", false, err
+		return nil, "", false, 0, err
 	}
 
 	// Apply any server-pushed cap change. The server's view of the
@@ -1147,7 +1147,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		}()
 	}
 
-	return res.Tasks, res.UpgradeRequested, res.ServerUpgradeInProgress, nil
+	return res.Tasks, res.UpgradeRequested, res.ServerUpgradeInProgress, len(res.ActiveTasks), nil
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
@@ -1209,7 +1209,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			break
 		}
 
-		tasks, upgradeReq, serverGating, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, lastDerivedStep)
+		tasks, upgradeReq, serverGating, serverActiveCount, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, lastDerivedStep)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -1232,7 +1232,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 		// waits for in-flight tasks to settle, then performs the swap.
 		// performUpgrade calls os.Exit on success — supervisor restart
 		// brings up the new binary. See specs/worker_autoupgrade.md.
-		upgradeSup.tick(ctx, client, reporter, &config, activeTasks, upgradeReq)
+		upgradeSup.tick(ctx, client, reporter, &config, activeTasks, serverActiveCount, upgradeReq)
 
 		// Phase III: server is in graceful drain. Don't pick up new
 		// tasks this iteration — existing in-flight ones keep running,

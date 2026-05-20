@@ -55,12 +55,22 @@ func newUpgradeSupervisor() *upgradeSupervisor {
 // invokes performUpgrade once the worker is ready. performUpgrade exits
 // the process on success; tick only returns when no upgrade happens
 // yet (still waiting, hash mismatch retried later, unsupported arch).
+// tick is called once per worker-loop iteration after a successful ping.
+// `serverActiveCount` is the number of tasks the server currently reports
+// as active on this worker (from PingAndTakeNewTasks.ActiveTasks). We
+// consult BOTH local and server views: after a worker process restart
+// the local map is empty even when docker containers are still running
+// the prior tasks. Trusting only `activeTasks` made the supervisor fire
+// the upgrade while the server still believed the task was running,
+// which then tripped the server's "worker re-registered while task
+// active → fail" safety on the next register.
 func (u *upgradeSupervisor) tick(
 	ctx context.Context,
 	client pb.TaskQueueClient,
 	reporter *event.Reporter,
 	config *WorkerConfig,
 	activeTasks *sync.Map,
+	serverActiveCount int,
 	requested string,
 ) {
 	u.mu.Lock()
@@ -104,7 +114,7 @@ func (u *upgradeSupervisor) tick(
 		u.announced = true
 	}
 
-	idle := activeTaskCount(activeTasks) == 0
+	idle := activeTaskCount(activeTasks) == 0 && serverActiveCount == 0
 
 	switch u.mode {
 	case "normal":
