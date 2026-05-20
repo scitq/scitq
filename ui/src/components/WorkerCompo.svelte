@@ -796,9 +796,10 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
         Workflow:
         <select
           bind:value={selectedWorkflowId}
-          on:change={() => loadStepsForWorkflow(selectedWorkflowId !== null ? Number(selectedWorkflowId) : null)}
+          on:change={() => loadStepsForWorkflow(selectedWorkflowId !== null && Number(selectedWorkflowId) > 0 ? Number(selectedWorkflowId) : null)}
         >
           <option value={null}>-- select workflow --</option>
+          <option value={-1}>-- Clear --</option>
           {#each workflowOptions as wf}
             <option value={wf.workflowId}>{wf.name}</option>
           {/each}
@@ -808,26 +809,38 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       <button
         class="btn-action"
         on:click={loadWorkflows}
-        disabled={loadingWorkflows}
+        disabled={loadingWorkflows || Number(selectedWorkflowId) === -1}
         title="Load more workflows"
       >+</button>
 
-      <!-- STEP SELECTOR -->
-      <label>
-        Step:
-        <select bind:value={selectedStepId}>
-          <option value={null}>-- select step --</option>
-          {#each stepOptions as st}
-            <option value={st.stepId}>{st.name}</option>
-          {/each}
-        </select>
-      </label>
+      <!-- STEP SELECTOR (hidden when "Clear" is selected) -->
+      {#if Number(selectedWorkflowId) !== -1}
+        <label>
+          Step:
+          <select bind:value={selectedStepId}>
+            <option value={null}>-- select step --</option>
+            {#each stepOptions as st}
+              <option value={st.stepId}>{st.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
 
       <!-- SAVE / CANCEL -->
       <button
         class="btn-action"
         title="Save"
         on:click={async () => {
+          if (Number(selectedWorkflowId) === -1) {
+            await updateWorkerConfig(worker.workerId, { clearStep: true });
+            internalWorkers = internalWorkers.map(w =>
+              w.workerId === worker.workerId
+                ? { ...w, stepId: undefined, stepName: undefined, workflowId: undefined, workflowName: undefined }
+                : w
+            );
+            editingWorkflowStepFor = null;
+            return;
+          }
           const stepIdNum = selectedStepId !== null ? Number(selectedStepId) : null;
           const workflowIdNum = selectedWorkflowId !== null ? Number(selectedWorkflowId) : null;
           if (stepIdNum !== null) {

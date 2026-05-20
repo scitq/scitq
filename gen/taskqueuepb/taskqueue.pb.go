@@ -3271,8 +3271,12 @@ type WorkerUpdateRequest struct {
 	// flavor cpu/mem and the new value is pushed to the worker on its
 	// next ping (via TaskListAndOther.max_cpu / max_mem). Mirrors the
 	// existing concurrency-resize hook.
-	MaxCpu        *int32   `protobuf:"varint,12,opt,name=max_cpu,json=maxCpu,proto3,oneof" json:"max_cpu,omitempty"`
-	MaxMem        *float32 `protobuf:"fixed32,13,opt,name=max_mem,json=maxMem,proto3,oneof" json:"max_mem,omitempty"`
+	MaxCpu *int32   `protobuf:"varint,12,opt,name=max_cpu,json=maxCpu,proto3,oneof" json:"max_cpu,omitempty"`
+	MaxMem *float32 `protobuf:"fixed32,13,opt,name=max_mem,json=maxMem,proto3,oneof" json:"max_mem,omitempty"`
+	// Detach the worker from any current step/workflow assignment by
+	// setting step_id to NULL. Mutually exclusive with step_id /
+	// workflow_name / step_name.
+	ClearStep     *bool `protobuf:"varint,14,opt,name=clear_step,json=clearStep,proto3,oneof" json:"clear_step,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3396,6 +3400,13 @@ func (x *WorkerUpdateRequest) GetMaxMem() float32 {
 		return *x.MaxMem
 	}
 	return 0
+}
+
+func (x *WorkerUpdateRequest) GetClearStep() bool {
+	if x != nil && x.ClearStep != nil {
+		return *x.ClearStep
+	}
+	return false
 }
 
 type ListFlavorsRequest struct {
@@ -10586,7 +10597,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bprefetch\x18\x06 \x01(\x05R\bprefetch\x12\x1c\n" +
 	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
 	"\n" +
-	"\b_step_id\"\x95\x05\n" +
+	"\b_step_id\"\xc8\x05\n" +
 	"\x13WorkerUpdateRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12$\n" +
 	"\vprovider_id\x18\x02 \x01(\x05H\x00R\n" +
@@ -10603,7 +10614,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tstep_name\x18\v \x01(\tH\tR\bstepName\x88\x01\x01\x12\x1c\n" +
 	"\amax_cpu\x18\f \x01(\x05H\n" +
 	"R\x06maxCpu\x88\x01\x01\x12\x1c\n" +
-	"\amax_mem\x18\r \x01(\x02H\vR\x06maxMem\x88\x01\x01B\x0e\n" +
+	"\amax_mem\x18\r \x01(\x02H\vR\x06maxMem\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"clear_step\x18\x0e \x01(\bH\fR\tclearStep\x88\x01\x01B\x0e\n" +
 	"\f_provider_idB\f\n" +
 	"\n" +
 	"_flavor_idB\f\n" +
@@ -10621,7 +10634,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_max_cpuB\n" +
 	"\n" +
-	"\b_max_mem\"B\n" +
+	"\b_max_memB\r\n" +
+	"\v_clear_step\"B\n" +
 	"\x12ListFlavorsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xa9\x03\n" +

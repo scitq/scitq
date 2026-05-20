@@ -142,6 +142,7 @@ type Attr struct {
 			Prefetch        *int32   `arg:"--prefetch" help:"Update worker prefetch"`
 			Permanent       bool     `arg:"--permanent" help:"Set worker as permanent"`
 			NoPermanent     bool     `arg:"--no-permanent" help:"Unset permanent status"`
+			ClearStep       bool     `arg:"--clear-step" help:"Detach the worker from its current step/workflow (sets step_id to NULL). Mutually exclusive with --step-id / --workflow-name / --step-name."`
 			RecyclableScope *string  `arg:"--recyclable-scope" help:"Update recyclable scope"`
 			MaxCpu          *int32   `arg:"--max-cpu" help:"Update advertised CPU cap. Live-pushed to the running worker on its next ping. Client refuses values larger than the real host."`
 			MaxMem          *float32 `arg:"--max-mem" help:"Update advertised memory cap in GiB. Same live-resize semantics as --max-cpu."`
@@ -1325,6 +1326,9 @@ func (c *CLI) WorkerUpdate() error {
 	if c.Attr.Worker.Update.Permanent && c.Attr.Worker.Update.NoPermanent {
 		return fmt.Errorf("provide only one of --permanent or --no-permanent")
 	}
+	if c.Attr.Worker.Update.ClearStep && (c.Attr.Worker.Update.StepId != nil || c.Attr.Worker.Update.WorkflowName != nil || c.Attr.Worker.Update.StepName != nil) {
+		return fmt.Errorf("--clear-step is mutually exclusive with --step-id / --workflow-name / --step-name")
+	}
 
 	if c.Attr.Worker.Update.StepId != nil {
 		req.StepId = c.Attr.Worker.Update.StepId
@@ -1334,6 +1338,10 @@ func (c *CLI) WorkerUpdate() error {
 	}
 	if c.Attr.Worker.Update.StepName != nil {
 		req.StepName = c.Attr.Worker.Update.StepName
+	}
+	if c.Attr.Worker.Update.ClearStep {
+		val := true
+		req.ClearStep = &val
 	}
 	if c.Attr.Worker.Update.Concurrency != nil {
 		req.Concurrency = c.Attr.Worker.Update.Concurrency

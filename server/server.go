@@ -2935,6 +2935,8 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 		sets = append(sets, fmt.Sprintf("step_id=$%d", i))
 		args = append(args, req.GetStepId())
 		i++
+	} else if req.ClearStep != nil && *req.ClearStep {
+		sets = append(sets, "step_id=NULL")
 	}
 	if req.IsPermanent != nil {
 		sets = append(sets, fmt.Sprintf("is_permanent=$%d", i))
@@ -3029,6 +3031,9 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 	if req.StepName != nil && req.WorkflowName == nil {
 		return nil, status.Error(codes.InvalidArgument, "workflow_name is required when step_name is provided")
 	}
+	if req.ClearStep != nil && *req.ClearStep && (req.StepId != nil || req.WorkflowName != nil || req.StepName != nil) {
+		return nil, status.Error(codes.InvalidArgument, "clear_step is mutually exclusive with step_id / workflow_name / step_name")
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -3090,6 +3095,8 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 		sets = append(sets, fmt.Sprintf("step_id=$%d", i))
 		args = append(args, *resolvedStepID)
 		i++
+	} else if req.ClearStep != nil && *req.ClearStep {
+		sets = append(sets, "step_id=NULL")
 	}
 	if req.IsPermanent != nil {
 		sets = append(sets, fmt.Sprintf("is_permanent=$%d", i))

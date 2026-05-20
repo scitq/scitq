@@ -1182,6 +1182,14 @@ export interface WorkerUpdateRequest {
      * @generated from protobuf field: optional float max_mem = 13
      */
     maxMem?: number;
+    /**
+     * Detach the worker from any current step/workflow assignment by
+     * setting step_id to NULL. Mutually exclusive with step_id /
+     * workflow_name / step_name.
+     *
+     * @generated from protobuf field: optional bool clear_step = 14
+     */
+    clearStep?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.ListFlavorsRequest
@@ -6614,7 +6622,8 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
             { no: 10, name: "workflow_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 11, name: "step_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 12, name: "max_cpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 13, name: "max_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 13, name: "max_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 14, name: "clear_step", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerUpdateRequest>): WorkerUpdateRequest {
@@ -6668,6 +6677,9 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
                 case /* optional float max_mem */ 13:
                     message.maxMem = reader.float();
                     break;
+                case /* optional bool clear_step */ 14:
+                    message.clearStep = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6719,6 +6731,9 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
         /* optional float max_mem = 13; */
         if (message.maxMem !== undefined)
             writer.tag(13, WireType.Bit32).float(message.maxMem);
+        /* optional bool clear_step = 14; */
+        if (message.clearStep !== undefined)
+            writer.tag(14, WireType.Varint).bool(message.clearStep);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

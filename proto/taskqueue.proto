@@ -546,6 +546,10 @@ message WorkerUpdateRequest {
     // existing concurrency-resize hook.
     optional int32 max_cpu = 12;
     optional float max_mem = 13;
+    // Detach the worker from any current step/workflow assignment by
+    // setting step_id to NULL. Mutually exclusive with step_id /
+    // workflow_name / step_name.
+    optional bool clear_step = 14;
 }
 
 message ListFlavorsRequest {

@@ -251,6 +251,7 @@ export async function updateWorkerConfig(
   workerId: number,
   updates: Partial<{
     stepId: number;
+    clearStep: boolean;
     concurrency: number;
     prefetch: number;
     isPermanent: boolean;
@@ -261,6 +262,7 @@ export async function updateWorkerConfig(
     const req: any = { workerId };
 
     if (updates.stepId !== undefined) req.stepId = updates.stepId;
+    if (updates.clearStep !== undefined) req.clearStep = updates.clearStep;
     if (updates.concurrency !== undefined) req.concurrency = updates.concurrency;
     if (updates.prefetch !== undefined) req.prefetch = updates.prefetch;
     if (updates.isPermanent !== undefined) req.isPermanent = updates.isPermanent;
