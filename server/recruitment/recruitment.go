@@ -555,8 +555,14 @@ func findRecyclableWorkers(
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id,
     		f.cpu, f.mem, f.disk
-		HAVING 
-			COALESCE(sum(t.weight),0) < w.concurrency
+		HAVING
+			-- Free capacity on the current step, OR genuinely idle. The
+			-- idle branch covers operator-parked workers (concurrency=0,
+			-- step_id NULL): without it the comparison degenerates to
+			-- "0 < 0 = false" and a worker that is actually doing nothing
+			-- is silently excluded from recruitment.
+			COALESCE(sum(t.weight),0) = 0
+			OR COALESCE(sum(t.weight),0) < w.concurrency
     `
 	log.Printf("Trying to find with Flavors %v| Regions %v", allAllowedFlavorIDs, allAllowedRegionIDs)
 	rows, err := db.Query(query, pq.Array(allAllowedFlavorIDs), pq.Array(allAllowedRegionIDs))
