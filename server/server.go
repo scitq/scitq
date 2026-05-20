@@ -3876,7 +3876,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
 			download_timeout, running_timeout, upload_timeout,
-			status, weight, publish, scitq_auth, numa
+			status, weight, publish, scitq_auth, numa, step_id
 		FROM task
 		WHERE worker_id = $1
 		  AND NOT hidden
@@ -3893,11 +3893,12 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		var weight sql.NullFloat64
 		var scitqAuth bool
 		var numa sql.NullInt32
+		var stepID sql.NullInt32
 
 		var publishNull sql.NullString
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa, &stepID); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
@@ -3906,6 +3907,9 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		}
 		if numa.Valid {
 			task.Numa = &numa.Int32
+		}
+		if stepID.Valid {
+			task.StepId = &stepID.Int32
 		}
 		task.Input = []string(input)
 		task.Resource = []string(resource)
