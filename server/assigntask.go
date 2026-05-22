@@ -90,7 +90,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 	workerCapacityRows, err := tx.Query(`
 		SELECT w.worker_id, COALESCE(w.step_id,0), w.concurrency+w.prefetch-COALESCE(SUM(t.weight),0) AS capacity
 		FROM worker w
-		LEFT JOIN task t ON (t.worker_id=w.worker_id AND t.status IN ('A','C','D','O','R'))
+		LEFT JOIN task t ON (t.worker_id=w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden)
 		WHERE w.status='R' AND w.deleted_at IS NULL
 		GROUP BY w.worker_id, w.step_id, w.concurrency, w.prefetch
 		HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
@@ -820,7 +820,7 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 		WITH candidate AS (
 			SELECT w.worker_id
 			FROM worker w
-			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden
 			WHERE w.status = 'R' AND w.deleted_at IS NULL AND w.step_id = $2
 			GROUP BY w.worker_id, w.concurrency, w.prefetch
 			HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)

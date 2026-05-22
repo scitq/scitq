@@ -101,13 +101,13 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
         WITH pt_agg AS (
             SELECT step_id, COUNT(*) AS pending
             FROM task
-            WHERE status = 'P'
+            WHERE status = 'P' AND NOT hidden
             GROUP BY step_id
         ),
         active_agg AS (
             SELECT step_id, COALESCE(SUM(weight),0) AS active_taskrate
             FROM task
-            WHERE status = 'R'
+            WHERE status = 'R' AND NOT hidden
             GROUP BY step_id
         ),
         worker_load AS (
@@ -117,7 +117,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
                 w.concurrency,
                 COALESCE(SUM(t.weight),0) AS load
             FROM worker w
-            LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+            LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden
             WHERE w.deleted_at IS NULL
             GROUP BY w.worker_id, w.step_id, w.concurrency
         ),
@@ -261,13 +261,13 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
         WITH pt_agg AS (
             SELECT step_id, COUNT(*) AS pending
             FROM task
-            WHERE status = 'P'
+            WHERE status = 'P' AND NOT hidden
             GROUP BY step_id
         ),
         active_agg AS (
             SELECT step_id, COALESCE(SUM(weight),0) AS active_taskrate
             FROM task
-            WHERE status = 'R'
+            WHERE status = 'R' AND NOT hidden
             GROUP BY step_id
         ),
         worker_load AS (
@@ -277,7 +277,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
                 w.concurrency,
                 COALESCE(SUM(t.weight),0) AS load
             FROM worker w
-            LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+            LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden
             WHERE w.deleted_at IS NULL
             GROUP BY w.worker_id, w.step_id, w.concurrency
         ),
@@ -541,7 +541,7 @@ func findRecyclableWorkers(
 		FROM
 			worker w
 		LEFT JOIN
-			task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R')
+			task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden
 		LEFT JOIN
 			step s ON s.step_id = w.step_id
 		LEFT JOIN

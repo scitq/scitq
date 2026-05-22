@@ -1321,10 +1321,16 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				RETURNING task_id
 			`, req.TaskId).Scan(&newID)
 			if txErr == nil {
-				// Hide the failed parent; keep step_id so lineage is intact and default views can filter it out
+				// Hide the failed parent; keep step_id so lineage is intact and default views can filter it out.
+				// Clear worker_id: when NewStatus=F && retry>0 the status-write below is skipped, so the parent
+				// keeps its prior (active) status (A/C/D/O/R). A hidden row with an active status AND a worker_id
+				// still counts against that worker's capacity (the assign/recruit load joins don't filter hidden),
+				// silently pinning slots on a worker that's actually idle. retryTaskInternal already nulls worker_id
+				// on its hide for the same reason.
 				_, txErr = tx.ExecContext(ctx, `
 					UPDATE task
 					   SET hidden = TRUE,
+						   worker_id = NULL,
 						   modified_at = NOW()
 					 WHERE task_id = $1
 				`, req.TaskId)
@@ -2652,7 +2658,7 @@ func FetchWorkersForWatchdog(ctx context.Context, db *sql.DB) ([]watchdog.Worker
         LEFT JOIN (
             SELECT worker_id, COUNT(*) as active_tasks
             FROM task
-            WHERE status IN ('A', 'C', 'D', 'O', 'R')
+            WHERE status IN ('A', 'C', 'D', 'O', 'R') AND NOT hidden
             GROUP BY worker_id
         ) t ON w.worker_id = t.worker_id
         WHERE w.deleted_at IS NULL
