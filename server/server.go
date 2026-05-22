@@ -4317,7 +4317,13 @@ func NewLogin(s *taskQueueServer) http.HandlerFunc {
 			HttpOnly: true,
 			Secure:   true, // Set to true in production with HTTPS
 			SameSite: http.SameSiteNoneMode,
-			MaxAge:   3600 * 24,
+			// 30 days. The server-side session (scitq_user_session,
+			// 365-day expires_at) and the JWT exp both outlast this, so the
+			// cookie is the effective re-login interval. Revocation does NOT
+			// rely on this lifetime: every request re-checks the DB session
+			// (auth.go), and DeleteUser drops the user's sessions, so a
+			// disabled/removed account is rejected on its next call.
+			MaxAge: 3600 * 24 * 30,
 		})
 
 		w.WriteHeader(http.StatusOK)
