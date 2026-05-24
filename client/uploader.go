@@ -204,6 +204,14 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 				}
 				um.uploadStart.Delete(taskID)
 			}
+			// Send the terminal status through the reporter's per-task
+			// serialized queue (NOT a direct/out-of-band send): updates for a
+			// task must stay ordered behind any earlier R/V update, otherwise
+			// the terminal status can land first and a late-arriving 'V' pins
+			// the task as active on the server. Reliability against a lost
+			// terminal update is handled server-side by the ping-time
+			// reconciliation (it fails tasks the worker no longer tracks),
+			// which is ordering-safe and also covers worker crashes.
 			um.reporter.UpdateTaskAsync(taskID, task.Status, "", &secs)
 			cleanupTaskWorkingDir(um.Store, taskID, um.reporter)
 			activeTasks.Delete(taskID)

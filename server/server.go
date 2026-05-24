@@ -95,6 +95,7 @@ type taskQueueServer struct {
 	rcloneRemotes     *pb.RcloneRemotes
 	pythonReady       chan struct{} // closed when Python DSL venv is bootstrapped
 	activeLogStreams   sync.Map     // taskID -> chan struct{} (closed when log stream ends)
+	lostTaskSeen       sync.Map     // taskID -> time.Time first observed as server-active but absent from the worker's reported known_task_ids (reconciliation debounce)
 
 	// Phase III: server received SIGUSR1 and is draining active admin
 	// jobs in preparation for a clean exit. Workers see this on ping
@@ -3886,7 +3887,15 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		FROM task
 		WHERE worker_id = $1
 		  AND NOT hidden
-		  AND status IN ('A', 'C', 'D', 'R', 'U', 'V')
+		  -- 'O' (on-hold: downloaded-ahead via prefetch, waiting for an
+		  -- execution slot) MUST be included. The worker's local active set
+		  -- is {A,C,D,O,R}; omitting 'O' here means an on-hold task is absent
+		  -- from both res.Tasks and res.ActiveTasks, so the worker's orphan
+		  -- detector (which kills anything it holds that the server doesn't
+		  -- report) spuriously kills it after the 3s debounce — racing the
+		  -- task's own completion and stranding it (observed: tasks pinned in
+		  -- 'U' with output already in object storage).
+		  AND status IN ('A', 'C', 'D', 'O', 'R', 'U', 'V')
 	`, req.WorkerId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch assigned/running tasks: %w", err)
@@ -3939,6 +3948,62 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating through tasks: %w", err)
+	}
+
+	// Reconcile against the worker's self-reported tracked tasks. A task the
+	// server believes is active on this worker but that the worker no longer
+	// lists has been lost — typically the worker finished and cleaned up but
+	// its terminal status update never landed (leaving the task pinned in U).
+	// We deliberately ask the worker rather than time tasks out: a large
+	// output can legitimately upload for a long time, so elapsed time is not a
+	// safe signal, but the worker's own "I'm not tracking this" is.
+	//
+	// Gated on ReportsKnownTasks so old clients (which never set it) are never
+	// reconciled — otherwise their silence would read as "all tasks lost".
+	// Debounced via lostTaskSeen to tolerate the assign→worker-store race
+	// (a just-assigned task isn't in the worker's set for a ping or two).
+	if req.ReportsKnownTasks {
+		const lostTaskGrace = 60 * time.Second
+		known := make(map[int32]struct{}, len(req.KnownTaskIds))
+		for _, tid := range req.KnownTaskIds {
+			known[tid] = struct{}{}
+		}
+		serverActive := make([]int32, 0, len(tasks)+len(activeTaskIDs))
+		for _, t := range tasks {
+			serverActive = append(serverActive, t.TaskId)
+		}
+		serverActive = append(serverActive, activeTaskIDs...)
+
+		now := time.Now()
+		for _, tid := range serverActive {
+			if _, ok := known[tid]; ok {
+				s.lostTaskSeen.Delete(tid) // worker still has it — clear any pending mark
+				continue
+			}
+			first, seen := s.lostTaskSeen.LoadOrStore(tid, now)
+			if !seen {
+				continue // first observation — give the worker a chance to catch up
+			}
+			if now.Sub(first.(time.Time)) < lostTaskGrace {
+				continue // still within grace window
+			}
+			// Persistently lost: fail it (FreeRetry) so it re-runs. For
+			// skip_if_exists steps the retry no-ops if the output is already
+			// published. Done in a goroutine so the ping isn't blocked.
+			s.lostTaskSeen.Delete(tid)
+			lostID := tid
+			lostWorker := req.WorkerId
+			go func() {
+				log.Printf("🩹 Reconcile: task %d server-active but worker %d no longer tracks it — failing for retry", lostID, lostWorker)
+				if _, err := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{
+					TaskId:    lostID,
+					NewStatus: "F",
+					FreeRetry: proto.Bool(true),
+				}); err != nil {
+					log.Printf("⚠️ Reconcile: failed to fail lost task %d: %v", lostID, err)
+				}
+			}()
+		}
 	}
 
 	// No longer need to clean up in-memory weightMemory here

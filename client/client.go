@@ -870,6 +870,20 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		query = &pb.PingAndGetNewTasksRequest{WorkerId: id, Stats: ws.ToProto()}
 	}
 
+	// Report the tasks we're actually tracking locally so the server can
+	// reconcile: any task it believes is active on us but that we no longer
+	// list has been lost (finished + cleaned up but terminal status update
+	// failed to land). ReportsKnownTasks=true tells the server this list is
+	// authoritative for us — an old client never sets it, so the server won't
+	// mistake its silence for "all tasks lost".
+	known := make([]int32, 0)
+	activeTasks.Range(func(k, _ any) bool {
+		known = append(known, k.(int32))
+		return true
+	})
+	query.KnownTaskIds = known
+	query.ReportsKnownTasks = true
+
 	res, err := client.PingAndTakeNewTasks(ctx, query)
 	if err != nil {
 		log.Printf("⚠️ Error calling fetch tasks: %v", err)

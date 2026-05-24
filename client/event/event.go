@@ -210,9 +210,18 @@ func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 
 		switch it.kind {
 		case itStatus:
-			// Send status with small retries
+			// Terminal statuses (S/F) are the authoritative end-of-task
+			// signal: losing one strands the task on the server (pinned in an
+			// active state) while the worker has moved on. So retry those
+			// until they land (or the worker is told to quit), instead of the
+			// bounded best-effort used for transient statuses (R/D/O/V/…),
+			// which a newer update supersedes anyway. This stays on the
+			// per-task serialized queue, so ordering behind any earlier
+			// transient update is preserved — sending the terminal status
+			// out-of-band would let it race ahead and be overwritten.
+			terminal := it.status == "S" || it.status == "F"
 			timeout := max(r.Timeout, 5*time.Second)
-			for attempt := 0; attempt < 3; attempt++ {
+			for attempt := 0; ; attempt++ {
 				log.Printf("🔄 Updating task %d status to %s (attempt %d)", taskID, it.status, attempt+1)
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				req := &pb.TaskStatusUpdate{
@@ -228,6 +237,9 @@ func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 					break
 				}
 				log.Printf("⚠️ update task %d to %s failed: %v", taskID, it.status, err)
+				if !terminal && attempt >= 2 {
+					break // transient status: give up after 3 tries
+				}
 				time.Sleep(2 * time.Second)
 				if timeout < 15*time.Second {
 					timeout += 5 * time.Second

@@ -483,6 +483,15 @@ message WorkerIds {
 message PingAndGetNewTasksRequest {
     int32 worker_id = 1;
     WorkerStats stats = 2; // Optional
+    // Task IDs the worker is currently tracking locally (its activeTasks set).
+    // Used by the server to reconcile: a task the server believes is active on
+    // this worker but that the worker no longer lists has been lost (e.g. the
+    // worker finished + cleaned up but the terminal status update was lost).
+    // reports_known_tasks gates this — proto3 can't tell an empty repeated
+    // field from an absent one, so an old worker (which never sets the flag)
+    // is never reconciled, avoiding mass-failing its tasks.
+    repeated int32 known_task_ids = 3;
+    bool reports_known_tasks = 4;
 }
 
 message Ack {
