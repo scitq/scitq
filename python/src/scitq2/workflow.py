@@ -377,26 +377,60 @@ class Task:
         status = "W" if resolved_depends else DEFAULT_TASK_STATUS
         scitq_auth = bool(getattr(self.step.task_spec, 'scitq_auth', False)) if self.step.task_spec is not None else False
         numa = getattr(self.step.task_spec, 'numa', None) if self.step.task_spec is not None else None
-        self.task_id = client.submit_task(
-                step_id=self.step.step_id,
-                command=resolved_command,
-                shell=resolved_shell,
-                container=self.container,
-                depends=resolved_depends,
-                inputs=resolved_inputs,
-                output=resolved_output,
-                publish=resolved_publish,
-                resources=resolved_resources,
-                status=status,
-                task_name=self.full_name,
-                skip_if_exists=self.skip_if_exists,
-                retry=self.retry,
-                accept_failure=self.accept_failure,
-                reuse_key=computed_reuse_key,
-                consume_reuse=opportunistic,
-                scitq_auth=scitq_auth,
-                numa=numa,
-            )
+
+        ext = self.step.workflow._extend
+        existing = None
+        if ext is not None:
+            existing = ext.tasks_by_step.get(self.step.step_id, {}).get(self.full_name)
+
+        if existing is None:
+            # New tag (or a normal create-new run): submit a fresh task.
+            self.task_id = client.submit_task(
+                    step_id=self.step.step_id,
+                    command=resolved_command,
+                    shell=resolved_shell,
+                    container=self.container,
+                    depends=resolved_depends,
+                    inputs=resolved_inputs,
+                    output=resolved_output,
+                    publish=resolved_publish,
+                    resources=resolved_resources,
+                    status=status,
+                    task_name=self.full_name,
+                    skip_if_exists=self.skip_if_exists,
+                    retry=self.retry,
+                    accept_failure=self.accept_failure,
+                    reuse_key=computed_reuse_key,
+                    consume_reuse=opportunistic,
+                    scitq_auth=scitq_auth,
+                    numa=numa,
+                )
+            if ext is not None:
+                ext.changed.add(self.task_id)
+        else:
+            # Extend reconcile: a task with this (step, tag) already exists.
+            existing_id, existing_cmd, existing_status = existing
+            if ext.retry_failed_only:
+                # Only re-run failed tasks; leave S/R/P untouched. No cascade —
+                # a failed task's dependents are blocked in W and unblock when
+                # the retry succeeds.
+                if existing_status == "F":
+                    self.task_id = client.edit_and_retry_task(existing_id, resolved_command)
+                    ext.changed.add(self.task_id)
+                else:
+                    self.task_id = existing_id  # reference, untouched
+            else:
+                # Default cascade reconcile: re-run if the command drifted, the
+                # task failed, OR any prerequisite was re-run this pass (its
+                # inputs changed). edit_and_retry rewires dependents to the new
+                # clone server-side, so editing in dependency order keeps the
+                # chain consistent.
+                dep_changed = any(d in ext.changed for d in resolved_depends)
+                if existing_cmd != resolved_command or existing_status == "F" or dep_changed:
+                    self.task_id = client.edit_and_retry_task(existing_id, resolved_command)
+                    ext.changed.add(self.task_id)
+                else:
+                    self.task_id = existing_id  # converged, reference
 
 
 
@@ -640,10 +674,23 @@ class Step:
     def compile(self, client: Scitq2Client, opportunistic: bool = False, untrusted: Optional[List[str]] = None):
         """Compile the Step into real scitq objects by calling appropriate gRPC functions. Called automatically during the template run phase."""
         quality_json = self.quality.to_json() if self.quality else None
-        self.step_id = client.create_step(self.workflow.workflow_id, self.name, quality_definition=quality_json)
+        ext = self.workflow._extend
+        # Find-or-create the step by name. In extend mode, a step that already
+        # exists in the target workflow is reused (its tasks get reconciled);
+        # only a genuinely new step is created.
+        step_existed = False
+        if ext is not None and self.name in ext.step_ids:
+            self.step_id = ext.step_ids[self.name]
+            step_existed = True
+        else:
+            self.step_id = client.create_step(self.workflow.workflow_id, self.name, quality_definition=quality_json)
+            if ext is not None:
+                ext.step_ids[self.name] = self.step_id
 
+        # Only attach a recruiter to a newly-created step — an existing step
+        # already has its recruiter(s); adding another would duplicate.
         pool = self.worker_pool or self.workflow.worker_pool
-        if pool:
+        if pool and not step_existed:
             options = pool.build_recruiter(self.task_spec,
                                            default_provider=self.workflow.provider,
                                            default_region=self.workflow.region)
@@ -671,6 +718,25 @@ class Step:
         if not self.tasks:
             raise ValueError(f"Step {self.name} has no tasks defined")
         return self.tasks[-1]
+
+class _ExtendContext:
+    """State carried through compile() when extending an existing workflow.
+
+    See specs/workflow_extend.md. Built once in Workflow.compile from the
+    target workflow's current steps and (non-hidden) tasks, then consulted by
+    Step.compile (find-or-create step by name) and Task.compile
+    (find-or-reference/edit task by (step_id, task_name), with cascade).
+    """
+    def __init__(self, workflow_id, retry_failed_only, step_ids, tasks_by_step, workflow_name):
+        self.workflow_id = workflow_id
+        self.retry_failed_only = retry_failed_only
+        self.step_ids = step_ids            # {step_name: step_id}
+        self.tasks_by_step = tasks_by_step  # {step_id: {task_name: (task_id, command, status)}}
+        self.workflow_name = workflow_name
+        # task_ids (re)created or edit-and-retried this pass; drives the
+        # default cascade ("re-run a dependent whose prerequisite changed").
+        self.changed = set()
+
 
 class Workflow:
     """Workflow objects are the corner stone of scitq DSL. They define the name, version and description of the template, 
@@ -715,6 +781,9 @@ class Workflow:
         self.workflow_id: Optional[int] = None
         self.full_name: Optional[str] = None
         self.workspace_root: Optional[str] = None
+        # Set by compile() when extending an existing workflow (see
+        # specs/workflow_extend.md); None for a normal create-new run.
+        self._extend: Optional["_ExtendContext"] = None
         self.version = version
         self.container = container
         self.publish_root = publish_root.rstrip("/") if publish_root else None
@@ -801,8 +870,29 @@ class Workflow:
                       accept_failure=accept_failure)
         return step
 
+    def _build_extend_context(self, client: Scitq2Client, workflow_id: int, retry_failed_only: bool) -> "_ExtendContext":
+        """Snapshot the target workflow's steps and live tasks for reconcile."""
+        steps = client.list_steps(workflow_id)
+        step_ids = {s.name: s.step_id for s in steps}
+        workflow_name = steps[0].workflow_name if steps else None
+        if workflow_name is None:
+            # Extending a workflow with no steps yet — resolve the name directly.
+            for wf in client.list_workflows():
+                if wf.workflow_id == workflow_id:
+                    workflow_name = wf.name
+                    break
+        if workflow_name is None:
+            raise ValueError(f"extend: workflow {workflow_id} not found")
+        tasks_by_step: dict = {}
+        for t in client.list_tasks(workflow_id=workflow_id, show_hidden=False):
+            if not t.task_name:
+                continue
+            tasks_by_step.setdefault(t.step_id, {})[t.task_name] = (t.task_id, t.command, t.status)
+        return _ExtendContext(workflow_id, retry_failed_only, step_ids, tasks_by_step, workflow_name)
+
     def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: Optional[str] = None,
-                opportunistic: bool = False, untrusted: Optional[List[str]] = None) -> int:
+                opportunistic: bool = False, untrusted: Optional[List[str]] = None,
+                extend_workflow_id: Optional[int] = None, retry_failed_only: bool = False) -> int:
         if self.provider:
             self.workspace_root = client.get_workspace_root(
                 provider=self.provider,
@@ -811,23 +901,33 @@ class Workflow:
         else:
             self.workspace_root = None
 
-        base_name = self.naming_strategy(self.name, self.tag) if self.tag else self.name
-        for i in count():
-            candidate_name = base_name if i == 0 else self.naming_strategy(base_name,str(i))
-            try:
-                self.workflow_id = client.create_workflow(
-                    name=candidate_name,
-                    maximum_workers=1 if workflow_status == "D" else self.max_recruited,
-                    status=workflow_status,
-                    live=self.live,
-                    run_strategy=self.run_strategy,
-                )
-                self.full_name = candidate_name
-                break
-            except Exception as e:
-                if 'unique constraint' in str(e).lower() or 'duplicate key' in str(e).lower():
-                    continue
-                raise  # re-raise non-duplicate errors
+        if extend_workflow_id is not None:
+            # Extend mode: reuse the existing workflow, don't create one. The
+            # full_name comes from the existing workflow so task output paths
+            # land alongside its current tasks. Workflow-level settings
+            # (status, max_recruited, run_strategy, live) are left untouched.
+            self._extend = self._build_extend_context(client, extend_workflow_id, retry_failed_only)
+            self.workflow_id = extend_workflow_id
+            self.full_name = self._extend.workflow_name
+        else:
+            self._extend = None
+            base_name = self.naming_strategy(self.name, self.tag) if self.tag else self.name
+            for i in count():
+                candidate_name = base_name if i == 0 else self.naming_strategy(base_name,str(i))
+                try:
+                    self.workflow_id = client.create_workflow(
+                        name=candidate_name,
+                        maximum_workers=1 if workflow_status == "D" else self.max_recruited,
+                        status=workflow_status,
+                        live=self.live,
+                        run_strategy=self.run_strategy,
+                    )
+                    self.full_name = candidate_name
+                    break
+                except Exception as e:
+                    if 'unique constraint' in str(e).lower() or 'duplicate key' in str(e).lower():
+                        continue
+                    raise  # re-raise non-duplicate errors
 
         template_run_id = os.environ.get("SCITQ_TEMPLATE_RUN_ID")
         if template_run_id:

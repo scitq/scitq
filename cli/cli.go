@@ -335,6 +335,8 @@ type Attr struct {
 			Version       *string `arg:"--ver" help:"Optional version, e.g. 1.0.0 or 'latest' (default: latest)"`
 			ParamPairs    *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
 			NoRecruiters  bool    `arg:"--no-recruiters" help:"Create workflow without recruiters"`
+			ExtendWorkflow *int32 `arg:"--extend-workflow" help:"Extend an existing workflow (by id) instead of creating a new one: steps are found-or-created by name, tasks found-or-referenced by (step, tag), and drifted tasks edit-and-retried with cascade. See specs/workflow_extend.md."`
+			RetryFailedOnly bool  `arg:"--retry-failed-only" help:"With --extend-workflow: among existing tasks only re-run those currently failed (no cascade); leave succeeded/running/pending untouched. New inputs are still added."`
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
 		List *struct {
@@ -2179,6 +2181,10 @@ func (c *CLI) TemplateRun() error {
 		WorkflowTemplateId: *c.Attr.Template.Run.TemplateId,
 		ParamValuesJson:    paramJSON,
 		NoRecruiters:       c.Attr.Template.Run.NoRecruiters,
+		RetryFailedOnly:    c.Attr.Template.Run.RetryFailedOnly,
+	}
+	if c.Attr.Template.Run.ExtendWorkflow != nil {
+		req.ExtendWorkflowId = c.Attr.Template.Run.ExtendWorkflow
 	}
 	res, err := c.QC.Client.RunTemplate(ctx, req)
 	if err != nil {

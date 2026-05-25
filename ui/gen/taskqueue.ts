@@ -993,6 +993,22 @@ export interface PingAndGetNewTasksRequest {
      * @generated from protobuf field: taskqueue.WorkerStats stats = 2
      */
     stats?: WorkerStats; // Optional
+    /**
+     * Task IDs the worker is currently tracking locally (its activeTasks set).
+     * Used by the server to reconcile: a task the server believes is active on
+     * this worker but that the worker no longer lists has been lost (e.g. the
+     * worker finished + cleaned up but the terminal status update was lost).
+     * reports_known_tasks gates this — proto3 can't tell an empty repeated
+     * field from an absent one, so an old worker (which never sets the flag)
+     * is never reconciled, avoiding mass-failing its tasks.
+     *
+     * @generated from protobuf field: repeated int32 known_task_ids = 3
+     */
+    knownTaskIds: number[];
+    /**
+     * @generated from protobuf field: bool reports_known_tasks = 4
+     */
+    reportsKnownTasks: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.Ack
@@ -2423,6 +2439,18 @@ export interface RunTemplateRequest {
      * @generated from protobuf field: bool no_recruiters = 3
      */
     noRecruiters: boolean;
+    /**
+     * Extend an existing workflow instead of creating a new one. See
+     * specs/workflow_extend.md. retry_failed_only narrows the reconcile to
+     * re-running only the existing failed tasks (no cascade).
+     *
+     * @generated from protobuf field: optional int32 extend_workflow_id = 4
+     */
+    extendWorkflowId?: number;
+    /**
+     * @generated from protobuf field: bool retry_failed_only = 5
+     */
+    retryFailedOnly: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.TemplateFilter
@@ -6213,12 +6241,16 @@ class PingAndGetNewTasksRequest$Type extends MessageType<PingAndGetNewTasksReque
     constructor() {
         super("taskqueue.PingAndGetNewTasksRequest", [
             { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 2, name: "stats", kind: "message", T: () => WorkerStats }
+            { no: 2, name: "stats", kind: "message", T: () => WorkerStats },
+            { no: 3, name: "known_task_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "reports_known_tasks", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<PingAndGetNewTasksRequest>): PingAndGetNewTasksRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.workerId = 0;
+        message.knownTaskIds = [];
+        message.reportsKnownTasks = false;
         if (value !== undefined)
             reflectionMergePartial<PingAndGetNewTasksRequest>(this, message, value);
         return message;
@@ -6233,6 +6265,16 @@ class PingAndGetNewTasksRequest$Type extends MessageType<PingAndGetNewTasksReque
                     break;
                 case /* taskqueue.WorkerStats stats */ 2:
                     message.stats = WorkerStats.internalBinaryRead(reader, reader.uint32(), options, message.stats);
+                    break;
+                case /* repeated int32 known_task_ids */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.knownTaskIds.push(reader.int32());
+                    else
+                        message.knownTaskIds.push(reader.int32());
+                    break;
+                case /* bool reports_known_tasks */ 4:
+                    message.reportsKnownTasks = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -6252,6 +6294,16 @@ class PingAndGetNewTasksRequest$Type extends MessageType<PingAndGetNewTasksReque
         /* taskqueue.WorkerStats stats = 2; */
         if (message.stats)
             WorkerStats.internalBinaryWrite(message.stats, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated int32 known_task_ids = 3; */
+        if (message.knownTaskIds.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.knownTaskIds.length; i++)
+                writer.int32(message.knownTaskIds[i]);
+            writer.join();
+        }
+        /* bool reports_known_tasks = 4; */
+        if (message.reportsKnownTasks !== false)
+            writer.tag(4, WireType.Varint).bool(message.reportsKnownTasks);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10858,7 +10910,9 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
         super("taskqueue.RunTemplateRequest", [
             { no: 1, name: "workflow_template_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "param_values_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "no_recruiters", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 3, name: "no_recruiters", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "extend_workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "retry_failed_only", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<RunTemplateRequest>): RunTemplateRequest {
@@ -10866,6 +10920,7 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
         message.workflowTemplateId = 0;
         message.paramValuesJson = "";
         message.noRecruiters = false;
+        message.retryFailedOnly = false;
         if (value !== undefined)
             reflectionMergePartial<RunTemplateRequest>(this, message, value);
         return message;
@@ -10883,6 +10938,12 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
                     break;
                 case /* bool no_recruiters */ 3:
                     message.noRecruiters = reader.bool();
+                    break;
+                case /* optional int32 extend_workflow_id */ 4:
+                    message.extendWorkflowId = reader.int32();
+                    break;
+                case /* bool retry_failed_only */ 5:
+                    message.retryFailedOnly = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -10905,6 +10966,12 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
         /* bool no_recruiters = 3; */
         if (message.noRecruiters !== false)
             writer.tag(3, WireType.Varint).bool(message.noRecruiters);
+        /* optional int32 extend_workflow_id = 4; */
+        if (message.extendWorkflowId !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.extendWorkflowId);
+        /* bool retry_failed_only = 5; */
+        if (message.retryFailedOnly !== false)
+            writer.tag(5, WireType.Varint).bool(message.retryFailedOnly);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

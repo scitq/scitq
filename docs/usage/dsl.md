@@ -1203,6 +1203,25 @@ The CLI runner also supports these flags:
 python -m scitq2.runner my_workflow.py --opportunistic --untrusted qc
 ```
 
+### Extending an existing workflow
+
+By default `run()` creates a new workflow each time. To instead reconcile the
+template against an existing workflow (add new tags, edit-and-retry drifted
+tasks, cascade re-runs to dependents), pass `--extend-workflow <id>`:
+
+```sh
+# Reconcile/extend workflow 2484 with this template's (current) definition:
+python -m scitq2.runner my_workflow.py --values '{...}' --extend-workflow 2484
+
+# Only re-run the existing failed tasks (no cascade); leave healthy ones alone:
+python -m scitq2.runner my_workflow.py --values '{...}' --extend-workflow 2484 --retry-failed-only
+```
+
+Steps are found-or-created by name and tasks found-or-referenced by `(step, tag)`.
+Run with the same provider/region the workflow already uses so outputs land in
+the same workspace. Full semantics and caveats: `specs/workflow_extend.md`. The
+same options exist on `scitq template run` (`--extend-workflow` / `--retry-failed-only`).
+
 ## Quality scoring
 
 Steps can define quality extraction rules to score task output:

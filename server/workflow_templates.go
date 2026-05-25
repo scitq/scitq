@@ -76,6 +76,8 @@ func (s *taskQueueServer) scriptRunner(
 	paramJSON string, // only used for "run"
 	templateRunID int32, // only used for "run"
 	authToken string, // extracted from context
+	extendWorkflowID int32, // only used for "run"; 0 = create new workflow
+	retryFailedOnly bool, // only used for "run" with extendWorkflowID != 0
 ) (stdout string, stderr string, exitCode int, err error) {
 	// Extract --no-recruiters suffix if present
 	noRecruiters := strings.HasSuffix(mode, "_no_recruiters")
@@ -123,6 +125,16 @@ func (s *taskQueueServer) scriptRunner(
 		valuesArgs = []string{"--values", paramJSON}
 	}
 
+	// extendArgs carries the "extend an existing workflow" opt-in to the
+	// runner (only meaningful for run/yaml_run modes).
+	var extendArgs []string
+	if extendWorkflowID != 0 {
+		extendArgs = append(extendArgs, "--extend-workflow", fmt.Sprintf("%d", extendWorkflowID))
+		if retryFailedOnly {
+			extendArgs = append(extendArgs, "--retry-failed-only")
+		}
+	}
+
 	var args []string
 	switch mode {
 	case "metadata":
@@ -135,6 +147,7 @@ func (s *taskQueueServer) scriptRunner(
 		if noRecruiters {
 			args = append(args, "--no-recruiters")
 		}
+		args = append(args, extendArgs...)
 	case "yaml_params":
 		args = []string{"-m", "scitq2.yaml_runner", scriptPath, "--params"}
 	case "yaml_run":
@@ -143,6 +156,7 @@ func (s *taskQueueServer) scriptRunner(
 		if noRecruiters {
 			args = append(args, "--no-recruiters")
 		}
+		args = append(args, extendArgs...)
 	default:
 		return "", "", -1, fmt.Errorf("unknown mode: %q", mode)
 	}
@@ -412,6 +426,8 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		req.ParamValuesJson,
 		templateRunId,
 		authToken,
+		req.GetExtendWorkflowId(),
+		req.RetryFailedOnly,
 	)
 
 	// Use a non-canceled context for the finalize/cleanup DB writes. If we fail
@@ -690,6 +706,8 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			"",
 			0,
 			authToken,
+			0,     // extendWorkflowID: metadata/params don't extend
+			false, // retryFailedOnly
 		)
 	}
 	if err != nil || exitCodeMeta != 0 {
@@ -747,6 +765,8 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			"",
 			0,
 			authToken,
+			0,     // extendWorkflowID: metadata/params don't extend
+			false, // retryFailedOnly
 		)
 	} else {
 		stdoutParams, stderrParams, _, err = s.scriptRunner(
@@ -756,6 +776,8 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			"",
 			0,
 			authToken,
+			0,     // extendWorkflowID: metadata/params don't extend
+			false, // retryFailedOnly
 		)
 	}
 	if err != nil {

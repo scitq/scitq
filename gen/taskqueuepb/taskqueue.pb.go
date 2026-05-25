@@ -7382,8 +7382,13 @@ type RunTemplateRequest struct {
 	WorkflowTemplateId int32                  `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
 	ParamValuesJson    string                 `protobuf:"bytes,2,opt,name=param_values_json,json=paramValuesJson,proto3" json:"param_values_json,omitempty"`
 	NoRecruiters       bool                   `protobuf:"varint,3,opt,name=no_recruiters,json=noRecruiters,proto3" json:"no_recruiters,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Extend an existing workflow instead of creating a new one. See
+	// specs/workflow_extend.md. retry_failed_only narrows the reconcile to
+	// re-running only the existing failed tasks (no cascade).
+	ExtendWorkflowId *int32 `protobuf:"varint,4,opt,name=extend_workflow_id,json=extendWorkflowId,proto3,oneof" json:"extend_workflow_id,omitempty"`
+	RetryFailedOnly  bool   `protobuf:"varint,5,opt,name=retry_failed_only,json=retryFailedOnly,proto3" json:"retry_failed_only,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RunTemplateRequest) Reset() {
@@ -7433,6 +7438,20 @@ func (x *RunTemplateRequest) GetParamValuesJson() string {
 func (x *RunTemplateRequest) GetNoRecruiters() bool {
 	if x != nil {
 		return x.NoRecruiters
+	}
+	return false
+}
+
+func (x *RunTemplateRequest) GetExtendWorkflowId() int32 {
+	if x != nil && x.ExtendWorkflowId != nil {
+		return *x.ExtendWorkflowId
+	}
+	return 0
+}
+
+func (x *RunTemplateRequest) GetRetryFailedOnly() bool {
+	if x != nil {
+		return x.RetryFailedOnly
 	}
 	return false
 }
@@ -11063,11 +11082,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_versionB\x0e\n" +
 	"\f_descriptionB\r\n" +
-	"\v_param_json\"\x97\x01\n" +
+	"\v_param_json\"\x8d\x02\n" +
 	"\x12RunTemplateRequest\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12*\n" +
 	"\x11param_values_json\x18\x02 \x01(\tR\x0fparamValuesJson\x12#\n" +
-	"\rno_recruiters\x18\x03 \x01(\bR\fnoRecruiters\"\x9c\x02\n" +
+	"\rno_recruiters\x18\x03 \x01(\bR\fnoRecruiters\x121\n" +
+	"\x12extend_workflow_id\x18\x04 \x01(\x05H\x00R\x10extendWorkflowId\x88\x01\x01\x12*\n" +
+	"\x11retry_failed_only\x18\x05 \x01(\bR\x0fretryFailedOnlyB\x15\n" +
+	"\x13_extend_workflow_id\"\x9c\x02\n" +
 	"\x0eTemplateFilter\x125\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
 	"\x04name\x18\x02 \x01(\tH\x01R\x04name\x88\x01\x01\x12\x1d\n" +
@@ -11887,6 +11909,7 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[91].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[102].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[103].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[104].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[105].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[106].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[107].OneofWrappers = []any{}

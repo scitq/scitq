@@ -691,7 +691,7 @@ scitq template upload --path biomscope.yaml
 Runs a previously uploaded template. You can select it by name+version or by ID. Parameters are passed as comma‑separated `key=value` pairs.
 
 ```sh
-scitq template run [--id <template_id> | --name <template_name>] [--version <ver>] [--param "k1=v1,k2=v2,..."] [--no-recruiters]
+scitq template run [--id <template_id> | --name <template_name>] [--version <ver>] [--param "k1=v1,k2=v2,..."] [--no-recruiters] [--extend-workflow <id> [--retry-failed-only]]
 ```
 
 Options:
@@ -700,13 +700,33 @@ Options:
 - `--version`: optional version (defaults to latest when omitted with `--name`).
 - `--param`: comma‑separated key=value pairs (client converts them to JSON for the server).
 - `--no-recruiters`: create the workflow without deploying any workers (useful for testing or manual worker assignment).
+- `--extend-workflow <id>`: **extend** an existing workflow instead of creating a new one (opt-in; default is always create-new). Steps are found-or-created by name, and tasks found-or-referenced by `(step, tag)`. A task whose generated command drifted is edit-and-retried, and by default its dependents are re-run too (cascade). New tags (e.g. more samples) are added. Use the same provider/region the workflow already uses so outputs land in the same workspace. See [Extending a workflow](#extending-an-existing-workflow) and `specs/workflow_extend.md`.
+- `--retry-failed-only`: with `--extend-workflow`, only re-run existing tasks currently **failed** (no cascade); leave succeeded/running/pending tasks untouched. New tags are still added. Ideal when a template's command was fixed and only the failed tasks need the fix (generalizes `edit_step_command`).
 
 Examples:
 
 ```sh
 scitq template run --name qc_step --version 1.2.0 --param "sample=A12,threads=8"
 scitq template run --name biomscope --param "bioproject=PRJEB6070,location=openstack.ovh:GRA11" --no-recruiters
+
+# Add more samples to an existing collection workflow (id 2484), reconciling drift:
+scitq template run --name hermes-collect --param "bioproject=PRJEB9999,location=openstack.ovh:GRA11" --extend-workflow 2484
+
+# Re-run only the failed tasks of an existing workflow with the (fixed) template:
+scitq template run --name hermes-collect --param "bioproject=PRJEB51353,location=openstack.ovh:GRA11" --extend-workflow 2484 --retry-failed-only
 ```
+
+#### Extending an existing workflow
+
+By default every template run creates a new workflow. `--extend-workflow <id>` instead reconciles the template's desired state against an existing workflow, idempotent by identity at each level:
+
+| Level | Identity | Action |
+|---|---|---|
+| Workflow | the `--extend-workflow` id | reused (not recreated; its settings are left untouched) |
+| Step | `(workflow, step name)` | found-or-created |
+| Task | `(step, tag)` (tag = task name) | found-or-referenced; drifted command → edit-and-retry |
+
+Default mode **cascades**: re-running a task because its command drifted also re-runs its dependents (their inputs changed). `--retry-failed-only` narrows this to just the failed tasks (no cascade). Either way, brand-new tags are created — so this is also how you feed more inputs into an existing workflow's steps. Caveats and full semantics: `specs/workflow_extend.md`.
 
 #### `template list`
 

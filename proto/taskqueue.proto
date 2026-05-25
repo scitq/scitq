@@ -993,6 +993,11 @@ message RunTemplateRequest {
   int32 workflow_template_id = 1;
   string param_values_json = 2;
   bool no_recruiters = 3;
+  // Extend an existing workflow instead of creating a new one. See
+  // specs/workflow_extend.md. retry_failed_only narrows the reconcile to
+  // re-running only the existing failed tasks (no cascade).
+  optional int32 extend_workflow_id = 4;
+  bool retry_failed_only = 5;
 }
 
 message TemplateFilter {

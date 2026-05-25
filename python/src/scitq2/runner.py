@@ -88,8 +88,8 @@ def extract_workflow_metadata(source_code: str) -> Dict[str, str]:
                 value = next((kw.value for kw in node.keywords if kw.arg == field), None)
                 if value is None:
                     continue
-                if isinstance(value, ast.Str):
-                    result[field] = value.s
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    result[field] = value.value
                 else:
                     raise WorkflowDefinitionError(
                         f"The workflow metadata field '{field}' must be a plain string literal, "
@@ -185,6 +185,10 @@ def run(func: Callable, live: bool = False):
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters.")
     parser.add_argument("--opportunistic", action="store_true", help="Enable opportunistic reuse of previous results. Steps declared with skip_if_exists=True are excluded (evaluated against the current publish target instead). Reuse hits are also restricted to cached outputs sharing the current task's scheme+authority (no cross-region/cross-cloud reuse).")
     parser.add_argument("--untrusted", type=str, default="", help="Comma-separated step names to force re-execute.")
+    parser.add_argument("--extend-workflow", type=int, default=None, dest="extend_workflow",
+                        help="Extend an existing workflow (by id) instead of creating a new one. Steps are found-or-created by name; tasks are found-or-referenced by (step, tag). A task whose command drifted is edit-and-retried, and (by default) its dependents are re-run too (cascade). See specs/workflow_extend.md.")
+    parser.add_argument("--retry-failed-only", action="store_true", dest="retry_failed_only",
+                        help="With --extend-workflow: among existing tasks, only re-run those currently failed (no cascade); leave succeeded/running/pending tasks untouched. New inputs are still added.")
     parser.add_argument("--live", action="store_true", help="Keep DSL running for dynamic task submission.")
     args = parser.parse_args()
 
@@ -316,8 +320,11 @@ def run(func: Callable, live: bool = False):
                 for step in workflow.steps:
                     step.worker_pool = None
             untrusted_list = [s.strip() for s in args.untrusted.split(",") if s.strip()] if args.untrusted else []
+            if args.retry_failed_only and args.extend_workflow is None:
+                print("⚠️ --retry-failed-only has no effect without --extend-workflow; ignoring.", file=sys.stderr)
             workflow.compile(client, activate_leading_tasks=activate, workflow_status=workflow_status,
-                             opportunistic=args.opportunistic, untrusted=untrusted_list)
+                             opportunistic=args.opportunistic, untrusted=untrusted_list,
+                             extend_workflow_id=args.extend_workflow, retry_failed_only=args.retry_failed_only)
         except grpc.RpcError as e:
             _handle_grpc_error(e)
         if args.dry_run:

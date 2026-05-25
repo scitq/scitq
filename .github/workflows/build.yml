@@ -123,7 +123,11 @@ jobs:
 
       - name: Run uncovered tests (catch-all for new tests)
         run: |
-          make copy-docs
+          # Rebuild the embedded Python tarball (//go:embed python-src.tgz) so
+          # tests that upload+run a real template (e.g. TestExtendWorkflowE2E)
+          # exercise the *current* DSL source, not a stale committed tarball.
+          # Pure shell + tar, no Python interpreter needed.
+          make tgz-python-src copy-docs
           COVERED="TestIntegration|TestTaskDependency|TestWorkflowStatus|TestFreeWorkers|TestRetryClonesHiddenParent|TestRetryCLI|TestMCPEndToEnd|TestTaskStdoutStderr|TestReuse|TestSkipIfExists|TestForceRunTask|TestPublishOnly|TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestMultiObjectiveQuality|TestOptunaLoop|TestSignalStop|TestEnvVars|TestWorkflowCounters|TestFetchIntegration|TestRecruitmentCycle|TestLongRecruiter|TestLiveQualityMonitoring|TestPermanentWorkerProtection"
           ALL=$(cd tests/integration && grep -h '^func Test' *_test.go | sed 's/func \(Test[a-zA-Z0-9_]*\).*/\1/' | sort -u)
           UNCOVERED=""
