@@ -619,6 +619,9 @@
   let workflowOptions: Array<any> = [];
   let workflowOffset: number = 0;
   let selectedWorkflowId: number | null = null;
+  let workflowSearch: string = "";
+  let workflowSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  const WORKFLOW_PAGE = 50;
 
   let stepOptions: Array<any> = [];
   let selectedStepId: number | null = null;
@@ -635,7 +638,11 @@
 
     try {
       const api = await import('../lib/api');
-      const res = await api.listWorkflows({ limit: 10, offset: workflowOffset });
+      const res = await api.listWorkflows({
+        nameLike: workflowSearch.trim() || undefined,
+        limit: WORKFLOW_PAGE,
+        offset: workflowOffset,
+      });
 
       const newList = res?.workflows ?? [];
       workflowOptions = [...workflowOptions, ...newList];
@@ -646,6 +653,21 @@
     } finally {
       loadingWorkflows = false;
     }
+  }
+
+  /** Reset the list and reload from the first page for the current search term. */
+  async function resetAndLoadWorkflows() {
+    workflowOptions = [];
+    workflowOffset = 0;
+    await loadWorkflows();
+  }
+
+  /** Debounced handler for the workflow search box. */
+  function onWorkflowSearchInput() {
+    if (workflowSearchTimer) clearTimeout(workflowSearchTimer);
+    workflowSearchTimer = setTimeout(() => {
+      resetAndLoadWorkflows();
+    }, 250);
   }
 
 
@@ -794,6 +816,13 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
     <div class="step-edit-block">
       <label>
         Workflow:
+        <input
+          type="text"
+          placeholder="search…"
+          bind:value={workflowSearch}
+          on:input={onWorkflowSearchInput}
+          class="wf-search"
+        />
         <select
           bind:value={selectedWorkflowId}
           on:change={() => loadStepsForWorkflow(selectedWorkflowId !== null && Number(selectedWorkflowId) > 0 ? Number(selectedWorkflowId) : null)}
@@ -890,6 +919,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
           editingWorkflowStepFor = worker.workerId;
           selectedWorkflowId = worker.workflowId ?? null;
           selectedStepId = worker.stepId ?? null;
+          workflowSearch = "";
           workflowOptions = [];
           workflowOffset = 0;
           loadWorkflows();

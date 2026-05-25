@@ -203,6 +203,13 @@
   padding: 4px;
 }
 
+.step-edit-block .wf-search {
+  width: 9em;
+  margin-left: 4px;
+  padding: 2px 4px;
+  font-size: 0.85em;
+}
+
 .wf-step-cell .btn-action,
 .step-edit-block .btn-action {
   flex: 0 0 auto;
