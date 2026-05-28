@@ -1721,7 +1721,9 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
              no_recruiters: bool = False,
              verbose: bool = False,
              opportunistic: bool = False,
-             untrusted: Optional[List[str]] = None) -> Optional[int]:
+             untrusted: Optional[List[str]] = None,
+             extend_workflow_id: Optional[int] = None,
+             retry_failed_only: bool = False) -> Optional[int]:
     """Run a YAML pipeline definition."""
     # Validate
     if 'name' not in data:
@@ -2074,7 +2076,8 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     # Compile (client already created above for RESOURCE_ROOT)
     activate = standalone and not dry_run
     workflow.compile(client, activate_leading_tasks=activate,
-                     opportunistic=effective_opportunistic, untrusted=effective_untrusted)
+                     opportunistic=effective_opportunistic, untrusted=effective_untrusted,
+                     extend_workflow_id=extend_workflow_id, retry_failed_only=retry_failed_only)
 
     if dry_run:
         client.delete_workflow(workflow.workflow_id)
@@ -2444,6 +2447,10 @@ def main():
     parser.add_argument("--params", action="store_true", help="Print parameter schema as JSON")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     parser.add_argument("--no-recruiters", action="store_true", dest="no_recruiters", help="Create workflow without recruiters")
+    parser.add_argument("--extend-workflow", type=int, default=None, dest="extend_workflow",
+                        help="Extend an existing workflow (by id) instead of creating a new one. Steps are found-or-created by name; tasks found-or-referenced by (step, tag); drifted-command tasks are edit-and-retried (with cascade by default). See specs/workflow_extend.md.")
+    parser.add_argument("--retry-failed-only", action="store_true", dest="retry_failed_only",
+                        help="With --extend-workflow: among existing tasks only re-run those currently failed (no cascade); leave succeeded/running/pending untouched. New tags are still added.")
     parser.add_argument("--standalone", action="store_true", default=True)
     parser.add_argument("--verbose", action="store_true", help="Print step decisions to stderr")
     parser.add_argument("--list-bundled", action="store_true", dest="list_bundled",
@@ -2489,9 +2496,12 @@ def main():
         values = json.loads(args.values) if args.values else {}
     standalone = args.standalone or not os.environ.get("SCITQ_TEMPLATE_RUN_ID")
     pipeline_dir = os.path.dirname(os.path.abspath(args.input))
+    if args.retry_failed_only and args.extend_workflow is None:
+        print("⚠️ --retry-failed-only has no effect without --extend-workflow; ignoring.", file=sys.stderr)
     run_yaml(data, params_values=values, dry_run=args.dry_run, standalone=standalone,
              pipeline_dir=pipeline_dir, no_recruiters=args.no_recruiters,
-             verbose=args.verbose)
+             verbose=args.verbose,
+             extend_workflow_id=args.extend_workflow, retry_failed_only=args.retry_failed_only)
 
 
 if __name__ == "__main__":
