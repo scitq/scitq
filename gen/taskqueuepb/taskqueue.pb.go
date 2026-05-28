@@ -1307,8 +1307,15 @@ type Worker struct {
 	// Pending operator-triggered upgrade request, if any. Phase II.
 	// "" | "normal" | "emergency".
 	UpgradeRequested *string `protobuf:"bytes,24,opt,name=upgrade_requested,json=upgradeRequested,proto3,oneof" json:"upgrade_requested,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Number of tasks this worker has FAILED since its most recent SUCCESS
+	// (counting hidden retry-parents, which retain worker_id). A worker that
+	// is structurally broken for the current step (e.g. a binary that crashes
+	// on its CPU) shows this climbing while it produces no successes — the UI
+	// surfaces it as a warning. 0 when the worker's latest task outcome is a
+	// success (or it has no failures).
+	RecentFailures *int32 `protobuf:"varint,25,opt,name=recent_failures,json=recentFailures,proto3,oneof" json:"recent_failures,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Worker) Reset() {
@@ -1507,6 +1514,13 @@ func (x *Worker) GetUpgradeRequested() string {
 		return *x.UpgradeRequested
 	}
 	return ""
+}
+
+func (x *Worker) GetRecentFailures() int32 {
+	if x != nil && x.RecentFailures != nil {
+		return *x.RecentFailures
+	}
+	return 0
 }
 
 type WorkersList struct {
@@ -10434,7 +10448,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x17EditStepCommandResponse\x12!\n" +
 	"\fedited_count\x18\x01 \x01(\x05R\veditedCount\x12 \n" +
 	"\fnew_task_ids\x18\x02 \x03(\x05R\n" +
-	"newTaskIds\"\xc6\a\n" +
+	"newTaskIds\"\x88\b\n" +
 	"\x06Worker\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -10466,7 +10480,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"build_arch\x18\x16 \x01(\tH\tR\tbuildArch\x88\x01\x01\x12*\n" +
 	"\x0eupgrade_status\x18\x17 \x01(\tH\n" +
 	"R\rupgradeStatus\x88\x01\x01\x120\n" +
-	"\x11upgrade_requested\x18\x18 \x01(\tH\vR\x10upgradeRequested\x88\x01\x01B\n" +
+	"\x11upgrade_requested\x18\x18 \x01(\tH\vR\x10upgradeRequested\x88\x01\x01\x12,\n" +
+	"\x0frecent_failures\x18\x19 \x01(\x05H\fR\x0erecentFailures\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_idB\f\n" +
 	"\n" +
@@ -10481,7 +10496,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\a_commitB\r\n" +
 	"\v_build_archB\x11\n" +
 	"\x0f_upgrade_statusB\x14\n" +
-	"\x12_upgrade_requested\":\n" +
+	"\x12_upgrade_requestedB\x12\n" +
+	"\x10_recent_failures\":\n" +
 	"\vWorkersList\x12+\n" +
 	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"J\n" +
 	"\x12ListWorkersRequest\x12$\n" +

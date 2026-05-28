@@ -325,6 +325,13 @@ message Worker {
     // Pending operator-triggered upgrade request, if any. Phase II.
     // "" | "normal" | "emergency".
     optional string upgrade_requested = 24;
+    // Number of tasks this worker has FAILED since its most recent SUCCESS
+    // (counting hidden retry-parents, which retain worker_id). A worker that
+    // is structurally broken for the current step (e.g. a binary that crashes
+    // on its CPU) shows this climbing while it produces no successes — the UI
+    // surfaces it as a warning. 0 when the worker's latest task outcome is a
+    // success (or it has no failures).
+    optional int32 recent_failures = 25;
 }
 
 

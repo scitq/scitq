@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, listWorkerEvents} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star, ArrowUpCircle } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
@@ -629,6 +629,29 @@
   let loadingWorkflows: boolean = false;
   let loadingSteps: boolean = false;
 
+  /** Worker-events viewer state (the info/warning badge opens this). */
+  let eventsWorker: any = null;          // worker whose events are shown, or null
+  let workerEvents: Array<any> = [];
+  let eventsLoading: boolean = false;
+
+  async function openWorkerEvents(worker: any) {
+    eventsWorker = worker;
+    eventsLoading = true;
+    workerEvents = [];
+    try {
+      workerEvents = await listWorkerEvents(worker.workerId, 100);
+    } catch (err) {
+      console.error('Failed to load worker events', worker.workerId, err);
+    } finally {
+      eventsLoading = false;
+    }
+  }
+
+  function closeWorkerEvents() {
+    eventsWorker = null;
+    workerEvents = [];
+  }
+
   /**
    * Loads initial workflows lazily (first page only)
    */
@@ -808,6 +831,24 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                     class="worker-upgrade-badge worker-upgrade-pending-emergency"
                     title="Emergency upgrade pending — worker is draining in-flight tasks, then will swap binaries (30 min hard cap)."
                   >upg drain</span>
+                {/if}
+                <!-- Worker-events badge: ℹ︎ normally, ⚠ when this worker has
+                     been failing tasks (>=2 since its last success). Click to
+                     view the worker's recent events. -->
+                {#if (worker.recentFailures ?? 0) >= 2}
+                  <button
+                    type="button"
+                    class="worker-events-badge worker-events-warn"
+                    title="{worker.recentFailures} task failure(s) since this worker's last success — it may be broken for this step. Click for events."
+                    on:click|stopPropagation={() => openWorkerEvents(worker)}
+                  >⚠</button>
+                {:else}
+                  <button
+                    type="button"
+                    class="worker-events-badge worker-events-info"
+                    title="Worker events"
+                    on:click|stopPropagation={() => openWorkerEvents(worker)}
+                  >ⓘ</button>
                 {/if}
               </td>
               <td class="workerCompo-wfstep">
@@ -1247,4 +1288,37 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
   </div>
 {:else}
   <p class="workerCompo-empty-state">No workers found.</p>
+{/if}
+
+<!-- Worker-events viewer (opened from the ℹ︎/⚠ badge in the worker name cell). -->
+{#if eventsWorker}
+  <div class="worker-events-overlay" on:click={closeWorkerEvents} role="presentation">
+    <div class="worker-events-panel" on:click|stopPropagation role="dialog" aria-modal="true">
+      <div class="worker-events-header">
+        <span>
+          Events — <strong>{eventsWorker.name}</strong>
+          {#if (eventsWorker.recentFailures ?? 0) >= 2}
+            <span class="worker-events-warn-text">⚠ {eventsWorker.recentFailures} failures since last success</span>
+          {/if}
+        </span>
+        <button type="button" class="worker-events-close" on:click={closeWorkerEvents} title="Close">✕</button>
+      </div>
+      <div class="worker-events-body">
+        {#if eventsLoading}
+          <p class="worker-events-empty">Loading…</p>
+        {:else if workerEvents.length === 0}
+          <p class="worker-events-empty">No events recorded for this worker.</p>
+        {:else}
+          {#each workerEvents as ev}
+            <div class="worker-events-row worker-events-level-{ev.level}">
+              <span class="worker-events-time">{ev.createdAt}</span>
+              <span class="worker-events-lvl">{ev.level}</span>
+              <span class="worker-events-class">{ev.eventClass}</span>
+              <span class="worker-events-msg">{ev.message}</span>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    </div>
+  </div>
 {/if}

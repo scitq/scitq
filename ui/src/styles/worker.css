@@ -708,3 +708,102 @@
 .btn-action.btn-upgrade-emergency {
   color: #dc2626;
 }
+
+/* Worker-events badge (ℹ︎ / ⚠) in the worker name cell. */
+.worker-events-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1;
+  vertical-align: middle;
+}
+.worker-events-info {
+  color: #2563eb; /* blue info */
+}
+.worker-events-info:hover {
+  color: #1d4ed8;
+}
+.worker-events-warn {
+  color: #dc2626; /* red warning */
+}
+.worker-events-warn:hover {
+  color: #991b1b;
+}
+
+/* Worker-events modal. */
+.worker-events-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.worker-events-panel {
+  background: var(--bg-color, #1e1e1e);
+  color: var(--text-color, #e5e5e5);
+  width: min(900px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.worker-events-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.95rem;
+}
+.worker-events-warn-text {
+  color: #f87171;
+  margin-left: 8px;
+  font-size: 0.85rem;
+}
+.worker-events-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.worker-events-body {
+  overflow-y: auto;
+  padding: 6px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+.worker-events-empty {
+  opacity: 0.7;
+  padding: 16px;
+  text-align: center;
+}
+.worker-events-row {
+  display: grid;
+  grid-template-columns: 168px 22px 96px 1fr;
+  gap: 8px;
+  padding: 3px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  align-items: baseline;
+}
+.worker-events-time { opacity: 0.7; }
+.worker-events-lvl { font-weight: 700; text-align: center; }
+.worker-events-class { opacity: 0.85; }
+.worker-events-msg { word-break: break-word; }
+.worker-events-level-E .worker-events-lvl,
+.worker-events-level-E .worker-events-msg { color: #f87171; }
+.worker-events-level-W .worker-events-lvl,
+.worker-events-level-W .worker-events-msg { color: #fbbf24; }

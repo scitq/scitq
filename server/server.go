@@ -1323,15 +1323,18 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			`, req.TaskId).Scan(&newID)
 			if txErr == nil {
 				// Hide the failed parent; keep step_id so lineage is intact and default views can filter it out.
-				// Clear worker_id: when NewStatus=F && retry>0 the status-write below is skipped, so the parent
-				// keeps its prior (active) status (A/C/D/O/R). A hidden row with an active status AND a worker_id
-				// still counts against that worker's capacity (the assign/recruit load joins don't filter hidden),
-				// silently pinning slots on a worker that's actually idle. retryTaskInternal already nulls worker_id
-				// on its hide for the same reason.
+				// Keep worker_id on the hidden parent: it records which worker
+				// actually ran (and failed) this attempt — invaluable for
+				// diagnosing "which worker is failing tasks?" (see the
+				// recent-failure signal in ListWorkers). It is safe to retain
+				// because hidden rows are excluded from every scheduling path:
+				// the capacity/recruit load joins filter `AND NOT t.hidden`,
+				// and PingAndTakeNewTasks fetches `AND NOT hidden`, so a hidden
+				// row is never re-served nor counted against capacity. (This is
+				// why the older "null worker_id on hide" is no longer needed.)
 				_, txErr = tx.ExecContext(ctx, `
 					UPDATE task
 					   SET hidden = TRUE,
-						   worker_id = NULL,
 						   modified_at = NOW()
 					 WHERE task_id = $1
 				`, req.TaskId)
@@ -1793,9 +1796,13 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 			RETURNING task_id
 		),
 		hidden AS (
-			-- Clear worker_id so a hidden-but-still-'A' row isn't handed back
-			-- to its old worker on subsequent PingAndTakeNewTasks calls.
-			UPDATE task SET hidden = TRUE, worker_id = NULL, modified_at = NOW()
+			-- Keep worker_id: it records which worker ran this (now superseded)
+			-- attempt, which drives "which worker is failing tasks?" diagnostics.
+			-- Safe because hidden rows are excluded from re-serve
+			-- (PingAndTakeNewTasks: AND NOT hidden) and from capacity/recruit
+			-- load joins (AND NOT t.hidden), so a retained worker_id never
+			-- causes a re-hand-out or a phantom capacity charge.
+			UPDATE task SET hidden = TRUE, modified_at = NOW()
 			WHERE task_id = (SELECT task_id FROM validated)
 			RETURNING TRUE
 		)
@@ -4110,7 +4117,17 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			w.version,
 			w.commit_sha,
 			w.build_arch,
-			w.upgrade_requested
+			w.upgrade_requested,
+			-- Failures since this worker's most recent success. Counts hidden
+			-- retry-parents (they retain worker_id), so a worker that crashes
+			-- every task it takes shows this climbing with no successes.
+			(SELECT count(*) FROM task ft
+			 WHERE ft.worker_id = w.worker_id AND ft.status = 'F'
+			   AND ft.modified_at > COALESCE(
+			       (SELECT max(st.modified_at) FROM task st
+			        WHERE st.worker_id = w.worker_id AND st.status = 'S'),
+			       '-infinity'::timestamptz)
+			) AS recent_failures
 		FROM worker w
 		LEFT JOIN region r ON r.region_id = w.region_id
 		LEFT JOIN provider p ON r.provider_id = p.provider_id
@@ -4148,13 +4165,14 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		var flavorMem, flavorDisk sql.NullFloat64
 		var stepName, workflowName sql.NullString
 		var workerVersion, workerCommit, workerArch, upgradeReq sql.NullString
+		var recentFailures int32
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
 			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor,
 			&flavorCpu, &flavorMem, &flavorDisk,
 			&stepId, &stepName,
 			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName,
-			&workerVersion, &workerCommit, &workerArch, &upgradeReq)
+			&workerVersion, &workerCommit, &workerArch, &upgradeReq, &recentFailures)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan worker: %v", err)
 			continue
@@ -4198,6 +4216,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		if upgradeReq.Valid {
 			worker.UpgradeRequested = &upgradeReq.String
 		}
+		worker.RecentFailures = &recentFailures
 
 		workers = append(workers, &worker)
 	}

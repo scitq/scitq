@@ -602,6 +602,17 @@ export interface Worker {
      * @generated from protobuf field: optional string upgrade_requested = 24
      */
     upgradeRequested?: string;
+    /**
+     * Number of tasks this worker has FAILED since its most recent SUCCESS
+     * (counting hidden retry-parents, which retain worker_id). A worker that
+     * is structurally broken for the current step (e.g. a binary that crashes
+     * on its CPU) shows this climbing while it produces no successes — the UI
+     * surfaces it as a warning. 0 when the worker's latest task outcome is a
+     * success (or it has no failures).
+     *
+     * @generated from protobuf field: optional int32 recent_failures = 25
+     */
+    recentFailures?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -4595,7 +4606,8 @@ class Worker$Type extends MessageType<Worker> {
             { no: 21, name: "commit", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 22, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 23, name: "upgrade_status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 24, name: "upgrade_requested", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 24, name: "upgrade_requested", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 25, name: "recent_failures", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -4693,6 +4705,9 @@ class Worker$Type extends MessageType<Worker> {
                 case /* optional string upgrade_requested */ 24:
                     message.upgradeRequested = reader.string();
                     break;
+                case /* optional int32 recent_failures */ 25:
+                    message.recentFailures = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4777,6 +4792,9 @@ class Worker$Type extends MessageType<Worker> {
         /* optional string upgrade_requested = 24; */
         if (message.upgradeRequested !== undefined)
             writer.tag(24, WireType.LengthDelimited).string(message.upgradeRequested);
+        /* optional int32 recent_failures = 25; */
+        if (message.recentFailures !== undefined)
+            writer.tag(25, WireType.Varint).int32(message.recentFailures);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

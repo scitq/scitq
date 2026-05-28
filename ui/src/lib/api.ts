@@ -198,6 +198,22 @@ export async function listWorkers(workflowId?: number): Promise<taskqueue.Worker
 }
 
 /**
+ * Retrieves recent lifecycle/runtime events for a worker (install, bootstrap,
+ * download failures, task warnings, …). Newest first.
+ * @param workerId - The worker to fetch events for.
+ * @param limit - Max events (default 50).
+ */
+export async function listWorkerEvents(workerId: number, limit = 50): Promise<taskqueue.WorkerEventRecord[]> {
+  try {
+    const res = await client.listWorkerEvents({ workerId, limit }, await callOptionsUserToken());
+    return res.response?.events || [];
+  } catch (error) {
+    console.error("Error while retrieving worker events:", error);
+    return [];
+  }
+}
+
+/**
  * Retrieves stats for a list of worker IDs.
  * @param workerIds - The IDs of the workers.
  * @returns A record mapping worker IDs to their stats.
