@@ -1222,6 +1222,14 @@ Run with the same provider/region the workflow already uses so outputs land in
 the same workspace. Full semantics and caveats: `specs/workflow_extend.md`. The
 same options exist on `scitq template run` (`--extend-workflow` / `--retry-failed-only`).
 
+For uploaded templates, `scitq template run` also accepts `--continue`, which
+resolves the workflow id automatically (your most recent run of the same
+template name with matching params) so you don't have to look it up — see
+[CLI → Extending a workflow](cli.md#extending-an-existing-workflow). (`--continue`
+is server-resolved, so it applies to `scitq template run`, not the local
+`python -m scitq2.runner` path, which has no run history to consult — there you
+pass `--extend-workflow <id>` directly.)
+
 ## Quality scoring
 
 Steps can define quality extraction rules to score task output:

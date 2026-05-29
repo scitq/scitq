@@ -1540,3 +1540,46 @@ Reusing across regions silently turns intra-region reads into paid cross-region 
 | Speed | Requires I/O (listing remote files) | Instant (DB primary key) |
 | Granularity | Per step | Workflow-level opt-in |
 | Precedence | Wins when both are set | Skipped when `skip_if_exists=true` |
+
+## Extending an existing workflow
+
+By default each `scitq template run` of a YAML template creates a new workflow.
+You can instead **reconcile the template against an existing workflow** —
+declaratively, by identity:
+
+```sh
+# Re-run the exact same thing into the same workflow, without looking up its id
+# (e.g. after fixing a module the template imports). Resolves your most recent
+# run of this template with matching params:
+scitq template run --name biomscope --param "bioproject=...,depth=2x20M,location=azure.primary:swedencentral" --continue
+
+# Or target a workflow explicitly by id:
+scitq template run --name biomscope --param "bioproject=...,depth=2x20M,location=azure.primary:swedencentral" --extend-workflow 2525
+
+# Re-run only the tasks that failed (no cascade); leave succeeded/running alone:
+scitq template run --name biomscope --param "..." --extend-workflow 2525 --retry-failed-only
+```
+
+What happens, level by level:
+
+| Level | Identity | Action |
+|---|---|---|
+| Workflow | `--extend-workflow <id>` (or resolved by `--continue`) | reused, settings untouched |
+| Step | `(workflow, step name)` | found-or-created |
+| Task | `(step, tag)` | found-or-referenced; a task whose generated command **drifted** (e.g. an imported module changed) is edit-and-retried |
+
+Default mode **cascades**: re-running a drifted task also re-runs its dependents
+(their inputs changed). `--retry-failed-only` narrows it to just the failed
+tasks (no cascade). Brand-new tags (e.g. more samples) are always added, so this
+is also how you feed more inputs into an existing workflow.
+
+`--continue` matches your most recent run of the same template **name** (any
+version) with **identical params** (compared canonically), restricted to your
+own runs, and errors rather than silently creating a new workflow if there's no
+match. Because it matches on identical params, it's for reconciling/retrying the
+same run (a template or module fix) — adding a sample changes the params, so use
+`--extend-workflow <id>` for that. Run with the same provider/region the
+workflow already uses so outputs land in the same workspace.
+
+Full semantics, caveats, and the cascade rule: `specs/workflow_extend.md`, and
+[CLI → Extending a workflow](cli.md#extending-an-existing-workflow).
