@@ -691,9 +691,19 @@ export async function UploadTemplates(script: Uint8Array, force: boolean): Promi
  * @returns {Promise<taskqueue.TemplateRun>} Promise resolving to template run response
  * @throws {Error} If template execution fails
  */
-export async function runTemp(workflowTemplateId: number, paramValuesJson: string): Promise<taskqueue.TemplateRun> {
+export async function runTemp(
+  workflowTemplateId: number,
+  paramValuesJson: string,
+  opts?: { extendWorkflowId?: number; continueLast?: boolean; retryFailedOnly?: boolean }
+): Promise<taskqueue.TemplateRun> {
   try {
-    const runTempUnary = await client.runTemplate({ workflowTemplateId, paramValuesJson }, await callOptionsUserToken());
+    const req: any = { workflowTemplateId, paramValuesJson };
+    if (opts?.extendWorkflowId !== undefined && opts.extendWorkflowId !== null) {
+      req.extendWorkflowId = opts.extendWorkflowId;
+    }
+    if (opts?.continueLast) req.continueLast = true;
+    if (opts?.retryFailedOnly) req.retryFailedOnly = true;
+    const runTempUnary = await client.runTemplate(req, await callOptionsUserToken());
     return runTempUnary.response!;
   } catch (error) {
     console.error("Error while running templates:", error);

@@ -37,6 +37,12 @@
   let selectedTemplate: Template | null = null;
   // User-provided parameter values
   let userParams: Record<string, any> = {};
+  // --- Advanced run options (collapsed by default) ---
+  // runMode: 'new' (default), 'continue' (extend the last matching run), or
+  // 'extend' (extend a specific workflow id). See specs/workflow_extend.md.
+  let runMode: 'new' | 'continue' | 'extend' = 'new';
+  let runExtendWorkflowId: number | null = null;
+  let runRetryFailedOnly = false;
   // Parameter validation errors
   let paramErrors: Record<string, string> = {};
   // Whether to show parameter errors
@@ -245,6 +251,11 @@
       userParams = {};
     }
 
+    // Reset advanced run options each time the modal opens.
+    runMode = 'new';
+    runExtendWorkflowId = null;
+    runRetryFailedOnly = false;
+
     showParamModal = true;
   }
 
@@ -274,11 +285,27 @@
 
       if (!selectedTemplate) return;
 
+      // Advanced run options (extend / continue / retry-failed-only).
+      const runOpts: { extendWorkflowId?: number; continueLast?: boolean; retryFailedOnly?: boolean } = {};
+      if (runMode === 'continue') {
+        runOpts.continueLast = true;
+      } else if (runMode === 'extend') {
+        if (runExtendWorkflowId == null || runExtendWorkflowId <= 0) {
+          errorMessage = 'Enter a workflow id to extend, or pick another run mode.';
+          showRunErrorModal = true;
+          return;
+        }
+        runOpts.extendWorkflowId = runExtendWorkflowId;
+      }
+      if (runMode !== 'new' && runRetryFailedOnly) {
+        runOpts.retryFailedOnly = true;
+      }
+
       // Only include paramJson if userParams is non-empty
       const hasParams = Object.keys(userParams).length > 0;
       const res = hasParams
-        ? await runTemp(selectedTemplate.workflowTemplateId, JSON.stringify(userParams))
-        : await runTemp(selectedTemplate.workflowTemplateId, '{}');
+        ? await runTemp(selectedTemplate.workflowTemplateId, JSON.stringify(userParams), runOpts)
+        : await runTemp(selectedTemplate.workflowTemplateId, '{}', runOpts);
 
       if (res.status !== 'S') {
         const msg = res.errorMessage || 'Template run failed (unknown error)';
@@ -571,6 +598,38 @@
           </div>
         {/each}
       </div>
+
+      <!-- Advanced run options (collapsed by default). Extend/continue an
+           existing workflow instead of creating a new one. -->
+      <details class="wfTemp-run-options">
+        <summary>Options</summary>
+        <div class="wfTemp-run-options-body">
+          <label class="wfTemp-run-opt">
+            <input type="radio" name="runMode" value="new" bind:group={runMode} />
+            New workflow <span class="wfTemp-opt-hint">(default)</span>
+          </label>
+          <label class="wfTemp-run-opt">
+            <input type="radio" name="runMode" value="continue" bind:group={runMode} />
+            Continue last run <span class="wfTemp-opt-hint">(extend your most recent run of this template with the same parameters)</span>
+          </label>
+          <label class="wfTemp-run-opt">
+            <input type="radio" name="runMode" value="extend" bind:group={runMode} />
+            Extend workflow
+            <input
+              type="number"
+              min="1"
+              placeholder="id"
+              class="wfTemp-extend-id"
+              bind:value={runExtendWorkflowId}
+              on:focus={() => (runMode = 'extend')}
+            />
+          </label>
+          <label class="wfTemp-run-opt wfTemp-run-subopt" class:wfTemp-opt-disabled={runMode === 'new'}>
+            <input type="checkbox" bind:checked={runRetryFailedOnly} disabled={runMode === 'new'} />
+            Retry failed only <span class="wfTemp-opt-hint">(re-run only failed tasks, no cascade)</span>
+          </label>
+        </div>
+      </details>
 
       <!-- Modal action buttons -->
       <div class="wfTemp-modal-actions">

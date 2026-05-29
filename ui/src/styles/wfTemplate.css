@@ -440,3 +440,43 @@ input[type="checkbox"] {
   height: 1.1rem;
   accent-color: var(--primary-color);
 }
+/* Advanced run options (extend / continue) in the run-template modal. */
+.wfTemp-run-options {
+  margin: 10px 0 4px;
+  border-top: 1px solid var(--border-color, #444);
+  padding-top: 8px;
+}
+.wfTemp-run-options > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  user-select: none;
+}
+.wfTemp-run-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 4px 2px;
+}
+.wfTemp-run-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+.wfTemp-run-subopt {
+  margin-left: 18px;
+}
+.wfTemp-opt-hint {
+  opacity: 0.65;
+  font-size: 0.8rem;
+}
+.wfTemp-opt-disabled {
+  opacity: 0.5;
+}
+.wfTemp-extend-id {
+  width: 6em;
+  margin-left: 4px;
+  padding: 1px 4px;
+  font-size: 0.85rem;
+}
