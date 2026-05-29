@@ -360,6 +360,24 @@ func (s *taskQueueServer) RegisterAdhocRun(ctx context.Context, req *pb.Register
 	}, nil
 }
 
+// canonicalJSON normalizes a JSON object string (sorts keys, drops whitespace)
+// so two param sets compare equal regardless of key order or formatting.
+func canonicalJSON(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		s = "{}"
+	}
+	var v interface{}
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(v) // encoding/json sorts map keys deterministically
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRequest) (*pb.TemplateRun, error) {
 	// Wait for Python DSL environment to be ready (bootstrapped async at startup)
 	if s.pythonReady != nil {
@@ -381,6 +399,68 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 	if user != nil {
 		uid := uint32(user.UserID)
 		userId = &uid
+	}
+
+	// --continue: resolve the workflow to extend automatically — the caller's
+	// most recent run of the same template NAME (any version) whose params
+	// match. Fills extend_workflow_id, then falls through to the normal extend
+	// path. Mutually exclusive with an explicit extend_workflow_id.
+	if req.ContinueLast {
+		if req.ExtendWorkflowId != nil {
+			return nil, fmt.Errorf("continue_last and extend_workflow_id are mutually exclusive")
+		}
+		var tmplName string
+		if e := s.db.QueryRowContext(ctx,
+			`SELECT name FROM workflow_template WHERE workflow_template_id = $1`,
+			req.WorkflowTemplateId).Scan(&tmplName); e != nil {
+			return nil, fmt.Errorf("continue: template not found: %w", e)
+		}
+		wantParams, e := canonicalJSON(req.ParamValuesJson)
+		if e != nil {
+			return nil, fmt.Errorf("continue: invalid param_values_json: %w", e)
+		}
+		// Candidate prior runs: same template name (any version), same caller,
+		// workflow still exists; newest first. Param match is done in Go on the
+		// canonical form (SQL can't reliably canonicalize JSON).
+		rows, e := s.db.QueryContext(ctx, `
+			SELECT tr.workflow_id, tr.param_values, w.workflow_name, tr.created_at
+			FROM template_run tr
+			JOIN workflow_template wt ON wt.workflow_template_id = tr.workflow_template_id
+			JOIN workflow w ON w.workflow_id = tr.workflow_id
+			WHERE wt.name = $1
+			  AND tr.run_by IS NOT DISTINCT FROM $2
+			ORDER BY tr.created_at DESC
+		`, tmplName, userId)
+		if e != nil {
+			return nil, fmt.Errorf("continue: failed to query prior runs: %w", e)
+		}
+		var resolvedID int32
+		var resolvedName string
+		var resolvedAt time.Time
+		found := false
+		for rows.Next() {
+			var wid int32
+			var pv sql.NullString
+			var wn string
+			var ca time.Time
+			if rows.Scan(&wid, &pv, &wn, &ca) != nil {
+				continue
+			}
+			cj, cerr := canonicalJSON(pv.String)
+			if cerr != nil {
+				continue
+			}
+			if cj == wantParams {
+				resolvedID, resolvedName, resolvedAt, found = wid, wn, ca, true
+				break
+			}
+		}
+		rows.Close()
+		if !found {
+			return nil, fmt.Errorf("continue: no prior workflow found for template %q with these params — run without --continue to start a new workflow", tmplName)
+		}
+		log.Printf("↩︎ continue: extending workflow %d (%s, launched %s)", resolvedID, resolvedName, resolvedAt.Format(time.RFC3339))
+		req.ExtendWorkflowId = &resolvedID
 	}
 
 	err := s.db.QueryRowContext(ctx,

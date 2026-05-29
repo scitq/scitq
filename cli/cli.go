@@ -336,7 +336,8 @@ type Attr struct {
 			ParamPairs    *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
 			NoRecruiters  bool    `arg:"--no-recruiters" help:"Create workflow without recruiters"`
 			ExtendWorkflow *int32 `arg:"--extend-workflow" help:"Extend an existing workflow (by id) instead of creating a new one: steps are found-or-created by name, tasks found-or-referenced by (step, tag), and drifted tasks edit-and-retried with cascade. See specs/workflow_extend.md."`
-			RetryFailedOnly bool  `arg:"--retry-failed-only" help:"With --extend-workflow: among existing tasks only re-run those currently failed (no cascade); leave succeeded/running/pending untouched. New inputs are still added."`
+			Continue       bool   `arg:"--continue" help:"Extend your most recent workflow run of this template (same template name, any version, matching params) — resolves the workflow automatically instead of passing --extend-workflow. Mutually exclusive with --extend-workflow."`
+			RetryFailedOnly bool  `arg:"--retry-failed-only" help:"With --extend-workflow / --continue: among existing tasks only re-run those currently failed (no cascade); leave succeeded/running/pending untouched. New inputs are still added."`
 		} `arg:"subcommand:run" help:"Run a workflow template"`
 
 		List *struct {
@@ -2177,11 +2178,15 @@ func (c *CLI) TemplateRun() error {
 		}
 	}
 
+	if c.Attr.Template.Run.Continue && c.Attr.Template.Run.ExtendWorkflow != nil {
+		return fmt.Errorf("provide only one of --continue or --extend-workflow")
+	}
 	req := &pb.RunTemplateRequest{
 		WorkflowTemplateId: *c.Attr.Template.Run.TemplateId,
 		ParamValuesJson:    paramJSON,
 		NoRecruiters:       c.Attr.Template.Run.NoRecruiters,
 		RetryFailedOnly:    c.Attr.Template.Run.RetryFailedOnly,
+		ContinueLast:       c.Attr.Template.Run.Continue,
 	}
 	if c.Attr.Template.Run.ExtendWorkflow != nil {
 		req.ExtendWorkflowId = c.Attr.Template.Run.ExtendWorkflow

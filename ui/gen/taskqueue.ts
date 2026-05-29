@@ -2462,6 +2462,15 @@ export interface RunTemplateRequest {
      * @generated from protobuf field: bool retry_failed_only = 5
      */
     retryFailedOnly: boolean;
+    /**
+     * continue_last resolves the workflow to extend automatically: the caller's
+     * most recent run of the same template *name* (any version) with matching
+     * params. The server fills extend_workflow_id from it. Mutually exclusive
+     * with extend_workflow_id.
+     *
+     * @generated from protobuf field: bool continue_last = 6
+     */
+    continueLast: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.TemplateFilter
@@ -10930,7 +10939,8 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
             { no: 2, name: "param_values_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "no_recruiters", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "extend_workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 5, name: "retry_failed_only", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 5, name: "retry_failed_only", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "continue_last", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<RunTemplateRequest>): RunTemplateRequest {
@@ -10939,6 +10949,7 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
         message.paramValuesJson = "";
         message.noRecruiters = false;
         message.retryFailedOnly = false;
+        message.continueLast = false;
         if (value !== undefined)
             reflectionMergePartial<RunTemplateRequest>(this, message, value);
         return message;
@@ -10962,6 +10973,9 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
                     break;
                 case /* bool retry_failed_only */ 5:
                     message.retryFailedOnly = reader.bool();
+                    break;
+                case /* bool continue_last */ 6:
+                    message.continueLast = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -10990,6 +11004,9 @@ class RunTemplateRequest$Type extends MessageType<RunTemplateRequest> {
         /* bool retry_failed_only = 5; */
         if (message.retryFailedOnly !== false)
             writer.tag(5, WireType.Varint).bool(message.retryFailedOnly);
+        /* bool continue_last = 6; */
+        if (message.continueLast !== false)
+            writer.tag(6, WireType.Varint).bool(message.continueLast);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -1005,6 +1005,11 @@ message RunTemplateRequest {
   // re-running only the existing failed tasks (no cascade).
   optional int32 extend_workflow_id = 4;
   bool retry_failed_only = 5;
+  // continue_last resolves the workflow to extend automatically: the caller's
+  // most recent run of the same template *name* (any version) with matching
+  // params. The server fills extend_workflow_id from it. Mutually exclusive
+  // with extend_workflow_id.
+  bool continue_last = 6;
 }
 
 message TemplateFilter {

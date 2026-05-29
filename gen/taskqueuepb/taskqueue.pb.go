@@ -7401,8 +7401,13 @@ type RunTemplateRequest struct {
 	// re-running only the existing failed tasks (no cascade).
 	ExtendWorkflowId *int32 `protobuf:"varint,4,opt,name=extend_workflow_id,json=extendWorkflowId,proto3,oneof" json:"extend_workflow_id,omitempty"`
 	RetryFailedOnly  bool   `protobuf:"varint,5,opt,name=retry_failed_only,json=retryFailedOnly,proto3" json:"retry_failed_only,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// continue_last resolves the workflow to extend automatically: the caller's
+	// most recent run of the same template *name* (any version) with matching
+	// params. The server fills extend_workflow_id from it. Mutually exclusive
+	// with extend_workflow_id.
+	ContinueLast  bool `protobuf:"varint,6,opt,name=continue_last,json=continueLast,proto3" json:"continue_last,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunTemplateRequest) Reset() {
@@ -7466,6 +7471,13 @@ func (x *RunTemplateRequest) GetExtendWorkflowId() int32 {
 func (x *RunTemplateRequest) GetRetryFailedOnly() bool {
 	if x != nil {
 		return x.RetryFailedOnly
+	}
+	return false
+}
+
+func (x *RunTemplateRequest) GetContinueLast() bool {
+	if x != nil {
+		return x.ContinueLast
 	}
 	return false
 }
@@ -11098,13 +11110,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_versionB\x0e\n" +
 	"\f_descriptionB\r\n" +
-	"\v_param_json\"\x8d\x02\n" +
+	"\v_param_json\"\xb2\x02\n" +
 	"\x12RunTemplateRequest\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12*\n" +
 	"\x11param_values_json\x18\x02 \x01(\tR\x0fparamValuesJson\x12#\n" +
 	"\rno_recruiters\x18\x03 \x01(\bR\fnoRecruiters\x121\n" +
 	"\x12extend_workflow_id\x18\x04 \x01(\x05H\x00R\x10extendWorkflowId\x88\x01\x01\x12*\n" +
-	"\x11retry_failed_only\x18\x05 \x01(\bR\x0fretryFailedOnlyB\x15\n" +
+	"\x11retry_failed_only\x18\x05 \x01(\bR\x0fretryFailedOnly\x12#\n" +
+	"\rcontinue_last\x18\x06 \x01(\bR\fcontinueLastB\x15\n" +
 	"\x13_extend_workflow_id\"\x9c\x02\n" +
 	"\x0eTemplateFilter\x125\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +

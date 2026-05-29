@@ -124,6 +124,28 @@ step needs more workers.
 - UI run modal: an "Extend existing workflow" opt-in (workflow picker, reuse the
   searchable selector) + a "retry failed only" checkbox. Default off.
 
+### `--continue` (auto-resolve the workflow to extend)
+
+`RunTemplateRequest.continue_last` (CLI `--continue`) removes the need to pass a
+workflow id. The server resolves it: among `template_run` rows whose
+`workflow_template.name` matches (any version), whose `run_by` is the caller,
+and whose `workflow_id` still references an existing workflow, it picks the most
+recent (`created_at DESC`) whose `param_values` match the incoming params. Match
+is **canonical** — both sides are JSON-normalized (sorted keys, no whitespace)
+before comparison — so formatting differences don't cause a miss. The resolved
+id is fed into the same extend path (so `--continue --retry-failed-only`
+composes). Rules:
+
+- Mutually exclusive with an explicit `extend_workflow_id`.
+- **Hard error on no match** — never silently creates a new workflow (that would
+  defeat the intent and scatter half-workflows).
+- Scoped to the **caller's own** runs.
+- Matches on **identical params**, so `--continue` is for reconciling/retrying
+  the same run (template/module fix), not for adding inputs — adding a sample
+  changes the params, so use `--extend-workflow <id>` for that.
+- The server logs which workflow it resolved (`↩︎ continue: extending workflow
+  N …`) so a wrong guess is visible.
+
 ## Non-goals / caveats
 
 - No cross-provider workspace reconciliation (documented operator responsibility).

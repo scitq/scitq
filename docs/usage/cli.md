@@ -701,7 +701,8 @@ Options:
 - `--param`: comma‑separated key=value pairs (client converts them to JSON for the server).
 - `--no-recruiters`: create the workflow without deploying any workers (useful for testing or manual worker assignment).
 - `--extend-workflow <id>`: **extend** an existing workflow instead of creating a new one (opt-in; default is always create-new). Steps are found-or-created by name, and tasks found-or-referenced by `(step, tag)`. A task whose generated command drifted is edit-and-retried, and by default its dependents are re-run too (cascade). New tags (e.g. more samples) are added. Use the same provider/region the workflow already uses so outputs land in the same workspace. See [Extending a workflow](#extending-an-existing-workflow) and `specs/workflow_extend.md`.
-- `--retry-failed-only`: with `--extend-workflow`, only re-run existing tasks currently **failed** (no cascade); leave succeeded/running/pending tasks untouched. New tags are still added. Ideal when a template's command was fixed and only the failed tasks need the fix (generalizes `edit_step_command`).
+- `--continue`: like `--extend-workflow` but resolves the workflow **automatically** — your most recent run of this template (same template **name**, any version) with **matching params**. No id to look up. Mutually exclusive with `--extend-workflow`. Fails (rather than silently creating a new workflow) if no prior matching run is found; the server echoes which workflow it resolved. Ideal for "I fixed the template/a module and want to re-run the exact same thing."
+- `--retry-failed-only`: with `--extend-workflow` / `--continue`, only re-run existing tasks currently **failed** (no cascade); leave succeeded/running/pending tasks untouched. New tags are still added. Ideal when a template's command was fixed and only the failed tasks need the fix (generalizes `edit_step_command`).
 
 Examples:
 
@@ -714,6 +715,10 @@ scitq template run --name hermes-collect --param "bioproject=PRJEB9999,location=
 
 # Re-run only the failed tasks of an existing workflow with the (fixed) template:
 scitq template run --name hermes-collect --param "bioproject=PRJEB51353,location=openstack.ovh:GRA11" --extend-workflow 2484 --retry-failed-only
+
+# Re-run the exact same thing into the same workflow without looking up its id
+# (e.g. after fixing a module the template imports):
+scitq template run --name biomscope --param "bioproject=s3://rnd/raw/GMTS0005,filter=S17694Nr7*,depth=2x20M,location=azure.primary:swedencentral,max_workers=1" --continue
 ```
 
 #### Extending an existing workflow
@@ -727,6 +732,8 @@ By default every template run creates a new workflow. `--extend-workflow <id>` i
 | Task | `(step, tag)` (tag = task name) | found-or-referenced; drifted command → edit-and-retry |
 
 Default mode **cascades**: re-running a task because its command drifted also re-runs its dependents (their inputs changed). `--retry-failed-only` narrows this to just the failed tasks (no cascade). Either way, brand-new tags are created — so this is also how you feed more inputs into an existing workflow's steps. Caveats and full semantics: `specs/workflow_extend.md`.
+
+`--continue` is the no-id shortcut for the common "re-run the same thing" case: the server resolves your most recent run of the same template name (any version) whose params match (compared canonically, so key order/whitespace don't matter), restricted to your own runs, and extends that workflow. It errors if there's no match rather than starting a fresh workflow. Note that "matching params" means *identical* params — so `--continue` is for reconciling/retrying the same run (after a template or module fix), not for adding samples (which changes the params); for the latter, pass `--extend-workflow <id>` explicitly.
 
 #### `template list`
 
