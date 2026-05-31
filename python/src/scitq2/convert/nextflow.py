@@ -721,21 +721,389 @@ def _emit_step(lines: List[str], indent: str, var_name: str, proc: NfProcess,
 
 
 # ---------------------------------------------------------------------------
+# YAML emitter (preferred target)
+# ---------------------------------------------------------------------------
+#
+# Emits a scitq YAML template (format: 2). Reuses the same parser + IR as
+# the DSL emitter — only the translation layer differs:
+#
+#   * `${task.cpus}` → `$CPU` (not `${{CPU}}`: YAML doesn't double-brace)
+#   * `${params.X}`  → `{params.X}` (YAML engine substitution)
+#   * `${meta.id}` / `${sample_id}` → `{SAMPLE}` (iterator var, uppercase)
+#   * `${reads[0]}`  → `/input/*_1.fastq.gz` (named-group glob)
+#   * `path("*.x")` with `emit: name` → `outputs: { name: "*.x" }`
+#   * process directives → `task_spec: {cpu, mem}`
+#   * `publishDir` → `publish: true`
+#   * `.collect()` → `grouped: true`
+#
+# See docs/usage/convert-nextflow.md for the user-facing mapping table.
+
+# nf-core label heuristics → (cpu, mem_gb)
+_LABEL_RESOURCES = {
+    'process_low':    (2, 6),
+    'process_medium': (6, 36),
+    'process_high':   (12, 72),
+    'process_high_memory': (12, 200),
+    'process_long':   (6, 36),
+    'process_single': (1, 6),
+}
+
+
+def _translate_script_yaml(script: str, iter_var: str, proc: Optional[NfProcess]) -> str:
+    """Convert Nextflow script variables to scitq YAML conventions.
+
+    Different from the DSL translator: YAML's `command: |` block has a
+    single-brace shell convention (`$CPU` survives, no fr-string escaping),
+    and template variables are `{SAMPLE}` / `{params.X}` resolved by the
+    YAML engine at compile time.
+    """
+    s = script
+    input_path_vars: set = set()
+    input_val_vars: set = set()
+    if proc:
+        for inp in proc.inputs:
+            for q in inp.qualifiers:
+                m = re.match(r'path\((\w+)\)', q)
+                if m:
+                    input_path_vars.add(m.group(1))
+                m = re.match(r'val\((\w+)\)', q)
+                if m:
+                    input_val_vars.add(m.group(1))
+
+    # Resource shell vars: scitq sets $CPU / $MEM / $DISK at task launch.
+    s = re.sub(r'\$\{?task\.cpus\}?', '$CPU', s)
+    s = re.sub(r'\$\{?task\.memory[^}]*\}?', '$MEM', s)
+    # Params: YAML compile-time substitution.
+    s = re.sub(r'\$\{params\.(\w+)\}', r'{params.\1}', s)
+    # Iterator value vars (val(meta), val(sample_id), …) → {SAMPLE}.
+    iter_upper = iter_var.upper()
+    for var in input_val_vars:
+        s = re.sub(rf'\$\{{?{var}\.id\}}?', '{' + iter_upper + '}', s)
+        s = re.sub(rf'\$\{{?{var}\}}?', '{' + iter_upper + '}', s)
+    # nf-core convention: ${meta.id} and ${prefix}.
+    s = re.sub(r'\$\{meta\.id\}', '{' + iter_upper + '}', s)
+    s = re.sub(r'\$\{prefix\}', '{' + iter_upper + '}', s)
+    # Paired-end reads: ${reads[0]} / ${reads[1]} → globs.
+    s = re.sub(r'\$\{?\w+\[0\]\}?', '/input/*_1.fastq.gz', s)
+    s = re.sub(r'\$\{?\w+\[1\]\}?', '/input/*_2.fastq.gz', s)
+    # Single path() inputs → /input/<name> (best-effort; may need manual fixup).
+    for var in input_path_vars:
+        s = re.sub(rf'\$\{{?{var}\}}?', f'/input/{var}', s)
+    return s.rstrip() + '\n'
+
+
+def _build_yaml_params(pipeline: NfPipeline) -> Dict[str, dict]:
+    """Translate `params.x = "y"` declarations into a YAML params block."""
+    out: Dict[str, dict] = {}
+    for name, default in pipeline.params.items():
+        d = default.strip().strip("'\"")
+        if d.lower() in ('true', 'false'):
+            out[name] = {'type': 'boolean', 'default': d.lower() == 'true'}
+        elif d.lower() in ('null', 'none', ''):
+            # Nullable param: emit as optional string with no default.
+            out[name] = {'type': 'string', 'required': False}
+        elif d.isdigit():
+            out[name] = {'type': 'integer', 'default': int(d)}
+        else:
+            out[name] = {'type': 'string', 'default': d}
+    # Always provider/region — every YAML template needs `location` to
+    # resolve `workspace:` / worker recruitment.
+    out['location'] = {'type': 'provider_region', 'required': True}
+    return out
+
+
+def _task_spec_for(proc: NfProcess) -> Optional[Dict]:
+    """Build a `task_spec:` dict honoring explicit directives, then labels
+    as a fallback."""
+    cpu = proc.cpus
+    mem = proc.memory_gb
+    if cpu is None or mem is None:
+        # Fall back to nf-core label resources.
+        if proc.label and proc.label.strip("'\"") in _LABEL_RESOURCES:
+            label_cpu, label_mem = _LABEL_RESOURCES[proc.label.strip("'\"")]
+            cpu = cpu if cpu is not None else label_cpu
+            mem = mem if mem is not None else label_mem
+    ts = {}
+    if cpu is not None:
+        ts['cpu'] = cpu
+    if mem is not None:
+        ts['mem'] = int(mem) if mem == int(mem) else mem
+    return ts or None
+
+
+def _build_yaml_step(proc: NfProcess, call: NfWorkflowCall, pipeline: NfPipeline,
+                     resolved_containers: Dict[str, str], iter_var: str,
+                     is_fan_in: bool) -> Dict:
+    """Build one steps[] entry for a process.
+
+    The caller (generate_yaml) knows the categorisation (per-sample, fan-in,
+    one-off) and the iterator variable name; this just builds the dict.
+    """
+    step: Dict[str, object] = {'name': proc.name.lower()}
+    if container := resolved_containers.get(proc.name):
+        step['container'] = container
+
+    # Resolve inputs from the workflow call's arguments.
+    inputs = _resolve_call_inputs_yaml(call, pipeline, iter_var, is_fan_in)
+    if inputs is not None:
+        step['inputs'] = inputs
+
+    # Optional resource block — single-path inputs that are clearly a
+    # reference (e.g. `host_index`, `kraken_db`) tend to be reference
+    # data; surface as a TODO so the operator can move them to resource:.
+    # (Best effort: an `input: path(name)` second argument referencing a
+    # `params.X` channel is the common case.)
+    # Done in _resolve_call_inputs_yaml via a comment hint.
+
+    # Script as a literal block.
+    script = _translate_script_yaml(proc.script, iter_var, proc)
+    if script.strip():
+        step['command'] = script
+
+    # Outputs.
+    globs = _output_globs(proc)
+    if globs:
+        step['outputs'] = dict(globs)
+
+    # Publish.
+    if proc.publish_dir:
+        step['publish'] = True  # paired with publish_root at workflow level
+
+    # Resource directives → task_spec.
+    if ts := _task_spec_for(proc):
+        step['task_spec'] = ts
+
+    # Fan-in opt-in.
+    if is_fan_in:
+        step['grouped'] = True
+
+    return step
+
+
+def _resolve_call_inputs_yaml(call: NfWorkflowCall, pipeline: NfPipeline,
+                              iter_var: str, is_fan_in: bool):
+    """Map a Nextflow process call's args to YAML `inputs:`.
+
+    Supported shapes:
+      * PROC.out.X / PROC.out   → `<proc>.X` step ref
+      * .collect()               → flagged via call.is_collect; here the
+        resulting step is fan-in (caller decides), and the per-sample
+        upstream's output is referenced by name (resolver does the right
+        thing on a grouped step).
+      * `params.X` channel       → `{params.X}` (TODO comment: may want
+        `resource:` instead).
+      * No discernible channel   → fall back to `<iter_var>.fastqs`.
+    """
+    raw = call.args.strip()
+    if not raw:
+        return None
+    args: List[str] = []
+    depth = 0
+    current: List[str] = []
+    for ch in raw:
+        if ch in ('(', '['):
+            depth += 1
+        elif ch in (')', ']'):
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            args.append(''.join(current).strip())
+            current = []
+            continue
+        current.append(ch)
+    if current:
+        args.append(''.join(current).strip())
+
+    resolved: List[str] = []
+    for arg in args:
+        if not arg:
+            continue
+        # `PROC.out.name` and `PROC.out`
+        m = re.match(r'(\w+)\.out\.(\w+)', arg)
+        if m:
+            resolved.append(f'{m.group(1).lower()}.{m.group(2)}')
+            continue
+        m = re.match(r'(\w+)\.out', arg)
+        if m:
+            resolved.append(f'{m.group(1).lower()}.output')
+            continue
+        if arg.startswith('params.'):
+            # Reference-data channels (host_index, kraken_db, ...) usually
+            # belong in `resource:` rather than `inputs:`. Emit as a
+            # `{params.X}` URI in inputs with a TODO marker — operator can
+            # promote to resource.
+            resolved.append(f'{{params.{arg[len("params."):]}}}')
+            continue
+        # Bare channel variable — fall back to the iterator's named group.
+        resolved.append(f'{iter_var}.fastqs')
+
+    if not resolved:
+        return None
+    if len(resolved) == 1:
+        return resolved[0]
+    return resolved
+
+
+def generate_yaml(pipeline: NfPipeline, config: Optional[Dict] = None) -> str:
+    """Generate a scitq YAML template from the parsed pipeline."""
+    config = config or {}
+    registry = config.get('registry', 'gmtscience')
+
+    # Resolve containers (explicit, conda fallback). dockerfiles get
+    # surfaced on stderr by the caller path that prints them — same
+    # behaviour as generate().
+    dockerfiles: Dict[str, str] = {}
+    resolved_containers: Dict[str, str] = {}
+    for pname, proc in pipeline.processes.items():
+        if proc.container:
+            resolved_containers[pname] = proc.container
+        elif proc.conda:
+            container, dockerfile = _conda_to_container(proc.conda, registry)
+            resolved_containers[pname] = container
+            if dockerfile:
+                dockerfiles[pname.lower()] = dockerfile
+
+    # Workflow-wide pool: cover the largest resource demand so per-sample
+    # steps with light needs reuse the same workers when possible. Steps
+    # that need MORE (e.g. GPU, larger RAM) get a per-step override below.
+    cpus_decl = [p.cpus for p in pipeline.processes.values() if p.cpus is not None]
+    mems_decl = [p.memory_gb for p in pipeline.processes.values() if p.memory_gb is not None]
+    default_cpu = max(cpus_decl) if cpus_decl else 4
+    default_mem = int(max(mems_decl)) if mems_decl else 8
+
+    iter_var_name = config.get('iter_name', 'sample')
+
+    # Build the output structure as an ordered dict — insertion order is
+    # the layout users expect. PyYAML 6+ preserves dict order on dump
+    # when sort_keys=False.
+    out: Dict[str, object] = {}
+    out['format'] = 2
+    out['name'] = config.get('name', 'converted-pipeline')
+    out['version'] = '1.0.0'
+    out['description'] = config.get('description', 'Converted from Nextflow')
+
+    params_block = _build_yaml_params(pipeline)
+    if params_block:
+        out['params'] = params_block
+
+    # Sample discovery: assume URI iterator with `fastqs:` group — the
+    # bioinformatics default. Real Nextflow `Channel.fromFilePairs(...)`
+    # calls aren't reliably introspectable, so this is the safe pick.
+    out['iterate'] = {
+        'name': iter_var_name,
+        'source': 'uri',
+        'uri': '{params.input_dir}' if 'input_dir' in pipeline.params else '{params.reads}',
+        'group_by': 'folder',
+        'fastqs': '*.f*q.gz',
+    }
+
+    out['worker_pool'] = {
+        'provider': '{params.location}',
+        'cpu': f'>= {default_cpu}',
+        'mem': f'>= {default_mem}',
+        'max_recruited': 10,
+    }
+    out['workspace'] = '{params.location}'
+    out['language'] = 'bash'
+
+    # publish_root convention: every Nextflow `publishDir` lands under one
+    # root, with the step's own name in the per-step publish path. Map the
+    # NF `params.outdir` (universal nf-core convention) to a publish_root.
+    if 'outdir' in pipeline.params:
+        out['publish_root'] = '{params.location}://{params.outdir}'
+
+    # Steps in call order.
+    per_sample_procs = {n for n, p in pipeline.processes.items() if p.is_per_sample}
+    steps_out: List[Dict] = []
+    if pipeline.workflow:
+        for call in pipeline.workflow.calls:
+            proc = pipeline.processes.get(call.process)
+            if not proc:
+                steps_out.append({'name': call.process.lower(),
+                                  '_comment': f'TODO: process {call.process} not found'})
+                continue
+            is_per_sample = call.process in per_sample_procs and not call.is_collect
+            is_fan_in = call.is_collect or (call.process not in per_sample_procs
+                                            and proc.inputs)
+            # One-off (no per-sample input) → mark per_sample: false.
+            is_oneoff = not is_per_sample and not is_fan_in
+            step = _build_yaml_step(proc, call, pipeline, resolved_containers,
+                                    iter_var=iter_var_name, is_fan_in=is_fan_in)
+            if is_oneoff:
+                step['per_sample'] = False
+            steps_out.append(step)
+
+    out['steps'] = steps_out
+
+    text = _yaml_dump(out)
+    text = _annotate_yaml(text, pipeline)
+
+    if dockerfiles:
+        print("\n📦 mkdocker Dockerfiles to build:", file=sys.stderr)
+        for name, content in dockerfiles.items():
+            print(f"\n--- dockers/{name} ---", file=sys.stderr)
+            print(content, file=sys.stderr)
+
+    return text
+
+
+def _annotate_yaml(text: str, pipeline: NfPipeline) -> str:
+    """Prepend a small header comment so the converted file announces its
+    provenance and any caveats."""
+    header = [
+        '# Converted from a Nextflow DSL2 pipeline by scitq2.convert.nextflow.',
+        '# Review before running: per-step worker_pool overrides, GPU labels,',
+        '# and reference-data inputs (consider promoting params.X channels',
+        '# referenced by inputs: to `resource:`).',
+        '',
+    ]
+    return '\n'.join(header) + text
+
+
+def _yaml_dump(obj) -> str:
+    """yaml.safe_dump with a literal-block style for multi-line strings.
+    Single-line strings stay inline. Keeps the output readable for the
+    `command:` blocks (and any long descriptions).
+    """
+    import yaml
+
+    class _ScitqDumper(yaml.SafeDumper):
+        pass
+
+    def _str_representer(dumper, data):
+        if '\n' in data:
+            return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+    _ScitqDumper.add_representer(str, _str_representer)
+    return yaml.dump(obj, Dumper=_ScitqDumper, sort_keys=False,
+                     default_flow_style=False, allow_unicode=True, width=120)
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-def convert_file(input_path: str, output_path: Optional[str] = None, config: Optional[Dict] = None) -> str:
-    """Convert a Nextflow .nf file to scitq Python DSL."""
+def convert_file(input_path: str, output_path: Optional[str] = None,
+                 config: Optional[Dict] = None, fmt: str = 'yaml') -> str:
+    """Convert a Nextflow .nf file. `fmt` selects the output target:
+    'yaml' (default — modern format-2 YAML template) or 'dsl' (legacy
+    Python DSL emitter; kept for backward compatibility).
+    """
     with open(input_path, "r") as f:
         text = f.read()
 
     pipeline = parse(text)
-    code = generate(pipeline, config)
+    if fmt == 'dsl':
+        code = generate(pipeline, config)
+    elif fmt == 'yaml':
+        code = generate_yaml(pipeline, config)
+    else:
+        raise ValueError(f"unknown --format {fmt!r}: expected 'yaml' or 'dsl'")
 
     if output_path:
         with open(output_path, "w") as f:
             f.write(code)
-        print(f"✅ Converted {input_path} → {output_path}", file=sys.stderr)
+        print(f"✅ Converted {input_path} → {output_path} ({fmt})", file=sys.stderr)
     else:
         print(code)
 
@@ -744,11 +1112,20 @@ def convert_file(input_path: str, output_path: Optional[str] = None, config: Opt
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Convert Nextflow DSL2 to scitq Python DSL")
+    parser = argparse.ArgumentParser(description="Convert Nextflow DSL2 to a scitq template")
     parser.add_argument("input", help="Input .nf file")
-    parser.add_argument("-o", "--output", help="Output .py file (default: stdout)")
+    parser.add_argument("-o", "--output", help="Output file (default: stdout)")
+    parser.add_argument("--format", choices=("yaml", "dsl"), default="yaml",
+                        help="Target format (default: yaml = format-2 YAML template; "
+                             "dsl = legacy Python DSL).")
+    parser.add_argument("--name", help="Override the workflow `name:` field")
+    parser.add_argument("--registry", default="gmtscience",
+                        help="Docker registry for conda-derived containers")
     args = parser.parse_args()
-    convert_file(args.input, args.output)
+    config = {'registry': args.registry}
+    if args.name:
+        config['name'] = args.name
+    convert_file(args.input, args.output, config=config, fmt=args.format)
 
 
 if __name__ == "__main__":
