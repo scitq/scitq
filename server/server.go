@@ -832,6 +832,15 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 		WorkflowId: workflowID,
 		Status:     newStatus,
 	})
+
+	// Workflow chain — if this workflow is the parent of any chain entries,
+	// evaluate them against the new terminal status. Async goroutine: the
+	// per-entry firing may take a while (param resolution + child template
+	// run) and must not block the recompute / EmitWS path. See
+	// workflow_chain_fire.go and specs/workflow_chain.md.
+	if newStatus == "S" || newStatus == "F" {
+		go s.evaluateChainEntriesForWorkflow(workflowID, newStatus)
+	}
 }
 
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
@@ -5083,7 +5092,8 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 	query := `
         SELECT w.workflow_id, w.workflow_name, w.status, w.run_strategy, w.maximum_workers, w.live,
                tr.template_run_id, wt.name, wt.version,
-               tr.script_name, tr.script_sha256
+               tr.script_name, tr.script_sha256,
+               w.parent_workflow_id
         FROM workflow w
         LEFT JOIN template_run tr ON tr.workflow_id = w.workflow_id
         LEFT JOIN workflow_template wt ON wt.workflow_template_id = tr.workflow_template_id
@@ -5156,10 +5166,10 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 	var workflows []*pb.Workflow
 	for rows.Next() {
 		var wf pb.Workflow
-		var templateRunID sql.NullInt32
+		var templateRunID, parentWorkflowID sql.NullInt32
 		var templateName, templateVersion, scriptName, scriptSha sql.NullString
 		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers, &wf.Live,
-			&templateRunID, &templateName, &templateVersion, &scriptName, &scriptSha); err != nil {
+			&templateRunID, &templateName, &templateVersion, &scriptName, &scriptSha, &parentWorkflowID); err != nil {
 			return nil, fmt.Errorf("failed to scan workflow: %w", err)
 		}
 		if templateRunID.Valid {
@@ -5176,6 +5186,9 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 		}
 		if scriptSha.Valid {
 			wf.ScriptSha256 = proto.String(scriptSha.String)
+		}
+		if parentWorkflowID.Valid {
+			wf.ParentWorkflowId = proto.Int32(parentWorkflowID.Int32)
 		}
 		// Populate progress from in-memory step stats aggregator (no DB hit)
 		s.stats.mu.Lock()

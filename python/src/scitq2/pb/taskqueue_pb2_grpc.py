@@ -285,6 +285,41 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.WorkflowId.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
+        self.CreateChainEntries = channel.unary_unary(
+                '/taskqueue.TaskQueue/CreateChainEntries',
+                request_serializer=taskqueue__pb2.CreateChainEntriesRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.ChainEntryList.FromString,
+                _registered_method=True)
+        self.ListChainEntries = channel.unary_unary(
+                '/taskqueue.TaskQueue/ListChainEntries',
+                request_serializer=taskqueue__pb2.ListChainEntriesRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.ChainEntryList.FromString,
+                _registered_method=True)
+        self.GetChainEntry = channel.unary_unary(
+                '/taskqueue.TaskQueue/GetChainEntry',
+                request_serializer=taskqueue__pb2.ChainEntryId.SerializeToString,
+                response_deserializer=taskqueue__pb2.ChainEntry.FromString,
+                _registered_method=True)
+        self.SuspendChainEntry = channel.unary_unary(
+                '/taskqueue.TaskQueue/SuspendChainEntry',
+                request_serializer=taskqueue__pb2.ChainEntryId.SerializeToString,
+                response_deserializer=taskqueue__pb2.ChainEntry.FromString,
+                _registered_method=True)
+        self.ResumeChainEntry = channel.unary_unary(
+                '/taskqueue.TaskQueue/ResumeChainEntry',
+                request_serializer=taskqueue__pb2.ChainEntryId.SerializeToString,
+                response_deserializer=taskqueue__pb2.ChainEntry.FromString,
+                _registered_method=True)
+        self.CancelChainEntry = channel.unary_unary(
+                '/taskqueue.TaskQueue/CancelChainEntry',
+                request_serializer=taskqueue__pb2.ChainEntryId.SerializeToString,
+                response_deserializer=taskqueue__pb2.ChainEntry.FromString,
+                _registered_method=True)
+        self.EditChainEntry = channel.unary_unary(
+                '/taskqueue.TaskQueue/EditChainEntry',
+                request_serializer=taskqueue__pb2.EditChainEntryRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.ChainEntry.FromString,
+                _registered_method=True)
         self.DebugAssignTask = channel.unary_unary(
                 '/taskqueue.TaskQueue/DebugAssignTask',
                 request_serializer=taskqueue__pb2.DebugAssignRequest.SerializeToString,
@@ -795,6 +830,51 @@ class TaskQueueServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def DeleteWorkflow(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CreateChainEntries(self, request, context):
+        """Workflow chain — template-to-template sequencing. Entries are armed
+        at parent-submit time (CreateChainEntries) and fire when the parent
+        reaches a terminal status. See specs/workflow_chain.md.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListChainEntries(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetChainEntry(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SuspendChainEntry(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ResumeChainEntry(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CancelChainEntry(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def EditChainEntry(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1312,6 +1392,41 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.DeleteWorkflow,
                     request_deserializer=taskqueue__pb2.WorkflowId.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'CreateChainEntries': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateChainEntries,
+                    request_deserializer=taskqueue__pb2.CreateChainEntriesRequest.FromString,
+                    response_serializer=taskqueue__pb2.ChainEntryList.SerializeToString,
+            ),
+            'ListChainEntries': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListChainEntries,
+                    request_deserializer=taskqueue__pb2.ListChainEntriesRequest.FromString,
+                    response_serializer=taskqueue__pb2.ChainEntryList.SerializeToString,
+            ),
+            'GetChainEntry': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetChainEntry,
+                    request_deserializer=taskqueue__pb2.ChainEntryId.FromString,
+                    response_serializer=taskqueue__pb2.ChainEntry.SerializeToString,
+            ),
+            'SuspendChainEntry': grpc.unary_unary_rpc_method_handler(
+                    servicer.SuspendChainEntry,
+                    request_deserializer=taskqueue__pb2.ChainEntryId.FromString,
+                    response_serializer=taskqueue__pb2.ChainEntry.SerializeToString,
+            ),
+            'ResumeChainEntry': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResumeChainEntry,
+                    request_deserializer=taskqueue__pb2.ChainEntryId.FromString,
+                    response_serializer=taskqueue__pb2.ChainEntry.SerializeToString,
+            ),
+            'CancelChainEntry': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelChainEntry,
+                    request_deserializer=taskqueue__pb2.ChainEntryId.FromString,
+                    response_serializer=taskqueue__pb2.ChainEntry.SerializeToString,
+            ),
+            'EditChainEntry': grpc.unary_unary_rpc_method_handler(
+                    servicer.EditChainEntry,
+                    request_deserializer=taskqueue__pb2.EditChainEntryRequest.FromString,
+                    response_serializer=taskqueue__pb2.ChainEntry.SerializeToString,
             ),
             'DebugAssignTask': grpc.unary_unary_rpc_method_handler(
                     servicer.DebugAssignTask,
@@ -2864,6 +2979,195 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/DeleteWorkflow',
             taskqueue__pb2.WorkflowId.SerializeToString,
             taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CreateChainEntries(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/CreateChainEntries',
+            taskqueue__pb2.CreateChainEntriesRequest.SerializeToString,
+            taskqueue__pb2.ChainEntryList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListChainEntries(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ListChainEntries',
+            taskqueue__pb2.ListChainEntriesRequest.SerializeToString,
+            taskqueue__pb2.ChainEntryList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetChainEntry(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/GetChainEntry',
+            taskqueue__pb2.ChainEntryId.SerializeToString,
+            taskqueue__pb2.ChainEntry.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SuspendChainEntry(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/SuspendChainEntry',
+            taskqueue__pb2.ChainEntryId.SerializeToString,
+            taskqueue__pb2.ChainEntry.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResumeChainEntry(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ResumeChainEntry',
+            taskqueue__pb2.ChainEntryId.SerializeToString,
+            taskqueue__pb2.ChainEntry.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CancelChainEntry(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/CancelChainEntry',
+            taskqueue__pb2.ChainEntryId.SerializeToString,
+            taskqueue__pb2.ChainEntry.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EditChainEntry(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/EditChainEntry',
+            taskqueue__pb2.EditChainEntryRequest.SerializeToString,
+            taskqueue__pb2.ChainEntry.FromString,
             options,
             channel_credentials,
             insecure,

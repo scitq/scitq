@@ -70,6 +70,13 @@ const (
 	TaskQueue_CreateWorkflow_FullMethodName            = "/taskqueue.TaskQueue/CreateWorkflow"
 	TaskQueue_UpdateWorkflowStatus_FullMethodName      = "/taskqueue.TaskQueue/UpdateWorkflowStatus"
 	TaskQueue_DeleteWorkflow_FullMethodName            = "/taskqueue.TaskQueue/DeleteWorkflow"
+	TaskQueue_CreateChainEntries_FullMethodName        = "/taskqueue.TaskQueue/CreateChainEntries"
+	TaskQueue_ListChainEntries_FullMethodName          = "/taskqueue.TaskQueue/ListChainEntries"
+	TaskQueue_GetChainEntry_FullMethodName             = "/taskqueue.TaskQueue/GetChainEntry"
+	TaskQueue_SuspendChainEntry_FullMethodName         = "/taskqueue.TaskQueue/SuspendChainEntry"
+	TaskQueue_ResumeChainEntry_FullMethodName          = "/taskqueue.TaskQueue/ResumeChainEntry"
+	TaskQueue_CancelChainEntry_FullMethodName          = "/taskqueue.TaskQueue/CancelChainEntry"
+	TaskQueue_EditChainEntry_FullMethodName            = "/taskqueue.TaskQueue/EditChainEntry"
 	TaskQueue_DebugAssignTask_FullMethodName           = "/taskqueue.TaskQueue/DebugAssignTask"
 	TaskQueue_DebugRecruitStep_FullMethodName          = "/taskqueue.TaskQueue/DebugRecruitStep"
 	TaskQueue_DebugRetryTask_FullMethodName            = "/taskqueue.TaskQueue/DebugRetryTask"
@@ -171,6 +178,16 @@ type TaskQueueClient interface {
 	CreateWorkflow(ctx context.Context, in *WorkflowRequest, opts ...grpc.CallOption) (*WorkflowId, error)
 	UpdateWorkflowStatus(ctx context.Context, in *WorkflowStatusUpdate, opts ...grpc.CallOption) (*Ack, error)
 	DeleteWorkflow(ctx context.Context, in *WorkflowId, opts ...grpc.CallOption) (*Ack, error)
+	// Workflow chain — template-to-template sequencing. Entries are armed
+	// at parent-submit time (CreateChainEntries) and fire when the parent
+	// reaches a terminal status. See specs/workflow_chain.md.
+	CreateChainEntries(ctx context.Context, in *CreateChainEntriesRequest, opts ...grpc.CallOption) (*ChainEntryList, error)
+	ListChainEntries(ctx context.Context, in *ListChainEntriesRequest, opts ...grpc.CallOption) (*ChainEntryList, error)
+	GetChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error)
+	SuspendChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error)
+	ResumeChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error)
+	CancelChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error)
+	EditChainEntry(ctx context.Context, in *EditChainEntryRequest, opts ...grpc.CallOption) (*ChainEntry, error)
 	DebugAssignTask(ctx context.Context, in *DebugAssignRequest, opts ...grpc.CallOption) (*Ack, error)
 	DebugRecruitStep(ctx context.Context, in *DebugRecruitRequest, opts ...grpc.CallOption) (*Ack, error)
 	DebugRetryTask(ctx context.Context, in *RetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
@@ -762,6 +779,76 @@ func (c *taskQueueClient) DeleteWorkflow(ctx context.Context, in *WorkflowId, op
 	return out, nil
 }
 
+func (c *taskQueueClient) CreateChainEntries(ctx context.Context, in *CreateChainEntriesRequest, opts ...grpc.CallOption) (*ChainEntryList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainEntryList)
+	err := c.cc.Invoke(ctx, TaskQueue_CreateChainEntries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ListChainEntries(ctx context.Context, in *ListChainEntriesRequest, opts ...grpc.CallOption) (*ChainEntryList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainEntryList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListChainEntries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) GetChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainEntry)
+	err := c.cc.Invoke(ctx, TaskQueue_GetChainEntry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) SuspendChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainEntry)
+	err := c.cc.Invoke(ctx, TaskQueue_SuspendChainEntry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ResumeChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainEntry)
+	err := c.cc.Invoke(ctx, TaskQueue_ResumeChainEntry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) CancelChainEntry(ctx context.Context, in *ChainEntryId, opts ...grpc.CallOption) (*ChainEntry, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainEntry)
+	err := c.cc.Invoke(ctx, TaskQueue_CancelChainEntry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) EditChainEntry(ctx context.Context, in *EditChainEntryRequest, opts ...grpc.CallOption) (*ChainEntry, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainEntry)
+	err := c.cc.Invoke(ctx, TaskQueue_EditChainEntry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) DebugAssignTask(ctx context.Context, in *DebugAssignRequest, opts ...grpc.CallOption) (*Ack, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Ack)
@@ -1221,6 +1308,16 @@ type TaskQueueServer interface {
 	CreateWorkflow(context.Context, *WorkflowRequest) (*WorkflowId, error)
 	UpdateWorkflowStatus(context.Context, *WorkflowStatusUpdate) (*Ack, error)
 	DeleteWorkflow(context.Context, *WorkflowId) (*Ack, error)
+	// Workflow chain — template-to-template sequencing. Entries are armed
+	// at parent-submit time (CreateChainEntries) and fire when the parent
+	// reaches a terminal status. See specs/workflow_chain.md.
+	CreateChainEntries(context.Context, *CreateChainEntriesRequest) (*ChainEntryList, error)
+	ListChainEntries(context.Context, *ListChainEntriesRequest) (*ChainEntryList, error)
+	GetChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error)
+	SuspendChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error)
+	ResumeChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error)
+	CancelChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error)
+	EditChainEntry(context.Context, *EditChainEntryRequest) (*ChainEntry, error)
 	DebugAssignTask(context.Context, *DebugAssignRequest) (*Ack, error)
 	DebugRecruitStep(context.Context, *DebugRecruitRequest) (*Ack, error)
 	DebugRetryTask(context.Context, *RetryTaskRequest) (*TaskResponse, error)
@@ -1440,6 +1537,27 @@ func (UnimplementedTaskQueueServer) UpdateWorkflowStatus(context.Context, *Workf
 }
 func (UnimplementedTaskQueueServer) DeleteWorkflow(context.Context, *WorkflowId) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorkflow not implemented")
+}
+func (UnimplementedTaskQueueServer) CreateChainEntries(context.Context, *CreateChainEntriesRequest) (*ChainEntryList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateChainEntries not implemented")
+}
+func (UnimplementedTaskQueueServer) ListChainEntries(context.Context, *ListChainEntriesRequest) (*ChainEntryList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListChainEntries not implemented")
+}
+func (UnimplementedTaskQueueServer) GetChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetChainEntry not implemented")
+}
+func (UnimplementedTaskQueueServer) SuspendChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SuspendChainEntry not implemented")
+}
+func (UnimplementedTaskQueueServer) ResumeChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResumeChainEntry not implemented")
+}
+func (UnimplementedTaskQueueServer) CancelChainEntry(context.Context, *ChainEntryId) (*ChainEntry, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelChainEntry not implemented")
+}
+func (UnimplementedTaskQueueServer) EditChainEntry(context.Context, *EditChainEntryRequest) (*ChainEntry, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EditChainEntry not implemented")
 }
 func (UnimplementedTaskQueueServer) DebugAssignTask(context.Context, *DebugAssignRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DebugAssignTask not implemented")
@@ -2457,6 +2575,132 @@ func _TaskQueue_DeleteWorkflow_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_CreateChainEntries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateChainEntriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).CreateChainEntries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_CreateChainEntries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).CreateChainEntries(ctx, req.(*CreateChainEntriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ListChainEntries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListChainEntriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListChainEntries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListChainEntries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListChainEntries(ctx, req.(*ListChainEntriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_GetChainEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChainEntryId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetChainEntry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetChainEntry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetChainEntry(ctx, req.(*ChainEntryId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_SuspendChainEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChainEntryId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).SuspendChainEntry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_SuspendChainEntry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).SuspendChainEntry(ctx, req.(*ChainEntryId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ResumeChainEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChainEntryId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ResumeChainEntry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ResumeChainEntry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ResumeChainEntry(ctx, req.(*ChainEntryId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_CancelChainEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChainEntryId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).CancelChainEntry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_CancelChainEntry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).CancelChainEntry(ctx, req.(*ChainEntryId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_EditChainEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EditChainEntryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).EditChainEntry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_EditChainEntry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).EditChainEntry(ctx, req.(*EditChainEntryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_DebugAssignTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DebugAssignRequest)
 	if err := dec(in); err != nil {
@@ -3371,6 +3615,34 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteWorkflow",
 			Handler:    _TaskQueue_DeleteWorkflow_Handler,
+		},
+		{
+			MethodName: "CreateChainEntries",
+			Handler:    _TaskQueue_CreateChainEntries_Handler,
+		},
+		{
+			MethodName: "ListChainEntries",
+			Handler:    _TaskQueue_ListChainEntries_Handler,
+		},
+		{
+			MethodName: "GetChainEntry",
+			Handler:    _TaskQueue_GetChainEntry_Handler,
+		},
+		{
+			MethodName: "SuspendChainEntry",
+			Handler:    _TaskQueue_SuspendChainEntry_Handler,
+		},
+		{
+			MethodName: "ResumeChainEntry",
+			Handler:    _TaskQueue_ResumeChainEntry_Handler,
+		},
+		{
+			MethodName: "CancelChainEntry",
+			Handler:    _TaskQueue_CancelChainEntry_Handler,
+		},
+		{
+			MethodName: "EditChainEntry",
+			Handler:    _TaskQueue_EditChainEntry_Handler,
 		},
 		{
 			MethodName: "DebugAssignTask",

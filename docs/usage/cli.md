@@ -504,6 +504,66 @@ scitq workflow delete --id <workflow_id>
 The workflow and its associated steps and tasks will be removed.  
 Use with care, as this cannot be undone.
 
+#### `workflow chain`
+
+Manage the **chain entries** of a workflow — child template runs that fire automatically when the parent reaches a terminal status. Templates declare chain entries via the top-level `chain:` block (see [YAML templates → Chaining workflows](yaml-templates.md#chaining-workflows) and `specs/workflow_chain.md`). The CLI is for inspection and operator intervention before the entry fires.
+
+```sh
+# Inspection
+scitq workflow chain list [--workflow-id <id>] [--status <pending|suspended|skipped|fired|failed|cancelled>]
+scitq workflow chain show --id <chain_entry_id>
+
+# Lifecycle controls (the operator's "I need to fix the child before it fires" path)
+scitq workflow chain suspend --id <chain_entry_id>   # pending → suspended
+scitq workflow chain resume  --id <chain_entry_id>   # suspended → pending (fires immediately if the parent already terminated)
+scitq workflow chain cancel  --id <chain_entry_id>   # pending|suspended → cancelled (terminal)
+
+# Edit a suspended entry before resuming
+scitq workflow chain edit --id <chain_entry_id> \
+    [--template <name>] [--version <ver>] \
+    [--params-json '{...}'] \
+    [--param key=value]... [--param-clear key]... \
+    [--when <expr>] [--on succeeded|always|failed] [--always-new true|false]
+```
+
+`--params-json` replaces the entire params mapping wholesale; `--param key=value` and `--param-clear key` merge into the entry's existing params (mutually exclusive with `--params-json`).
+
+Each entry has one of these statuses:
+
+| Status | Meaning |
+|---|---|
+| `pending` | Armed; will be evaluated when the parent reaches a terminal status. |
+| `suspended` | Paused by the operator; can be edited or resumed. |
+| `skipped` | Parent terminated but `when:` was falsy or `on:` rejected the parent's status. Terminal. |
+| `fired` | Child `template_run` submitted; `child_workflow_id` recorded. Re-fired on parent re-extend. |
+| `failed` | Chain firing itself failed (template not found, param resolution error). `error_message` records why. |
+| `cancelled` | Operator cancelled before fire. Terminal. |
+
+Examples:
+
+```sh
+# What's queued behind workflow 2484?
+scitq workflow chain list --workflow-id 2484
+
+# Suspend the QC entry, fix the child template, then resume — the child fires with the new template content
+scitq workflow chain suspend --id 7
+scitq template upload --path bin_qc.yaml --force
+scitq workflow chain resume --id 7
+
+# Operator override of a single param without rewriting the whole mapping
+scitq workflow chain suspend --id 7
+scitq workflow chain edit --id 7 --param "bins_dir=azure://override/path"
+scitq workflow chain resume --id 7
+
+# Drop a chain entry entirely
+scitq workflow chain cancel --id 9
+
+# Everything still armed across all workflows
+scitq workflow chain list --status pending
+```
+
+The `--json` global flag returns the raw `ChainEntry` proto for scripting / agents.
+
 ### `step`
 
 A step is a subdivision of a workflow that groups tasks requiring similar execution environments (same container, resources, or logic).  

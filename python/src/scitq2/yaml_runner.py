@@ -442,6 +442,13 @@ TOPLEVEL_KEYS = {
     'opportunistic', 'untrusted', 'publish_root', 'container',
     'optimize', 'run_strategy', 'skip_if_exists', 'no_recruiters',
     'scores',
+    'chain',
+}
+
+# Chain entry — see specs/workflow_chain.md. `template` is required;
+# everything else has a sensible default at the server.
+CHAIN_ENTRY_KEYS = {
+    'template', 'version', 'params', 'when', 'on', 'always_new',
 }
 
 # Native step (inline command/container). Module steps (import: / module:)
@@ -2085,6 +2092,66 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         return None
 
     print(f"✅ Workflow '{workflow.full_name}' created (id={workflow.workflow_id})")
+
+    # Workflow chain — top-level `chain:` block declares one or more child
+    # templates to fire when this workflow reaches a terminal status. See
+    # specs/workflow_chain.md. Materialising the entries here (after the
+    # workflow row is created, before optimize) means a dry-run never arms
+    # a chain and an extend re-run does not duplicate entries (the runner
+    # creates the workflow only once per run).
+    chain_def = data.get('chain')
+    if chain_def:
+        if not isinstance(chain_def, list):
+            print("❌ chain: must be a list of entry objects", file=sys.stderr)
+            sys.exit(1)
+        prepared = []
+        for i, entry in enumerate(chain_def):
+            if not isinstance(entry, dict):
+                print(f"❌ chain entry {i}: must be a mapping", file=sys.stderr)
+                sys.exit(1)
+            # YAML 1.1 (PyYAML default) booleanises `on`/`off`/`yes`/`no` as
+            # bare keys: `on: failed` parses to `{True: 'failed'}`. Normalise
+            # back so users can write `on: failed` unquoted. This is the
+            # classic YAML 1.1 "Norway problem" applied to chain entries.
+            if True in entry:
+                entry['on'] = entry.pop(True)
+            if False in entry:
+                entry['off'] = entry.pop(False)
+            _check_unknown_keys(entry, CHAIN_ENTRY_KEYS, f"chain entry {i}")
+            tmpl = entry.get('template')
+            if not tmpl or not isinstance(tmpl, str):
+                print(f"❌ chain entry {i}: 'template' is required (string)", file=sys.stderr)
+                sys.exit(1)
+            # Resolve `template: name@version` shorthand or split fields.
+            tmpl_name, tmpl_version = tmpl, entry.get('version')
+            if '@' in tmpl:
+                tmpl_name, tmpl_version = tmpl.split('@', 1)
+            # Resolve {params.X} / {vars.X} substitutions in mapping values
+            # *now*, against the parent's submitted params. Cross-workflow
+            # parent.* references are resolved server-side at fire time and
+            # are passed through verbatim.
+            mapping_in = entry.get('params', {}) or {}
+            if not isinstance(mapping_in, dict):
+                print(f"❌ chain entry {i}: 'params' must be a mapping", file=sys.stderr)
+                sys.exit(1)
+            mapping_resolved = {}
+            for k, v in mapping_in.items():
+                if isinstance(v, str):
+                    # Leave {parent.X} alone; only resolve {params.X} / {VARS}
+                    # whose values are knowable now.
+                    mapping_resolved[k] = _resolve_refs(v, params, extra_vars=workflow_vars)
+                else:
+                    mapping_resolved[k] = v
+            prepared.append({
+                'template_name': tmpl_name,
+                'template_version': tmpl_version,
+                'params_template': mapping_resolved,
+                'when': str(entry.get('when', 'true')),
+                'on': str(entry.get('on', 'succeeded')),
+                'always_new': bool(entry.get('always_new', False)),
+            })
+        created = client.create_chain_entries(workflow.workflow_id, prepared)
+        print(f"🔗 Chain armed: {len(created)} entr(ies) for workflow {workflow.workflow_id}")
 
     # Flush module pins into template_run.module_pins so replays can use the
     # exact same module content. Only meaningful when the runner is invoked

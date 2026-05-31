@@ -62,6 +62,16 @@ service TaskQueue {
     rpc CreateWorkflow(WorkflowRequest) returns (WorkflowId);
     rpc UpdateWorkflowStatus(WorkflowStatusUpdate) returns (Ack);
     rpc DeleteWorkflow(WorkflowId) returns (Ack);
+    // Workflow chain — template-to-template sequencing. Entries are armed
+    // at parent-submit time (CreateChainEntries) and fire when the parent
+    // reaches a terminal status. See specs/workflow_chain.md.
+    rpc CreateChainEntries(CreateChainEntriesRequest) returns (ChainEntryList);
+    rpc ListChainEntries(ListChainEntriesRequest) returns (ChainEntryList);
+    rpc GetChainEntry(ChainEntryId) returns (ChainEntry);
+    rpc SuspendChainEntry(ChainEntryId) returns (ChainEntry);
+    rpc ResumeChainEntry(ChainEntryId) returns (ChainEntry);
+    rpc CancelChainEntry(ChainEntryId) returns (ChainEntry);
+    rpc EditChainEntry(EditChainEntryRequest) returns (ChainEntry);
     rpc DebugAssignTask(DebugAssignRequest) returns (Ack);
     rpc DebugRecruitStep(DebugRecruitRequest) returns (Ack);
     rpc DebugRetryTask(RetryTaskRequest) returns (TaskResponse);
@@ -826,6 +836,9 @@ message Workflow {
     optional string template_version = 14;
     optional string script_name = 15;
     optional string script_sha256 = 16;
+    // When this workflow was created by a parent workflow's chain firing,
+    // the parent's id. See specs/workflow_chain.md.
+    optional int32 parent_workflow_id = 17;
 }
 message WorkflowRequest {
     string name = 1;
@@ -843,6 +856,85 @@ message WorkflowStatusUpdate {
     int32 workflow_id = 1;
     string status = 2;
     optional int32 maximum_workers = 3;
+}
+
+// -----------------------------------------------------------------
+// Workflow chain — template-to-template sequencing.
+// See specs/workflow_chain.md for the full design.
+// -----------------------------------------------------------------
+
+// A planned (or historical) chain entry: armed at parent-submit time,
+// evaluated when the parent reaches a terminal status.
+message ChainEntry {
+    int32 chain_entry_id = 1;
+    int32 parent_workflow_id = 2;
+    // Position in the parent's `chain:` list (stable ordering for display).
+    int32 idx = 3;
+    string template_name = 4;
+    // Pinned version (null = "latest" at fire time).
+    optional string template_version = 5;
+    // JSON object: keys are child param names, values are unresolved
+    // strings containing {parent.params.X} / {parent.publish.<step>} / ...
+    string params_template_json = 6;
+    // Truthy condition expression; "" means default (true).
+    string when_expr = 7;
+    // Parent-status filter: "succeeded" (default) | "always" | "failed".
+    string on_status = 8;
+    // If true, fire a fresh child each time instead of reconciling via --continue.
+    bool always_new = 9;
+    // Lifecycle: pending|suspended|skipped|fired|failed|cancelled.
+    string status = 10;
+    // Populated when status=fired (or last child if re-fired on parent extend).
+    optional int32 child_workflow_id = 11;
+    // Populated when status=failed (chain firing itself failed).
+    optional string error_message = 12;
+    string created_at = 13;
+    optional string fired_at = 14;
+    optional string last_fired_at = 15;
+}
+
+message ChainEntryList {
+    repeated ChainEntry entries = 1;
+}
+
+message ChainEntryId {
+    int32 chain_entry_id = 1;
+}
+
+// A pre-creation chain entry — fields the caller supplies; the server
+// assigns chain_entry_id, idx, created_at, status=pending.
+message ChainEntryDraft {
+    string template_name = 1;
+    optional string template_version = 2;
+    string params_template_json = 3;
+    string when_expr = 4;
+    string on_status = 5;
+    bool always_new = 6;
+}
+
+message CreateChainEntriesRequest {
+    int32 workflow_id = 1;
+    repeated ChainEntryDraft entries = 2;
+}
+
+message ListChainEntriesRequest {
+    // Filter by parent workflow. If unset, returns entries across all
+    // workflows the caller can see (useful with status_filter).
+    optional int32 parent_workflow_id = 1;
+    // Filter by lifecycle status (e.g. "pending", "suspended").
+    optional string status_filter = 2;
+}
+
+message EditChainEntryRequest {
+    int32 chain_entry_id = 1;
+    optional string template_name = 2;
+    // Pass the empty string to clear template_version (resolve latest at
+    // fire time). Unset = no change.
+    optional string template_version = 3;
+    optional string params_template_json = 4;
+    optional string when_expr = 5;
+    optional string on_status = 6;
+    optional bool always_new = 7;
 }
 
 message DebugAssignRequest {
@@ -1074,6 +1166,10 @@ message TemplateRun {
   optional string run_by_username = 12;
   optional string script_name = 13;    // ad-hoc runs only
   optional string script_sha256 = 14;  // ad-hoc runs only
+  // When this run was created by a chain firing, the parent's template_run id.
+  // Mirrors workflow.parent_workflow_id at the run-record layer.
+  // See specs/workflow_chain.md.
+  optional int32 parent_template_run_id = 15;
 }
 
 message TemplateRunList {

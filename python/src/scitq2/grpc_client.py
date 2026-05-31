@@ -1,6 +1,7 @@
 # src/scitq2/grpc_client.py
 
 import grpc
+import json
 import os
 from scitq2.pb import taskqueue_pb2, taskqueue_pb2_grpc
 from scitq2.constants import DEFAULT_RECRUITER_TIMEOUT
@@ -140,6 +141,88 @@ class Scitq2Client:
 
     def delete_workflow(self, workflow_id: int) -> None:
         self.stub.DeleteWorkflow(taskqueue_pb2.WorkflowId(workflow_id=workflow_id))
+
+    # ------------------------------------------------------------------
+    # Workflow chain — see specs/workflow_chain.md.
+    # ------------------------------------------------------------------
+
+    def create_chain_entries(self, workflow_id: int, entries: list) -> list:
+        """Materialise chain entries for a parent workflow.
+
+        `entries` is a list of dicts with keys: template_name (str),
+        template_version (str, optional), params_template (dict or str),
+        when (str, default 'true'), on (str, default 'succeeded'),
+        always_new (bool, default False).
+        """
+        drafts = []
+        for e in entries:
+            params_tpl = e.get('params_template', e.get('params', {}))
+            if isinstance(params_tpl, dict):
+                params_tpl = json.dumps(params_tpl, separators=(',', ':'))
+            draft = taskqueue_pb2.ChainEntryDraft(
+                template_name=e['template_name'],
+                params_template_json=params_tpl,
+                when_expr=str(e.get('when', 'true') or 'true'),
+                on_status=str(e.get('on', 'succeeded') or 'succeeded'),
+                always_new=bool(e.get('always_new', False)),
+            )
+            tv = e.get('template_version')
+            if tv:
+                draft.template_version = tv
+            drafts.append(draft)
+        req = taskqueue_pb2.CreateChainEntriesRequest(
+            workflow_id=workflow_id, entries=drafts)
+        return list(self.stub.CreateChainEntries(req).entries)
+
+    def list_chain_entries(self, *, parent_workflow_id: Optional[int] = None,
+                           status: Optional[str] = None) -> list:
+        req = taskqueue_pb2.ListChainEntriesRequest()
+        if parent_workflow_id is not None:
+            req.parent_workflow_id = parent_workflow_id
+        if status:
+            req.status_filter = status
+        return list(self.stub.ListChainEntries(req).entries)
+
+    def get_chain_entry(self, chain_entry_id: int):
+        return self.stub.GetChainEntry(
+            taskqueue_pb2.ChainEntryId(chain_entry_id=chain_entry_id))
+
+    def suspend_chain_entry(self, chain_entry_id: int):
+        return self.stub.SuspendChainEntry(
+            taskqueue_pb2.ChainEntryId(chain_entry_id=chain_entry_id))
+
+    def resume_chain_entry(self, chain_entry_id: int):
+        return self.stub.ResumeChainEntry(
+            taskqueue_pb2.ChainEntryId(chain_entry_id=chain_entry_id))
+
+    def cancel_chain_entry(self, chain_entry_id: int):
+        return self.stub.CancelChainEntry(
+            taskqueue_pb2.ChainEntryId(chain_entry_id=chain_entry_id))
+
+    def edit_chain_entry(self, chain_entry_id: int, *,
+                         template_name: Optional[str] = None,
+                         template_version: Optional[str] = None,
+                         params_template=None,
+                         when: Optional[str] = None,
+                         on: Optional[str] = None,
+                         always_new: Optional[bool] = None):
+        req = taskqueue_pb2.EditChainEntryRequest(chain_entry_id=chain_entry_id)
+        if template_name is not None:
+            req.template_name = template_name
+        if template_version is not None:
+            # Empty string clears the pin.
+            req.template_version = template_version
+        if params_template is not None:
+            if isinstance(params_template, dict):
+                params_template = json.dumps(params_template, separators=(',', ':'))
+            req.params_template_json = params_template
+        if when is not None:
+            req.when_expr = when
+        if on is not None:
+            req.on_status = on
+        if always_new is not None:
+            req.always_new = always_new
+        return self.stub.EditChainEntry(req)
 
     def list_tasks(self, workflow_id: Optional[int] = None, show_hidden: bool = False, status: Optional[str] = None):
         req = taskqueue_pb2.ListTasksRequest()

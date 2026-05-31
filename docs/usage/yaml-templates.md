@@ -1583,3 +1583,121 @@ workflow already uses so outputs land in the same workspace.
 
 Full semantics, caveats, and the cascade rule: `specs/workflow_extend.md`, and
 [CLI → Extending a workflow](cli.md#extending-an-existing-workflow).
+
+## Chaining workflows
+
+Extending reconciles within one workflow. **Chaining** sequences one workflow
+into another — when the parent reaches a terminal status (`S` by default),
+the server fires one or more child template runs whose parameters are
+mapped from the parent's state.
+
+The most common use is "a step in workflow A produces an unknown number of
+outputs that workflow B must fan out over": A's outputs are real files on
+storage by the moment B is submitted, so B's iterator does its normal
+compile-time enumeration over those URIs — no need for dynamic
+task-materialisation inside one workflow.
+
+```yaml
+format: 2
+name: binning
+version: "1.0.0"
+description: Cross-sample contig catalog + GPU binning
+
+params:
+  project: { type: string, required: true }
+  location: { type: provider_region, required: true }
+publish_root: "azure://results/{params.project}"
+
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.bioproject}"
+  group_by: folder
+  fastqs: "*.f*q.gz"
+
+steps:
+  - import: binning/semibin2
+    publish: true        # → azure://results/{project}/binning/semibin2/
+
+chain:
+  - template: bin_qc
+    when: "{params.run_qc}"        # optional: only fire if user opted in
+    params:
+      project:  "{parent.params.project}"
+      location: "{parent.params.location}"
+      bins_dir: "azure://results/{parent.params.project}/binning/semibin2/"
+  - template: notify_failure
+    on: failed                      # only fire if parent failed
+    params:
+      workflow_id: "{parent.workflow_id}"
+```
+
+### Entry filters: `when:` and `on:`
+
+A chain entry has two orthogonal filters; both must hold for the child to
+fire:
+
+- **`when:`** — same semantics as a step's `when:` (skip if the value is
+  falsy). Use it for opt-in / opt-out on a parameter.
+- **`on:`** — closed enum (default `succeeded`) gating on the parent's
+  terminal status:
+  - `succeeded` — fire only when parent ends `S`,
+  - `failed` — fire only when parent ends `F`,
+  - `always` — fire on either (cleanup / archival chains).
+
+> YAML 1.1 booleanises bare `on:` as `True`. The runner normalises this
+> automatically so you can write `on: failed` unquoted in chain entries.
+
+### Param mapping surface (v1)
+
+`params:` is a mapping from child param name to an expression. Mapping
+values support the usual `{params.X}` / `{vars.X}` substitutions plus a
+narrow `parent.*` namespace resolved server-side at fire time:
+
+| Reference | Resolves to |
+|---|---|
+| `{parent.workflow_id}` | The parent's workflow id (int). |
+| `{parent.workflow_name}` | The parent's workflow name. |
+| `{parent.run_by}` | The parent's `run_by` user id (int). |
+| `{parent.run_by_username}` | The parent's `run_by` username. |
+| `{parent.params.<name>}` | A value from the parent's submitted params. |
+
+Refs that require schema additions (`{parent.publish.<step>}`,
+`{parent.workspace_root}`, `{parent.tag}`) return a clear "not in v1" error
+pointing at the workaround: pass the URI explicitly via
+`{parent.params.X}` and your template's known `publish_root` convention.
+See [`specs/workflow_chain.md`](../../specs/workflow_chain.md) for the v2
+plan.
+
+### Lifecycle and operator controls
+
+Each `chain:` entry becomes a first-class row in `workflow_chain_entry`
+when the parent is submitted, with status `pending`. It progresses to:
+
+- **`fired`** — child submitted; the entry records `child_workflow_id`.
+- **`skipped`** — `when:` evaluated false, or `on:` rejected the parent's
+  terminal status. Permanent.
+- **`failed`** — chain firing itself failed (template not found, param
+  resolution error, mapping malformed); `error_message` records why.
+- **`cancelled`** — operator cancelled before fire (terminal).
+- **`suspended`** — operator paused the entry; can be edited or resumed.
+
+The operator can pause, fix, and resume an armed entry — useful when you
+realise mid-run that the child template needs a fix before it fires:
+
+```sh
+scitq workflow chain list --workflow-id 2484          # show what's armed
+scitq workflow chain suspend --id 7                   # pause entry 7
+# ... edit the child template (scitq template upload --force), then:
+scitq workflow chain edit --id 7 --param bins_dir=...
+scitq workflow chain resume --id 7                    # fires immediately if parent already terminated
+```
+
+Re-runs (`--continue` / `--extend-workflow` on the parent) re-fire `fired`
+entries against their recorded `child_workflow_id` via `--extend-workflow`
+— deterministic idempotency tied to the chain entry's own lineage. Set
+`always_new: true` on the entry to opt out and produce a fresh child each
+time (e.g. dated archival workflows).
+
+Full design, full lifecycle diagram, and the rerun semantics:
+[`specs/workflow_chain.md`](../../specs/workflow_chain.md).

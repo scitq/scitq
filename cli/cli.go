@@ -275,6 +275,35 @@ type Attr struct {
 		Delete *struct {
 			WorkflowId int32 `arg:"--id,required" help:"Workflow ID to delete"`
 		} `arg:"subcommand:delete" help:"Delete a workflow"`
+		Chain *struct {
+			List *struct {
+				WorkflowId *int32 `arg:"--workflow-id" help:"Filter to a specific parent workflow"`
+				Status     string `arg:"--status" help:"Filter by lifecycle status (pending|suspended|skipped|fired|failed|cancelled)"`
+			} `arg:"subcommand:list" help:"List chain entries"`
+			Show *struct {
+				EntryId int32 `arg:"--id,required" help:"Chain entry ID"`
+			} `arg:"subcommand:show" help:"Show one chain entry in detail"`
+			Suspend *struct {
+				EntryId int32 `arg:"--id,required" help:"Chain entry ID (must be pending)"`
+			} `arg:"subcommand:suspend" help:"Suspend a pending chain entry so the operator can edit it before it fires"`
+			Resume *struct {
+				EntryId int32 `arg:"--id,required" help:"Chain entry ID (must be suspended)"`
+			} `arg:"subcommand:resume" help:"Resume a suspended chain entry; fires immediately if the parent has already terminated"`
+			Cancel *struct {
+				EntryId int32 `arg:"--id,required" help:"Chain entry ID (must be pending or suspended)"`
+			} `arg:"subcommand:cancel" help:"Cancel a pending or suspended chain entry (terminal)"`
+			Edit *struct {
+				EntryId    int32    `arg:"--id,required" help:"Chain entry ID (must be suspended)"`
+				Template   *string  `arg:"--template" help:"New target template name"`
+				Version    *string  `arg:"--version" help:"New target version (use empty string to clear the pin and resolve latest at fire time)"`
+				ParamsJson *string  `arg:"--params-json" help:"Replace the entire params_template JSON object"`
+				Param      []string `arg:"--param,separate" help:"Set one params entry as key=value (repeatable). Merged into existing params."`
+				ParamClear []string `arg:"--param-clear,separate" help:"Drop one params key (repeatable)"`
+				When       *string  `arg:"--when" help:"New when expression"`
+				On         *string  `arg:"--on" help:"New on filter (succeeded|always|failed)"`
+				AlwaysNew  *bool    `arg:"--always-new" help:"Set always_new (true/false)"`
+			} `arg:"subcommand:edit" help:"Edit a suspended chain entry"`
+		} `arg:"subcommand:chain" help:"Manage workflow chain entries (see specs/workflow_chain.md)"`
 	} `arg:"subcommand:workflow" help:"Manage workflows"`
 
 	// Step commands
@@ -3291,6 +3320,23 @@ func Run(c CLI) error {
 			err = c.WorkflowUpdateStatus()
 		case c.Attr.Workflow.Delete != nil:
 			err = c.WorkflowDelete()
+		case c.Attr.Workflow.Chain != nil:
+			switch {
+			case c.Attr.Workflow.Chain.List != nil:
+				err = c.WorkflowChainList()
+			case c.Attr.Workflow.Chain.Show != nil:
+				err = c.WorkflowChainShow()
+			case c.Attr.Workflow.Chain.Suspend != nil:
+				err = c.WorkflowChainLifecycle("suspend")
+			case c.Attr.Workflow.Chain.Resume != nil:
+				err = c.WorkflowChainLifecycle("resume")
+			case c.Attr.Workflow.Chain.Cancel != nil:
+				err = c.WorkflowChainLifecycle("cancel")
+			case c.Attr.Workflow.Chain.Edit != nil:
+				err = c.WorkflowChainEdit()
+			default:
+				err = fmt.Errorf("no chain subcommand specified")
+			}
 		}
 	case c.Attr.Step != nil:
 		switch {

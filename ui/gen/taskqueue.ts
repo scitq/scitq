@@ -1942,6 +1942,13 @@ export interface Workflow {
      * @generated from protobuf field: optional string script_sha256 = 16
      */
     scriptSha256?: string;
+    /**
+     * When this workflow was created by a parent workflow's chain firing,
+     * the parent's id. See specs/workflow_chain.md.
+     *
+     * @generated from protobuf field: optional int32 parent_workflow_id = 17
+     */
+    parentWorkflowId?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkflowRequest
@@ -1993,6 +2000,215 @@ export interface WorkflowStatusUpdate {
      * @generated from protobuf field: optional int32 maximum_workers = 3
      */
     maximumWorkers?: number;
+}
+// -----------------------------------------------------------------
+// Workflow chain — template-to-template sequencing.
+// See specs/workflow_chain.md for the full design.
+// -----------------------------------------------------------------
+
+/**
+ * A planned (or historical) chain entry: armed at parent-submit time,
+ * evaluated when the parent reaches a terminal status.
+ *
+ * @generated from protobuf message taskqueue.ChainEntry
+ */
+export interface ChainEntry {
+    /**
+     * @generated from protobuf field: int32 chain_entry_id = 1
+     */
+    chainEntryId: number;
+    /**
+     * @generated from protobuf field: int32 parent_workflow_id = 2
+     */
+    parentWorkflowId: number;
+    /**
+     * Position in the parent's `chain:` list (stable ordering for display).
+     *
+     * @generated from protobuf field: int32 idx = 3
+     */
+    idx: number;
+    /**
+     * @generated from protobuf field: string template_name = 4
+     */
+    templateName: string;
+    /**
+     * Pinned version (null = "latest" at fire time).
+     *
+     * @generated from protobuf field: optional string template_version = 5
+     */
+    templateVersion?: string;
+    /**
+     * JSON object: keys are child param names, values are unresolved
+     * strings containing {parent.params.X} / {parent.publish.<step>} / ...
+     *
+     * @generated from protobuf field: string params_template_json = 6
+     */
+    paramsTemplateJson: string;
+    /**
+     * Truthy condition expression; "" means default (true).
+     *
+     * @generated from protobuf field: string when_expr = 7
+     */
+    whenExpr: string;
+    /**
+     * Parent-status filter: "succeeded" (default) | "always" | "failed".
+     *
+     * @generated from protobuf field: string on_status = 8
+     */
+    onStatus: string;
+    /**
+     * If true, fire a fresh child each time instead of reconciling via --continue.
+     *
+     * @generated from protobuf field: bool always_new = 9
+     */
+    alwaysNew: boolean;
+    /**
+     * Lifecycle: pending|suspended|skipped|fired|failed|cancelled.
+     *
+     * @generated from protobuf field: string status = 10
+     */
+    status: string;
+    /**
+     * Populated when status=fired (or last child if re-fired on parent extend).
+     *
+     * @generated from protobuf field: optional int32 child_workflow_id = 11
+     */
+    childWorkflowId?: number;
+    /**
+     * Populated when status=failed (chain firing itself failed).
+     *
+     * @generated from protobuf field: optional string error_message = 12
+     */
+    errorMessage?: string;
+    /**
+     * @generated from protobuf field: string created_at = 13
+     */
+    createdAt: string;
+    /**
+     * @generated from protobuf field: optional string fired_at = 14
+     */
+    firedAt?: string;
+    /**
+     * @generated from protobuf field: optional string last_fired_at = 15
+     */
+    lastFiredAt?: string;
+}
+/**
+ * @generated from protobuf message taskqueue.ChainEntryList
+ */
+export interface ChainEntryList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.ChainEntry entries = 1
+     */
+    entries: ChainEntry[];
+}
+/**
+ * @generated from protobuf message taskqueue.ChainEntryId
+ */
+export interface ChainEntryId {
+    /**
+     * @generated from protobuf field: int32 chain_entry_id = 1
+     */
+    chainEntryId: number;
+}
+/**
+ * A pre-creation chain entry — fields the caller supplies; the server
+ * assigns chain_entry_id, idx, created_at, status=pending.
+ *
+ * @generated from protobuf message taskqueue.ChainEntryDraft
+ */
+export interface ChainEntryDraft {
+    /**
+     * @generated from protobuf field: string template_name = 1
+     */
+    templateName: string;
+    /**
+     * @generated from protobuf field: optional string template_version = 2
+     */
+    templateVersion?: string;
+    /**
+     * @generated from protobuf field: string params_template_json = 3
+     */
+    paramsTemplateJson: string;
+    /**
+     * @generated from protobuf field: string when_expr = 4
+     */
+    whenExpr: string;
+    /**
+     * @generated from protobuf field: string on_status = 5
+     */
+    onStatus: string;
+    /**
+     * @generated from protobuf field: bool always_new = 6
+     */
+    alwaysNew: boolean;
+}
+/**
+ * @generated from protobuf message taskqueue.CreateChainEntriesRequest
+ */
+export interface CreateChainEntriesRequest {
+    /**
+     * @generated from protobuf field: int32 workflow_id = 1
+     */
+    workflowId: number;
+    /**
+     * @generated from protobuf field: repeated taskqueue.ChainEntryDraft entries = 2
+     */
+    entries: ChainEntryDraft[];
+}
+/**
+ * @generated from protobuf message taskqueue.ListChainEntriesRequest
+ */
+export interface ListChainEntriesRequest {
+    /**
+     * Filter by parent workflow. If unset, returns entries across all
+     * workflows the caller can see (useful with status_filter).
+     *
+     * @generated from protobuf field: optional int32 parent_workflow_id = 1
+     */
+    parentWorkflowId?: number;
+    /**
+     * Filter by lifecycle status (e.g. "pending", "suspended").
+     *
+     * @generated from protobuf field: optional string status_filter = 2
+     */
+    statusFilter?: string;
+}
+/**
+ * @generated from protobuf message taskqueue.EditChainEntryRequest
+ */
+export interface EditChainEntryRequest {
+    /**
+     * @generated from protobuf field: int32 chain_entry_id = 1
+     */
+    chainEntryId: number;
+    /**
+     * @generated from protobuf field: optional string template_name = 2
+     */
+    templateName?: string;
+    /**
+     * Pass the empty string to clear template_version (resolve latest at
+     * fire time). Unset = no change.
+     *
+     * @generated from protobuf field: optional string template_version = 3
+     */
+    templateVersion?: string;
+    /**
+     * @generated from protobuf field: optional string params_template_json = 4
+     */
+    paramsTemplateJson?: string;
+    /**
+     * @generated from protobuf field: optional string when_expr = 5
+     */
+    whenExpr?: string;
+    /**
+     * @generated from protobuf field: optional string on_status = 6
+     */
+    onStatus?: string;
+    /**
+     * @generated from protobuf field: optional bool always_new = 7
+     */
+    alwaysNew?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.DebugAssignRequest
@@ -2643,6 +2859,14 @@ export interface TemplateRun {
      * @generated from protobuf field: optional string script_sha256 = 14
      */
     scriptSha256?: string; // ad-hoc runs only
+    /**
+     * When this run was created by a chain firing, the parent's template_run id.
+     * Mirrors workflow.parent_workflow_id at the run-record layer.
+     * See specs/workflow_chain.md.
+     *
+     * @generated from protobuf field: optional int32 parent_template_run_id = 15
+     */
+    parentTemplateRunId?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TemplateRunList
@@ -9077,7 +9301,8 @@ class Workflow$Type extends MessageType<Workflow> {
             { no: 13, name: "template_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 14, name: "template_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 15, name: "script_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 16, name: "script_sha256", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 16, name: "script_sha256", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 17, name: "parent_workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Workflow>): Workflow {
@@ -9149,6 +9374,9 @@ class Workflow$Type extends MessageType<Workflow> {
                 case /* optional string script_sha256 */ 16:
                     message.scriptSha256 = reader.string();
                     break;
+                case /* optional int32 parent_workflow_id */ 17:
+                    message.parentWorkflowId = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9209,6 +9437,9 @@ class Workflow$Type extends MessageType<Workflow> {
         /* optional string script_sha256 = 16; */
         if (message.scriptSha256 !== undefined)
             writer.tag(16, WireType.LengthDelimited).string(message.scriptSha256);
+        /* optional int32 parent_workflow_id = 17; */
+        if (message.parentWorkflowId !== undefined)
+            writer.tag(17, WireType.Varint).int32(message.parentWorkflowId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9403,6 +9634,537 @@ class WorkflowStatusUpdate$Type extends MessageType<WorkflowStatusUpdate> {
  * @generated MessageType for protobuf message taskqueue.WorkflowStatusUpdate
  */
 export const WorkflowStatusUpdate = new WorkflowStatusUpdate$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChainEntry$Type extends MessageType<ChainEntry> {
+    constructor() {
+        super("taskqueue.ChainEntry", [
+            { no: 1, name: "chain_entry_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "parent_workflow_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "idx", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "template_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "template_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "params_template_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "when_expr", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "on_status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "always_new", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 10, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 11, name: "child_workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 12, name: "error_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 13, name: "created_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 14, name: "fired_at", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 15, name: "last_fired_at", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChainEntry>): ChainEntry {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chainEntryId = 0;
+        message.parentWorkflowId = 0;
+        message.idx = 0;
+        message.templateName = "";
+        message.paramsTemplateJson = "";
+        message.whenExpr = "";
+        message.onStatus = "";
+        message.alwaysNew = false;
+        message.status = "";
+        message.createdAt = "";
+        if (value !== undefined)
+            reflectionMergePartial<ChainEntry>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChainEntry): ChainEntry {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 chain_entry_id */ 1:
+                    message.chainEntryId = reader.int32();
+                    break;
+                case /* int32 parent_workflow_id */ 2:
+                    message.parentWorkflowId = reader.int32();
+                    break;
+                case /* int32 idx */ 3:
+                    message.idx = reader.int32();
+                    break;
+                case /* string template_name */ 4:
+                    message.templateName = reader.string();
+                    break;
+                case /* optional string template_version */ 5:
+                    message.templateVersion = reader.string();
+                    break;
+                case /* string params_template_json */ 6:
+                    message.paramsTemplateJson = reader.string();
+                    break;
+                case /* string when_expr */ 7:
+                    message.whenExpr = reader.string();
+                    break;
+                case /* string on_status */ 8:
+                    message.onStatus = reader.string();
+                    break;
+                case /* bool always_new */ 9:
+                    message.alwaysNew = reader.bool();
+                    break;
+                case /* string status */ 10:
+                    message.status = reader.string();
+                    break;
+                case /* optional int32 child_workflow_id */ 11:
+                    message.childWorkflowId = reader.int32();
+                    break;
+                case /* optional string error_message */ 12:
+                    message.errorMessage = reader.string();
+                    break;
+                case /* string created_at */ 13:
+                    message.createdAt = reader.string();
+                    break;
+                case /* optional string fired_at */ 14:
+                    message.firedAt = reader.string();
+                    break;
+                case /* optional string last_fired_at */ 15:
+                    message.lastFiredAt = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChainEntry, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 chain_entry_id = 1; */
+        if (message.chainEntryId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.chainEntryId);
+        /* int32 parent_workflow_id = 2; */
+        if (message.parentWorkflowId !== 0)
+            writer.tag(2, WireType.Varint).int32(message.parentWorkflowId);
+        /* int32 idx = 3; */
+        if (message.idx !== 0)
+            writer.tag(3, WireType.Varint).int32(message.idx);
+        /* string template_name = 4; */
+        if (message.templateName !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.templateName);
+        /* optional string template_version = 5; */
+        if (message.templateVersion !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.templateVersion);
+        /* string params_template_json = 6; */
+        if (message.paramsTemplateJson !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.paramsTemplateJson);
+        /* string when_expr = 7; */
+        if (message.whenExpr !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.whenExpr);
+        /* string on_status = 8; */
+        if (message.onStatus !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.onStatus);
+        /* bool always_new = 9; */
+        if (message.alwaysNew !== false)
+            writer.tag(9, WireType.Varint).bool(message.alwaysNew);
+        /* string status = 10; */
+        if (message.status !== "")
+            writer.tag(10, WireType.LengthDelimited).string(message.status);
+        /* optional int32 child_workflow_id = 11; */
+        if (message.childWorkflowId !== undefined)
+            writer.tag(11, WireType.Varint).int32(message.childWorkflowId);
+        /* optional string error_message = 12; */
+        if (message.errorMessage !== undefined)
+            writer.tag(12, WireType.LengthDelimited).string(message.errorMessage);
+        /* string created_at = 13; */
+        if (message.createdAt !== "")
+            writer.tag(13, WireType.LengthDelimited).string(message.createdAt);
+        /* optional string fired_at = 14; */
+        if (message.firedAt !== undefined)
+            writer.tag(14, WireType.LengthDelimited).string(message.firedAt);
+        /* optional string last_fired_at = 15; */
+        if (message.lastFiredAt !== undefined)
+            writer.tag(15, WireType.LengthDelimited).string(message.lastFiredAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ChainEntry
+ */
+export const ChainEntry = new ChainEntry$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChainEntryList$Type extends MessageType<ChainEntryList> {
+    constructor() {
+        super("taskqueue.ChainEntryList", [
+            { no: 1, name: "entries", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => ChainEntry }
+        ]);
+    }
+    create(value?: PartialMessage<ChainEntryList>): ChainEntryList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.entries = [];
+        if (value !== undefined)
+            reflectionMergePartial<ChainEntryList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChainEntryList): ChainEntryList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.ChainEntry entries */ 1:
+                    message.entries.push(ChainEntry.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChainEntryList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.ChainEntry entries = 1; */
+        for (let i = 0; i < message.entries.length; i++)
+            ChainEntry.internalBinaryWrite(message.entries[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ChainEntryList
+ */
+export const ChainEntryList = new ChainEntryList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChainEntryId$Type extends MessageType<ChainEntryId> {
+    constructor() {
+        super("taskqueue.ChainEntryId", [
+            { no: 1, name: "chain_entry_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChainEntryId>): ChainEntryId {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chainEntryId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<ChainEntryId>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChainEntryId): ChainEntryId {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 chain_entry_id */ 1:
+                    message.chainEntryId = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChainEntryId, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 chain_entry_id = 1; */
+        if (message.chainEntryId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.chainEntryId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ChainEntryId
+ */
+export const ChainEntryId = new ChainEntryId$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChainEntryDraft$Type extends MessageType<ChainEntryDraft> {
+    constructor() {
+        super("taskqueue.ChainEntryDraft", [
+            { no: 1, name: "template_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "template_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "params_template_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "when_expr", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "on_status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "always_new", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChainEntryDraft>): ChainEntryDraft {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.templateName = "";
+        message.paramsTemplateJson = "";
+        message.whenExpr = "";
+        message.onStatus = "";
+        message.alwaysNew = false;
+        if (value !== undefined)
+            reflectionMergePartial<ChainEntryDraft>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChainEntryDraft): ChainEntryDraft {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string template_name */ 1:
+                    message.templateName = reader.string();
+                    break;
+                case /* optional string template_version */ 2:
+                    message.templateVersion = reader.string();
+                    break;
+                case /* string params_template_json */ 3:
+                    message.paramsTemplateJson = reader.string();
+                    break;
+                case /* string when_expr */ 4:
+                    message.whenExpr = reader.string();
+                    break;
+                case /* string on_status */ 5:
+                    message.onStatus = reader.string();
+                    break;
+                case /* bool always_new */ 6:
+                    message.alwaysNew = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChainEntryDraft, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string template_name = 1; */
+        if (message.templateName !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.templateName);
+        /* optional string template_version = 2; */
+        if (message.templateVersion !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.templateVersion);
+        /* string params_template_json = 3; */
+        if (message.paramsTemplateJson !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.paramsTemplateJson);
+        /* string when_expr = 4; */
+        if (message.whenExpr !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.whenExpr);
+        /* string on_status = 5; */
+        if (message.onStatus !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.onStatus);
+        /* bool always_new = 6; */
+        if (message.alwaysNew !== false)
+            writer.tag(6, WireType.Varint).bool(message.alwaysNew);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ChainEntryDraft
+ */
+export const ChainEntryDraft = new ChainEntryDraft$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateChainEntriesRequest$Type extends MessageType<CreateChainEntriesRequest> {
+    constructor() {
+        super("taskqueue.CreateChainEntriesRequest", [
+            { no: 1, name: "workflow_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "entries", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => ChainEntryDraft }
+        ]);
+    }
+    create(value?: PartialMessage<CreateChainEntriesRequest>): CreateChainEntriesRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workflowId = 0;
+        message.entries = [];
+        if (value !== undefined)
+            reflectionMergePartial<CreateChainEntriesRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateChainEntriesRequest): CreateChainEntriesRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 workflow_id */ 1:
+                    message.workflowId = reader.int32();
+                    break;
+                case /* repeated taskqueue.ChainEntryDraft entries */ 2:
+                    message.entries.push(ChainEntryDraft.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateChainEntriesRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 workflow_id = 1; */
+        if (message.workflowId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.workflowId);
+        /* repeated taskqueue.ChainEntryDraft entries = 2; */
+        for (let i = 0; i < message.entries.length; i++)
+            ChainEntryDraft.internalBinaryWrite(message.entries[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.CreateChainEntriesRequest
+ */
+export const CreateChainEntriesRequest = new CreateChainEntriesRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ListChainEntriesRequest$Type extends MessageType<ListChainEntriesRequest> {
+    constructor() {
+        super("taskqueue.ListChainEntriesRequest", [
+            { no: 1, name: "parent_workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "status_filter", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ListChainEntriesRequest>): ListChainEntriesRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ListChainEntriesRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListChainEntriesRequest): ListChainEntriesRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional int32 parent_workflow_id */ 1:
+                    message.parentWorkflowId = reader.int32();
+                    break;
+                case /* optional string status_filter */ 2:
+                    message.statusFilter = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ListChainEntriesRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int32 parent_workflow_id = 1; */
+        if (message.parentWorkflowId !== undefined)
+            writer.tag(1, WireType.Varint).int32(message.parentWorkflowId);
+        /* optional string status_filter = 2; */
+        if (message.statusFilter !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.statusFilter);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ListChainEntriesRequest
+ */
+export const ListChainEntriesRequest = new ListChainEntriesRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class EditChainEntryRequest$Type extends MessageType<EditChainEntryRequest> {
+    constructor() {
+        super("taskqueue.EditChainEntryRequest", [
+            { no: 1, name: "chain_entry_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "template_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "template_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "params_template_json", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "when_expr", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "on_status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "always_new", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<EditChainEntryRequest>): EditChainEntryRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chainEntryId = 0;
+        if (value !== undefined)
+            reflectionMergePartial<EditChainEntryRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: EditChainEntryRequest): EditChainEntryRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 chain_entry_id */ 1:
+                    message.chainEntryId = reader.int32();
+                    break;
+                case /* optional string template_name */ 2:
+                    message.templateName = reader.string();
+                    break;
+                case /* optional string template_version */ 3:
+                    message.templateVersion = reader.string();
+                    break;
+                case /* optional string params_template_json */ 4:
+                    message.paramsTemplateJson = reader.string();
+                    break;
+                case /* optional string when_expr */ 5:
+                    message.whenExpr = reader.string();
+                    break;
+                case /* optional string on_status */ 6:
+                    message.onStatus = reader.string();
+                    break;
+                case /* optional bool always_new */ 7:
+                    message.alwaysNew = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: EditChainEntryRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 chain_entry_id = 1; */
+        if (message.chainEntryId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.chainEntryId);
+        /* optional string template_name = 2; */
+        if (message.templateName !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.templateName);
+        /* optional string template_version = 3; */
+        if (message.templateVersion !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.templateVersion);
+        /* optional string params_template_json = 4; */
+        if (message.paramsTemplateJson !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.paramsTemplateJson);
+        /* optional string when_expr = 5; */
+        if (message.whenExpr !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.whenExpr);
+        /* optional string on_status = 6; */
+        if (message.onStatus !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.onStatus);
+        /* optional bool always_new = 7; */
+        if (message.alwaysNew !== undefined)
+            writer.tag(7, WireType.Varint).bool(message.alwaysNew);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.EditChainEntryRequest
+ */
+export const EditChainEntryRequest = new EditChainEntryRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DebugAssignRequest$Type extends MessageType<DebugAssignRequest> {
     constructor() {
@@ -11319,7 +12081,8 @@ class TemplateRun$Type extends MessageType<TemplateRun> {
             { no: 11, name: "error_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 12, name: "run_by_username", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 13, name: "script_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 14, name: "script_sha256", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 14, name: "script_sha256", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 15, name: "parent_template_run_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<TemplateRun>): TemplateRun {
@@ -11380,6 +12143,9 @@ class TemplateRun$Type extends MessageType<TemplateRun> {
                 case /* optional string script_sha256 */ 14:
                     message.scriptSha256 = reader.string();
                     break;
+                case /* optional int32 parent_template_run_id */ 15:
+                    message.parentTemplateRunId = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11434,6 +12200,9 @@ class TemplateRun$Type extends MessageType<TemplateRun> {
         /* optional string script_sha256 = 14; */
         if (message.scriptSha256 !== undefined)
             writer.tag(14, WireType.LengthDelimited).string(message.scriptSha256);
+        /* optional int32 parent_template_run_id = 15; */
+        if (message.parentTemplateRunId !== undefined)
+            writer.tag(15, WireType.Varint).int32(message.parentTemplateRunId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13880,6 +14649,13 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "CreateWorkflow", options: {}, I: WorkflowRequest, O: WorkflowId },
     { name: "UpdateWorkflowStatus", options: {}, I: WorkflowStatusUpdate, O: Ack },
     { name: "DeleteWorkflow", options: {}, I: WorkflowId, O: Ack },
+    { name: "CreateChainEntries", options: {}, I: CreateChainEntriesRequest, O: ChainEntryList },
+    { name: "ListChainEntries", options: {}, I: ListChainEntriesRequest, O: ChainEntryList },
+    { name: "GetChainEntry", options: {}, I: ChainEntryId, O: ChainEntry },
+    { name: "SuspendChainEntry", options: {}, I: ChainEntryId, O: ChainEntry },
+    { name: "ResumeChainEntry", options: {}, I: ChainEntryId, O: ChainEntry },
+    { name: "CancelChainEntry", options: {}, I: ChainEntryId, O: ChainEntry },
+    { name: "EditChainEntry", options: {}, I: EditChainEntryRequest, O: ChainEntry },
     { name: "DebugAssignTask", options: {}, I: DebugAssignRequest, O: Ack },
     { name: "DebugRecruitStep", options: {}, I: DebugRecruitRequest, O: Ack },
     { name: "DebugRetryTask", options: {}, I: RetryTaskRequest, O: TaskResponse },

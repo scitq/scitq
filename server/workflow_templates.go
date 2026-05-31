@@ -393,6 +393,7 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 
 	var templateRunId int32
 	var createdAt time.Time
+	var workflowID sql.NullInt32
 	user := GetUserFromContext(ctx)
 
 	var userId *uint32
@@ -543,7 +544,6 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		if err != nil {
 			log.Printf("⚠️ failed to update template_run status: %v", err)
 		}
-		var workflowID sql.NullInt32
 		err = s.db.QueryRowContext(finalizeCtx, `
 			SELECT workflow_id FROM template_run WHERE template_run_id = $1
 		`, templateRunId).Scan(&workflowID)
@@ -615,13 +615,14 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		log.Printf("⚠️ Warning: %s", stderr)
 	}
 
-	// ✅ Script ran successfully (but workflow_id will be updated later by Python)
+	// ✅ Script ran successfully.
 	resp := &pb.TemplateRun{
 		TemplateRunId:      templateRunId,
 		WorkflowTemplateId: req.WorkflowTemplateId,
 		CreatedAt:          createdAt.Format(time.RFC3339),
 		ParamValuesJson:    req.ParamValuesJson,
 		Status:             "S",
+		WorkflowId:         proto.Int32(workflowID.Int32),
 	}
 	// Only surface stderr when there's actual content — otherwise the CLI
 	// prints an empty "Warning:" line on every successful run.
