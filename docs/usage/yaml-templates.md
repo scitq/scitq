@@ -453,13 +453,36 @@ iterate:
 
 Each iterator source declares the attributes it understands (`name`, `match`, `fastq_pair_filtering`, plus source-specific keys like `uri`, `identifier`, `where`, `group_by`, etc.). Passing an unknown attribute fails fast with an error listing the supported keys for that source — no silent ignores.
 
+#### `product:` — outer-product (multi-dimensional iteration)
+
+For "every sample × every chromosome" or "every sample × every parameter setting" patterns, declare an outer-product dimension nested inside the primary iterator:
+
+```yaml
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.bioproject}"
+  group_by: folder
+  fastqs: "*.f*q.gz"
+  product:                       # outer-product dimension
+    name: chrom
+    source: list
+    values: [chr1, chr2, chr3, ..., chrX]
+# → iterations = samples × chroms; tag = "{SAMPLE}.{CHROM}"
+```
+
+The `product:` value is itself a full iterator spec, recursively validated, so it can use any source (`list`, `range`, `uri`, ...). Each iteration receives both variables; commands can reference `{SAMPLE}` and `{CHROM}` independently. The composite tag is the dot-join of the iterator values, so a per-sample step here produces tasks like `call.S001.chr1`, `call.S001.chr2`, ....
+
+This is the static (compile-time-enumerable) version of the Cartesian product. For runtime-cardinality fan-out (e.g. "split until each chunk < N reads"), use [workflow chaining](#chaining-workflows) instead — the next workflow's iterator enumerates the prior workflow's outputs on storage.
+
 ### Three kinds of steps
 
-Steps fall into three categories based on how they relate to the iteration loop:
+Steps fall into four categories based on how they relate to the iteration loop:
 
 1. **Per-sample steps** (default): run once per iteration. They have access to `{SAMPLE}` and the sample's input files.
 2. **Fan-in steps** (`grouped: true`): run once after all iterations. They receive the combined outputs of all per-sample tasks.
 3. **One-off steps** (`per_sample: false`): run once before the iteration loop (e.g. index building).
+4. **Keyed-grouping steps** (`grouped_by: <iter-name>`): run once per *distinct value* of the named iteration variable, collecting outputs from upstream tasks that shared that value. The complement of `product:` — collapses one dimension of a multi-dimensional iteration back into one task per key. See ["Keyed grouping"](#keyed-grouping-grouped_by) below.
 
 ### Inputs and dependencies
 
@@ -517,6 +540,48 @@ steps:
 ```
 
 This is the right pattern when the only thing you want to do with the per-sample fastqs is feed them to a many-to-one tool (simka, k-mer comparisons, joint variant calling, etc.) — no need for a no-op pass-through step purely to register an upstream output for the resolver. (See note: until this support landed, an explicit `name: stage` step that did `mv /input/*.fastq.gz /output/` was required between the iterator and the grouped step.)
+
+#### Keyed grouping (`grouped_by:`)
+
+`grouped_by: <iter-name>` is the dimensional complement of `grouped: true`. Instead of one task collecting **all** upstream outputs, it produces **one task per distinct value** of the named iteration variable, each collecting only that group's outputs:
+
+```yaml
+iterate:
+  name: sample
+  source: uri
+  uri: "{params.bioproject}"
+  group_by: folder
+  fastqs: "*.f*q.gz"
+  product:
+    name: chrom
+    source: list
+    values: [chr1, chr2, ..., chrX]
+
+steps:
+  - name: call
+    inputs: sample.fastqs
+    command: 'gatk HaplotypeCaller -L {CHROM} -I /input/*.bam -O {SAMPLE}.{CHROM}.vcf'
+    outputs: { vcf: "*.vcf" }
+
+  - name: merge
+    inputs: call.vcf
+    grouped_by: sample          # ← one merge task per sample, collecting that sample's chroms
+    command: 'bcftools concat -O z -o {SAMPLE}.vcf.gz /input/*.vcf'
+    outputs: { vcf: "*.vcf.gz" }
+
+  - name: report
+    inputs: merge.vcf
+    grouped: true                # ← single task collecting ALL samples
+```
+
+The grouping key is the iterator's `name:` written lowercase (the same identifier you'd put in `name:`); inside the keyed-grouping task, `{SAMPLE}` (or whatever the key is) substitutes to the group value, and the task tag is just that value (`merge.S001`, not `merge.S001.chr1`).
+
+Upstream-task selection per group works for any upstream shape:
+- per-iter upstream (`call.S001.chr1`, `call.S001.chr2`, ...) — each `merge.S<i>` collects its same-sample call outputs.
+- another `grouped_by:` upstream with the same key — straight 1:1 pairing.
+- fully grouped upstream (`grouped: true`) — not addressable by group; use a plain inputs reference instead.
+
+Together with `product:`, this closes most "Cartesian fan-out then per-key fan-in" patterns (variant calling per (sample × chrom) then per-sample merge; per-lane QC then per-sample merge; etc.) without needing the runtime topology gymnastics that channel-algebra workflow engines use for the same shape.
 
 #### Deterministic file order in fan-in scripts
 

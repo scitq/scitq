@@ -17,7 +17,6 @@ import os
 import re
 import sys
 from datetime import date, datetime, timezone
-from itertools import product as itertools_product
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
@@ -383,20 +382,37 @@ def _build_iterations(iterate_def, params, workflow_vars: Optional[Dict] = None)
                     resolved[inherit] = iterate_def[inherit]
             return _build_iterations(resolved, params, workflow_vars=workflow_vars)
 
-    # Product mode
-    if 'mode' in iterate_def and iterate_def['mode'] == 'product':
-        sub_iters = [_build_single_iterator(sub, params, workflow_vars=workflow_vars) for sub in iterate_def['over']]
-        names = [sub['name'] for sub in iterate_def['over']]
-        result = []
-        for combo in itertools_product(*[s[0] for s in sub_iters]):
-            merged = {}
-            for name, items in zip(names, combo):
-                merged.update(items)
-            result.append(merged)
-        return result, None
-
-    # Single iterator
+    # Single iterator (potentially with a `product:` outer-product dimension).
     items, source_type = _build_single_iterator(iterate_def, params, workflow_vars=workflow_vars)
+
+    # `product:` — outer-product dimension on the primary iterator. Each
+    # primary iteration is crossed with every product iteration; the
+    # iteration dict gets the merged variables, so a primary `name: sample`
+    # with `product: { name: chrom, source: list, values: [...] }` yields
+    # iterations like `{sample: S1, chrom: chr1}`, with tag composed by
+    # the step builder as `S1.chr1`. The product dimension is itself an
+    # iterator spec, recursively validated, so it can also carry its own
+    # `product:` for higher-dimensional crosses (rarely needed in practice).
+    product_def = iterate_def.get('product')
+    if product_def is not None:
+        if not isinstance(product_def, dict):
+            raise ValueError("`product:` must be an iterator spec (mapping)")
+        product_items, _ = _build_iterations(product_def, params, workflow_vars=workflow_vars)
+        crossed = []
+        for primary in items:
+            for secondary in product_items:
+                merged = dict(primary)
+                # Secondary variables overlay; conflict on a name is an
+                # author bug (same iterator name on both dimensions).
+                for k, v in secondary.items():
+                    if k in merged and not k.startswith('_'):
+                        raise ValueError(
+                            f"`product:` iterator '{product_def.get('name')}' "
+                            f"shadows primary key '{k}' — rename one")
+                    merged[k] = v
+                crossed.append(merged)
+        items = crossed
+
     return items, source_type
 
 
@@ -457,7 +473,7 @@ STEP_NATIVE_KEYS = {
     'name', 'container', 'tag', 'inputs', 'resource', 'command',
     'outputs', 'publish', 'task_spec', 'vars', 'depends', 'when',
     'worker_pool', 'skip_if_exists', 'accept_failure', 'language',
-    'quality', 'retry', 'grouped', 'per_sample',
+    'quality', 'retry', 'grouped', 'grouped_by', 'per_sample',
     # adhoc container builders (conda / apt / binary / pip)
     'conda', 'apt', 'binary', 'pip',
     # `requires:` lists prerequisite modules that get auto-injected as
@@ -488,13 +504,13 @@ PARAM_ENTRY_KEYS = {
 # reject anything outside the schema.
 ITERATOR_SCHEMAS: Dict[str, set] = {
     'uri':   {'name', 'source', 'uri', 'group_by', 'filter',
-              'match', 'fastq_pair_filtering', 'download_method'},
+              'match', 'fastq_pair_filtering', 'download_method', 'product'},
     'ena':   {'name', 'source', 'identifier', 'group_by', 'where', 'filter',
-              'match', 'fastq_pair_filtering', 'download_method'},
+              'match', 'fastq_pair_filtering', 'download_method', 'product'},
     'sra':   {'name', 'source', 'identifier', 'group_by', 'where', 'filter',
-              'match', 'fastq_pair_filtering', 'download_method'},
-    'range': {'name', 'source', 'start', 'end', 'step'},
-    'list':  {'name', 'source', 'values'},
+              'match', 'fastq_pair_filtering', 'download_method', 'product'},
+    'range': {'name', 'source', 'start', 'end', 'step', 'product'},
+    'list':  {'name', 'source', 'values', 'product'},
     # `lines`: each non-empty line becomes one iteration.
     #   file:    path on the YAML-runner host (server-side use).
     #   content: in-memory multi-line string, typically from a
@@ -1158,6 +1174,11 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
     grouped step then resolves to the union of that file group across every
     sample, sparing the workflow author from inserting a no-op pass-through
     step purely to give the resolver an upstream Step to look up.
+
+    For grouped_by steps, `itervar` carries `_group_iterations` (the subset of
+    iterations sharing this group's key value); iterator-shaped refs collect
+    file groups across that subset, and step.output refs return the list of
+    per-task outputs from upstream tasks whose iteration was in the subset.
     """
     if not input_ref:
         return None
@@ -1167,9 +1188,14 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
     parts = input_ref.split('.')
 
     # Pick the iteration source: a single current itervar for per-sample
-    # resolution, or the full iterations list when this is a grouped step.
+    # resolution, the filtered subset for grouped_by, or the full iterations
+    # list when this is a (fully) grouped step.
     iter_pool: Optional[List[Dict]] = None
-    if itervar is not None and '_sample' in itervar:
+    grouped_by_pool: Optional[List[Dict]] = None
+    if itervar is not None and '_group_iterations' in itervar:
+        grouped_by_pool = itervar['_group_iterations']
+        iter_pool = grouped_by_pool
+    elif itervar is not None and '_sample' in itervar:
         iter_pool = [itervar]
     elif grouped and iterations:
         iter_pool = iterations
@@ -1219,11 +1245,57 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
     if len(parts) == 2:
         step_name, output_name = parts
         if step_name in step_map:
-            return step_map[step_name].output(output_name, grouped=grouped)
+            upstream = step_map[step_name]
+            # Keyed-grouping: return a list of per-task outputs for upstream
+            # tasks that came from one of this group's iterations. Matched
+            # by tag-component subset (an upstream task tagged "S1" matches
+            # iteration {sample:S1, chrom:chr1} because {S1} ⊆ {S1, chr1};
+            # an upstream "S1.chr1" matches that same iteration by
+            # equality). Works whether the upstream is per-iter, fully
+            # grouped, or itself grouped_by.
+            if grouped_by_pool is not None:
+                matching = _tasks_for_group(upstream, grouped_by_pool)
+                if not matching:
+                    raise ValueError(
+                        f"grouped_by: no upstream tasks of step '{step_name}' match "
+                        f"any iteration in this group (upstream tags: {[t.tag for t in upstream.tasks]})")
+                return [upstream.output(output_name, task=t) for t in matching]
+            return upstream.output(output_name, grouped=grouped)
     elif len(parts) == 1 and parts[0] in step_map:
         return step_map[parts[0]].output(grouped=grouped)
     available = ', '.join(sorted(step_map.keys())) if step_map else '(none)'
     raise ValueError(f"Cannot resolve input: {input_ref} (available steps: {available})")
+
+
+def _tasks_for_group(upstream_step, group_iterations: List[Dict]):
+    """Filter upstream_step.tasks to those whose iteration belonged to one
+    of `group_iterations`. Matched by tag-component subset: an iteration's
+    natural per-iter tag is the dot-join of its non-internal values, so a
+    task tagged with any subset of those components belongs to the group.
+
+    This handles three upstream shapes uniformly:
+      - per-iter upstream (tag = "S1.chr1") matches iteration {sample:S1, chrom:chr1};
+      - grouped_by upstream (tag = "S1") matches the same iteration since {S1} ⊆ {S1,chr1};
+      - fully-grouped upstream (no tag) matches nothing — use a plain
+        inputs ref against the grouped step instead.
+
+    Returns tasks in upstream.tasks order (stable submission order).
+    """
+    if upstream_step is None or not upstream_step.tasks:
+        return []
+    iter_componentsets = []
+    for iv in group_iterations:
+        iter_componentsets.append({str(v) for k, v in iv.items() if not k.startswith('_')})
+    matches = []
+    for t in upstream_step.tasks:
+        if not getattr(t, 'tag', None):
+            continue
+        task_components = set(t.tag.split('.'))
+        for iset in iter_componentsets:
+            if task_components.issubset(iset):
+                matches.append(t)
+                break
+    return matches
 
 
 def _load_module_by_ref(ref: str, pipeline_dir: Optional[str] = None,
@@ -1461,6 +1533,7 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
                 default_language: str = 'sh', script_root: Optional[str] = None,
                 pipeline_dir: Optional[str] = None, workflow_vars: Optional[Dict] = None,
                 iterations: Optional[List[Dict]] = None,
+                grouped_by_key: Optional[str] = None,
                 verbose: bool = False) -> Step:
     """Build a single step from a YAML definition."""
 
@@ -1596,7 +1669,11 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
 
     # Tag from iterator
     sample = itervar.get('_sample') if itervar else None
-    if itervar and not is_fan_in:
+    if itervar and grouped_by_key:
+        # Keyed-grouping step: tag is just the group key value, not the
+        # composite — one task per distinct value of the grouped_by var.
+        step_kwargs['tag'] = str(itervar.get(grouped_by_key, ''))
+    elif itervar and not is_fan_in:
         # Build tag from all iterator variables (excluding internal keys)
         tag_parts = [str(v) for k, v in itervar.items() if not k.startswith('_')]
         step_kwargs['tag'] = '.'.join(tag_parts) if tag_parts else None
@@ -1948,8 +2025,15 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
     per_iter_steps = []
     oneoff_steps = []
     fanin_steps = []
+    grouped_by_steps = []
     for step_def in steps_def:
-        if _classify_flag(step_def, 'grouped'):
+        if step_def.get('grouped_by') or _classify_flag(step_def, 'grouped_by') is not None:
+            # `grouped_by: <iter-name>` collapses one dimension of a
+            # multi-dimensional iteration into one task per distinct value
+            # of that dimension. Distinct from `grouped: true` (one task
+            # collecting ALL upstream outputs) — keyed instead of global.
+            grouped_by_steps.append(step_def)
+        elif _classify_flag(step_def, 'grouped'):
             fanin_steps.append(step_def)
         elif _classify_flag(step_def, 'per_sample') is False:
             oneoff_steps.append(step_def)
@@ -2017,6 +2101,54 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
                            verbose=verbose)
         if step is not None:
             step_map[step.name] = step
+
+    # Keyed-grouping steps — one task per distinct value of the named
+    # iteration variable, collecting per-task outputs of upstream steps
+    # whose iteration shared that value.
+    for step_def in grouped_by_steps:
+        key_raw = step_def.get('grouped_by')
+        if not isinstance(key_raw, str) or not key_raw:
+            print(f"❌ Step '{step_def.get('name','?')}': grouped_by must be a non-empty string",
+                  file=sys.stderr)
+            sys.exit(1)
+        # User writes lowercase to match the iterator's `name:`; iter dicts
+        # store the value under the UPPERCASE name (matching the {KEY}
+        # substitution convention elsewhere in YAML).
+        key = key_raw.upper()
+        # Group iterations by the named iter variable. Preserves first-seen
+        # order so the step's tasks come out in a stable order.
+        groups: Dict[str, list] = {}
+        order: List[str] = []
+        for iv in (iterations or []):
+            if key not in iv:
+                print(f"❌ Step '{step_def.get('name','?')}': grouped_by '{key_raw}' not found "
+                      f"in iteration vars (available: {sorted(k for k in iv if not k.startswith('_'))})",
+                      file=sys.stderr)
+                sys.exit(1)
+            gv = str(iv[key])
+            if gv not in groups:
+                groups[gv] = []
+                order.append(gv)
+            groups[gv].append(iv)
+        if not groups:
+            print(f"❌ Step '{step_def.get('name','?')}': grouped_by '{key_raw}' produced 0 groups "
+                  f"(no iterations to group over)", file=sys.stderr)
+            sys.exit(1)
+        for gv in order:
+            # Synthesise an itervar that carries only the group key so
+            # `{<KEY>}` substitution + tag construction work as expected.
+            # Keeps every original iteration's `_sample` accessible via
+            # `_group_iterations` for input resolution.
+            synthetic_itervar = {key: gv, '_group_iterations': groups[gv]}
+            step = _build_step(workflow, step_def, step_map, params,
+                               itervar=synthetic_itervar,
+                               grouped_by_key=key,
+                               default_language=default_language, script_root=script_root,
+                               pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
+                               iterations=iterations,
+                               verbose=verbose)
+            if step is not None:
+                step_map[step.name] = step
 
     # Strip recruiters if requested — either by the CLI/API flag, or
     # declared in the YAML itself (typically wired to a param so the
