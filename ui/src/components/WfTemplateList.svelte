@@ -122,6 +122,11 @@
               </button>
 
               {#if openTemplateId === (t.workflowTemplateId ?? 0)}
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- on:click|stopPropagation is containment only: keeps an
+                     in-menu click from bubbling to the outer "open / close"
+                     toggle. Real menu items below have their own buttons /
+                     <a>s with keyboard support. -->
                 <ul class="wf-version-menu" role="listbox" on:click|stopPropagation>
                   {#if versionsByName[t.name] === 'loading'}
                     <li class="wf-version-status">Loading…</li>

@@ -3,6 +3,7 @@
   import * as grpcWeb from 'grpc-web';
 import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api';
   import { wsClient } from '../lib/wsClient';
+  import { scitqDebug } from '../lib/debug';
   import { RefreshCw, PauseCircle, CircleX, Eraser } from 'lucide-svelte';
   import { formatDuration, showIfNonZero } from '../lib/format';
 
@@ -13,9 +14,23 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
   export let workflowId: number;
   export let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
 
-  // Local, reactive copy of the parent-provided map to avoid mutating props
+  // Local, reactive copy of the parent-provided map to avoid mutating props.
+  //
+  // Why the reference guard: Svelte 4's `safe_not_equal` treats any
+  // non-null object as "always changed", so the parent's per-row prop
+  // setter fires on every keyed-each re-render — including when the
+  // parent is rebuilding rows for an unrelated reason (e.g. an
+  // individual workflow's counters updated via `workflows[idx] = ...`).
+  // Without this guard, the body re-ran on every WorkflowPage step-stats
+  // delta, cloning the map, reassigning `workersByStep`, and forcing
+  // the `{#each workersByStep.get(step.stepId) ...}` block at the
+  // bottom of the template to re-render across every step. On a
+  // workflow with thousands of tasks expanded into this StepList that
+  // cascade allocated 1+ GB in a single delta and crashed the tab.
   let workersByStep: Map<number, taskqueue.Worker[]> = new Map();
-  $: if (workersPerStepId) {
+  let _lastWorkersPerStepIdRef: Map<number, taskqueue.Worker[]> | null = null;
+  $: if (workersPerStepId && workersPerStepId !== _lastWorkersPerStepIdRef) {
+    _lastWorkersPerStepIdRef = workersPerStepId;
     // Recreate the map to preserve Svelte reactivity and avoid sharing references
     workersByStep = new Map(workersPerStepId);
   }
@@ -98,40 +113,96 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
     return { average: avg, min: acc.min ?? 0, max: acc.max ?? 0 };
   }
 
-  // Recompute live running stats every 1s from runningByStep
+  // Recompute live running stats every 1s from runningByStep.
+  //
+  // CRITICAL perf rule: use index-assignment `steps[i] = step` for the
+  // rows that actually changed — DO NOT do `steps = steps;`.
+  //
+  // Svelte's keyed `{#each}` block reacts very differently to the two:
+  //   - `steps = steps;` invalidates the whole array → Svelte walks every
+  //     keyed item's DOM node list to confirm its position (Svelte's
+  //     internal `tl()` move-nodes loop, which the debugger shows as the
+  //     hot path on a frozen page). On a workflow with many steps × many
+  //     nodes per row, this is O(steps × nodes) per tick.
+  //   - `steps[i] = step;` is a fine-grained index update → Svelte only
+  //     re-evaluates bindings for THAT keyed item. O(nodes-of-one-row).
+  //
+  // Cheap-guard #1 (skip frozen steps whose stats can't have changed)
+  // still applies: we touch a row only when its computed stats differ
+  // from what's already shown.
   function recomputeRunningStats() {
     const now = Math.floor(Date.now() / 1000);
-    for (const step of steps) {
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
       const rm = runningByStep.get(step.stepId);
+      let newStats: { average: number; min: number; max: number };
       if (!rm || rm.size === 0) {
-        // fall back to server-provided runningRun (static) if present
-        if (step.runningRun) {
-          step.currentRunStats = toStats(step.runningRun);
-        } else {
-          step.currentRunStats = { average: 0, min: 0, max: 0 };
-        }
-        continue;
-      }
-      let count = 0;
-      let sum = 0;
-      let min = Number.POSITIVE_INFINITY;
-      let max = 0;
-      rm.forEach((startEpoch) => {
-        const elapsed = Math.max(0, now - startEpoch);
-        sum += elapsed;
-        if (elapsed < min) min = elapsed;
-        if (elapsed > max) max = elapsed;
-        count++;
-      });
-      if (count > 0) {
-        step.currentRunStats = { average: sum / count, min, max };
+        // No live running tasks → fall back to the server-provided
+        // (static) runningRun accumulator.
+        newStats = step.runningRun ? toStats(step.runningRun)
+                                   : { average: 0, min: 0, max: 0 };
       } else {
-        step.currentRunStats = { average: 0, min: 0, max: 0 };
+        let count = 0;
+        let sum = 0;
+        let min = Number.POSITIVE_INFINITY;
+        let max = 0;
+        rm.forEach((startEpoch) => {
+          const elapsed = Math.max(0, now - startEpoch);
+          sum += elapsed;
+          if (elapsed < min) min = elapsed;
+          if (elapsed > max) max = elapsed;
+          count++;
+        });
+        newStats = count > 0
+          ? { average: sum / count, min, max }
+          : { average: 0, min: 0, max: 0 };
+      }
+      const cur = step.currentRunStats;
+      if (!cur
+          || cur.average !== newStats.average
+          || cur.min !== newStats.min
+          || cur.max !== newStats.max) {
+        step.currentRunStats = newStats;
+        // Fine-grained Svelte invalidation: only this keyed row's
+        // bindings re-evaluate. The other rows are untouched.
+        steps[i] = step;
       }
     }
-    // 🔁 Svelte reactivity nudge: we mutated nested props inside array items
-    // Reassigning the array reference forces an update
-    steps = steps;
+    // No more work to do? Free the timer until WS deltas bring back a
+    // running task. The timer restarts on the next R-state transition.
+    if (!hasAnyRunning()) {
+      stopRunningTimer();
+    }
+  }
+
+  // True if any step has at least one task in the R (running) state.
+  // Lookup is O(steps), called at most once per tick.
+  function hasAnyRunning(): boolean {
+    for (const m of runningByStep.values()) {
+      if (m.size > 0) return true;
+    }
+    return false;
+  }
+
+  // Start the periodic recompute if it isn't already running. Called when
+  // a task transitions into R (either from the API restore or from a WS
+  // delta). Idempotent.
+  function ensureRunningTimer() {
+    if (runningTimer !== null) return;
+    if (scitqDebug.verbose) console.log('[StepList] running timer started');
+    scitqDebug.stepListLiveTimers++;
+    runningTimer = setInterval(() => {
+      scitqDebug.recomputeRunningStatsCalls++;
+      recomputeRunningStats();
+    }, 1000);
+  }
+
+  function stopRunningTimer() {
+    if (runningTimer === null) return;
+    if (scitqDebug.verbose) console.log('[StepList] running timer stopped (no live running tasks)');
+    clearInterval(runningTimer);
+    runningTimer = null;
+    scitqDebug.stepListLiveTimers = Math.max(0, scitqDebug.stepListLiveTimers - 1);
   }
 
   // Safe percent helper for progress segments
@@ -148,6 +219,7 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
    * @returns {Promise<void>}
    */
   onMount(async () => {
+    scitqDebug.stepListMounts++;
     steps = await getStepStats({ workflowId });
     // Restore running tasks map from API
     const runningTasks = await getRunningTasks(workflowId);
@@ -156,20 +228,20 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
       if (!m) { m = new Map(); runningByStep.set(stepId, m); }
       m.set(taskId, runStartedEpoch);
     }
-    console.info('[StepList] restored', runningTasks.length, 'running tasks into runningByStep');
+    if (scitqDebug.verbose) console.info('[StepList] restored', runningTasks.length, 'running tasks into runningByStep');
     const allWorkers = await listWorkers(workflowId);
     for (const w of allWorkers) {
       if (typeof w.stepId === 'number') {
         addWorkerToStep(w.stepId, w);
       }
     }
-    console.info('[StepList] mount: workflow', workflowId, 'initial steps:', (steps||[]).length);
+    if (scitqDebug.verbose) console.info('[StepList] mount: workflow', workflowId, 'initial steps:', (steps||[]).length);
     // Subscribe to step entity events, step-stats deltas, and worker events for this workflow
     unsubscribeWS = wsClient.subscribeWithTopics(
       { step: [workflowId], 'step-stats': [workflowId], worker: [] },
       handleMessage
     );
-    console.info('[StepList] subscribed to topics:', { step: [workflowId], 'step-stats': [workflowId], worker: [] });
+    if (scitqDebug.verbose) console.info('[StepList] subscribed to topics:', { step: [workflowId], 'step-stats': [workflowId], worker: [] });
     // Prime derived stats from accumulators
     steps = (steps || []).map((s) => ({
       ...s,
@@ -177,9 +249,13 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
       failedRunStats: toStats(s.failedRun),
       currentRunStats: toStats(s.runningRun),
     }));
-    // Start periodic recompute for live running durations (updated via deltas)
-    console.log('[StepList] setInterval for recomputeRunningStats activated');
-    runningTimer = setInterval(recomputeRunningStats, 1000);
+    // Start the periodic recompute only if there ARE running tasks. A
+    // workflow whose tasks are all done/failed pays nothing per second
+    // until a WS delta brings one back to R. See ensureRunningTimer /
+    // stopRunningTimer above for the lifecycle.
+    if (hasAnyRunning()) {
+      ensureRunningTimer();
+    }
   });
 
   /**
@@ -194,7 +270,9 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
     if (runningTimer) {
       clearInterval(runningTimer);
       runningTimer = null;
+      scitqDebug.stepListLiveTimers = Math.max(0, scitqDebug.stepListLiveTimers - 1);
     }
+    scitqDebug.stepListMounts = Math.max(0, scitqDebug.stepListMounts - 1);
   });
 
   /**
@@ -317,7 +395,7 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
           case 'U':
           case 'V': step.uploadingTasks--; break;
           case 'S': step.successfulTasks--; break;
-          case 'F': step.reallyFailedTasks--; if (p?.retried) { step.failedTasks++; console.log(`Failed count increased to ${step.failedTasks}`)} break;
+          case 'F': step.reallyFailedTasks--; if (p?.retried) { step.failedTasks++; if (scitqDebug.verbose) console.log(`Failed count increased to ${step.failedTasks}`); } break;
         }
       }
       if (newS) {
@@ -348,6 +426,9 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
           let m = runningByStep.get(stepId);
           if (!m) { m = new Map(); runningByStep.set(stepId, m); }
           m.set(p.taskId, p.runStartedEpoch);
+          // A task just entered R: make sure the 1 Hz timer is running so
+          // its duration ticks visibly. Idempotent — no-op if already on.
+          ensureRunningTimer();
         } else {
           console.warn('[StepList] Missing or invalid runStartedEpoch for R task:', {
             taskId: p.taskId,
@@ -360,6 +441,9 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
       if (oldS === 'R' && newS !== 'R') {
         const m = runningByStep.get(stepId);
         if (m) { m.delete(p.taskId); }
+        // The timer is stopped lazily on the next tick by
+        // recomputeRunningStats once hasAnyRunning() returns false — no
+        // need to check on every transition out of R.
       }
 
       // Accumulators
@@ -397,17 +481,18 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
           step.endTime = p.endEpoch;
         }
       }
-
-
-
-      // Update running derived stats now; periodic timer will keep it fresh
-      recomputeRunningStats();
       return;
     }
 
-    // WORKER events: track assignment changes per step
+    // WORKER events: track assignment changes per step.
+    //
+    // Note: the WS topic subscription is `worker: []` (= "all workers in
+    // the server"), so we receive a firehose of events for workers across
+    // every running workflow on this server. Most of them belong to OTHER
+    // workflows and aren't relevant to this StepList. We short-circuit
+    // those before any allocation / Map rebuild / console output so a
+    // busy server doesn't drag idle workflow views down.
     if (message.type === 'worker') {
-      console.debug('[StepList] worker event:', message);
       let p = message.payload || {};
 
       // unwrap if payload contains nested worker object
@@ -417,9 +502,34 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
       const sid: number | undefined = p.stepId;
 
       if (typeof wid !== 'number') {
-        console.warn('[StepList] ignoring worker event with invalid payload:', message);
+        if (scitqDebug.verbose) console.warn('[StepList] ignoring worker event with invalid payload:', message);
         return;
       }
+
+      // Filter to this workflow's worker pool. We act on a worker event
+      // only if either:
+      //   (a) the event's stepId is one of OUR steps (worker is on or
+      //       moving INTO this workflow), or
+      //   (b) we already track this worker in any of our steps (worker
+      //       is moving OUT or being deleted — we need to remove it).
+      // Worker stats heartbeats for unrelated workers are silently
+      // dropped here at ~free cost.
+      const ourStepIds = new Set<number>(steps.map(s => s.stepId));
+      const relevantBySid = typeof sid === 'number' && ourStepIds.has(sid);
+      let relevantByTracking = false;
+      if (!relevantBySid) {
+        for (const arr of workersByStep.values()) {
+          if (arr.some(w => w.workerId === wid)) {
+            relevantByTracking = true;
+            break;
+          }
+        }
+      }
+      if (!relevantBySid && !relevantByTracking) {
+        return; // not ours — drop
+      }
+
+      if (scitqDebug.verbose) console.debug('[StepList] worker event:', message);
 
       const workerObj: taskqueue.Worker = {
         workerId: wid,
@@ -429,7 +539,12 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
       switch (message.action) {
         case 'deleted':
           removeWorkerEverywhere(wid);
-          steps = steps; // nudge reactivity
+          // No `steps = steps;` — `removeWorkerEverywhere` already
+          // reassigns the `workersByStep` Map which is what the
+          // template's workers column binds to. A whole-array nudge
+          // here would force Svelte's keyed-each to walk every step's
+          // DOM nodes (its internal `tl()` move loop) — that's the
+          // exact O(steps × nodes) cost we're optimising away.
           return;
 
         case 'created':
@@ -437,7 +552,9 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
           if (typeof sid === 'number') {
             removeWorkerEverywhere(wid);
             addWorkerToStep(sid, workerObj);
-            steps = steps; // refresh UI
+            // Same as above: `addWorkerToStep` already reassigns
+            // `workersByStep`. The workers column re-renders on its
+            // own; no need to invalidate every step row.
           }
           return;
 
@@ -445,7 +562,6 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
           if (typeof sid === 'number') {
             removeWorkerEverywhere(wid);
             addWorkerToStep(sid, workerObj);
-            steps = steps;
           }
           return;
       }

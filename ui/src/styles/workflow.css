@@ -105,8 +105,14 @@
   bottom: 0;
   left: 0;                 /* we use translateX to place it cumulatively */
   height: 100%;
-  transition: width 0.5s ease, transform 0.5s ease;
-  will-change: width, transform;
+  /* No transition / will-change here on purpose. The previous
+     `transition: width 0.5s ease, transform 0.5s ease; will-change:
+     width, transform;` looked nice with a handful of rows but on a page
+     with many workflow rows × 4 colored segments × a 1 Hz width-flip from
+     the WS-driven counter updates, it kept the compositor repainting
+     every frame indefinitely. For workflows with thousands of tasks, the
+     per-tick width change is 0.01% anyway — snapping is visually identical
+     and lets the browser go idle. */
 }
 
 /* Success (green) segment */
@@ -255,28 +261,29 @@
   border: 1px solid var(--border-color);
 }
 
+/* The four colored segments below each had `transition: width 0.3s ease`
+   originally. Removed for the same reason as .wf-progress__segment above:
+   on a workflow list with N rows × 4 segments updating every 1 Hz, the
+   transitions kept the compositor repainting at 60+ fps continuously,
+   pinning a CPU core even when nothing visible was actually moving. */
 .wf-progress-success {
   background: #4caf50;
   height: 100%;
-  transition: width 0.3s ease;
 }
 
 .wf-progress-running {
   background: #2196f3;
   height: 100%;
-  transition: width 0.3s ease;
 }
 
 .wf-progress-retrying {
   background: #ff9800;
   height: 100%;
-  transition: width 0.3s ease;
 }
 
 .wf-progress-failed {
   background: #f44336;
   height: 100%;
-  transition: width 0.3s ease;
 }
 
 /* Table styling */

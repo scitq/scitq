@@ -5,6 +5,7 @@
   let workers: taskqueue.Worker[] = [];
   let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
   import { wsClient } from '../lib/wsClient';
+  import { wfCounters } from '../lib/wfCounters';
   import WorkflowList from '../components/WorkflowList.svelte';
   import '../styles/workflow.css';
 
@@ -132,6 +133,7 @@
     const saved = readSessionState();
     const targetCount = saved?.loaded && saved.loaded > 0 ? saved.loaded : WORKFLOWS_CHUNK_SIZE;
     workflows = await getWorkFlow(nameFilter || undefined, targetCount, 0, userFilter || undefined);
+    wfCounters.seedMany(workflows);
     // If we asked for N and got exactly N back, assume more might exist.
     // Worst case: a no-op "Load more" click (acceptable).
     hasMoreWorkflows = workflows.length === targetCount;
@@ -172,6 +174,7 @@
       const seen = new Set(workflows.map(w => w.workflowId));
       const fresh = next.filter(w => !seen.has(w.workflowId));
       workflows = [...workflows, ...fresh];
+      wfCounters.seedMany(fresh);
       hasMoreWorkflows = next.length === WORKFLOWS_CHUNK_SIZE;
     } finally {
       isLoading = false;
@@ -190,6 +193,7 @@
       isLoading = true;
       try {
         workflows = await getWorkFlow(nameFilter || undefined, WORKFLOWS_CHUNK_SIZE, 0, userFilter || undefined);
+        wfCounters.seedMany(workflows);
         hasMoreWorkflows = workflows.length === WORKFLOWS_CHUNK_SIZE;
         pendingWorkflows = [];
         showNewWorkflowsNotification = false;
@@ -252,6 +256,7 @@
         const existsInDisplayed = workflows.some(wf => wf.workflowId === newWf.workflowId);
         const existsInPending = pendingWorkflows.some(wf => wf.workflowId === newWf.workflowId);
         if (!existsInDisplayed && !existsInPending) {
+          wfCounters.seed(newWf.workflowId, newWf);
           if (isScrolledToTop) {
             workflows = [newWf, ...workflows];
             console.log('workflow created via WebSocket:', newWf.workflowId);
@@ -269,6 +274,7 @@
         if (typeof idToRemove === 'number') {
           workflows = workflows.filter(wf => wf.workflowId !== idToRemove);
           pendingWorkflows = pendingWorkflows.filter(wf => wf.workflowId !== idToRemove);
+          wfCounters.drop(idToRemove);
         }
         return;
       }
@@ -277,50 +283,35 @@
         const wfId = message.id;
         const newStatus = p.status;
         if (typeof wfId === 'number' && typeof newStatus === 'string') {
-          workflows = workflows.map(wf =>
-            wf.workflowId === wfId ? { ...wf, status: newStatus } : wf
-          );
+          // Index-assignment, not whole-array map: only this row's
+          // bindings re-evaluate. See StepList.svelte for the same
+          // pattern + rationale (keyed-each `tl()` walk avoidance).
+          const idx = workflows.findIndex(wf => wf.workflowId === wfId);
+          if (idx !== -1) {
+            workflows[idx] = { ...workflows[idx], status: newStatus };
+          }
         }
         return;
       }
     }
 
-    // Step-stats delta: update workflow progress counters
+    // Step-stats delta: update per-workflow counters via the sideband
+    // store. We deliberately avoid `workflows[idx] = updated` here.
+    // Invalidating the `workflows` array forces WorkflowList's
+    // keyed-each to re-run block.p across every row, which in turn
+    // calls $set on every child component (StepList, lucide icons,
+    // ...). Svelte 4's `safe_not_equal` returns true for any object
+    // prop, so each child treats its props as dirty even when refs
+    // are unchanged. On the workflows page with megahit expanded that
+    // cascade allocated 1+ GB in a single delta and crashed the
+    // renderer. Writing to the wfCounters store only invalidates the
+    // counter-reading bindings in WorkflowList's row template; the
+    // keyed-each itself stays put and no child $set fires.
     if (message?.type === 'step-stats' && message?.action === 'delta') {
       const p = message.payload || {};
       const wfId = p.workflowId;
-      const oldStatus = p.oldStatus;
-      const newStatus = p.newStatus;
-      const isRetry = !!p.retried;
       if (typeof wfId !== 'number') return;
-
-      workflows = workflows.map(wf => {
-        if (wf.workflowId !== wfId) return wf;
-        const updated = { ...wf };
-
-        // Decrement old status bucket
-        if (oldStatus === 'S') updated.succeededTasks = Math.max(0, (updated.succeededTasks || 0) - 1);
-        else if (oldStatus === 'F') updated.failedTasks = Math.max(0, (updated.failedTasks || 0) - 1);
-        else if (['A', 'C', 'D', 'O', 'R', 'U', 'V'].includes(oldStatus)) updated.runningTasks = Math.max(0, (updated.runningTasks || 0) - 1);
-
-        // Increment new status bucket
-        if (newStatus === 'S') updated.succeededTasks = (updated.succeededTasks || 0) + 1;
-        else if (newStatus === 'F') updated.failedTasks = (updated.failedTasks || 0) + 1;
-        else if (['A', 'C', 'D', 'O', 'R', 'U', 'V'].includes(newStatus)) updated.runningTasks = (updated.runningTasks || 0) + 1;
-
-        // Retrying: increment on retry clone creation, decrement on terminal
-        if (isRetry && !oldStatus) {
-          updated.retryingTasks = (updated.retryingTasks || 0) + 1;
-        }
-        if (isRetry && (newStatus === 'S' || newStatus === 'F')) {
-          updated.retryingTasks = Math.max(0, (updated.retryingTasks || 0) - 1);
-        }
-
-        // Total only increases on first submission (oldStatus is empty/null)
-        if (!oldStatus) updated.totalTasks = (updated.totalTasks || 0) + 1;
-
-        return updated;
-      });
+      wfCounters.applyDelta(wfId, p.oldStatus, p.newStatus, !!p.retried);
       return;
     }
   }

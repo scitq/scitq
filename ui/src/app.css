@@ -219,8 +219,10 @@ body{
   margin: 0;
   padding: 0;
   font-family: Arial, sans-serif;
-  background: url('/path/to/background.jpg') no-repeat center center fixed;
-  background-size: cover;
+  /* The login page's actual background image is set by
+     .loginpage-page-wrapper in styles/loginPage.css. No need to also
+     declare one here — the previous `/path/to/background.jpg` was a
+     dead placeholder that 404'd on every login-page load. */
 }
 
 .body-dashboard {

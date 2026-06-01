@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { CONFIG } from './config';
+import { scitqDebug } from './debug';
 
 type WSMessage = any; // adapte selon tes types
 type MessageHandler = (data: WSMessage) => void;
@@ -156,6 +157,7 @@ function createWebSocketStore() {
 
     socket.onopen = () => {
       console.log('✅ WebSocket connected');
+      scitqDebug.recordWsOpen();
       set(socket);
 
       if (reconnectTimeout) {
@@ -181,6 +183,13 @@ function createWebSocketStore() {
         const data = JSON.parse(event.data);
         if (data.type === 'pong') return;
 
+        // Count every WS message before dispatch — gives us per-second
+        // rates by (type, action), the ring buffer of recent events, and
+        // a periodic console summary. Crucial for diagnosing "the page
+        // suddenly froze" cases where you want to know what was firing
+        // at high rate in the seconds before the freeze.
+        scitqDebug.recordWs(data);
+
         handlers.forEach((handler) => handler(data));
       } catch (err) {
         console.error('❌ Error parsing WebSocket message', err);
@@ -189,6 +198,7 @@ function createWebSocketStore() {
 
     socket.onclose = (event) => {
       console.warn(`⚠️ WebSocket closed (code: ${event.code})`);
+      scitqDebug.recordWsClose(event.code);
       cleanup();
       set(null);
 

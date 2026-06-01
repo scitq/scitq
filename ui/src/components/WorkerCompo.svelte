@@ -1293,7 +1293,13 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 <!-- Worker-events viewer (opened from the ℹ︎/⚠ badge in the worker name cell). -->
 {#if eventsWorker}
   <div class="worker-events-overlay" on:click={closeWorkerEvents} role="presentation">
-    <div class="worker-events-panel" on:click|stopPropagation role="dialog" aria-modal="true">
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
+    <!-- The on:click here is purely containment: it stops the overlay click
+         (which would close the dialog) from bubbling when the user clicks
+         INSIDE the panel. It's not a user action — no keyboard equivalent
+         needed. tabindex="-1" lets the dialog be focused programmatically
+         (e.g. for screen-reader announce) without being in the tab order. -->
+    <div class="worker-events-panel" on:click|stopPropagation role="dialog" aria-modal="true" tabindex="-1">
       <div class="worker-events-header">
         <span>
           Events — <strong>{eventsWorker.name}</strong>

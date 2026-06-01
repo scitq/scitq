@@ -4,6 +4,7 @@
   import {delWorkflow} from '../lib/api';
   import { onMount } from 'svelte';
   import TemplateRunModal from './TemplateRunModal.svelte';
+  import { wfCounters } from '../lib/wfCounters';
 
   let modalRunId: number | null = null;
   function openModal(id: number) { modalRunId = id; }
@@ -83,6 +84,20 @@
 {#if workflows && workflows.length > 0}
   <div class="wf-list">
     {#each workflows as wf (wf.workflowId)}
+      <!-- Counter values come from the wfCounters sideband store rather
+           than from `wf.*` so high-frequency step-stats deltas don't
+           force the parent to do `workflows[idx] = updated`, which
+           used to re-run the whole keyed-each + child $set cascade and
+           crash the renderer. See ../lib/wfCounters.ts for context.
+           Fallback to wf.* for the initial render before the store is
+           seeded. -->
+      {@const c = $wfCounters.get(wf.workflowId)}
+      {@const totalTasks = c?.totalTasks ?? wf.totalTasks}
+      {@const succeededTasks = c?.succeededTasks ?? wf.succeededTasks}
+      {@const failedTasks = c?.failedTasks ?? wf.failedTasks}
+      {@const runningTasks = c?.runningTasks ?? wf.runningTasks}
+      {@const retryingTasks = c?.retryingTasks ?? wf.retryingTasks ?? 0}
+
       <!-- Individual workflow item -->
       <div class="wf-item" data-testid={`wf-${wf.workflowId}`}>
         <!-- Expand/collapse toggle button -->
@@ -97,8 +112,8 @@
         <!-- Workflow information section -->
         <div class="wf-info">
           <span class="wf-id">#{wf.workflowId}</span>
-          <span class="wf-status-dot {wf.status === 'S' ? 'wf-dot-green' : wf.runningTasks > 0 ? 'wf-dot-blue' : wf.failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
-                title={wf.status === 'S' ? 'Completed' : wf.runningTasks > 0 ? `${wf.runningTasks} active` : wf.status === 'F' ? `Stuck: ${wf.failedTasks} failed` : wf.failedTasks > 0 ? `${wf.failedTasks} failed, no active tasks` : 'Idle'}></span>
+          <span class="wf-status-dot {wf.status === 'S' ? 'wf-dot-green' : runningTasks > 0 ? 'wf-dot-blue' : failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
+                title={wf.status === 'S' ? 'Completed' : runningTasks > 0 ? `${runningTasks} active` : wf.status === 'F' ? `Stuck: ${failedTasks} failed` : failedTasks > 0 ? `${failedTasks} failed, no active tasks` : 'Idle'}></span>
           <a href={`#/tasks?workflowId=${wf.workflowId}`}
              class="wf-name"
              title={launchSummary(wf) ? `Launched by: ${launchSummary(wf)}` : undefined}>{wf.name}</a>
@@ -111,14 +126,14 @@
               data-testid={`info-btn-${wf.workflowId}`}
             ><HelpCircle size="16" /></button>
           {/if}
-          {#if wf.totalTasks > 0}
-            {@const t = wf.totalTasks}
-            {@const pctSuccess = wf.succeededTasks / t * 100}
-            {@const pctFailed = wf.failedTasks / t * 100}
-            {@const pctRunning = wf.runningTasks / t * 100}
-            {@const pctRetrying = (wf.retryingTasks || 0) / t * 100}
+          {#if totalTasks > 0}
+            {@const t = totalTasks}
+            {@const pctSuccess = succeededTasks / t * 100}
+            {@const pctFailed = failedTasks / t * 100}
+            {@const pctRunning = runningTasks / t * 100}
+            {@const pctRetrying = retryingTasks / t * 100}
             <div class="wf-progress-bar"
-                 title={`${wf.succeededTasks}/${t} succeeded, ${wf.failedTasks} failed, ${wf.runningTasks} running` + (wf.retryingTasks ? `, ${wf.retryingTasks} retrying` : '')}>
+                 title={`${succeededTasks}/${t} succeeded, ${failedTasks} failed, ${runningTasks} running` + (retryingTasks ? `, ${retryingTasks} retrying` : '')}>
               <div class="wf-progress-success" style="width:{pctSuccess}%"></div>
               <div class="wf-progress-running" style="width:{pctRunning}%"></div>
               <div class="wf-progress-retrying" style="width:{pctRetrying}%"></div>
