@@ -196,6 +196,25 @@ export interface TaskRequest {
      * @generated from protobuf field: optional int32 numa = 24
      */
     numa?: number;
+    /**
+     * Per-task minimum resource requirements (spec: addition_from_nextflow.md A).
+     * When the step's task_spec declares a list curve (e.g. `mem: [40, 80, 160]`),
+     * the initial submission carries curve[0] here; on retry the values shift to
+     * curve[attempt] so the assignment & recruitment paths see the heavier
+     * requirement. Unset = inherit from the step's task_spec defaults (today's
+     * behaviour, no per-task override).
+     *
+     * @generated from protobuf field: optional float min_cpu = 25
+     */
+    minCpu?: number; // minimum cpu cores per task (also drives weight)
+    /**
+     * @generated from protobuf field: optional float min_mem = 26
+     */
+    minMem?: number; // minimum GB of memory per task
+    /**
+     * @generated from protobuf field: optional float min_disk = 27
+     */
+    minDisk?: number; // minimum GB of disk per task
 }
 /**
  * @generated from protobuf message taskqueue.Task
@@ -341,6 +360,21 @@ export interface Task {
      * @generated from protobuf field: optional int32 numa = 34
      */
     numa?: number;
+    /**
+     * See TaskRequest.min_cpu / min_mem / min_disk (per-task resource
+     * requirements; spec: addition_from_nextflow.md A).
+     *
+     * @generated from protobuf field: optional float min_cpu = 35
+     */
+    minCpu?: number;
+    /**
+     * @generated from protobuf field: optional float min_mem = 36
+     */
+    minMem?: number;
+    /**
+     * @generated from protobuf field: optional float min_disk = 37
+     */
+    minDisk?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -830,6 +864,26 @@ export interface TaskStatusUpdate {
      * @generated from protobuf field: optional bool free_retry = 4
      */
     freeRetry?: boolean; // if new_status is F and this is true, then retry is increased by 1 before setting status to F
+    /**
+     * Failure classification (spec: addition_from_nextflow.md A). Set when
+     * new_status is "F". Controls whether the retry-decision logic should
+     * advance the step's resource-escalation curve. The worker reports
+     * OOM (docker exit 137), timeout (exceeded running_timeout), and
+     * explicit-error / unknown ("other"). Eviction / worker-disappeared
+     * failures are server-declared — the worker is gone by definition —
+     * and the server tags the task with failure_class="eviction" directly
+     * when reaping orphaned tasks. Empty / unset is treated the same as
+     * "other" by downstream logic. Recognised values:
+     *   "oom"      — out-of-memory kill (docker exit 137 / OOMKilled)
+     *   "timeout"  — exceeded running_timeout / upload_timeout / download_timeout
+     *   "eviction" — server-declared (spot preempt, manual worker delete,
+     *                worker watchdog reaped)
+     *   "network"  — transient connectivity failure (uploads, downloads)
+     *   "other"    — anything else (script exit non-zero, segfault, …)
+     *
+     * @generated from protobuf field: optional string failure_class = 5
+     */
+    failureClass?: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskLog
@@ -3829,7 +3883,10 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 21, name: "reuse_key", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 22, name: "consume_reuse", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 23, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 24, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 24, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 25, name: "min_cpu", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 26, name: "min_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 27, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<TaskRequest>): TaskRequest {
@@ -3927,6 +3984,15 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                 case /* optional int32 numa */ 24:
                     message.numa = reader.int32();
                     break;
+                case /* optional float min_cpu */ 25:
+                    message.minCpu = reader.float();
+                    break;
+                case /* optional float min_mem */ 26:
+                    message.minMem = reader.float();
+                    break;
+                case /* optional float min_disk */ 27:
+                    message.minDisk = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4015,6 +4081,15 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         /* optional int32 numa = 24; */
         if (message.numa !== undefined)
             writer.tag(24, WireType.Varint).int32(message.numa);
+        /* optional float min_cpu = 25; */
+        if (message.minCpu !== undefined)
+            writer.tag(25, WireType.Bit32).float(message.minCpu);
+        /* optional float min_mem = 26; */
+        if (message.minMem !== undefined)
+            writer.tag(26, WireType.Bit32).float(message.minMem);
+        /* optional float min_disk = 27; */
+        if (message.minDisk !== undefined)
+            writer.tag(27, WireType.Bit32).float(message.minDisk);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4062,7 +4137,10 @@ class Task$Type extends MessageType<Task> {
             { no: 31, name: "quality_score", kind: "scalar", opt: true, T: 1 /*ScalarType.DOUBLE*/ },
             { no: 32, name: "quality_vars", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 33, name: "scitq_auth", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 34, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 34, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 35, name: "min_cpu", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 36, name: "min_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 37, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -4187,6 +4265,15 @@ class Task$Type extends MessageType<Task> {
                 case /* optional int32 numa */ 34:
                     message.numa = reader.int32();
                     break;
+                case /* optional float min_cpu */ 35:
+                    message.minCpu = reader.float();
+                    break;
+                case /* optional float min_mem */ 36:
+                    message.minMem = reader.float();
+                    break;
+                case /* optional float min_disk */ 37:
+                    message.minDisk = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4301,6 +4388,15 @@ class Task$Type extends MessageType<Task> {
         /* optional int32 numa = 34; */
         if (message.numa !== undefined)
             writer.tag(34, WireType.Varint).int32(message.numa);
+        /* optional float min_cpu = 35; */
+        if (message.minCpu !== undefined)
+            writer.tag(35, WireType.Bit32).float(message.minCpu);
+        /* optional float min_mem = 36; */
+        if (message.minMem !== undefined)
+            writer.tag(36, WireType.Bit32).float(message.minMem);
+        /* optional float min_disk = 37; */
+        if (message.minDisk !== undefined)
+            writer.tag(37, WireType.Bit32).float(message.minDisk);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5705,7 +5801,8 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
             { no: 1, name: "task_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "new_status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 4, name: "free_retry", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 4, name: "free_retry", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<TaskStatusUpdate>): TaskStatusUpdate {
@@ -5733,6 +5830,9 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
                 case /* optional bool free_retry */ 4:
                     message.freeRetry = reader.bool();
                     break;
+                case /* optional string failure_class */ 5:
+                    message.failureClass = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5757,6 +5857,9 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
         /* optional bool free_retry = 4; */
         if (message.freeRetry !== undefined)
             writer.tag(4, WireType.Varint).bool(message.freeRetry);
+        /* optional string failure_class = 5; */
+        if (message.failureClass !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.failureClass);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -269,7 +269,16 @@ type TaskRequest struct {
 	// `--cpuset-mems` on the docker run. Mutually exclusive with
 	// task_spec.cpu and task_spec.mem in the DSL — concurrency and
 	// per-task budget are derived from the topology.
-	Numa          *int32 `protobuf:"varint,24,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
+	Numa *int32 `protobuf:"varint,24,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
+	// Per-task minimum resource requirements (spec: addition_from_nextflow.md A).
+	// When the step's task_spec declares a list curve (e.g. `mem: [40, 80, 160]`),
+	// the initial submission carries curve[0] here; on retry the values shift to
+	// curve[attempt] so the assignment & recruitment paths see the heavier
+	// requirement. Unset = inherit from the step's task_spec defaults (today's
+	// behaviour, no per-task override).
+	MinCpu        *float32 `protobuf:"fixed32,25,opt,name=min_cpu,json=minCpu,proto3,oneof" json:"min_cpu,omitempty"`    // minimum cpu cores per task (also drives weight)
+	MinMem        *float32 `protobuf:"fixed32,26,opt,name=min_mem,json=minMem,proto3,oneof" json:"min_mem,omitempty"`    // minimum GB of memory per task
+	MinDisk       *float32 `protobuf:"fixed32,27,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"` // minimum GB of disk per task
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -472,6 +481,27 @@ func (x *TaskRequest) GetNuma() int32 {
 	return 0
 }
 
+func (x *TaskRequest) GetMinCpu() float32 {
+	if x != nil && x.MinCpu != nil {
+		return *x.MinCpu
+	}
+	return 0
+}
+
+func (x *TaskRequest) GetMinMem() float32 {
+	if x != nil && x.MinMem != nil {
+		return *x.MinMem
+	}
+	return 0
+}
+
+func (x *TaskRequest) GetMinDisk() float32 {
+	if x != nil && x.MinDisk != nil {
+		return *x.MinDisk
+	}
+	return 0
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -509,7 +539,12 @@ type Task struct {
 	// See TaskRequest.scitq_auth.
 	ScitqAuth *bool `protobuf:"varint,33,opt,name=scitq_auth,json=scitqAuth,proto3,oneof" json:"scitq_auth,omitempty"`
 	// See TaskRequest.numa.
-	Numa          *int32 `protobuf:"varint,34,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
+	Numa *int32 `protobuf:"varint,34,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
+	// See TaskRequest.min_cpu / min_mem / min_disk (per-task resource
+	// requirements; spec: addition_from_nextflow.md A).
+	MinCpu        *float32 `protobuf:"fixed32,35,opt,name=min_cpu,json=minCpu,proto3,oneof" json:"min_cpu,omitempty"`
+	MinMem        *float32 `protobuf:"fixed32,36,opt,name=min_mem,json=minMem,proto3,oneof" json:"min_mem,omitempty"`
+	MinDisk       *float32 `protobuf:"fixed32,37,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -778,6 +813,27 @@ func (x *Task) GetScitqAuth() bool {
 func (x *Task) GetNuma() int32 {
 	if x != nil && x.Numa != nil {
 		return *x.Numa
+	}
+	return 0
+}
+
+func (x *Task) GetMinCpu() float32 {
+	if x != nil && x.MinCpu != nil {
+		return *x.MinCpu
+	}
+	return 0
+}
+
+func (x *Task) GetMinMem() float32 {
+	if x != nil && x.MinMem != nil {
+		return *x.MinMem
+	}
+	return 0
+}
+
+func (x *Task) GetMinDisk() float32 {
+	if x != nil && x.MinDisk != nil {
+		return *x.MinDisk
 	}
 	return 0
 }
@@ -2139,11 +2195,28 @@ func (x *TaskSignalRequest) GetGracePeriod() int32 {
 }
 
 type TaskStatusUpdate struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	NewStatus     string                 `protobuf:"bytes,2,opt,name=new_status,json=newStatus,proto3" json:"new_status,omitempty"`
-	Duration      *int32                 `protobuf:"varint,3,opt,name=duration,proto3,oneof" json:"duration,omitempty"`                    // in seconds
-	FreeRetry     *bool                  `protobuf:"varint,4,opt,name=free_retry,json=freeRetry,proto3,oneof" json:"free_retry,omitempty"` // if new_status is F and this is true, then retry is increased by 1 before setting status to F
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	TaskId    int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	NewStatus string                 `protobuf:"bytes,2,opt,name=new_status,json=newStatus,proto3" json:"new_status,omitempty"`
+	Duration  *int32                 `protobuf:"varint,3,opt,name=duration,proto3,oneof" json:"duration,omitempty"`                    // in seconds
+	FreeRetry *bool                  `protobuf:"varint,4,opt,name=free_retry,json=freeRetry,proto3,oneof" json:"free_retry,omitempty"` // if new_status is F and this is true, then retry is increased by 1 before setting status to F
+	// Failure classification (spec: addition_from_nextflow.md A). Set when
+	// new_status is "F". Controls whether the retry-decision logic should
+	// advance the step's resource-escalation curve. The worker reports
+	// OOM (docker exit 137), timeout (exceeded running_timeout), and
+	// explicit-error / unknown ("other"). Eviction / worker-disappeared
+	// failures are server-declared — the worker is gone by definition —
+	// and the server tags the task with failure_class="eviction" directly
+	// when reaping orphaned tasks. Empty / unset is treated the same as
+	// "other" by downstream logic. Recognised values:
+	//
+	//	"oom"      — out-of-memory kill (docker exit 137 / OOMKilled)
+	//	"timeout"  — exceeded running_timeout / upload_timeout / download_timeout
+	//	"eviction" — server-declared (spot preempt, manual worker delete,
+	//	             worker watchdog reaped)
+	//	"network"  — transient connectivity failure (uploads, downloads)
+	//	"other"    — anything else (script exit non-zero, segfault, …)
+	FailureClass  *string `protobuf:"bytes,5,opt,name=failure_class,json=failureClass,proto3,oneof" json:"failure_class,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2204,6 +2277,13 @@ func (x *TaskStatusUpdate) GetFreeRetry() bool {
 		return *x.FreeRetry
 	}
 	return false
+}
+
+func (x *TaskStatusUpdate) GetFailureClass() string {
+	if x != nil && x.FailureClass != nil {
+		return *x.FailureClass
+	}
+	return ""
 }
 
 type TaskLog struct {
@@ -10853,7 +10933,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xa2\b\n" +
+	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xa3\t\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -10884,7 +10964,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\rconsume_reuse\x18\x16 \x01(\bH\rR\fconsumeReuse\x88\x01\x01\x12\"\n" +
 	"\n" +
 	"scitq_auth\x18\x17 \x01(\bH\x0eR\tscitqAuth\x88\x01\x01\x12\x17\n" +
-	"\x04numa\x18\x18 \x01(\x05H\x0fR\x04numa\x88\x01\x01B\b\n" +
+	"\x04numa\x18\x18 \x01(\x05H\x0fR\x04numa\x88\x01\x01\x12\x1c\n" +
+	"\amin_cpu\x18\x19 \x01(\x02H\x10R\x06minCpu\x88\x01\x01\x12\x1c\n" +
+	"\amin_mem\x18\x1a \x01(\x02H\x11R\x06minMem\x88\x01\x01\x12\x1e\n" +
+	"\bmin_disk\x18\x1b \x01(\x02H\x12R\aminDisk\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -10904,7 +10987,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"_reuse_keyB\x10\n" +
 	"\x0e_consume_reuseB\r\n" +
 	"\v_scitq_authB\a\n" +
-	"\x05_numa\"\xb2\f\n" +
+	"\x05_numaB\n" +
+	"\n" +
+	"\b_min_cpuB\n" +
+	"\n" +
+	"\b_min_memB\v\n" +
+	"\t_min_disk\"\xb3\r\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -10945,7 +11033,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\fquality_vars\x18  \x01(\tH\x16R\vqualityVars\x88\x01\x01\x12\"\n" +
 	"\n" +
 	"scitq_auth\x18! \x01(\bH\x17R\tscitqAuth\x88\x01\x01\x12\x17\n" +
-	"\x04numa\x18\" \x01(\x05H\x18R\x04numa\x88\x01\x01B\b\n" +
+	"\x04numa\x18\" \x01(\x05H\x18R\x04numa\x88\x01\x01\x12\x1c\n" +
+	"\amin_cpu\x18# \x01(\x02H\x19R\x06minCpu\x88\x01\x01\x12\x1c\n" +
+	"\amin_mem\x18$ \x01(\x02H\x1aR\x06minMem\x88\x01\x01\x12\x1e\n" +
+	"\bmin_disk\x18% \x01(\x02H\x1bR\aminDisk\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -10975,7 +11066,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0e_quality_scoreB\x0f\n" +
 	"\r_quality_varsB\r\n" +
 	"\v_scitq_authB\a\n" +
-	"\x05_numa\"1\n" +
+	"\x05_numaB\n" +
+	"\n" +
+	"\b_min_cpuB\n" +
+	"\n" +
+	"\b_min_memB\v\n" +
+	"\t_min_disk\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +
@@ -11129,16 +11225,18 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
 	"\fgrace_period\x18\x03 \x01(\x05H\x00R\vgracePeriod\x88\x01\x01B\x0f\n" +
-	"\r_grace_period\"\xab\x01\n" +
+	"\r_grace_period\"\xe7\x01\n" +
 	"\x10TaskStatusUpdate\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\n" +
 	"new_status\x18\x02 \x01(\tR\tnewStatus\x12\x1f\n" +
 	"\bduration\x18\x03 \x01(\x05H\x00R\bduration\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"free_retry\x18\x04 \x01(\bH\x01R\tfreeRetry\x88\x01\x01B\v\n" +
+	"free_retry\x18\x04 \x01(\bH\x01R\tfreeRetry\x88\x01\x01\x12(\n" +
+	"\rfailure_class\x18\x05 \x01(\tH\x02R\ffailureClass\x88\x01\x01B\v\n" +
 	"\t_durationB\r\n" +
-	"\v_free_retry\"X\n" +
+	"\v_free_retryB\x10\n" +
+	"\x0e_failure_class\"X\n" +
 	"\aTaskLog\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x19\n" +
 	"\blog_type\x18\x02 \x01(\tR\alogType\x12\x19\n" +

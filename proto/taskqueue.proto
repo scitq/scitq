@@ -202,6 +202,15 @@ message TaskRequest {
     // task_spec.cpu and task_spec.mem in the DSL — concurrency and
     // per-task budget are derived from the topology.
     optional int32 numa = 24;
+    // Per-task minimum resource requirements (spec: addition_from_nextflow.md A).
+    // When the step's task_spec declares a list curve (e.g. `mem: [40, 80, 160]`),
+    // the initial submission carries curve[0] here; on retry the values shift to
+    // curve[attempt] so the assignment & recruitment paths see the heavier
+    // requirement. Unset = inherit from the step's task_spec defaults (today's
+    // behaviour, no per-task override).
+    optional float min_cpu = 25;   // minimum cpu cores per task (also drives weight)
+    optional float min_mem = 26;   // minimum GB of memory per task
+    optional float min_disk = 27;  // minimum GB of disk per task
 }
 
 message Task {
@@ -241,6 +250,11 @@ message Task {
     optional bool scitq_auth = 33;
     // See TaskRequest.numa.
     optional int32 numa = 34;
+    // See TaskRequest.min_cpu / min_mem / min_disk (per-task resource
+    // requirements; spec: addition_from_nextflow.md A).
+    optional float min_cpu = 35;
+    optional float min_mem = 36;
+    optional float min_disk = 37;
 }
 
 message TaskList {
@@ -432,6 +446,22 @@ message TaskStatusUpdate {
     string new_status = 2;
     optional int32 duration = 3; // in seconds
     optional bool free_retry = 4; // if new_status is F and this is true, then retry is increased by 1 before setting status to F
+    // Failure classification (spec: addition_from_nextflow.md A). Set when
+    // new_status is "F". Controls whether the retry-decision logic should
+    // advance the step's resource-escalation curve. The worker reports
+    // OOM (docker exit 137), timeout (exceeded running_timeout), and
+    // explicit-error / unknown ("other"). Eviction / worker-disappeared
+    // failures are server-declared — the worker is gone by definition —
+    // and the server tags the task with failure_class="eviction" directly
+    // when reaping orphaned tasks. Empty / unset is treated the same as
+    // "other" by downstream logic. Recognised values:
+    //   "oom"      — out-of-memory kill (docker exit 137 / OOMKilled)
+    //   "timeout"  — exceeded running_timeout / upload_timeout / download_timeout
+    //   "eviction" — server-declared (spot preempt, manual worker delete,
+    //                worker watchdog reaped)
+    //   "network"  — transient connectivity failure (uploads, downloads)
+    //   "other"    — anything else (script exit non-zero, segfault, …)
+    optional string failure_class = 5;
 }
 
 message TaskLog {

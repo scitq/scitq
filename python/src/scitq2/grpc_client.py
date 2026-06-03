@@ -356,6 +356,9 @@ class Scitq2Client:
         consume_reuse: bool = False,
         scitq_auth: bool = False,
         numa: Optional[int] = None,
+        min_cpu: Optional[float] = None,
+        min_mem: Optional[float] = None,
+        min_disk: Optional[float] = None,
     ) -> int:
         """
         Submits a task to a specific step.
@@ -411,6 +414,12 @@ class Scitq2Client:
             request.scitq_auth = True
         if numa is not None:
             request.numa = numa
+        if min_cpu is not None:
+            request.min_cpu = min_cpu
+        if min_mem is not None:
+            request.min_mem = min_mem
+        if min_disk is not None:
+            request.min_disk = min_disk
         response = self.stub.SubmitTask(request)
         return response.task_id
 

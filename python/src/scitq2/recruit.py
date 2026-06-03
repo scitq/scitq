@@ -192,9 +192,19 @@ class WorkerPool:
                 options["concurrency"] = 1
                 options["prefetch_percent"] = int(task_spec.prefetch * 100)
             elif task_spec.concurrency is None:
-                options["cpu_per_task"]=task_spec.cpu
-                options["memory_per_task"]=task_spec.mem
-                options["disk_per_task"]=task_spec.disk
+                # When task_spec declares a per-attempt resource curve
+                # (`mem: [40, 80, 160]`), the recruiter must size workers
+                # so the *heaviest* retry attempt still fits. Use the curve
+                # max for the per-task budget that drives flavor selection
+                # — workers will be wide enough for any attempt; the
+                # server-side retry-decision logic then sets the task's
+                # min_cpu/min_mem/min_disk per attempt so smaller attempts
+                # don't consume the whole worker. For scalar (non-curve)
+                # specs, max_* equals .cpu/.mem/.disk (no behavioural
+                # change). See spec: addition_from_nextflow.md (A).
+                options["cpu_per_task"]=task_spec.max_cpu if task_spec.max_cpu is not None else task_spec.cpu
+                options["memory_per_task"]=task_spec.max_mem if task_spec.max_mem is not None else task_spec.mem
+                options["disk_per_task"]=task_spec.max_disk if task_spec.max_disk is not None else task_spec.disk
                 options["prefetch_percent"]=int(task_spec.prefetch*100)
             else:
                 concurrency = task_spec.concurrency

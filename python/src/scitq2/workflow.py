@@ -377,6 +377,18 @@ class Task:
         status = "W" if resolved_depends else DEFAULT_TASK_STATUS
         scitq_auth = bool(getattr(self.step.task_spec, 'scitq_auth', False)) if self.step.task_spec is not None else False
         numa = getattr(self.step.task_spec, 'numa', None) if self.step.task_spec is not None else None
+        # Per-task minimum resources from the step's task_spec curve. The
+        # initial submission carries curve[0]; the server-side retry-decision
+        # logic shifts these to curve[attempt] on edit_and_retry, so the
+        # assignment & recruitment paths see the heavier requirement at
+        # retry time. None when the step doesn't declare cpu/mem/disk
+        # (e.g. NUMA-bound or concurrency-only specs) — task inherits the
+        # step's task_spec defaults.
+        ts = self.step.task_spec
+        if ts is not None:
+            min_cpu, min_mem, min_disk = ts.resources_at_attempt(0)
+        else:
+            min_cpu = min_mem = min_disk = None
 
         ext = self.step.workflow._extend
         existing = None
@@ -404,6 +416,9 @@ class Task:
                     consume_reuse=opportunistic,
                     scitq_auth=scitq_auth,
                     numa=numa,
+                    min_cpu=min_cpu,
+                    min_mem=min_mem,
+                    min_disk=min_disk,
                 )
             if ext is not None:
                 ext.changed.add(self.task_id)
@@ -481,9 +496,20 @@ class Task:
 
 
 class TaskSpec:
-    def __init__(self, *, cpu: Optional[int]=None, mem: Optional[float]=None, disk: Optional[float]=None,
+    def __init__(self, *, cpu=None, mem=None, disk=None,
                  concurrency: Optional[int]=None, prefetch: Optional[Union[str,int]]=None,
                  scitq_auth: bool=False, numa: Optional[int]=None):
+        # cpu / mem / disk: either a scalar or a non-empty monotonically
+        # non-decreasing list ("curve") of per-attempt resource requirements
+        # (spec: addition_from_nextflow.md A — Retry with resource escalation).
+        # A scalar `mem=40` is equivalent to `mem=[40]`. Each TaskSpec retains
+        # *both* the original (possibly scalar) form and the canonical
+        # curve form so downstream callers that expect a scalar (numa,
+        # legacy recruiter call sites, debug stringifier) keep working.
+        cpu_curve = self._normalize_curve('cpu', cpu)
+        mem_curve = self._normalize_curve('mem', mem)
+        disk_curve = self._normalize_curve('disk', disk)
+
         # numa: pin each task to N NUMA nodes on its worker (docker
         # --cpuset-cpus / --cpuset-mems). Concurrency and per-task CPU/mem
         # are then derived from the worker's NUMA topology rather than
@@ -499,13 +525,22 @@ class TaskSpec:
                 raise ValueError(f"TaskSpec(numa=...) must be a positive integer; got {numa!r}")
             if numa < 1:
                 raise ValueError(f"TaskSpec(numa=...) must be a positive integer; got {numa!r}")
-            if cpu is not None or mem is not None:
+            if cpu_curve is not None or mem_curve is not None:
                 raise ValueError("TaskSpec: `numa` is mutually exclusive with `cpu` and `mem` — concurrency and per-task budget are derived from the host NUMA topology")
-        if concurrency is None and cpu is None and mem is None and numa is None:
+        if concurrency is None and cpu_curve is None and mem_curve is None and numa is None:
             raise ValueError("TaskSpec must define at least one of concurrency, cpu, mem or numa")
-        self.cpu = cpu
-        self.mem = mem
-        self.disk = disk
+        # Canonical curve form (always a list when set) for the curve-aware
+        # consumers (workflow.compile, server-side retry-decision).
+        self.cpu_curve = cpu_curve
+        self.mem_curve = mem_curve
+        self.disk_curve = disk_curve
+        # Back-compat scalar attributes. When a curve was passed, these are
+        # the first element (curve[0]) — what the recruiter quoted as
+        # cpu_per_task historically. Callers that need the worst-case for
+        # recruitment use task_spec.max_cpu / .max_mem / .max_disk.
+        self.cpu = cpu_curve[0] if cpu_curve else None
+        self.mem = mem_curve[0] if mem_curve else None
+        self.disk = disk_curve[0] if disk_curve else None
         self.concurrency = concurrency
         self.prefetch = self._parse_prefetch(prefetch)
         # scitq_auth: when True, the worker injects SCITQ_SERVER + SCITQ_TOKEN
@@ -516,6 +551,72 @@ class TaskSpec:
         self.scitq_auth = bool(scitq_auth)
         self.numa = numa
 
+    @staticmethod
+    def _normalize_curve(field: str, value):
+        """Accept a scalar or list. Return None for unset, else a list of
+        floats. Validates non-empty + monotonically non-decreasing + all > 0."""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            curve = [float(value)]
+        elif isinstance(value, str):
+            # YAML interpolation can hand us numeric-looking strings.
+            try:
+                curve = [float(value)]
+            except ValueError:
+                raise ValueError(f"TaskSpec({field}=...) must be a number or list of numbers; got {value!r}")
+        elif isinstance(value, (list, tuple)):
+            if not value:
+                raise ValueError(f"TaskSpec({field}=[]) curve must be non-empty")
+            curve = []
+            for x in value:
+                try:
+                    curve.append(float(x))
+                except (TypeError, ValueError):
+                    raise ValueError(f"TaskSpec({field}=...) curve element {x!r} is not a number")
+        else:
+            raise ValueError(f"TaskSpec({field}=...) must be a number or list of numbers; got {type(value).__name__}")
+        for v in curve:
+            if v <= 0:
+                raise ValueError(f"TaskSpec({field}=...) curve must be all positive; got {curve!r}")
+        for a, b in zip(curve, curve[1:]):
+            if b < a:
+                raise ValueError(
+                    f"TaskSpec({field}=...) curve must be monotonically non-decreasing "
+                    f"(retry should never need less than the prior attempt); got {curve!r}"
+                )
+        return curve
+
+    @property
+    def max_cpu(self):
+        """Worst-case CPU across the attempt curve. Used by the recruiter to
+        size workers so the heaviest retry still fits."""
+        return self.cpu_curve[-1] if self.cpu_curve else None
+
+    @property
+    def max_mem(self):
+        """Worst-case memory across the attempt curve."""
+        return self.mem_curve[-1] if self.mem_curve else None
+
+    @property
+    def max_disk(self):
+        """Worst-case disk across the attempt curve."""
+        return self.disk_curve[-1] if self.disk_curve else None
+
+    def resources_at_attempt(self, attempt: int):
+        """Return (cpu, mem, disk) for the given attempt index (0-based).
+        Indices beyond the curve length clamp to the last element — once you've
+        hit the largest curve value, further retries stay there (the user
+        accepts the failure if even the biggest shape can't run it)."""
+        def _at(curve, idx):
+            if not curve:
+                return None
+            if idx >= len(curve):
+                return curve[-1]
+            return curve[idx]
+        a = max(0, int(attempt))
+        return (_at(self.cpu_curve, a), _at(self.mem_curve, a), _at(self.disk_curve, a))
+
     def _parse_prefetch(self, p):
         if p is None:
             return 0
@@ -525,11 +626,22 @@ class TaskSpec:
 
     def __eq__(self, other):
         return isinstance(other, TaskSpec) and (
-            self.cpu, self.mem, self.disk, self.concurrency, self.prefetch, self.scitq_auth, self.numa
-        ) == (other.cpu, other.mem, other.disk, other.concurrency, other.prefetch, other.scitq_auth, other.numa)
+            self.cpu_curve, self.mem_curve, self.disk_curve,
+            self.concurrency, self.prefetch, self.scitq_auth, self.numa
+        ) == (other.cpu_curve, other.mem_curve, other.disk_curve,
+              other.concurrency, other.prefetch, other.scitq_auth, other.numa)
 
     def __str__(self):
-        return f"TaskSpec(cpu={self.cpu}, mem={self.mem}, disk={self.disk} concurrency={self.concurrency}, prefetch={self.prefetch}, scitq_auth={self.scitq_auth}, numa={self.numa})"
+        # Show curves in their canonical list form so the per-attempt
+        # escalation is visible at a glance; collapse single-element curves
+        # to a bare scalar for the common case.
+        def _short(c):
+            if c is None:
+                return None
+            return c[0] if len(c) == 1 else c
+        return (f"TaskSpec(cpu={_short(self.cpu_curve)}, mem={_short(self.mem_curve)}, "
+                f"disk={_short(self.disk_curve)} concurrency={self.concurrency}, "
+                f"prefetch={self.prefetch}, scitq_auth={self.scitq_auth}, numa={self.numa})")
 
 
 def underscore_join(*args: str) -> str:

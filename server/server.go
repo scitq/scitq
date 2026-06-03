@@ -592,13 +592,15 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              command, shell, container, container_options, step_id,
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
-             status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, numa, created_at
+             status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, numa,
+             min_cpu, min_mem, min_disk, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
-             $15, $16, $17, $18, $19, $20, $21, $22, NOW()
+             $15, $16, $17, $18, $19, $20, $21, $22,
+             $23, $24, $25, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -609,6 +611,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(), req.Numa,
+		req.MinCpu, req.MinMem, req.MinDisk,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -1316,7 +1319,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					retry, is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, previous_task_id, retry_count,
-					task_name, publish, reuse_key, consume_reuse, scitq_auth
+					task_name, publish, reuse_key, consume_reuse, scitq_auth,
+					min_cpu, min_mem, min_disk
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -1325,7 +1329,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					GREATEST(retry - 1, 0), is_final, uses_cache,
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, task_id, retry_count + 1,
-					task_name, publish, reuse_key, consume_reuse, scitq_auth
+					task_name, publish, reuse_key, consume_reuse, scitq_auth,
+					min_cpu, min_mem, min_disk
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id
@@ -1788,7 +1793,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				retry, is_final, uses_cache,
 				download_timeout, running_timeout, upload_timeout,
 				input_hash, previous_task_id, retry_count, task_name, scitq_auth,
-				publish, skip_if_exists, skip_checked, reuse_key, consume_reuse, numa
+				publish, skip_if_exists, skip_checked, reuse_key, consume_reuse, numa,
+				min_cpu, min_mem, min_disk
 			)
 			SELECT
 				t.step_id, t.command, t.shell, t.container, t.container_options,
@@ -1799,7 +1805,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				t.input_hash, t.task_id, 0, t.task_name, t.scitq_auth,
 				t.publish, t.skip_if_exists,
 				(t.status = 'S' AND t.skip_if_exists),
-				t.reuse_key, t.consume_reuse, t.numa
+				t.reuse_key, t.consume_reuse, t.numa,
+				t.min_cpu, t.min_mem, t.min_disk
 			FROM task t
 			WHERE t.task_id = (SELECT task_id FROM validated)
 			RETURNING task_id
