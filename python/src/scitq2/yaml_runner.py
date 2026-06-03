@@ -324,7 +324,13 @@ def _is_safe_expr_tree(tree: ast.AST, allowed_names: set) -> bool:
 def _build_eval_locals(params=None, itervar=None, extra_vars=None):
     """Assemble the locals namespace for _eval_expression. String values get
     wrapped in _SmartStr so a TSV-column comparison like `sample.n_reads >=
-    1_000_000` auto-coerces."""
+    1_000_000` auto-coerces.
+
+    Dotted keys (e.g. `sample.depth_gb`) get aggregated into a synthesised
+    `SimpleNamespace` under the prefix, so expressions can write
+    `sample.depth_gb > 100` natively (Python attribute access) while
+    template substitutions of the same key (`{sample.depth_gb}`) keep going
+    through the existing flat-key path in `_resolve_refs`."""
     locals_dict = {
         _RE_MATCH_FUNC: _re_match,
         'max': max, 'min': min,
@@ -343,6 +349,28 @@ def _build_eval_locals(params=None, itervar=None, extra_vars=None):
             if k in locals_dict:
                 continue
             locals_dict[k] = _SmartStr(v) if isinstance(v, str) else v
+
+    # Synthesise namespaces from `<prefix>.<attr>` keys. Only one level of
+    # nesting (no `a.b.c`); attr must be a valid Python identifier so it can
+    # be accessed via attribute syntax. Skip prefixes that already have a
+    # complex (non-scalar) value bound — don't clobber an existing namespace
+    # or callable.
+    from types import SimpleNamespace as _SN
+    ns_attrs: Dict[str, Dict[str, Any]] = {}
+    for k, v in list(locals_dict.items()):
+        if not isinstance(k, str) or '.' not in k:
+            continue
+        if k.count('.') != 1:
+            continue
+        prefix, attr = k.split('.', 1)
+        if not attr.isidentifier():
+            continue
+        ns_attrs.setdefault(prefix, {})[attr] = v
+    for prefix, attrs in ns_attrs.items():
+        existing = locals_dict.get(prefix)
+        if existing is not None and not isinstance(existing, (str, int, float, bool, type(None))):
+            continue
+        locals_dict[prefix] = _SN(**attrs)
     return locals_dict
 
 
@@ -872,6 +900,24 @@ ITERATOR_SCHEMAS: Dict[str, set] = {
     #              omitted  — the raw line value (current behavior;
     #                         default when `item:` is not set).
     'lines': {'name', 'source', 'file', 'content', 'item', 'tag'},
+    # `tsv` / `csv`: tabular iterator. Each row becomes one iteration; the
+    # columns are exposed as `{<iter-name>.<column>}` substitutions and as
+    # `<iter-name>` attributes inside `when:` / `cond:` / `task_spec` /
+    # other expression-aware fields.
+    #   uri:     local path on the runner host (server-side use). Remote
+    #            URI fetch is reserved for a future revision — see
+    #            `specs/addition_from_nextflow.md` (C, "Local vs remote
+    #            TSV transport").
+    #   content: in-memory string, typically from a `type: text` param
+    #            (CLI ships the content via the `@file` shorthand, UI
+    #            uploads + ships content, or operator pastes directly).
+    #   key:     column name to use as the iteration key. Defaults to the
+    #            first column. Must be unique across rows.
+    #   sep:     field separator. If unset, auto-detected from the URI
+    #            extension (`.tsv` → tab, `.csv` → comma), defaulting to
+    #            tab. `content` always defaults to tab unless `sep:` is
+    #            set explicitly.
+    'tsv':   {'name', 'source', 'uri', 'content', 'key', 'sep', 'product'},
 }
 FILE_GROUP_SOURCES = {'uri', 'ena', 'sra'}
 # Internal markers added by the runner that are valid on any iterator.
@@ -1047,6 +1093,95 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
             })
             sample_obj.file_groups = {item_name: [line]}
             items.append({uname: tag_value, '_sample': sample_obj, '_source': source})
+        return items, source
+
+    elif source == 'tsv':
+        # Tabular iterator. Exactly one of `uri:` (local path on the
+        # runner host) or `content:` (in-memory text) must be set. Each
+        # row materialises one iteration; columns are exposed as
+        # `<iter-name>.<col>` substitutions (and as attributes inside
+        # expression-aware fields, via the namespace synthesised by
+        # _build_eval_locals from the same dotted keys).
+        import csv as _csv
+        import io as _io
+
+        has_uri = 'uri' in iter_def
+        has_content = 'content' in iter_def
+        if has_uri == has_content:
+            raise ValueError(
+                "Iterator 'tsv' requires exactly one of `uri:` or `content:` "
+                f"(got {'both' if has_uri else 'neither'})"
+            )
+
+        if has_uri:
+            uri_str = _resolve_refs(iter_def['uri'], params, extra_vars=workflow_vars)
+            if '://' in uri_str:
+                # Remote URI — deferred to a future revision (the local-
+                # vs-remote transport question in the spec). Be explicit
+                # rather than silently failing in csv.DictReader.
+                raise ValueError(
+                    f"Iterator 'tsv' with remote URI {uri_str!r} is not yet "
+                    "supported. Use `content:` (e.g. from a `type: text` param) "
+                    "or a local path on the runner host."
+                )
+            with open(uri_str) as f:
+                content = f.read()
+        else:
+            content = _resolve_refs(iter_def['content'], params, extra_vars=workflow_vars)
+
+        # Separator: explicit > auto-detect from extension > tab.
+        sep = iter_def.get('sep')
+        if sep is None:
+            if has_uri and uri_str.lower().endswith('.csv'):
+                sep = ','
+            else:
+                sep = '\t'
+
+        reader = _csv.DictReader(_io.StringIO(content), delimiter=sep)
+        fieldnames = reader.fieldnames or []
+        if not fieldnames:
+            raise ValueError(
+                f"Iterator '{name}' (source=tsv): no header row found. "
+                "TSV inputs must have a header line with column names."
+            )
+
+        # Key column: explicit > first column. Must exist among columns.
+        key_col = iter_def.get('key', fieldnames[0])
+        if key_col not in fieldnames:
+            raise ValueError(
+                f"Iterator '{name}' (source=tsv): key column {key_col!r} not in "
+                f"columns {fieldnames!r}."
+            )
+
+        rows = list(reader)
+        if not rows:
+            return [], None
+
+        # Enforce key uniqueness so the iter-tag (= step.task_name suffix
+        # in downstream tasks) is stable across rows.
+        seen_keys = set()
+        for r in rows:
+            k = r.get(key_col, '')
+            if k in seen_keys:
+                raise ValueError(
+                    f"Iterator '{name}' (source=tsv): duplicate value {k!r} in "
+                    f"key column {key_col!r}."
+                )
+            seen_keys.add(k)
+
+        items = []
+        for r in rows:
+            tag = r[key_col]
+            d = {uname: tag}
+            for col, val in r.items():
+                if col is None:
+                    continue  # extra fields beyond the header
+                # Dotted form for `{<iter-name>.<col>}` substitution and
+                # for the F' expression evaluator's attribute access via
+                # the synthesised namespace.
+                d[f"{name}.{col}"] = '' if val is None else str(val)
+            d['_source'] = source
+            items.append(d)
         return items, source
 
     else:

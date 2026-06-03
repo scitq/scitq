@@ -258,6 +258,55 @@ The iterator automatically injects:
 - `{SAMPLE_COUNT}` — the total number of samples (usable in vars and worker_pool),
 - `{SAMPLES}` — comma-separated list of all sample names.
 
+#### Tabular iterator (`source: tsv`)
+
+Sample sheets are the de-facto sample-discovery shape in bioinformatics — nf-core's `samplesheet.csv`, Snakemake's `samples.tsv`, etc. Use `source: tsv` to drive iteration from a TSV/CSV file's rows:
+
+```yaml
+iterate:
+  name: sample
+  source: tsv
+  content: |                    # in-memory inline (or use `uri:` for a file)
+    sample_name	depth_gb	assembly_file
+    A	30	s3://bucket/A.fa.gz
+    B	120	s3://bucket/B.fa.gz
+  key: sample_name              # iter tag column (default: first column)
+```
+
+Each row becomes one iteration. Columns are exposed under the iterator name with dotted syntax:
+
+| Reference | Resolves to |
+|---|---|
+| `{SAMPLE}` | the `key:` column value (the iter tag) |
+| `{sample.depth_gb}` | the row's `depth_gb` column |
+| `{sample.assembly_file}` | the row's `assembly_file` column |
+
+In expression-aware fields (`when:`, `cond:`, `task_spec` …) the same dotted form is a Python attribute access, so all the F' operators apply:
+
+```yaml
+steps:
+  - name: assemble
+    when: "sample.depth_gb > 5"                  # data-driven gating per row
+    inputs:
+      - "{sample.assembly_file}"
+    command: |
+      megahit -r {sample.assembly_file} -o {SAMPLE}/
+```
+
+Input fields:
+
+- `content:` — in-memory string. Typical use: a `type: text` param fed via the CLI's `@file` shorthand, an upload from the UI, or operator paste.
+- `uri:` — local path on the server (the runner host). Remote URIs (`s3://`, `gs://`, …) are reserved for a future revision; today the workflow author either inlines the rows via `content:` or pre-stages the file on the server.
+
+The two are mutually exclusive — supply exactly one.
+
+Optional fields:
+
+- `key:` — column name to use as the iteration tag. Defaults to the first column. Values in this column must be unique across rows.
+- `sep:` — field separator. Auto-detected from the URI extension (`.tsv` → tab, `.csv` → comma), defaulting to tab.
+
+Missing cells resolve to empty strings; this composes cleanly with `when:` for skip-if-missing patterns (`when: "sample.preqc_done"`).
+
 #### Named file groups
 
 Instead of a generic `filter:`, iterators declare **named file groups** — glob patterns that define what files each iteration provides. Steps reference them explicitly as `inputs: iterator_name.group_name`:
@@ -626,6 +675,36 @@ Without named outputs, the step exposes its entire `/output/` directory.
 ```
 
 At least one of `concurrency`, `cpu`, `mem`, or `numa` is required. `cpu`/`mem`/`disk` drive dynamic concurrency (scitq picks a per-worker concurrency that fits the worker's flavour and these per-task budgets); `concurrency` pins it to a static value; `numa` (see below) derives the per-task CPU and memory budget from the worker's NUMA topology.
+
+#### Conditional `task_spec` (data-driven branching)
+
+Real workloads have sample-size variance — an assembly step for a 200 GB sample needs a different worker class than a 5 GB sample. Express that with a top-level `cond:` block. The branches are full sub-specs; the matching branch's fields merge with any sibling fields outside the cond:
+
+```yaml
+  - name: assemble
+    task_spec:
+      cond: sample.depth_gb > 100
+      true:
+        cpu: 32
+        mem: 256
+      false:
+        cpu: 16
+        mem: 64
+      disk: 400                  # outside the cond → applies to both branches
+```
+
+The `cond:` field accepts the full F' expression grammar (`==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `~`, `and`, `or`, `not`), so it composes with all the iter-context features:
+
+```yaml
+    task_spec:
+      cond: "sample.platform in ('illumina', 'mgi') and sample.depth_gb > 50"
+      true:  { cpu: 32, mem: 128 }
+      false: { cpu: 16, mem: 64 }
+```
+
+Branches may declare any subset of fields; whatever isn't in the chosen branch but is in the sibling block applies to all branches. A `default:` key catches the unmatched-cond case.
+
+**Why a structured block rather than per-field expressions.** Free-form expressions in `cpu:` / `mem:` (`mem: "{sample.size * 2 + 8}"`) would produce a unique spec per sample in the worst case and fragment recruitment into 1-flavor-per-task — directly at odds with scitq's batching model. A `cond:` block forces the workflow author to declare a finite set of buckets; the recruiter recruits a flavor per branch, not per sample.
 
 #### `numa: <int>` — pin tasks to specific NUMA nodes
 
