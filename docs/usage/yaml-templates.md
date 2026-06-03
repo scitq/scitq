@@ -783,6 +783,32 @@ Use `|mv:<name>` to wrap the downloaded contents into a named subdirectory after
 
 `|mv:<name>` and the parent-directory trick are interchangeable for two-level layouts — the choice is stylistic. The metagenomics catalog modules (`metaphlan`, `meteor2`, `humann`) use `|mv:<name>` consistently because they need to pull *several* sibling sub-directories independently from one published catalog (e.g. `fasta/` and `database/` from a meteor2 catalog), each landing at its own `/resource/<name>/`. Pointing at the parent would force a single recursive copy of all siblings.
 
+#### The `|rename:<spec>` action
+
+Rename the basename of each transferred file. Pattern syntax is Perl-style `s/<pattern>/<replacement>/<flags>` (matching the Unix `rename(1)` utility); the delimiter is the character right after `s` (typically `/`, but `s#a/b#x/y#` is also accepted for patterns containing literal slashes).
+
+```yaml
+    resource: "azure://ref/genes_v2.tsv.gz|rename:s/_v2//|gunzip"
+    # downloads .../genes_v2.tsv.gz, renames to genes.tsv.gz before gunzip
+```
+
+Flags:
+
+- `g` — apply to every match (default: first only).
+- `i` — case-insensitive.
+
+Replacement supports Go regexp Expand backreferences (`$1`, `$2`, `${name}`).
+
+`|rename:` is target-side: same syntax whether the target is the local download path (under `resource:` or `inputs:`) or a remote publish path (under `publish:`):
+
+```yaml
+  - name: checkm2
+    publish: "azure://results/{params.project}/{SAMPLE}/qc/|rename:s/quality_report/checkm2_quality_report/"
+    # The uploaded file lands at .../checkm2_quality_report.tsv
+```
+
+`|` is the URI action separator; it isn't allowed inside the pattern. Use a character class `[|]` if you genuinely need the literal character.
+
 ### The `{RESOURCE_ROOT}` variable
 
 When your provider has a local copy of reference data (configured via `local_resources` in the server config), `{RESOURCE_ROOT}` resolves to the local path automatically. This avoids costly cross-region data transfer:
@@ -948,6 +974,39 @@ The `when:` field skips a step entirely when its value is falsy:
 ```
 
 This is cleaner than wrapping steps in conditionals — the step simply doesn't exist when the condition is false.
+
+### Expression syntax
+
+`when:` accepts a single ref (above) or a full expression. The supported operators are:
+
+| Category | Operators |
+|---|---|
+| Arithmetic | `+ - * /`, `max(…)`, `min(…)`, `int(…)`, `float(…)` |
+| Comparison | `== != < <= > >=` |
+| Boolean | `and  or  not` |
+| Membership | `in  not in` |
+| Regex match | `~` (e.g. `path ~ '\\.bam$'` → True when the regex matches) |
+
+References inside an expression don't need braces — `params.x`, the iterator name (e.g. `SAMPLE`), and any `vars:` entry are available directly:
+
+```yaml
+steps:
+  - name: align_long
+    when: "SAMPLE_READ_TYPE == 'long'"
+
+  - name: profile_species
+    when: "SAMPLE_N_READS >= 1_000_000"     # auto-coerces numeric-looking strings
+
+  - name: extended_qc
+    when: "params.profile in ('full', 'extended')"
+
+  - name: filter_bams
+    when: "SAMPLE_PATH ~ '\\.bam$'"
+```
+
+The whole expression may be wrapped in `{…}` for consistency with the substitution syntax used elsewhere; it's purely cosmetic. Strings drawn from string-typed sources (TSV columns, string params) auto-coerce to numbers when compared or arithmetically combined with a number; use explicit `int(...)` if you want to fail loudly on non-numeric input.
+
+The same evaluator powers the `cond:` field of [cond blocks](#conditional-iterators), so `cond: params.depth_gb > 100` selects between `true:` / `false:` branches.
 
 ## Modules
 

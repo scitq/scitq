@@ -724,23 +724,25 @@ func (op *Operation) Copy() error {
 	if op.dst == nil {
 		return fmt.Errorf("cannot copy with no destination (source %s)", op.srcUri)
 	}
-	if len(op.dstUri.Actions) > 0 {
-		return fmt.Errorf("actions for destination are declared on source for now, cannot handle destination action: %s", op.dstUri)
-	}
+	// Actions can sit on either URI. Source-side actions are the legacy
+	// shape (`s3://…/dir/|mv:foo` on a `resource:`). Destination-side
+	// actions cover the new publish path — e.g. `publish: "azure://results/
+	// |rename:s/quality_report/final_report/"`. Both are applied to the
+	// destination URI in src-then-dst order, so when both sides set actions
+	// the publish-side rewrites land on top of any source-side rewrites.
+	//
+	// Local-only actions (`untar`, `gunzip`) need a local target. We let
+	// performAction itself reject the impossible combinations at runtime
+	// rather than re-checking here.
 	if op.dstUri.File == "" {
 		if _, _, ok := detectGlob(op.srcUri.CompletePath()); !ok {
 			op.dstUri.File = op.srcUri.File
 		}
 	}
 
-	// Early-phase actions: by convention actions are declared on the
-	// source URI (e.g. `azswed://.../bowtie2/|mv:bowtie2`) but applied
-	// to the destination so they can rewrite where files land *before*
-	// the copy starts. `mv`'s early phase rewrites `dstUri.Path`;
-	// `gunzip`/`untar` are late-only and no-op in the early branch.
-	// Iterating over `dstUri.Actions` here was always dead code — the
-	// guard above forces that list to be empty.
-	for _, action := range op.srcUri.Actions {
+	earlyActions := append([]string{}, op.srcUri.Actions...)
+	earlyActions = append(earlyActions, op.dstUri.Actions...)
+	for _, action := range earlyActions {
 		err := performAction(action, &op.dstUri, op.dst, true)
 		if err != nil {
 			return fmt.Errorf("early action %s failed in URI %s with error: %s", action, op.srcUri, err)
@@ -782,7 +784,13 @@ func (op *Operation) Copy() error {
 		return fmt.Errorf("failed to copy %s -> %s: %v", op.srcUri, op.dstUri, err)
 	}
 
-	for _, action := range op.srcUri.Actions {
+	// Late-phase actions (gunzip / untar) also see both URIs' lists.
+	// performAction's local-backend guards return an unsupported-fs error
+	// when the destination isn't local, which is exactly the right
+	// behaviour for a publish URI carrying `|untar` etc.
+	lateActions := append([]string{}, op.srcUri.Actions...)
+	lateActions = append(lateActions, op.dstUri.Actions...)
+	for _, action := range lateActions {
 		err := performAction(action, &op.dstUri, op.dst, false)
 		if err != nil {
 			return fmt.Errorf("late action %s failed in URI %s with error: %s", action, op.dstUri, err)

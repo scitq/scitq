@@ -9,6 +9,7 @@ Usage:
     python -m scitq2.yaml_runner pipeline.yaml --values '...' --dry-run
 """
 import argparse
+import ast
 import difflib
 import hashlib
 import importlib
@@ -109,6 +110,364 @@ def _eval_arithmetic(expr: str) -> str:
         return expr
 
 
+# ---------------------------------------------------------------------------
+# Extended expression evaluator (F').
+#
+# Powers `when:` and the `cond:` field of cond blocks: comparison (== != < <=
+# > >=), regex match (`~`), boolean (and/or/not), and membership (in/not in)
+# operators on top of the arithmetic _eval_arithmetic supports. AST-walked
+# safe eval — anything outside the allow-listed node set bounces back as the
+# original string, so unrelated call sites (paths, command bodies, URLs) keep
+# flowing through unchanged.
+
+class _SmartStr(str):
+    """str subclass that auto-coerces to int/float when an ordering comparison
+    against a number is requested. TSV column values arrive as strings; this
+    lets `{sample.n_reads >= 1_000_000}` compare numerically without forcing
+    the workflow author to write `int(...)` everywhere. Equality, hashing,
+    membership, and arithmetic stay string-typed."""
+
+    __slots__ = ()
+
+    def _as_number(self):
+        s = self.replace('_', '')  # accept Python's 1_000_000 digit grouping
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            pass
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            pass
+        return None
+
+    def __lt__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n < other
+        return super().__lt__(other)
+
+    def __le__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n <= other
+        return super().__le__(other)
+
+    def __gt__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n > other
+        return super().__gt__(other)
+
+    def __ge__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n >= other
+        return super().__ge__(other)
+
+    # Arithmetic: coerce self to number only when the other operand is a
+    # number AND self looks numeric. `'42' + 5` → 47; `'abc' + 'def'` →
+    # 'abcdef' (str concat unchanged); `'42' + '5'` → '425' (str concat
+    # unchanged — user must write int('5') if numeric is desired).
+
+    def __add__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n + other
+        return super().__add__(other)
+
+    def __radd__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return other + n
+        return NotImplemented
+
+    def __sub__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n - other
+        return NotImplemented
+
+    def __rsub__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return other - n
+        return NotImplemented
+
+    def __mul__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n * other
+        return super().__mul__(other)
+
+    def __rmul__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return other * n
+        return super().__rmul__(other)
+
+    def __truediv__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n / other
+        return NotImplemented
+
+    def __rtruediv__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return other / n
+        return NotImplemented
+
+    def __floordiv__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n // other
+        return NotImplemented
+
+    def __mod__(self, other):
+        if isinstance(other, (int, float)) and not isinstance(other, bool):
+            n = self._as_number()
+            if n is not None:
+                return n % other
+        return NotImplemented
+
+
+# Internal name for the regex-match operator implementation. We rewrite
+# `a ~ b` to `__re_match__(a, b)` before AST parsing because `~` isn't a
+# binary operator in Python's grammar.
+_RE_MATCH_FUNC = '__re_match__'
+
+
+def _re_match(value, pattern):
+    """Implements the `~` operator: re.search of `pattern` against `str(value)`."""
+    return bool(re.search(str(pattern), str(value)))
+
+
+# Atom shapes accepted as operands of `~`. Simple shapes only — complex
+# nested expressions with `~` need explicit parens around the operands.
+_REGEX_ATOM = (
+    r"(?:[A-Za-z_]\w*(?:\.\w+)*)"    # ident, ident.attr.chain
+    r"|(?:'(?:\\'|[^'])*')"           # 'single-quoted'
+    r"|(?:\"(?:\\\"|[^\"])*\")"       # "double-quoted"
+    r"|(?:\d+(?:\.\d+)?)"             # int or float
+    r"|(?:\([^()]+\))"                # ( … ) one level
+)
+_REGEX_MATCH_PATTERN = re.compile(rf"({_REGEX_ATOM})\s*~\s*({_REGEX_ATOM})")
+
+
+def _preprocess_regex_match(expr: str) -> str:
+    """Rewrite each `<atom> ~ <atom>` as `__re_match__(<atom>, <atom>)`.
+    Repeats until stable to handle multiple ~ in one expression."""
+    prev = None
+    while expr != prev:
+        prev = expr
+        expr = _REGEX_MATCH_PATTERN.sub(rf"{_RE_MATCH_FUNC}(\1, \2)", expr)
+    return expr
+
+
+# The ast.Num / ast.Str / ast.NameConstant nodes were deprecated in 3.8 and
+# removed in 3.14; include them via getattr so the allowlist works on every
+# supported runtime.
+_ALLOWED_EXPR_NODES = tuple(t for t in (
+    ast.Expression,
+    ast.Constant,
+    getattr(ast, 'Num', None),
+    getattr(ast, 'Str', None),
+    getattr(ast, 'NameConstant', None),
+    ast.Name, ast.Load,
+    ast.BinOp, ast.UnaryOp,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.FloorDiv, ast.Pow,
+    ast.USub, ast.UAdd,
+    ast.Compare,
+    ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
+    ast.BoolOp, ast.And, ast.Or, ast.Not,
+    ast.Call,
+    ast.Tuple, ast.List, ast.Set,
+    ast.Attribute,
+) if t is not None)
+
+# Functions that may appear as a direct call target. `__re_match__` is the
+# internal implementation of `~`, added by the pre-processor.
+_ALLOWED_CALL_NAMES = frozenset({'max', 'min', 'int', 'float', 'str', 'len', _RE_MATCH_FUNC})
+
+
+def _is_safe_expr_tree(tree: ast.AST, allowed_names: set) -> bool:
+    """Walk the expression AST. Any unsupported node type or any name we
+    didn't bind in the locals dict rejects the expression."""
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_EXPR_NODES):
+            return False
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                return False
+            if node.func.id not in _ALLOWED_CALL_NAMES:
+                return False
+        if isinstance(node, ast.Name):
+            if node.id not in allowed_names and node.id not in _ALLOWED_CALL_NAMES:
+                return False
+    return True
+
+
+def _build_eval_locals(params=None, itervar=None, extra_vars=None):
+    """Assemble the locals namespace for _eval_expression. String values get
+    wrapped in _SmartStr so a TSV-column comparison like `sample.n_reads >=
+    1_000_000` auto-coerces."""
+    locals_dict = {
+        _RE_MATCH_FUNC: _re_match,
+        'max': max, 'min': min,
+        'int': int, 'float': float, 'str': str, 'len': len,
+        'True': True, 'False': False, 'None': None,
+    }
+    if params is not None:
+        locals_dict['params'] = params
+    if itervar:
+        for k, v in itervar.items():
+            if k in locals_dict:
+                continue
+            locals_dict[k] = _SmartStr(v) if isinstance(v, str) else v
+    if extra_vars:
+        for k, v in extra_vars.items():
+            if k in locals_dict:
+                continue
+            locals_dict[k] = _SmartStr(v) if isinstance(v, str) else v
+    return locals_dict
+
+
+def _eval_expression(expr, locals_dict):
+    """Safely evaluate an expression string with the given locals.
+
+    Returns the Python result, or the original `expr` string when parsing
+    fails or the AST contains an unsupported construct. The string-fallback
+    is the safety hatch: a path, URL, or plain value that isn't an
+    expression flows through unchanged."""
+    if not isinstance(expr, str):
+        return expr
+    expr = expr.strip()
+    if not expr:
+        return expr
+    # Cosmetic: a leading-and-trailing `{…}` is the same syntactic wrapper
+    # the rest of the YAML uses for substitutions; treat it as no-op here.
+    if expr.startswith('{') and expr.endswith('}'):
+        inner = expr[1:-1].strip()
+        # Only strip when the braces actually balance over the whole string
+        # (avoid breaking `{a} + {b}` shaped expressions, though those don't
+        # land here in practice).
+        depth = 0
+        balanced = True
+        for ch in expr[:-1]:
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    balanced = False
+                    break
+        if balanced:
+            expr = inner
+
+    expr = _preprocess_regex_match(expr)
+
+    try:
+        tree = ast.parse(expr, mode='eval')
+    except SyntaxError:
+        return expr
+
+    if not _is_safe_expr_tree(tree, set(locals_dict.keys())):
+        return expr
+
+    try:
+        return eval(
+            compile(tree, '<expression>', 'eval'),
+            {'__builtins__': {}},
+            locals_dict,
+        )
+    except Exception:
+        return expr
+
+
+def _eval_template_expression(template, params=None, itervar=None, extra_vars=None):
+    """Top-level entry for `when:` and `cond:` evaluation.
+
+    The template can be a bare expression (`params.profile in ('a', 'b')`)
+    or the same wrapped in `{…}` for consistency with template-substitution
+    syntax. Bare names `params`, `<ITER_KEY>`, and any extra_vars entry
+    resolve directly; string values auto-coerce in numeric comparisons via
+    _SmartStr."""
+    locals_dict = _build_eval_locals(params, itervar, extra_vars)
+    return _eval_expression(template, locals_dict)
+
+
+# Token patterns the expression evaluator handles that a bare ref does not.
+# When `_looks_like_expression` returns True, _resolve_cond and friends route
+# to _eval_template_expression first; otherwise they keep using the existing
+# substitution path.
+_EXPR_SIGNALS = re.compile(
+    r"(==|!=|<=|>=|<|>|\sand\s|\sor\s|\snot\s|\snot\sin\s|\sin\s|\s~\s)"
+)
+
+
+def _looks_like_expression(s: str) -> bool:
+    """True if the string contains tokens that only the expression evaluator
+    knows how to handle. Single bare refs (`params.x`, `{params.x}`, `SAMPLE`)
+    intentionally don't trigger this — they keep going through the existing
+    template-substitution path so back-compat is preserved exactly."""
+    if not isinstance(s, str):
+        return False
+    # Pad with spaces so the word-boundary patterns above match leading /
+    # trailing keywords.
+    return bool(_EXPR_SIGNALS.search(f" {s} "))
+
+
+def _resolve_cond_match(val: dict, resolved):
+    """Pick the branch of a cond block whose key matches the resolved value.
+
+    Lifted out of _resolve_cond so the new expression-evaluator path can
+    share the matcher with the legacy ref-resolution path."""
+    candidates = [resolved]
+    if isinstance(resolved, bool):
+        candidates.extend(['true' if resolved else 'false', True if resolved else False])
+    elif isinstance(resolved, str) and resolved.lower() in ('true', 'false'):
+        bool_val = resolved.lower() == 'true'
+        candidates.extend([bool_val, resolved.lower()])
+    else:
+        candidates.append(str(resolved))
+
+    for candidate in candidates:
+        if candidate in val and candidate != 'cond':
+            return val[candidate]
+    # String comparison fallback
+    for k, v in val.items():
+        if k == 'cond':
+            continue
+        if str(k).lower() == str(resolved).lower():
+            return v
+    # Truthy/falsy fallback: if keys include true/false, match on truthiness
+    keys = {k for k in val if k != 'cond'}
+    if True in keys or 'true' in keys or False in keys or 'false' in keys:
+        is_truthy = bool(resolved) and resolved not in ('', 'false', 'False', 'No', 'no', 'none', 'None', '0')
+        for candidate in ([True, 'true'] if is_truthy else [False, 'false']):
+            if candidate in val:
+                return val[candidate]
+    # `default` branch as final fallthrough — lets a workflow express
+    # "use this value when nothing else matched".
+    if 'default' in val:
+        return val['default']
+    raise ValueError(f"cond: no match for {resolved!r} in {list(k for k in val if k != 'cond')}")
+
+
 def _typed_literal(val: str, true_kw: str = 'True', false_kw: str = 'False') -> str:
     """Convert a resolved string value to a typed literal for a programming language."""
     if val.lower() in ('true', 'false'):
@@ -201,6 +560,23 @@ def _resolve_cond(val, params, itervar=None, step_fields=None, extra_vars=None):
     if not isinstance(val, dict) or 'cond' not in val:
         return val
     cond_ref = val['cond']
+    # If the cond field carries operators / comparisons / boolean ops, treat
+    # it as an expression first (F'). The expression evaluator sees
+    # `params`, `<ITER_KEY>`, and `extra_vars` directly; for `step_fields`
+    # entries (`paired:` style), they're merged into extra_vars below.
+    if isinstance(cond_ref, str) and _looks_like_expression(cond_ref):
+        eval_extras = dict(extra_vars) if extra_vars else {}
+        if step_fields:
+            for k, v in step_fields.items():
+                if k not in eval_extras:
+                    eval_extras[k] = v
+        result = _eval_template_expression(cond_ref, params, itervar, eval_extras)
+        # _eval_expression returns the original string if it couldn't
+        # parse/evaluate the expression. Anything else — bool, int, str
+        # value — is a real evaluation result we should use.
+        if not (isinstance(result, str) and result == cond_ref.strip().lstrip('{').rstrip('}').strip()):
+            resolved = result
+            return _resolve_cond_match(val, resolved)
     # First try resolving as param ref (handles {params.x} syntax)
     resolved = _resolve_refs(cond_ref, params, itervar, extra_vars)
     # If still unresolved (bare name), check extra_vars then step-level fields
@@ -209,42 +585,7 @@ def _resolve_cond(val, params, itervar=None, step_fields=None, extra_vars=None):
             resolved = str(extra_vars[cond_ref])
         elif step_fields and cond_ref in step_fields:
             resolved = _resolve_refs(str(step_fields[cond_ref]), params, itervar, extra_vars)
-    # Normalize to find the matching key
-    # YAML parses true/false as Python booleans, so we need to handle both
-    candidates = [resolved]
-    if isinstance(resolved, bool):
-        candidates.extend(['true' if resolved else 'false', True if resolved else False])
-    elif isinstance(resolved, str) and resolved.lower() in ('true', 'false'):
-        bool_val = resolved.lower() == 'true'
-        candidates.extend([bool_val, resolved.lower()])
-    else:
-        candidates.append(str(resolved))
-
-    for candidate in candidates:
-        if candidate in val and candidate != 'cond':
-            return val[candidate]
-    # String comparison fallback
-    for k, v in val.items():
-        if k == 'cond':
-            continue
-        if str(k).lower() == str(resolved).lower():
-            return v
-    # Truthy/falsy fallback: if keys include true/false, match on truthiness
-    keys = {k for k in val if k != 'cond'}
-    if True in keys or 'true' in keys or False in keys or 'false' in keys:
-        is_truthy = bool(resolved) and resolved not in ('', 'false', 'False', 'No', 'no', 'none', 'None', '0')
-        for candidate in ([True, 'true'] if is_truthy else [False, 'false']):
-            if candidate in val:
-                return val[candidate]
-    # `default` branch as final fallthrough — lets a workflow express
-    # "use this value when nothing else matched", e.g. param-overrides:
-    #   METAPHLAN_INDEX:
-    #     cond: "{params.metaphlan_index}"
-    #     "": <version-specific default>
-    #     default: "{params.metaphlan_index}"
-    if 'default' in val:
-        return val['default']
-    raise ValueError(f"cond: no match for '{resolved}' in {list(k for k in val if k != 'cond')}")
+    return _resolve_cond_match(val, resolved)
 
 
 def _resolve_task_spec(ts_def, params, itervar=None, extra_vars=None):
@@ -1537,10 +1878,16 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
                 verbose: bool = False) -> Step:
     """Build a single step from a YAML definition."""
 
-    # when: conditional — skip step if falsy
+    # when: conditional — skip step if falsy. The value can be a literal
+    # bool, a single ref like `{params.oral}`, or a full expression like
+    # `sample.read_type == 'long'` / `params.n_reads >= 1_000_000` /
+    # `params.profile in ('full', 'extended')` / `sample.path ~ '\\.bam$'`.
     when = step_def.get('when')
     if when is not None:
-        resolved = _resolve_field(when, params, itervar, extra_vars=workflow_vars)
+        if isinstance(when, str):
+            resolved = _eval_template_expression(when, params, itervar, workflow_vars)
+        else:
+            resolved = when
         step_label = step_def.get('name', step_def.get('module', step_def.get('import', '?')))
         if not resolved or resolved in ('false', 'False', 'No', 'no', 'none', 'None', ''):
             if verbose:
