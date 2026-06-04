@@ -362,6 +362,7 @@ class Scitq2Client:
         cpu_curve: Optional[List[float]] = None,
         mem_curve: Optional[List[float]] = None,
         disk_curve: Optional[List[float]] = None,
+        publish_mode: Optional[str] = None,
     ) -> int:
         """
         Submits a task to a specific step.
@@ -433,6 +434,10 @@ class Scitq2Client:
             request.mem_curve.extend(mem_curve)
         if disk_curve and len(disk_curve) > 1:
             request.disk_curve.extend(disk_curve)
+        if publish_mode is not None and publish_mode != "" and publish_mode != "move":
+            # "move" is the default — only send the field for the non-default
+            # ("copy") so legacy paths stay untouched on the wire.
+            request.publish_mode = publish_mode
         response = self.stub.SubmitTask(request)
         return response.task_id
 

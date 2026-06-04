@@ -602,7 +602,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              download_timeout, running_timeout, upload_timeout,
              status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, numa,
              min_cpu, min_mem, min_disk,
-             cpu_curve, mem_curve, disk_curve, created_at
+             cpu_curve, mem_curve, disk_curve, publish_mode, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
@@ -610,7 +610,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              $12, $13, $14,
              $15, $16, $17, $18, $19, $20, $21, $22,
              $23, $24, $25,
-             $26, $27, $28, NOW()
+             $26, $27, $28, $29, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -622,7 +622,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(), req.Numa,
 		req.MinCpu, req.MinMem, req.MinDisk,
-		cpuCurveArg, memCurveArg, diskCurveArg,
+		cpuCurveArg, memCurveArg, diskCurveArg, req.PublishMode,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -1353,7 +1353,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					input_hash, previous_task_id, retry_count,
 					task_name, publish, reuse_key, consume_reuse, scitq_auth,
 					min_cpu, min_mem, min_disk,
-					cpu_curve, mem_curve, disk_curve, weight
+					cpu_curve, mem_curve, disk_curve, weight, publish_mode
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -1386,7 +1386,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					       CASE WHEN disk_curve IS NOT NULL AND disk_curve[1] > 0
 					            THEN disk_curve[LEAST(retry_count + 2, array_length(disk_curve, 1))] / disk_curve[1]
 					            ELSE 1.0 END
-					     ) END
+					     ) END,
+					publish_mode
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id
@@ -1851,7 +1852,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				input_hash, previous_task_id, retry_count, task_name, scitq_auth,
 				publish, skip_if_exists, skip_checked, reuse_key, consume_reuse, numa,
 				min_cpu, min_mem, min_disk,
-				cpu_curve, mem_curve, disk_curve, weight
+				cpu_curve, mem_curve, disk_curve, weight, publish_mode
 			)
 			SELECT
 				t.step_id, t.command, t.shell, t.container, t.container_options,
@@ -1874,7 +1875,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				t.cpu_curve, t.mem_curve, t.disk_curve,
 				-- Fresh attempt chain → weight resets to 1.0 (= curve[0]/curve[0])
 				-- unless the previous failure was eviction (preserve parent weight).
-				CASE WHEN t.failure_class = 'eviction' THEN t.weight ELSE 1.0 END
+				CASE WHEN t.failure_class = 'eviction' THEN t.weight ELSE 1.0 END,
+				t.publish_mode
 			FROM task t
 			WHERE t.task_id = (SELECT task_id FROM validated)
 			RETURNING task_id
@@ -3980,7 +3982,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
 			download_timeout, running_timeout, upload_timeout,
-			status, weight, publish, scitq_auth, numa, step_id
+			status, weight, publish, scitq_auth, numa, step_id, publish_mode
 		FROM task
 		WHERE worker_id = $1
 		  AND NOT hidden
@@ -4007,13 +4009,14 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		var numa sql.NullInt32
 		var stepID sql.NullInt32
 
-		var publishNull sql.NullString
+		var publishNull, publishModeNull sql.NullString
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa, &stepID); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa, &stepID, &publishModeNull); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
+		task.PublishMode = utils.NullStringToPtr(publishModeNull)
 		if scitqAuth {
 			task.ScitqAuth = proto.Bool(true)
 		}

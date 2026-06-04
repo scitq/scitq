@@ -840,7 +840,7 @@ CHAIN_ENTRY_KEYS = {
 # forward arbitrary kwargs and are intentionally exempt from this list.
 STEP_NATIVE_KEYS = {
     'name', 'container', 'tag', 'inputs', 'resource', 'command',
-    'outputs', 'publish', 'task_spec', 'vars', 'depends', 'when',
+    'outputs', 'publish', 'publish_mode', 'task_spec', 'vars', 'depends', 'when',
     'worker_pool', 'skip_if_exists', 'accept_failure', 'language',
     'quality', 'retry', 'grouped', 'grouped_by', 'per_sample',
     # adhoc container builders (conda / apt / binary / pip)
@@ -2232,10 +2232,19 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     # Outputs
     outputs_def = step_def.get('outputs', {})
     publish = step_def.get('publish')
-    if outputs_def or publish:
+    publish_mode = step_def.get('publish_mode')
+    if outputs_def or publish or publish_mode:
         out_kwargs = dict(outputs_def) if isinstance(outputs_def, dict) else {}
         if publish:
             out_kwargs['publish'] = True if publish is True else _resolve_field(publish, params, itervar, extra_vars=extra_vars)
+        if publish_mode is not None:
+            resolved_pm = _resolve_field(publish_mode, params, itervar, extra_vars=extra_vars)
+            if resolved_pm not in (None, '', 'move', 'copy'):
+                raise ValueError(
+                    f"Step '{step_def.get('name', '?')}' has publish_mode={resolved_pm!r}; "
+                    "must be 'move' (default) or 'copy'."
+                )
+            out_kwargs['publish_mode'] = resolved_pm
         step_kwargs['outputs'] = Outputs(**out_kwargs)
 
     # TaskSpec — resolve cond: and reference templates ({NUMA},

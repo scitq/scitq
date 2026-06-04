@@ -1368,6 +1368,22 @@ steps:
     publish: true    # Publishes to azure://results/my_project/compile/
 ```
 
+### `publish_mode: copy` — keep the workspace copy too
+
+By default a successful task uploads to the publish URI **instead of** the workspace, so downstream consumers reading from `workspace:` no longer find the artefacts there. That's the right trade-off for steps whose outputs are only ever read by the published-results bucket.
+
+For the rare case where the same outputs are consumed *by a downstream step in the same workflow* **and** need to land in the results bucket, set `publish_mode: copy`:
+
+```yaml
+  - name: bin
+    publish: "{params.results}/{SAMPLE}/bins/"
+    publish_mode: copy        # → both .../bins/ in the results bucket and the workspace
+```
+
+With `copy`, the worker uploads each output file twice (once to the publish path, once to the workspace path). The default `move` (or omitting the field) keeps today's exclusive-or semantic.
+
+Failed tasks always upload to the workspace only — `publish_mode` is ignored when the task ends in `F`.
+
 ## Language
 
 The `language` field controls how the command is executed:

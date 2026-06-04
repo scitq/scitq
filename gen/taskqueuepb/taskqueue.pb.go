@@ -283,9 +283,15 @@ type TaskRequest struct {
 	// in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
 	// The server keeps it on the task so the retry-decision path can look up
 	// curve[attempt] without joining back to the step's recruiter.
-	CpuCurve      []float32 `protobuf:"fixed32,28,rep,packed,name=cpu_curve,json=cpuCurve,proto3" json:"cpu_curve,omitempty"`
-	MemCurve      []float32 `protobuf:"fixed32,29,rep,packed,name=mem_curve,json=memCurve,proto3" json:"mem_curve,omitempty"`
-	DiskCurve     []float32 `protobuf:"fixed32,30,rep,packed,name=disk_curve,json=diskCurve,proto3" json:"disk_curve,omitempty"`
+	CpuCurve  []float32 `protobuf:"fixed32,28,rep,packed,name=cpu_curve,json=cpuCurve,proto3" json:"cpu_curve,omitempty"`
+	MemCurve  []float32 `protobuf:"fixed32,29,rep,packed,name=mem_curve,json=memCurve,proto3" json:"mem_curve,omitempty"`
+	DiskCurve []float32 `protobuf:"fixed32,30,rep,packed,name=disk_curve,json=diskCurve,proto3" json:"disk_curve,omitempty"`
+	// Publish mode: "move" (default — successful task uploads to publish
+	// *instead of* the workspace) or "copy" (uploads to *both*, so a
+	// downstream consumer can still read from the workspace while the
+	// results bucket also gets the artefacts). Empty = move. Only
+	// meaningful when `publish` is set. Spec: addition_from_nextflow.md B.
+	PublishMode   *string `protobuf:"bytes,31,opt,name=publish_mode,json=publishMode,proto3,oneof" json:"publish_mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -530,6 +536,13 @@ func (x *TaskRequest) GetDiskCurve() []float32 {
 	return nil
 }
 
+func (x *TaskRequest) GetPublishMode() string {
+	if x != nil && x.PublishMode != nil {
+		return *x.PublishMode
+	}
+	return ""
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -582,7 +595,9 @@ type Task struct {
 	// also writes this column directly when reaping orphaned tasks
 	// (failure_class="eviction"). See TaskStatusUpdate.failure_class for the
 	// value set.
-	FailureClass  *string `protobuf:"bytes,41,opt,name=failure_class,json=failureClass,proto3,oneof" json:"failure_class,omitempty"`
+	FailureClass *string `protobuf:"bytes,41,opt,name=failure_class,json=failureClass,proto3,oneof" json:"failure_class,omitempty"`
+	// See TaskRequest.publish_mode.
+	PublishMode   *string `protobuf:"bytes,42,opt,name=publish_mode,json=publishMode,proto3,oneof" json:"publish_mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -900,6 +915,13 @@ func (x *Task) GetDiskCurve() []float32 {
 func (x *Task) GetFailureClass() string {
 	if x != nil && x.FailureClass != nil {
 		return *x.FailureClass
+	}
+	return ""
+}
+
+func (x *Task) GetPublishMode() string {
+	if x != nil && x.PublishMode != nil {
+		return *x.PublishMode
 	}
 	return ""
 }
@@ -10999,7 +11021,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xfc\t\n" +
+	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xb5\n" +
+	"\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -11037,7 +11060,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tcpu_curve\x18\x1c \x03(\x02R\bcpuCurve\x12\x1b\n" +
 	"\tmem_curve\x18\x1d \x03(\x02R\bmemCurve\x12\x1d\n" +
 	"\n" +
-	"disk_curve\x18\x1e \x03(\x02R\tdiskCurveB\b\n" +
+	"disk_curve\x18\x1e \x03(\x02R\tdiskCurve\x12&\n" +
+	"\fpublish_mode\x18\x1f \x01(\tH\x13R\vpublishMode\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -11062,7 +11086,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_min_cpuB\n" +
 	"\n" +
 	"\b_min_memB\v\n" +
-	"\t_min_disk\"\xc8\x0e\n" +
+	"\t_min_diskB\x0f\n" +
+	"\r_publish_mode\"\x81\x0f\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -11111,7 +11136,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tmem_curve\x18' \x03(\x02R\bmemCurve\x12\x1d\n" +
 	"\n" +
 	"disk_curve\x18( \x03(\x02R\tdiskCurve\x12(\n" +
-	"\rfailure_class\x18) \x01(\tH\x1cR\ffailureClass\x88\x01\x01B\b\n" +
+	"\rfailure_class\x18) \x01(\tH\x1cR\ffailureClass\x88\x01\x01\x12&\n" +
+	"\fpublish_mode\x18* \x01(\tH\x1dR\vpublishMode\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -11147,7 +11173,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_min_memB\v\n" +
 	"\t_min_diskB\x10\n" +
-	"\x0e_failure_class\"1\n" +
+	"\x0e_failure_classB\x0f\n" +
+	"\r_publish_mode\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +

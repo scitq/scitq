@@ -218,6 +218,12 @@ message TaskRequest {
     repeated float cpu_curve = 28;
     repeated float mem_curve = 29;
     repeated float disk_curve = 30;
+    // Publish mode: "move" (default — successful task uploads to publish
+    // *instead of* the workspace) or "copy" (uploads to *both*, so a
+    // downstream consumer can still read from the workspace while the
+    // results bucket also gets the artefacts). Empty = move. Only
+    // meaningful when `publish` is set. Spec: addition_from_nextflow.md B.
+    optional string publish_mode = 31;
 }
 
 message Task {
@@ -272,6 +278,8 @@ message Task {
     // (failure_class="eviction"). See TaskStatusUpdate.failure_class for the
     // value set.
     optional string failure_class = 41;
+    // See TaskRequest.publish_mode.
+    optional string publish_mode = 42;
 }
 
 message TaskList {

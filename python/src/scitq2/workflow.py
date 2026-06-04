@@ -83,9 +83,17 @@ class Outputs:
     - True — uses the workflow's publish_root with auto-generated subpath
     - a relative path (no "://") — appended to the workflow's publish_root
     """
-    def __init__(self, publish: Optional[Union[str, bool]]=None, **kwargs):
+    def __init__(self, publish: Optional[Union[str, bool]]=None,
+                 publish_mode: Optional[str]=None, **kwargs):
         self.globs: Dict[str, str] = kwargs
         self.publish = publish
+        # publish_mode: "move" (default — task uploads to publish *instead of*
+        # the workspace) or "copy" (uploads to *both*). Spec:
+        # addition_from_nextflow.md B. None defers to the server default
+        # ("move"); explicit "move" is also accepted.
+        if publish_mode is not None and publish_mode not in ("move", "copy"):
+            raise ValueError(f"publish_mode must be 'move' or 'copy', got {publish_mode!r}")
+        self.publish_mode = publish_mode
 
         if publish is not None and publish is not True and not isinstance(publish, str):
             raise ValueError("publish must be a string, True, or None")
@@ -236,6 +244,7 @@ class Task:
                  language: Optional[Language] = None,
                  depends: Optional[Union[List["Task"],"GroupedStep"]] = None,
                  publish: Optional[str]=None,
+                 publish_mode: Optional[str]=None,
                  skip_if_exists: bool = False,
                  retry: Optional[int]=None,
                  accept_failure: bool = False):
@@ -246,6 +255,11 @@ class Task:
         self.full_name = self.step.naming_strategy(self.step.name, self.tag) if self.tag else self.step.name
         self.depends = depends
         self.publish = publish
+        # publish_mode: forwarded to TaskRequest.publish_mode; the server
+        # persists it on the task row and the worker uploads to both
+        # workspace and publish when "copy". Empty / "move" preserves
+        # today's exclusive-or behaviour. Spec: addition_from_nextflow.md B.
+        self.publish_mode = publish_mode
         self.skip_if_exists = skip_if_exists
         self.accept_failure = accept_failure
         if inputs is None:
@@ -426,6 +440,7 @@ class Task:
                     cpu_curve=cpu_curve,
                     mem_curve=mem_curve,
                     disk_curve=disk_curve,
+                    publish_mode=self.publish_mode,
                 )
             if ext is not None:
                 ext.changed.add(self.task_id)
@@ -754,10 +769,12 @@ class Step:
         # Resolve publish path
         raw_publish = outputs.publish if outputs else None
         publish = self._resolve_publish(raw_publish, tag)
+        publish_mode = outputs.publish_mode if outputs else None
 
         task = Task(tag=tag, step=self, command=command, container=container,
                     inputs=inputs, resources=resources_list, language=language,
-                    depends=resolved_depends, publish=publish, skip_if_exists=skip_if_exists, retry=retry,
+                    depends=resolved_depends, publish=publish, publish_mode=publish_mode,
+                    skip_if_exists=skip_if_exists, retry=retry,
                     accept_failure=accept_failure)
         self.tasks.append(task)
 

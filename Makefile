@@ -117,6 +117,11 @@ proto-python:
 	  --experimental_allow_proto3_optional \
 	  ../proto/taskqueue.proto && \
 	sed -i '' 's/^import taskqueue_pb2/from . import taskqueue_pb2/' src/scitq2/pb/taskqueue_pb2_grpc.py
+	@# Marker file so setuptools.find_packages picks this directory up as
+	@# a regular subpackage. Without it the wheel ships scitq2/ but not
+	@# scitq2/pb/, and `from scitq2.pb import taskqueue_pb2` raises
+	@# ModuleNotFoundError at runtime.
+	@test -f python/src/scitq2/pb/__init__.py || echo "# generated marker — see Makefile" > python/src/scitq2/pb/__init__.py
 	@echo "✓ Python stubs generated in python/src/scitq2/pb/"
 
 # Generate Svelte (TypeScript) gRPC stubs

@@ -92,14 +92,27 @@ func (um *UploadManager) StartUploadWorkers(activeTasks *sync.Map) {
 }
 
 func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
-	// Determine upload target: on success with publish, upload to publish path.
-	// On failure (or no publish), upload to workspace output path.
-	uploadTarget := task.Output
+	// Determine upload target(s). Default ("move"): on success with publish,
+	// upload to publish path *only*. On failure or no publish, upload to
+	// workspace output path *only*.
+	//
+	// publish_mode="copy" (spec: addition_from_nextflow.md B): on success with
+	// publish, upload to *both* workspace and publish so a same-workflow
+	// downstream consumer can still fetch from the workspace while the
+	// results bucket also receives the artefacts. publish_mode is ignored
+	// on failure (failed tasks always upload to workspace only, never
+	// publish — see the docs).
+	var uploadTargets []*string
 	if task.Status == "S" && task.Publish != nil && *task.Publish != "" {
-		uploadTarget = task.Publish
+		uploadTargets = append(uploadTargets, task.Publish)
+		if task.PublishMode != nil && *task.PublishMode == "copy" && task.Output != nil && *task.Output != "" {
+			uploadTargets = append(uploadTargets, task.Output)
+		}
+	} else if task.Output != nil {
+		uploadTargets = append(uploadTargets, task.Output)
 	}
 
-	if uploadTarget == nil {
+	if len(uploadTargets) == 0 {
 		log.Printf("⚠️ Task %d has no output target; skipping upload", task.TaskId)
 		um.Completion <- task
 		return
@@ -145,24 +158,33 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 		um.Completion <- task
 		return
 	}
-	// Set counters/timers BEFORE enqueuing to avoid races
+	// Set counters/timers BEFORE enqueuing to avoid races. With publish_mode=copy
+	// each file is enqueued to *both* targets, so the pending counter is
+	// scaled by the number of targets — that's what watchCompletions decrements
+	// once per upload.
 	um.uploadStart.Store(task.TaskId, time.Now())
-	um.pendingUploads.Set(task.TaskId, count)
+	um.pendingUploads.Set(task.TaskId, count*len(uploadTargets))
 
 	for _, path := range files {
 		relPath, err := filepath.Rel(outputDir, path)
 		if err != nil {
 			log.Printf("❌ Failed to get relative path for %s: %v", path, err)
-			// degrade gracefully: skip this file and decrement the expected count
-			if remaining, done := um.pendingUploads.Decrement(task.TaskId); done {
-				um.Completion <- task
-			} else {
-				log.Printf("📤 Remaining uploads for task %d after relpath error: %d", task.TaskId, remaining)
+			// degrade gracefully: skip this file and decrement the expected
+			// count by one per target (each missing relpath would have
+			// produced len(uploadTargets) enqueues).
+			for range uploadTargets {
+				if remaining, done := um.pendingUploads.Decrement(task.TaskId); done {
+					um.Completion <- task
+				} else {
+					log.Printf("📤 Remaining uploads for task %d after relpath error: %d", task.TaskId, remaining)
+				}
 			}
 			continue
 		}
-		target := fetch.Join(*uploadTarget, relPath)
-		um.UploadQueue <- &UploadFile{Task: task, SourcePath: path, TargetPath: target}
+		for _, ut := range uploadTargets {
+			target := fetch.Join(*ut, relPath)
+			um.UploadQueue <- &UploadFile{Task: task, SourcePath: path, TargetPath: target}
+		}
 	}
 }
 

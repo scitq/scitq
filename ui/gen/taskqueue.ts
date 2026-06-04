@@ -232,6 +232,16 @@ export interface TaskRequest {
      * @generated from protobuf field: repeated float disk_curve = 30
      */
     diskCurve: number[];
+    /**
+     * Publish mode: "move" (default — successful task uploads to publish
+     * *instead of* the workspace) or "copy" (uploads to *both*, so a
+     * downstream consumer can still read from the workspace while the
+     * results bucket also gets the artefacts). Empty = move. Only
+     * meaningful when `publish` is set. Spec: addition_from_nextflow.md B.
+     *
+     * @generated from protobuf field: optional string publish_mode = 31
+     */
+    publishMode?: string;
 }
 /**
  * @generated from protobuf message taskqueue.Task
@@ -416,6 +426,12 @@ export interface Task {
      * @generated from protobuf field: optional string failure_class = 41
      */
     failureClass?: string;
+    /**
+     * See TaskRequest.publish_mode.
+     *
+     * @generated from protobuf field: optional string publish_mode = 42
+     */
+    publishMode?: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -3930,7 +3946,8 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 27, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 28, name: "cpu_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 29, name: "mem_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 30, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 30, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 31, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<TaskRequest>): TaskRequest {
@@ -4061,6 +4078,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                     else
                         message.diskCurve.push(reader.float());
                     break;
+                case /* optional string publish_mode */ 31:
+                    message.publishMode = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4179,6 +4199,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                 writer.float(message.diskCurve[i]);
             writer.join();
         }
+        /* optional string publish_mode = 31; */
+        if (message.publishMode !== undefined)
+            writer.tag(31, WireType.LengthDelimited).string(message.publishMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4233,7 +4256,8 @@ class Task$Type extends MessageType<Task> {
             { no: 38, name: "cpu_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 39, name: "mem_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 40, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 41, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 41, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 42, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -4394,6 +4418,9 @@ class Task$Type extends MessageType<Task> {
                 case /* optional string failure_class */ 41:
                     message.failureClass = reader.string();
                     break;
+                case /* optional string publish_mode */ 42:
+                    message.publishMode = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4541,6 +4568,9 @@ class Task$Type extends MessageType<Task> {
         /* optional string failure_class = 41; */
         if (message.failureClass !== undefined)
             writer.tag(41, WireType.LengthDelimited).string(message.failureClass);
+        /* optional string publish_mode = 42; */
+        if (message.publishMode !== undefined)
+            writer.tag(42, WireType.LengthDelimited).string(message.publishMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
