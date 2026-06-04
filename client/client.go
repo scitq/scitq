@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -301,7 +302,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		"task_id": task.TaskId,
 	})
 	task.Status = "R"
-	reporter.UpdateTaskAsync(task.TaskId, "R", "", nil)
+	reporter.UpdateTaskAsync(task.TaskId, "R", "", nil, "")
 
 	runStart := time.Now()
 
@@ -323,7 +324,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		log.Printf("❌ %s", message)
 		reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId})
 		task.Status = "F"
-		reporter.UpdateTask(task.TaskId, "V", message)
+		reporter.UpdateTask(task.TaskId, "V", message, "")
 		return
 	}
 
@@ -428,7 +429,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 				log.Printf("❌ %s", message)
 				reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId, "command": task.Command})
 				task.Status = "F"
-				reporter.UpdateTask(task.TaskId, "V", message)
+				reporter.UpdateTask(task.TaskId, "V", message, "")
 				return
 			}
 			if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
@@ -436,7 +437,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 				log.Printf("❌ %s", message)
 				reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId, "command": task.Command})
 				task.Status = "F"
-				reporter.UpdateTask(task.TaskId, "V", message)
+				reporter.UpdateTask(task.TaskId, "V", message, "")
 				return
 			}
 			command = append(command, task.Container, *task.Shell, "/scripts/task_"+fmt.Sprint(task.TaskId)+scriptExtension)
@@ -451,7 +452,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 					log.Printf("❌ %s", message)
 					reporter.Event("E", "task", message, map[string]any{"task_id": task.TaskId, "command": task.Command})
 					task.Status = "F"
-					reporter.UpdateTask(task.TaskId, "V", message)
+					reporter.UpdateTask(task.TaskId, "V", message, "")
 					return
 				}
 				command = append(command, task.Container)
@@ -473,7 +474,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			"command": task.Command,
 		})
 		task.Status = "F"                              // Mark as failed
-		reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
+		reporter.UpdateTask(task.TaskId, "V", message, "") // Mark as failed
 		return
 	}
 
@@ -498,7 +499,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		})
 		cmd.Wait()
 		task.Status = "F"                              // Mark as failed
-		reporter.UpdateTask(task.TaskId, "V", message) // Mark as failed
+		reporter.UpdateTask(task.TaskId, "V", message, "") // Mark as failed
 		log.Printf("⚠️ Failed to open log stream for task %d: %v", task.TaskId, err)
 		return
 	}
@@ -601,12 +602,45 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			"command": task.Command,
 		})
 		task.Status = "F"
-		reporter.UpdateTaskAsync(task.TaskId, "V", "", &sec) // Mark as failed
+		// Classify so the eventual terminal F (sent by the uploader) can
+		// carry the right failure_class for the server's retry-decision
+		// path (spec: addition_from_nextflow.md A).
+		fc := classifyExecFailure(err, hooks)
+		task.FailureClass = &fc
+		reporter.UpdateTaskAsync(task.TaskId, "V", "", &sec, "") // Mark as failed
 	} else {
 		log.Printf("✅ Task %d completed successfully", task.TaskId)
 		task.Status = "S" // Mark as success
-		reporter.UpdateTaskAsync(task.TaskId, "U", "", &sec)
+		reporter.UpdateTaskAsync(task.TaskId, "U", "", &sec, "")
 	}
+}
+
+// classifyExecFailure inspects a cmd.Wait error and the recovery hooks to
+// decide which failure_class to attach to the eventual terminal F status.
+// Values: "oom" (container exit 137 / Linux OOMKilled), "timeout" (running
+// timeout / context cancelled), "other" (everything else). "eviction" is
+// never produced here — server-side reaping owns that classification.
+func classifyExecFailure(err error, hooks *taskHooks) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return "timeout"
+	}
+	msg := err.Error()
+	// cmd.Wait reports docker / process exit codes via *exec.ExitError —
+	// we already have its String() embedded in err. Both forms ("exit
+	// status 137" from exec, "container exited with code 137" from our
+	// own captured-exit override path) contain "137".
+	if strings.Contains(msg, " 137") || strings.HasSuffix(msg, "137") {
+		return "oom"
+	}
+	if hooks != nil {
+		if c := hooks.capturedExit.Load(); c == 137 {
+			return "oom"
+		}
+	}
+	return "other"
 }
 
 // cleanupTaskWorkingDir removes the task working directory regardless of task outcome.
@@ -1188,7 +1222,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 					if msg == "" {
 						msg = "Download failed"
 					}
-					reporter.UpdateTask(tid, "F", msg)
+					reporter.UpdateTask(tid, "F", msg, "network")
 					// Cleanup and clear local bookkeeping
 					cleanupTaskWorkingDir(store, tid, reporter)
 					activeTasks.Delete(tid)
@@ -1211,7 +1245,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 						msg = "Upload failed"
 					}
 					// Single point: update server status to F once
-					reporter.UpdateTask(tid, "F", msg)
+					reporter.UpdateTask(tid, "F", msg, "network")
 					// Cleanup and clear local bookkeeping
 					cleanupTaskWorkingDir(store, tid, reporter)
 					activeTasks.Delete(tid)
@@ -1286,7 +1320,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			now := time.Now()
 			activeTasks.Store(task.TaskId, task)
 			activeSince.Store(task.TaskId, now)
-			reporter.UpdateTaskAsync(task.TaskId, task.Status, "", nil)
+			reporter.UpdateTaskAsync(task.TaskId, task.Status, "", nil, "")
 			log.Printf("📝 Task %d accepted at %s", task.TaskId, now.Format(time.RFC3339))
 			log.Printf("📌 Marked task %d active locally", task.TaskId)
 			// Trace: queued for download (client side)
@@ -1310,7 +1344,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 					})
 
 					// Mark as failed
-					reporter.UpdateTask(task.TaskId, "F", fmt.Sprintf("failed to create directory %s for task %d: %v", folder, task.TaskId, err))
+					reporter.UpdateTask(task.TaskId, "F", fmt.Sprintf("failed to create directory %s for task %d: %v", folder, task.TaskId, err), "other")
 					failed = true
 					break
 				}
@@ -1379,7 +1413,7 @@ func excuterThread(
 					"command": t.Command,
 				})
 				t.Status = "F" // Mark as failed
-				reporter.UpdateTask(t.TaskId, "F", message)
+				reporter.UpdateTask(t.TaskId, "F", message, "other")
 				wg.Done()
 				return
 			}

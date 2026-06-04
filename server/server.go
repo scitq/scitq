@@ -586,6 +586,14 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	}
 	defer tx.Rollback()
 
+	// Resource curves: convert []float32 → driver-friendly form for PG's
+	// double precision[] columns. nil when empty so unset curves stay
+	// NULL in the DB (the assignment & retry paths use NULL as "no
+	// curve, scalar resource only").
+	cpuCurveArg := curveToPG(req.CpuCurve)
+	memCurveArg := curveToPG(req.MemCurve)
+	diskCurveArg := curveToPG(req.DiskCurve)
+
 	err = tx.QueryRowContext(ctx,
 		`WITH inserted AS (
            INSERT INTO task (
@@ -593,14 +601,16 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
              status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, numa,
-             min_cpu, min_mem, min_disk, created_at
+             min_cpu, min_mem, min_disk,
+             cpu_curve, mem_curve, disk_curve, created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
              $15, $16, $17, $18, $19, $20, $21, $22,
-             $23, $24, $25, NOW()
+             $23, $24, $25,
+             $26, $27, $28, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -612,6 +622,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(), req.Numa,
 		req.MinCpu, req.MinMem, req.MinDisk,
+		cpuCurveArg, memCurveArg, diskCurveArg,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -898,7 +909,13 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				download_duration = CASE WHEN $3::INT IS NOT NULL AND $1 = 'O' THEN $3::INT ELSE download_duration END,
 				run_duration      = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('U','V') THEN $3::INT ELSE run_duration END,
 				upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END,
-				retry             = CASE WHEN $1 = 'F' AND $4::BOOL IS TRUE THEN retry + 1 ELSE retry END
+				retry             = CASE WHEN $1 = 'F' AND $4::BOOL IS TRUE THEN retry + 1 ELSE retry END,
+				-- Persist failure classification when transitioning to F so
+				-- the retry-decision path can read it on the *next* status
+				-- update (the clone-creation path). Non-F transitions clear
+				-- any prior class so success / re-run doesn't carry stale
+				-- metadata. Spec: addition_from_nextflow.md A.
+				failure_class     = CASE WHEN $1 = 'F' THEN $5::TEXT ELSE NULL END
 			WHERE task_id = $2
 			AND status <> $1
 			AND NOT hidden
@@ -934,6 +951,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		LEFT JOIN step s  ON u.step_id = s.step_id
     `,
 		req.NewStatus, req.TaskId, req.Duration, (req.FreeRetry != nil && *req.FreeRetry),
+		req.FailureClass,
 	).Scan(
 		&workerID, &oldStatus, &curRetry, &stepID, &workflowID, &prevRunStartedAt,
 		&runStartedEpoch, &dlDur, &runDur, &upDur, &startEpoch, &endEpoch,
@@ -1311,6 +1329,20 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		tx, txErr := s.db.BeginTx(ctx, nil)
 		if txErr == nil {
 			var newID int64
+			// Retry clone inherits the parent's resources by default, but
+			// shifts min_cpu/min_mem/min_disk along the per-attempt curve
+			// when one is set on the parent (spec: addition_from_nextflow.md A).
+			// The new attempt index is `retry_count + 1`; in PG's 1-based
+			// array indexing that's element `retry_count + 2`. LEAST clamps
+			// to array_length so attempts past the curve stay at the largest
+			// value.
+			//
+			// Eviction-class failures are NOT real OOM/timeout signals — the
+			// task didn't get a fair chance — so they don't advance the curve.
+			// failure_class can be set either by the worker (Phase 4) or
+			// server-side when reaping orphaned tasks of a deleted worker.
+			// Other failure_class values (oom, timeout, network, other,
+			// unset) all advance.
 			txErr = tx.QueryRowContext(ctx, `
 				INSERT INTO task (
 					step_id, command, shell, container, container_options,
@@ -1320,7 +1352,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, previous_task_id, retry_count,
 					task_name, publish, reuse_key, consume_reuse, scitq_auth,
-					min_cpu, min_mem, min_disk
+					min_cpu, min_mem, min_disk,
+					cpu_curve, mem_curve, disk_curve, weight
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -1330,7 +1363,30 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, task_id, retry_count + 1,
 					task_name, publish, reuse_key, consume_reuse, scitq_auth,
-					min_cpu, min_mem, min_disk
+					CASE WHEN failure_class = 'eviction' THEN min_cpu
+					     ELSE COALESCE(cpu_curve[LEAST(retry_count + 2, array_length(cpu_curve, 1))], min_cpu) END,
+					CASE WHEN failure_class = 'eviction' THEN min_mem
+					     ELSE COALESCE(mem_curve[LEAST(retry_count + 2, array_length(mem_curve, 1))], min_mem) END,
+					CASE WHEN failure_class = 'eviction' THEN min_disk
+					     ELSE COALESCE(disk_curve[LEAST(retry_count + 2, array_length(disk_curve, 1))], min_disk) END,
+					cpu_curve, mem_curve, disk_curve,
+					-- Capacity bookkeeping: the heavier retry consumes a
+					-- proportionally larger fraction of the worker. weight =
+					-- max ratio across whichever curves are set; falls back
+					-- to the parent's weight when there's no curve (or the
+					-- failure was eviction, which doesn't advance).
+					CASE WHEN failure_class = 'eviction' THEN weight
+					     ELSE GREATEST(
+					       CASE WHEN cpu_curve IS NOT NULL AND cpu_curve[1] > 0
+					            THEN cpu_curve[LEAST(retry_count + 2, array_length(cpu_curve, 1))] / cpu_curve[1]
+					            ELSE 1.0 END,
+					       CASE WHEN mem_curve IS NOT NULL AND mem_curve[1] > 0
+					            THEN mem_curve[LEAST(retry_count + 2, array_length(mem_curve, 1))] / mem_curve[1]
+					            ELSE 1.0 END,
+					       CASE WHEN disk_curve IS NOT NULL AND disk_curve[1] > 0
+					            THEN disk_curve[LEAST(retry_count + 2, array_length(disk_curve, 1))] / disk_curve[1]
+					            ELSE 1.0 END
+					     ) END
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id
@@ -1794,7 +1850,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				download_timeout, running_timeout, upload_timeout,
 				input_hash, previous_task_id, retry_count, task_name, scitq_auth,
 				publish, skip_if_exists, skip_checked, reuse_key, consume_reuse, numa,
-				min_cpu, min_mem, min_disk
+				min_cpu, min_mem, min_disk,
+				cpu_curve, mem_curve, disk_curve, weight
 			)
 			SELECT
 				t.step_id, t.command, t.shell, t.container, t.container_options,
@@ -1806,7 +1863,18 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				t.publish, t.skip_if_exists,
 				(t.status = 'S' AND t.skip_if_exists),
 				t.reuse_key, t.consume_reuse, t.numa,
-				t.min_cpu, t.min_mem, t.min_disk
+				-- edit_and_retry resets retry_count to 0 — start of a fresh
+				-- attempt chain — so the curve indexes from the top again.
+				CASE WHEN t.failure_class = 'eviction' THEN t.min_cpu
+				     ELSE COALESCE(t.cpu_curve[1], t.min_cpu) END,
+				CASE WHEN t.failure_class = 'eviction' THEN t.min_mem
+				     ELSE COALESCE(t.mem_curve[1], t.min_mem) END,
+				CASE WHEN t.failure_class = 'eviction' THEN t.min_disk
+				     ELSE COALESCE(t.disk_curve[1], t.min_disk) END,
+				t.cpu_curve, t.mem_curve, t.disk_curve,
+				-- Fresh attempt chain → weight resets to 1.0 (= curve[0]/curve[0])
+				-- unless the previous failure was eviction (preserve parent weight).
+				CASE WHEN t.failure_class = 'eviction' THEN t.weight ELSE 1.0 END
 			FROM task t
 			WHERE t.task_id = (SELECT task_id FROM validated)
 			RETURNING task_id
@@ -2638,11 +2706,14 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		go s.tryRecoverWorkerRegion(workerID, req.Name)
 	}
 
-	// After committing, fail previously active tasks via UpdateTaskStatus so that retries/WS/stats are handled uniformly
+	// After committing, fail previously active tasks via UpdateTaskStatus so that retries/WS/stats are handled uniformly.
+	// failure_class="eviction": the worker disappeared / re-registered out from under the task; the task didn't get a fair
+	// chance, so the retry-decision path doesn't advance the resource-escalation curve.
 	if v := ctx.Value(struct{ k string }{"reRegFailTaskIDs"}); v != nil {
 		if ids, ok := v.([]int32); ok {
+			eviction := "eviction"
 			for _, tid := range ids {
-				if _, upErr := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true)}); upErr != nil {
+				if _, upErr := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true), FailureClass: &eviction}); upErr != nil {
 					log.Printf("❌ failed to set task %d to 'F' on worker re-registration: %v", tid, upErr)
 				} else {
 					log.Printf("🔄 task %d failed due to worker %d re-registration", tid, workerID)
@@ -3333,11 +3404,14 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 		}{WorkerId: req.WorkerId})
 	}
 
-	// After commit, fail previously active tasks attributed to this worker
+	// After commit, fail previously active tasks attributed to this worker.
+	// failure_class="eviction": worker deletion is operator-driven, not a
+	// task-side problem; the retry-decision path won't advance the curve.
 	if v := ctx.Value(struct{ k string }{"delFailTaskIDs"}); v != nil {
 		if ids, ok := v.([]int32); ok {
+			eviction := "eviction"
 			for _, tid := range ids {
-				if _, upErr := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true)}); upErr != nil {
+				if _, upErr := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true), FailureClass: &eviction}); upErr != nil {
 					log.Printf("❌ failed to set task %d to 'F' on worker deletion %d: %v", tid, req.WorkerId, upErr)
 				} else {
 					log.Printf("🔄 task %d failed due to worker %d deletion", tid, req.WorkerId)

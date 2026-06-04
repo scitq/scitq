@@ -199,10 +199,10 @@ export interface TaskRequest {
     /**
      * Per-task minimum resource requirements (spec: addition_from_nextflow.md A).
      * When the step's task_spec declares a list curve (e.g. `mem: [40, 80, 160]`),
-     * the initial submission carries curve[0] here; on retry the values shift to
-     * curve[attempt] so the assignment & recruitment paths see the heavier
-     * requirement. Unset = inherit from the step's task_spec defaults (today's
-     * behaviour, no per-task override).
+     * the initial submission carries curve[0] here; on retry the server-side
+     * retry-decision logic shifts these to curve[attempt] so the assignment
+     * & recruitment paths see the heavier requirement. Unset = inherit from
+     * the step's task_spec defaults (today's behaviour, no per-task override).
      *
      * @generated from protobuf field: optional float min_cpu = 25
      */
@@ -215,6 +215,23 @@ export interface TaskRequest {
      * @generated from protobuf field: optional float min_disk = 27
      */
     minDisk?: number; // minimum GB of disk per task
+    /**
+     * Per-attempt resource curve. The full list the workflow author declared
+     * in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
+     * The server keeps it on the task so the retry-decision path can look up
+     * curve[attempt] without joining back to the step's recruiter.
+     *
+     * @generated from protobuf field: repeated float cpu_curve = 28
+     */
+    cpuCurve: number[];
+    /**
+     * @generated from protobuf field: repeated float mem_curve = 29
+     */
+    memCurve: number[];
+    /**
+     * @generated from protobuf field: repeated float disk_curve = 30
+     */
+    diskCurve: number[];
 }
 /**
  * @generated from protobuf message taskqueue.Task
@@ -375,6 +392,30 @@ export interface Task {
      * @generated from protobuf field: optional float min_disk = 37
      */
     minDisk?: number;
+    /**
+     * See TaskRequest.cpu_curve / mem_curve / disk_curve.
+     *
+     * @generated from protobuf field: repeated float cpu_curve = 38
+     */
+    cpuCurve: number[];
+    /**
+     * @generated from protobuf field: repeated float mem_curve = 39
+     */
+    memCurve: number[];
+    /**
+     * @generated from protobuf field: repeated float disk_curve = 40
+     */
+    diskCurve: number[];
+    /**
+     * failure_class set by the worker on terminal failures (oom / timeout /
+     * network / other) and propagated to the next TaskStatusUpdate. Server
+     * also writes this column directly when reaping orphaned tasks
+     * (failure_class="eviction"). See TaskStatusUpdate.failure_class for the
+     * value set.
+     *
+     * @generated from protobuf field: optional string failure_class = 41
+     */
+    failureClass?: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -3886,7 +3927,10 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 24, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 25, name: "min_cpu", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 26, name: "min_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 27, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 27, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 28, name: "cpu_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 29, name: "mem_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 30, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<TaskRequest>): TaskRequest {
@@ -3899,6 +3943,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         message.dependency = [];
         message.skipIfExists = false;
         message.acceptFailure = false;
+        message.cpuCurve = [];
+        message.memCurve = [];
+        message.diskCurve = [];
         if (value !== undefined)
             reflectionMergePartial<TaskRequest>(this, message, value);
         return message;
@@ -3992,6 +4039,27 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                     break;
                 case /* optional float min_disk */ 27:
                     message.minDisk = reader.float();
+                    break;
+                case /* repeated float cpu_curve */ 28:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.cpuCurve.push(reader.float());
+                    else
+                        message.cpuCurve.push(reader.float());
+                    break;
+                case /* repeated float mem_curve */ 29:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.memCurve.push(reader.float());
+                    else
+                        message.memCurve.push(reader.float());
+                    break;
+                case /* repeated float disk_curve */ 30:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.diskCurve.push(reader.float());
+                    else
+                        message.diskCurve.push(reader.float());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4090,6 +4158,27 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         /* optional float min_disk = 27; */
         if (message.minDisk !== undefined)
             writer.tag(27, WireType.Bit32).float(message.minDisk);
+        /* repeated float cpu_curve = 28; */
+        if (message.cpuCurve.length) {
+            writer.tag(28, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.cpuCurve.length; i++)
+                writer.float(message.cpuCurve[i]);
+            writer.join();
+        }
+        /* repeated float mem_curve = 29; */
+        if (message.memCurve.length) {
+            writer.tag(29, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.memCurve.length; i++)
+                writer.float(message.memCurve[i]);
+            writer.join();
+        }
+        /* repeated float disk_curve = 30; */
+        if (message.diskCurve.length) {
+            writer.tag(30, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.diskCurve.length; i++)
+                writer.float(message.diskCurve[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4140,7 +4229,11 @@ class Task$Type extends MessageType<Task> {
             { no: 34, name: "numa", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 35, name: "min_cpu", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 36, name: "min_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 37, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 37, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 38, name: "cpu_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 39, name: "mem_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 40, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 41, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -4154,6 +4247,9 @@ class Task$Type extends MessageType<Task> {
         message.retryCount = 0;
         message.hidden = false;
         message.skipIfExists = false;
+        message.cpuCurve = [];
+        message.memCurve = [];
+        message.diskCurve = [];
         if (value !== undefined)
             reflectionMergePartial<Task>(this, message, value);
         return message;
@@ -4273,6 +4369,30 @@ class Task$Type extends MessageType<Task> {
                     break;
                 case /* optional float min_disk */ 37:
                     message.minDisk = reader.float();
+                    break;
+                case /* repeated float cpu_curve */ 38:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.cpuCurve.push(reader.float());
+                    else
+                        message.cpuCurve.push(reader.float());
+                    break;
+                case /* repeated float mem_curve */ 39:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.memCurve.push(reader.float());
+                    else
+                        message.memCurve.push(reader.float());
+                    break;
+                case /* repeated float disk_curve */ 40:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.diskCurve.push(reader.float());
+                    else
+                        message.diskCurve.push(reader.float());
+                    break;
+                case /* optional string failure_class */ 41:
+                    message.failureClass = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4397,6 +4517,30 @@ class Task$Type extends MessageType<Task> {
         /* optional float min_disk = 37; */
         if (message.minDisk !== undefined)
             writer.tag(37, WireType.Bit32).float(message.minDisk);
+        /* repeated float cpu_curve = 38; */
+        if (message.cpuCurve.length) {
+            writer.tag(38, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.cpuCurve.length; i++)
+                writer.float(message.cpuCurve[i]);
+            writer.join();
+        }
+        /* repeated float mem_curve = 39; */
+        if (message.memCurve.length) {
+            writer.tag(39, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.memCurve.length; i++)
+                writer.float(message.memCurve[i]);
+            writer.join();
+        }
+        /* repeated float disk_curve = 40; */
+        if (message.diskCurve.length) {
+            writer.tag(40, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.diskCurve.length; i++)
+                writer.float(message.diskCurve[i]);
+            writer.join();
+        }
+        /* optional string failure_class = 41; */
+        if (message.failureClass !== undefined)
+            writer.tag(41, WireType.LengthDelimited).string(message.failureClass);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

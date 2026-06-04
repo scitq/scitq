@@ -359,6 +359,9 @@ class Scitq2Client:
         min_cpu: Optional[float] = None,
         min_mem: Optional[float] = None,
         min_disk: Optional[float] = None,
+        cpu_curve: Optional[List[float]] = None,
+        mem_curve: Optional[List[float]] = None,
+        disk_curve: Optional[List[float]] = None,
     ) -> int:
         """
         Submits a task to a specific step.
@@ -420,6 +423,16 @@ class Scitq2Client:
             request.min_mem = min_mem
         if min_disk is not None:
             request.min_disk = min_disk
+        # Curves: only send when there's more than one element. A
+        # singleton curve adds no information beyond min_* and would
+        # waste a bit of bandwidth (plus muddy the "is there a curve?"
+        # check on the server side).
+        if cpu_curve and len(cpu_curve) > 1:
+            request.cpu_curve.extend(cpu_curve)
+        if mem_curve and len(mem_curve) > 1:
+            request.mem_curve.extend(mem_curve)
+        if disk_curve and len(disk_curve) > 1:
+            request.disk_curve.extend(disk_curve)
         response = self.stub.SubmitTask(request)
         return response.task_id
 

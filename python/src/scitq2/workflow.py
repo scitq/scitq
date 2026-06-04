@@ -387,8 +387,12 @@ class Task:
         ts = self.step.task_spec
         if ts is not None:
             min_cpu, min_mem, min_disk = ts.resources_at_attempt(0)
+            cpu_curve = ts.cpu_curve
+            mem_curve = ts.mem_curve
+            disk_curve = ts.disk_curve
         else:
             min_cpu = min_mem = min_disk = None
+            cpu_curve = mem_curve = disk_curve = None
 
         ext = self.step.workflow._extend
         existing = None
@@ -419,6 +423,9 @@ class Task:
                     min_cpu=min_cpu,
                     min_mem=min_mem,
                     min_disk=min_disk,
+                    cpu_curve=cpu_curve,
+                    mem_curve=mem_curve,
+                    disk_curve=disk_curve,
                 )
             if ext is not None:
                 ext.changed.add(self.task_id)

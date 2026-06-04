@@ -499,7 +499,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 					if fm.Task.Status != "F" {
 						if start, ok := dm.DownloadStart[fm.TaskId]; ok {
 							secs := int32(time.Since(start).Seconds())
-							dm.reporter.UpdateTaskAsync(fm.TaskId, "O", "", &secs)
+							dm.reporter.UpdateTaskAsync(fm.TaskId, "O", "", &secs, "")
 							delete(dm.DownloadStart, fm.TaskId)
 						}
 					} else {
@@ -577,7 +577,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 							if task.Status != "F" {
 								if start, ok := dm.DownloadStart[task.TaskId]; ok {
 									secs := int32(time.Since(start).Seconds())
-									dm.reporter.UpdateTaskAsync(task.TaskId, "O", "", &secs)
+									dm.reporter.UpdateTaskAsync(task.TaskId, "O", "", &secs, "")
 									delete(dm.DownloadStart, task.TaskId)
 								}
 							} else {
@@ -688,7 +688,7 @@ func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string)
 		})
 		if fileMeta.Task != nil {
 			fileMeta.Task.Status = "F"
-			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
+			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message, "network")
 		}
 		return fmt.Errorf("error creating destination directory %s: %w", taskResourceFolder, err)
 	}
@@ -735,7 +735,7 @@ func (dm *DownloadManager) resourceLink(resourcePath, taskResourceFolder string)
 		})
 		if fileMeta.Task != nil {
 			fileMeta.Task.Status = "F"
-			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message)
+			dm.reporter.UpdateTask(fileMeta.TaskId, "F", message, "network")
 		}
 		return fmt.Errorf("error linking resource tree %s -> %s: %w", fileMeta.FilePath, taskResourceFolder, err)
 	}

@@ -114,10 +114,11 @@ const (
 )
 
 type item struct {
-	kind     itemKind
-	status   string // for itStatus
-	msg      string // for itLog or optional accompanying text
-	duration *int32 // optional duration in seconds for status updates
+	kind         itemKind
+	status       string // for itStatus
+	msg          string // for itLog or optional accompanying text
+	duration     *int32 // optional duration in seconds for status updates
+	failureClass string // for itStatus when status == "F" (oom/timeout/network/other); empty otherwise
 }
 
 type taskWorker struct {
@@ -167,13 +168,20 @@ func (r *Reporter) getWorker(taskID int32) *taskWorker {
 
 // UpdateTaskAsync enqueues the latest desired status for a task. Newer updates overwrite
 // any queued older one (latest-wins coalescing). Sending is serialized per task by its worker.
-func (r *Reporter) UpdateTaskAsync(taskID int32, status, msg string, duration *int32) {
+//
+// failureClass is set on terminal F transitions to classify the failure
+// (oom / timeout / network / other). The retry-decision path on the server
+// consults this when deciding to advance the resource-escalation curve —
+// eviction (server-declared) and unset both leave the curve alone. Pass
+// "" when the transition isn't a classified failure (success, intermediate
+// statuses, transient updates).
+func (r *Reporter) UpdateTaskAsync(taskID int32, status, msg string, duration *int32, failureClass string) {
 	if r.Client == nil || taskID == 0 || status == "" {
 		return
 	}
 	w := r.getWorker(taskID)
 	// enqueue the status item (blocks if queue is full)
-	w.ch <- item{kind: itStatus, status: status, duration: duration}
+	w.ch <- item{kind: itStatus, status: status, duration: duration, failureClass: failureClass}
 	// optionally enqueue a human/audit message
 	if msg != "" {
 		w.ch <- item{kind: itLog, msg: msg}
@@ -230,6 +238,10 @@ func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 				}
 				if it.duration != nil {
 					req.Duration = it.duration
+				}
+				if it.status == "F" && it.failureClass != "" {
+					fc := it.failureClass
+					req.FailureClass = &fc
 				}
 				_, err := r.Client.UpdateTaskStatus(ctx, req)
 				cancel()
@@ -290,17 +302,26 @@ func (r *Reporter) Event(level, class, msg string, details map[string]any) {
 	})
 }
 
-func (r *Reporter) UpdateTask(taskID int32, status string, logMessage string) error {
+// UpdateTask is the synchronous status-update helper. Pass `failureClass`
+// (oom / timeout / network / other) on terminal F transitions so the
+// server's retry-decision path can advance the resource-escalation curve
+// appropriately; pass "" otherwise.
+func (r *Reporter) UpdateTask(taskID int32, status string, logMessage string, failureClass string) error {
 	if r.Client == nil || taskID == 0 || status == "" {
 		return fmt.Errorf("invalid reporter or task parameters")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), max(r.Timeout, 5*time.Second))
 	defer cancel()
 
-	_, err := r.Client.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{
+	req := &pb.TaskStatusUpdate{
 		TaskId:    taskID,
 		NewStatus: status,
-	})
+	}
+	if status == "F" && failureClass != "" {
+		fc := failureClass
+		req.FailureClass = &fc
+	}
+	_, err := r.Client.UpdateTaskStatus(ctx, req)
 	if err != nil {
 		log.Printf("⚠️ Failed to update task %d status to %s: %v", taskID, status, err)
 	} else {

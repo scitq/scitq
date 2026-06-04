@@ -272,13 +272,20 @@ type TaskRequest struct {
 	Numa *int32 `protobuf:"varint,24,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
 	// Per-task minimum resource requirements (spec: addition_from_nextflow.md A).
 	// When the step's task_spec declares a list curve (e.g. `mem: [40, 80, 160]`),
-	// the initial submission carries curve[0] here; on retry the values shift to
-	// curve[attempt] so the assignment & recruitment paths see the heavier
-	// requirement. Unset = inherit from the step's task_spec defaults (today's
-	// behaviour, no per-task override).
-	MinCpu        *float32 `protobuf:"fixed32,25,opt,name=min_cpu,json=minCpu,proto3,oneof" json:"min_cpu,omitempty"`    // minimum cpu cores per task (also drives weight)
-	MinMem        *float32 `protobuf:"fixed32,26,opt,name=min_mem,json=minMem,proto3,oneof" json:"min_mem,omitempty"`    // minimum GB of memory per task
-	MinDisk       *float32 `protobuf:"fixed32,27,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"` // minimum GB of disk per task
+	// the initial submission carries curve[0] here; on retry the server-side
+	// retry-decision logic shifts these to curve[attempt] so the assignment
+	// & recruitment paths see the heavier requirement. Unset = inherit from
+	// the step's task_spec defaults (today's behaviour, no per-task override).
+	MinCpu  *float32 `protobuf:"fixed32,25,opt,name=min_cpu,json=minCpu,proto3,oneof" json:"min_cpu,omitempty"`    // minimum cpu cores per task (also drives weight)
+	MinMem  *float32 `protobuf:"fixed32,26,opt,name=min_mem,json=minMem,proto3,oneof" json:"min_mem,omitempty"`    // minimum GB of memory per task
+	MinDisk *float32 `protobuf:"fixed32,27,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"` // minimum GB of disk per task
+	// Per-attempt resource curve. The full list the workflow author declared
+	// in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
+	// The server keeps it on the task so the retry-decision path can look up
+	// curve[attempt] without joining back to the step's recruiter.
+	CpuCurve      []float32 `protobuf:"fixed32,28,rep,packed,name=cpu_curve,json=cpuCurve,proto3" json:"cpu_curve,omitempty"`
+	MemCurve      []float32 `protobuf:"fixed32,29,rep,packed,name=mem_curve,json=memCurve,proto3" json:"mem_curve,omitempty"`
+	DiskCurve     []float32 `protobuf:"fixed32,30,rep,packed,name=disk_curve,json=diskCurve,proto3" json:"disk_curve,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -502,6 +509,27 @@ func (x *TaskRequest) GetMinDisk() float32 {
 	return 0
 }
 
+func (x *TaskRequest) GetCpuCurve() []float32 {
+	if x != nil {
+		return x.CpuCurve
+	}
+	return nil
+}
+
+func (x *TaskRequest) GetMemCurve() []float32 {
+	if x != nil {
+		return x.MemCurve
+	}
+	return nil
+}
+
+func (x *TaskRequest) GetDiskCurve() []float32 {
+	if x != nil {
+		return x.DiskCurve
+	}
+	return nil
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -542,9 +570,19 @@ type Task struct {
 	Numa *int32 `protobuf:"varint,34,opt,name=numa,proto3,oneof" json:"numa,omitempty"`
 	// See TaskRequest.min_cpu / min_mem / min_disk (per-task resource
 	// requirements; spec: addition_from_nextflow.md A).
-	MinCpu        *float32 `protobuf:"fixed32,35,opt,name=min_cpu,json=minCpu,proto3,oneof" json:"min_cpu,omitempty"`
-	MinMem        *float32 `protobuf:"fixed32,36,opt,name=min_mem,json=minMem,proto3,oneof" json:"min_mem,omitempty"`
-	MinDisk       *float32 `protobuf:"fixed32,37,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"`
+	MinCpu  *float32 `protobuf:"fixed32,35,opt,name=min_cpu,json=minCpu,proto3,oneof" json:"min_cpu,omitempty"`
+	MinMem  *float32 `protobuf:"fixed32,36,opt,name=min_mem,json=minMem,proto3,oneof" json:"min_mem,omitempty"`
+	MinDisk *float32 `protobuf:"fixed32,37,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"`
+	// See TaskRequest.cpu_curve / mem_curve / disk_curve.
+	CpuCurve  []float32 `protobuf:"fixed32,38,rep,packed,name=cpu_curve,json=cpuCurve,proto3" json:"cpu_curve,omitempty"`
+	MemCurve  []float32 `protobuf:"fixed32,39,rep,packed,name=mem_curve,json=memCurve,proto3" json:"mem_curve,omitempty"`
+	DiskCurve []float32 `protobuf:"fixed32,40,rep,packed,name=disk_curve,json=diskCurve,proto3" json:"disk_curve,omitempty"`
+	// failure_class set by the worker on terminal failures (oom / timeout /
+	// network / other) and propagated to the next TaskStatusUpdate. Server
+	// also writes this column directly when reaping orphaned tasks
+	// (failure_class="eviction"). See TaskStatusUpdate.failure_class for the
+	// value set.
+	FailureClass  *string `protobuf:"bytes,41,opt,name=failure_class,json=failureClass,proto3,oneof" json:"failure_class,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -836,6 +874,34 @@ func (x *Task) GetMinDisk() float32 {
 		return *x.MinDisk
 	}
 	return 0
+}
+
+func (x *Task) GetCpuCurve() []float32 {
+	if x != nil {
+		return x.CpuCurve
+	}
+	return nil
+}
+
+func (x *Task) GetMemCurve() []float32 {
+	if x != nil {
+		return x.MemCurve
+	}
+	return nil
+}
+
+func (x *Task) GetDiskCurve() []float32 {
+	if x != nil {
+		return x.DiskCurve
+	}
+	return nil
+}
+
+func (x *Task) GetFailureClass() string {
+	if x != nil && x.FailureClass != nil {
+		return *x.FailureClass
+	}
+	return ""
 }
 
 type TaskList struct {
@@ -10933,7 +10999,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xa3\t\n" +
+	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xfc\t\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -10967,7 +11033,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x04numa\x18\x18 \x01(\x05H\x0fR\x04numa\x88\x01\x01\x12\x1c\n" +
 	"\amin_cpu\x18\x19 \x01(\x02H\x10R\x06minCpu\x88\x01\x01\x12\x1c\n" +
 	"\amin_mem\x18\x1a \x01(\x02H\x11R\x06minMem\x88\x01\x01\x12\x1e\n" +
-	"\bmin_disk\x18\x1b \x01(\x02H\x12R\aminDisk\x88\x01\x01B\b\n" +
+	"\bmin_disk\x18\x1b \x01(\x02H\x12R\aminDisk\x88\x01\x01\x12\x1b\n" +
+	"\tcpu_curve\x18\x1c \x03(\x02R\bcpuCurve\x12\x1b\n" +
+	"\tmem_curve\x18\x1d \x03(\x02R\bmemCurve\x12\x1d\n" +
+	"\n" +
+	"disk_curve\x18\x1e \x03(\x02R\tdiskCurveB\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -10992,7 +11062,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_min_cpuB\n" +
 	"\n" +
 	"\b_min_memB\v\n" +
-	"\t_min_disk\"\xb3\r\n" +
+	"\t_min_disk\"\xc8\x0e\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -11036,7 +11106,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x04numa\x18\" \x01(\x05H\x18R\x04numa\x88\x01\x01\x12\x1c\n" +
 	"\amin_cpu\x18# \x01(\x02H\x19R\x06minCpu\x88\x01\x01\x12\x1c\n" +
 	"\amin_mem\x18$ \x01(\x02H\x1aR\x06minMem\x88\x01\x01\x12\x1e\n" +
-	"\bmin_disk\x18% \x01(\x02H\x1bR\aminDisk\x88\x01\x01B\b\n" +
+	"\bmin_disk\x18% \x01(\x02H\x1bR\aminDisk\x88\x01\x01\x12\x1b\n" +
+	"\tcpu_curve\x18& \x03(\x02R\bcpuCurve\x12\x1b\n" +
+	"\tmem_curve\x18' \x03(\x02R\bmemCurve\x12\x1d\n" +
+	"\n" +
+	"disk_curve\x18( \x03(\x02R\tdiskCurve\x12(\n" +
+	"\rfailure_class\x18) \x01(\tH\x1cR\ffailureClass\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -11071,7 +11146,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_min_cpuB\n" +
 	"\n" +
 	"\b_min_memB\v\n" +
-	"\t_min_disk\"1\n" +
+	"\t_min_diskB\x10\n" +
+	"\x0e_failure_class\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +

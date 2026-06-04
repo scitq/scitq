@@ -86,13 +86,22 @@ func (s *taskQueueServer) assignPendingTasks() {
 	// Skip-if-exists: check all pending tasks with the flag before worker assignment
 	s.skipExistingTasks(tx)
 
-	// 2️⃣ Fetch workers and their capacities
+	// 2️⃣ Fetch workers and their capacities + their flavor caps. The flavor
+	// columns (f.cpu/mem/disk) drive the per-task fit check below: a task
+	// with min_cpu/min_mem/min_disk set won't be assigned to a worker
+	// whose flavor can't satisfy it (typically a retry whose curve
+	// stepped past the worker's headroom — see addition_from_nextflow.md A).
+	// Permanent / local workers without a flavor row come back with NULL
+	// caps and bypass the fit check (today's behaviour).
 	workerCapacityRows, err := tx.Query(`
-		SELECT w.worker_id, COALESCE(w.step_id,0), w.concurrency+w.prefetch-COALESCE(SUM(t.weight),0) AS capacity
+		SELECT w.worker_id, COALESCE(w.step_id,0),
+		       w.concurrency+w.prefetch-COALESCE(SUM(t.weight),0) AS capacity,
+		       f.cpu, f.mem, f.disk
 		FROM worker w
+		LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
 		LEFT JOIN task t ON (t.worker_id=w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden)
 		WHERE w.status='R' AND w.deleted_at IS NULL
-		GROUP BY w.worker_id, w.step_id, w.concurrency, w.prefetch
+		GROUP BY w.worker_id, w.step_id, w.concurrency, w.prefetch, f.cpu, f.mem, f.disk
 		HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
 	`)
 	if err != nil {
@@ -101,13 +110,20 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 	//defer workerCapacityRows.Close()
 
-	workerCapacity := map[int32]int{}    // worker_id -> available slots
-	stepWorkerMap := map[int32][]int32{} // step_id -> list of worker_id
-	stepSlots := map[int32]int{}         // step_id -> total available slots
+	// Worker flavor caps used for per-task fit checks. NULL caps (unset on
+	// the row) become NaN here so the fit check trivially passes — exactly
+	// what we want for legacy workers that pre-date the per-task resource
+	// fields.
+	type workerCaps struct{ cpu, mem, disk float64 }
+	workerCapacity := map[int32]int{}        // worker_id -> available slots
+	workerFlavorCaps := map[int32]workerCaps{}
+	stepWorkerMap := map[int32][]int32{}     // step_id -> list of worker_id
+	stepSlots := map[int32]int{}             // step_id -> total available slots
 	for workerCapacityRows.Next() {
 		var workerID, stepID int32
 		var capacity float64
-		if err := workerCapacityRows.Scan(&workerID, &stepID, &capacity); err != nil {
+		var fCPU, fMem, fDisk sql.NullFloat64
+		if err := workerCapacityRows.Scan(&workerID, &stepID, &capacity, &fCPU, &fMem, &fDisk); err != nil {
 			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
 		}
@@ -119,6 +135,21 @@ func (s *taskQueueServer) assignPendingTasks() {
 		}
 
 		workerCapacity[workerID] = rounded
+		caps := workerCaps{
+			cpu:  math.NaN(),
+			mem:  math.NaN(),
+			disk: math.NaN(),
+		}
+		if fCPU.Valid {
+			caps.cpu = fCPU.Float64
+		}
+		if fMem.Valid {
+			caps.mem = fMem.Float64
+		}
+		if fDisk.Valid {
+			caps.disk = fDisk.Float64
+		}
+		workerFlavorCaps[workerID] = caps
 		stepWorkerMap[stepID] = append(stepWorkerMap[stepID], workerID)
 		stepSlots[stepID] += rounded
 	}
@@ -140,7 +171,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 
 	for stepID, slots := range stepSlots {
 		part := fmt.Sprintf(`
-			(SELECT t.task_id, COALESCE(t.step_id,0)
+			(SELECT t.task_id, COALESCE(t.step_id,0), t.min_cpu, t.min_mem, t.min_disk
 			FROM task t
 			LEFT JOIN step s ON s.step_id = t.step_id
 			LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
@@ -163,12 +194,28 @@ func (s *taskQueueServer) assignPendingTasks() {
 		return
 	}
 
+	// Per-task minimum resource requirements (NaN = unset). Used by the
+	// per-task fit check below when matching tasks to workers.
+	type taskMins struct{ cpu, mem, disk float64 }
 	stepPendingTasks := make(map[int32][]int32) // step_id -> list of pending task_id
+	taskMinReqs := make(map[int32]taskMins)
 	for taskRows.Next() {
 		var taskID int32
 		var stepID int32
-		if err := taskRows.Scan(&taskID, &stepID); err == nil {
+		var mc, mm, md sql.NullFloat64
+		if err := taskRows.Scan(&taskID, &stepID, &mc, &mm, &md); err == nil {
 			stepPendingTasks[stepID] = append(stepPendingTasks[stepID], taskID)
+			mins := taskMins{cpu: math.NaN(), mem: math.NaN(), disk: math.NaN()}
+			if mc.Valid {
+				mins.cpu = mc.Float64
+			}
+			if mm.Valid {
+				mins.mem = mm.Float64
+			}
+			if md.Valid {
+				mins.disk = md.Float64
+			}
+			taskMinReqs[taskID] = mins
 		}
 	}
 	taskRows.Close()
@@ -187,13 +234,50 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 	var assigned []assignedEvent
 
+	// fitsWorker returns true iff `task` (by its min_cpu/min_mem/min_disk)
+	// can run on `caps`. NaN on either side bypasses the check for that
+	// dimension \u2014 legacy tasks without min_* set always fit, legacy
+	// workers without a flavor row always accept. Spec:
+	// addition_from_nextflow.md A (per-attempt resource curves).
+	fitsWorker := func(req taskMins, caps workerCaps) bool {
+		if !math.IsNaN(req.cpu) && !math.IsNaN(caps.cpu) && req.cpu > caps.cpu {
+			return false
+		}
+		if !math.IsNaN(req.mem) && !math.IsNaN(caps.mem) && req.mem > caps.mem {
+			return false
+		}
+		if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk > caps.disk {
+			return false
+		}
+		return true
+	}
+
 	for stepID, _ := range stepSlots {
 		// Match step_id
 		for _, workerID := range stepWorkerMap[stepID] {
-			// pick slot tasks in step pending task pool
+			// pick slot tasks in step pending task pool, filtering on the
+			// per-task min_cpu/min_mem/min_disk fit against this worker's
+			// flavor. Tasks that don't fit stay in the per-step pool \u2014
+			// another worker (or a freshly-recruited bigger one) may pick
+			// them up on a later tick.
 			available := workerCapacity[workerID]
-			taskCount := min(available, len(stepPendingTasks[stepID]))
-			pendingTasks := stepPendingTasks[stepID][:taskCount]
+			if available <= 0 {
+				continue
+			}
+			caps := workerFlavorCaps[workerID]
+			fittingTasks := make([]int32, 0, available)
+			remainingTasks := stepPendingTasks[stepID][:0]
+			for _, tid := range stepPendingTasks[stepID] {
+				if len(fittingTasks) < available && fitsWorker(taskMinReqs[tid], caps) {
+					fittingTasks = append(fittingTasks, tid)
+				} else {
+					remainingTasks = append(remainingTasks, tid)
+				}
+			}
+			stepPendingTasks[stepID] = remainingTasks
+			if len(fittingTasks) == 0 {
+				continue
+			}
 
 			// AND status = 'P' guard: without it, a task that another
 			// goroutine already moved to A would still appear in RETURNING,
@@ -206,7 +290,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 				RETURNING task_id, step_id, (
 				SELECT workflow_id FROM step s WHERE s.step_id = t.step_id
 				)
-			`, workerID, pq.Array(pendingTasks))
+			`, workerID, pq.Array(fittingTasks))
 			if err != nil {
 				log.Printf("\u26a0\ufe0f Failed to assign tasks to worker %d: %v", workerID, err)
 				continue
@@ -232,9 +316,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 			rows.Close()
 			log.Printf("\u2705 Assigned %d tasks to worker %d", taskNum, workerID)
 
-			stepPendingTasks[stepID] = stepPendingTasks[stepID][taskCount:]
 			if len(stepPendingTasks[stepID]) == 0 {
-				rows.Close()
 				break
 			}
 
@@ -799,12 +881,13 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 
 	var stepID sql.NullInt32
 	var workflowID sql.NullInt32
+	var minCpu, minMem, minDisk sql.NullFloat64
 	err = tx.QueryRow(`
-		SELECT t.step_id, s.workflow_id
+		SELECT t.step_id, s.workflow_id, t.min_cpu, t.min_mem, t.min_disk
 		FROM task t
 		LEFT JOIN step s ON s.step_id = t.step_id
 		WHERE t.task_id = $1 AND t.status = 'P'
-	`, taskID).Scan(&stepID, &workflowID)
+	`, taskID).Scan(&stepID, &workflowID, &minCpu, &minMem, &minDisk)
 	if err == sql.ErrNoRows {
 		return 0, sql.NullInt32{}, fmt.Errorf("task %d not pending", taskID)
 	}
@@ -815,13 +898,21 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 		return 0, workflowID, fmt.Errorf("task %d has no step_id", taskID)
 	}
 
+	// Per-task fit check: a candidate worker's flavor must satisfy the
+	// task's min_cpu/min_mem/min_disk (NULL on either side bypasses the
+	// check for that dimension — legacy tasks/workers always fit). Spec:
+	// addition_from_nextflow.md A.
 	var workerID sql.NullInt32
 	err = tx.QueryRow(`
 		WITH candidate AS (
 			SELECT w.worker_id
 			FROM worker w
+			LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
 			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden
 			WHERE w.status = 'R' AND w.deleted_at IS NULL AND w.step_id = $2
+			  AND ($3::double precision IS NULL OR f.cpu  IS NULL OR f.cpu  >= $3)
+			  AND ($4::double precision IS NULL OR f.mem  IS NULL OR f.mem  >= $4)
+			  AND ($5::double precision IS NULL OR f.disk IS NULL OR f.disk >= $5)
 			GROUP BY w.worker_id, w.concurrency, w.prefetch
 			HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
 			ORDER BY (w.concurrency + w.prefetch - COALESCE(SUM(t.weight),0)) DESC, w.worker_id
@@ -835,7 +926,7 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 			RETURNING worker_id, step_id
 		)
 		SELECT worker_id FROM updated
-	`, taskID, stepID.Int32).Scan(&workerID)
+	`, taskID, stepID.Int32, minCpu, minMem, minDisk).Scan(&workerID)
 	if err == sql.ErrNoRows {
 		return 0, workflowID, fmt.Errorf("no compatible worker available for task %d", taskID)
 	}

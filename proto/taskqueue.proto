@@ -204,13 +204,20 @@ message TaskRequest {
     optional int32 numa = 24;
     // Per-task minimum resource requirements (spec: addition_from_nextflow.md A).
     // When the step's task_spec declares a list curve (e.g. `mem: [40, 80, 160]`),
-    // the initial submission carries curve[0] here; on retry the values shift to
-    // curve[attempt] so the assignment & recruitment paths see the heavier
-    // requirement. Unset = inherit from the step's task_spec defaults (today's
-    // behaviour, no per-task override).
+    // the initial submission carries curve[0] here; on retry the server-side
+    // retry-decision logic shifts these to curve[attempt] so the assignment
+    // & recruitment paths see the heavier requirement. Unset = inherit from
+    // the step's task_spec defaults (today's behaviour, no per-task override).
     optional float min_cpu = 25;   // minimum cpu cores per task (also drives weight)
     optional float min_mem = 26;   // minimum GB of memory per task
     optional float min_disk = 27;  // minimum GB of disk per task
+    // Per-attempt resource curve. The full list the workflow author declared
+    // in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
+    // The server keeps it on the task so the retry-decision path can look up
+    // curve[attempt] without joining back to the step's recruiter.
+    repeated float cpu_curve = 28;
+    repeated float mem_curve = 29;
+    repeated float disk_curve = 30;
 }
 
 message Task {
@@ -255,6 +262,16 @@ message Task {
     optional float min_cpu = 35;
     optional float min_mem = 36;
     optional float min_disk = 37;
+    // See TaskRequest.cpu_curve / mem_curve / disk_curve.
+    repeated float cpu_curve = 38;
+    repeated float mem_curve = 39;
+    repeated float disk_curve = 40;
+    // failure_class set by the worker on terminal failures (oom / timeout /
+    // network / other) and propagated to the next TaskStatusUpdate. Server
+    // also writes this column directly when reaping orphaned tasks
+    // (failure_class="eviction"). See TaskStatusUpdate.failure_class for the
+    // value set.
+    optional string failure_class = 41;
 }
 
 message TaskList {

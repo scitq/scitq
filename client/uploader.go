@@ -130,6 +130,12 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 			"error":   err.Error(),
 		})
 		task.Status = "F"
+		// "network" covers the uploader's I/O failures (walk, copy,
+		// transport). The retry-decision path treats it the same as
+		// oom/timeout/other (it advances the curve); the distinction
+		// is preserved for operator visibility / future policy.
+		fc := "network"
+		task.FailureClass = &fc
 		um.Completion <- task
 		return
 	}
@@ -212,7 +218,15 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 			// terminal update is handled server-side by the ping-time
 			// reconciliation (it fails tasks the worker no longer tracks),
 			// which is ordering-safe and also covers worker crashes.
-			um.reporter.UpdateTaskAsync(taskID, task.Status, "", &secs)
+			// Carry the failure_class set earlier (by executeTask's
+			// classifyExecFailure, or by the uploader itself on its own
+			// upload failures) through the terminal F status. Empty on
+			// success / non-failure transitions.
+			fc := ""
+			if task.Status == "F" && task.FailureClass != nil {
+				fc = *task.FailureClass
+			}
+			um.reporter.UpdateTaskAsync(taskID, task.Status, "", &secs, fc)
 			cleanupTaskWorkingDir(um.Store, taskID, um.reporter)
 			activeTasks.Delete(taskID)
 		} else {
