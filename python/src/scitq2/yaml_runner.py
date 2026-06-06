@@ -278,15 +278,16 @@ def _preprocess_regex_match(expr: str) -> str:
     return expr
 
 
-# The ast.Num / ast.Str / ast.NameConstant nodes were deprecated in 3.8 and
-# removed in 3.14; include them via getattr so the allowlist works on every
-# supported runtime.
-_ALLOWED_EXPR_NODES = tuple(t for t in (
+# Every literal in Python ≥ 3.8 parses as `ast.Constant` — the legacy
+# `ast.Num` / `ast.Str` / `ast.NameConstant` node types were deprecated in
+# 3.8 and removed in 3.14, and never appear in trees produced by `ast.parse`
+# under our supported runtimes (pyproject.toml pins `requires-python =
+# ">=3.12"`). Probing for them via `getattr` triggers a DeprecationWarning
+# on every import under 3.12/3.13 — which the template-upload handler then
+# refuses unless `--force` is set. So we just don't list them.
+_ALLOWED_EXPR_NODES = (
     ast.Expression,
     ast.Constant,
-    getattr(ast, 'Num', None),
-    getattr(ast, 'Str', None),
-    getattr(ast, 'NameConstant', None),
     ast.Name, ast.Load,
     ast.BinOp, ast.UnaryOp,
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.FloorDiv, ast.Pow,
@@ -297,7 +298,7 @@ _ALLOWED_EXPR_NODES = tuple(t for t in (
     ast.Call,
     ast.Tuple, ast.List, ast.Set,
     ast.Attribute,
-) if t is not None)
+)
 
 # Functions that may appear as a direct call target. `__re_match__` is the
 # internal implementation of `~`, added by the pre-processor.
