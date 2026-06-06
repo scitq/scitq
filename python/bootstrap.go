@@ -4,15 +4,43 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 )
+
+// bootstrapMu serialises concurrent Bootstrap calls within the same process
+// (e.g. multiple test servers in the integration suite sharing one venv dir).
+// Without it, two `pip install --upgrade` invocations race: pip uninstalls
+// scitq2 to "upgrade" it while another already-finished bootstrap's caller
+// is invoking python — and the script crashes on
+// `ModuleNotFoundError: No module named 'scitq2.util'`. The fingerprint
+// check below additionally short-circuits redundant reinstalls (when the
+// embedded source hasn't changed since the last successful install) so the
+// venv survives a server restart without a 30+s pip install.
+var bootstrapMu sync.Mutex
 
 // Bootstrap ensures a valid Python venv with scitq2 installed.
 func Bootstrap(venvPath string) error {
+	bootstrapMu.Lock()
+	defer bootstrapMu.Unlock()
+
+	// Skip the install entirely when an earlier Bootstrap on this venv path
+	// already finished against the same embedded source. The fingerprint is
+	// just sha256 of EmbeddedPythonSrc — different bytes → different
+	// fingerprint → reinstall. Stored next to the venv so a fresh process
+	// can also reuse it.
+	sum := sha256.Sum256(EmbeddedPythonSrc)
+	wantFingerprint := hex.EncodeToString(sum[:])
+	markerPath := filepath.Join(venvPath, ".scitq2-bootstrap-fingerprint")
+	if existing, err := os.ReadFile(markerPath); err == nil && string(existing) == wantFingerprint {
+		return nil
+	}
 
 	// 1. Create venv if missing
 	venvPython := filepath.Join(venvPath, "bin", "python")
@@ -72,6 +100,13 @@ func Bootstrap(venvPath string) error {
 		return fmt.Errorf("failed to import scitq2 or grpc: %v\nOutput:\n%s", err, checkOut)
 	}
 	fmt.Fprint(os.Stderr, string(checkOut))
+
+	// Record the fingerprint of the embedded source we just installed so a
+	// subsequent Bootstrap call (same process or next process startup) can
+	// short-circuit. Best-effort: failure to write doesn't fail the bootstrap.
+	if err := os.WriteFile(markerPath, []byte(wantFingerprint), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ failed to write bootstrap fingerprint: %v\n", err)
+	}
 	return nil
 }
 

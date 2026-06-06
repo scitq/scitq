@@ -2164,9 +2164,18 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     if container:
         step_kwargs['container'] = container
 
-    # Tag from iterator
+    # Tag: an explicit `tag:` on the step wins; otherwise derive from the
+    # iterator context. The explicit form supports `{params.x}` / `{ITER}`
+    # substitutions and cond: blocks via _resolve_field. Until now the
+    # `tag:` key was whitelisted in STEP_NATIVE_KEYS but never read — any
+    # explicit tag was silently dropped, which is why scitq UI / task names
+    # for steps with curated tags looked surprising.
     sample = itervar.get('_sample') if itervar else None
-    if itervar and grouped_by_key:
+    if 'tag' in step_def:
+        resolved_tag = _resolve_field(step_def['tag'], params, itervar=itervar,
+                                      step_fields=step_def, extra_vars=extra_vars)
+        step_kwargs['tag'] = str(resolved_tag) if resolved_tag is not None else None
+    elif itervar and grouped_by_key:
         # Keyed-grouping step: tag is just the group key value, not the
         # composite — one task per distinct value of the grouped_by var.
         step_kwargs['tag'] = str(itervar.get(grouped_by_key, ''))
@@ -2351,7 +2360,10 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         retry=data.get('retry'),
     )
     if data.get('tag'):
-        wf_kwargs['tag'] = _resolve_refs(data['tag'], params)
+        # Use _resolve_field (not _resolve_refs) so a cond: block dispatches
+        # through _resolve_cond. With _resolve_refs alone, a dict-shaped tag
+        # was silently stored verbatim and stringified as the workflow's tag.
+        wf_kwargs['tag'] = _resolve_field(data['tag'], params)
     if data.get('container'):
         wf_kwargs['container'] = data['container']
     if data.get('publish_root'):

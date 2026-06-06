@@ -55,7 +55,7 @@ format: 2                  # YAML engine format (default: 1 for backward compat)
 name: my_workflow          # Required: unique template name
 version: 1.0.0             # Required: semantic version
 description: What it does   # Required: human-readable description
-tag: "{params.project}"     # Optional: tag for each workflow instance
+tag: "{params.project}"     # Optional: tag for each workflow instance (see "Tag" below)
 
 params:     # Parameter declarations
   ...
@@ -73,6 +73,56 @@ retry: 2      # Default retry count for all steps
 steps:      # The pipeline steps
   - ...
 ```
+
+## Tag
+
+The `tag:` field is an arbitrary string appended to a workflow's name (and per-step task names) to distinguish multiple runs of the same template. It's purely cosmetic — used by the UI, CLI, and task naming — and has no semantic effect on scheduling.
+
+### Workflow-level `tag:`
+
+Plain string with the usual `{params.x}` and `{VAR}` substitutions:
+
+```yaml
+name: my_workflow
+tag: "{params.project}/{params.depth}"
+```
+
+A `cond:` block dispatches the tag on a value, just like `cond:` everywhere else:
+
+```yaml
+tag:
+  cond: "{params.mode}"
+  dev:  "dev-{params.run}"
+  prod: "prod-{params.run}"
+  default: "scratch-{params.run}"
+```
+
+The chosen branch's value is re-resolved with substitutions, so referencing `{params.run}` inside a branch works.
+
+### Step-level `tag:`
+
+Each step also accepts a `tag:` field. When absent, scitq auto-derives the per-task tag from the iterator context (e.g. `S1.chr2` for a product-iter sample × chrom). Setting `tag:` explicitly overrides that derivation — useful for human-readable task names that don't expose every iteration coordinate:
+
+```yaml
+steps:
+  - name: align
+    tag: "{SAMPLE}-{params.mode}"
+    command: ...
+```
+
+Step-level `tag:` is re-resolved per task, so it sees both the iter context (`{SAMPLE}`, `{CHROM}`, …) and workflow params. A `cond:` block works the same way as at workflow level:
+
+```yaml
+steps:
+  - name: profile
+    tag:
+      cond: "{params.mode}"
+      fast: "{SAMPLE}-quick"
+      thorough: "{SAMPLE}-deep"
+    command: ...
+```
+
+If you omit `tag:` on a step that uses iteration, the auto-derived tag (composite of all iter variables, or just the `grouped_by` key for keyed-grouping steps) remains the default.
 
 ## Params
 
