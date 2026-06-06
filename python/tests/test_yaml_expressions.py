@@ -275,3 +275,77 @@ def test_legacy_cond_block_with_enum_value():
     }
     params = SimpleNamespace(metaphlan_index='mpa_vJun23')
     assert yr._resolve_cond(val, params) == 'four'
+
+
+# ---------- regression: dict-shaped `when:` must dispatch via _resolve_cond ----------
+#
+# Before F' the `when:` handler called `_resolve_field`, which transparently
+# routed a dict-shaped value through `_resolve_cond`. The first F' pass
+# narrowed the handler to a str-only fast path and passed everything else
+# through as-is — which silently made dict-shaped `when:` blocks always
+# truthy (a non-empty dict is truthy) so the step always ran regardless of
+# which branch the cond was supposed to pick. These tests guard the
+# corrected behaviour.
+
+
+def test_when_cond_block_picks_branch_truthy():
+    """A dict-shaped `when:` cond block dispatches on the cond expression
+    and returns the chosen branch's value. _build_step then runs that
+    value through the falsy-string check — "true" passes, "false" skips."""
+    step_def = {
+        'name': 'oral_align',
+        'when': {
+            'cond': '{params.catalog}',
+            'igc2': 'false',
+            'oral': 'false',
+            'both': 'true',
+        },
+        'command': 'echo',
+        'container': 'alpine',
+    }
+    params = SimpleNamespace(catalog='both')
+    # Stub workflow with minimal surface needed by _build_step.
+    from scitq2.workflow import Workflow
+    workflow = Workflow(name='test', version='1.0.0')
+    step = yr._build_step(workflow, step_def, step_map={}, params=params)
+    assert step is not None  # branch resolved to 'true' → step kept
+
+
+def test_when_cond_block_skips_step_on_false_branch():
+    step_def = {
+        'name': 'oral_align',
+        'when': {
+            'cond': '{params.catalog}',
+            'igc2': 'false',
+            'oral': 'false',
+            'both': 'true',
+        },
+        'command': 'echo',
+        'container': 'alpine',
+    }
+    params = SimpleNamespace(catalog='igc2')
+    from scitq2.workflow import Workflow
+    workflow = Workflow(name='test', version='1.0.0')
+    step = yr._build_step(workflow, step_def, step_map={}, params=params)
+    assert step is None  # branch resolved to 'false' → step skipped
+
+
+def test_when_cond_block_with_bool_branches():
+    """YAML parses `true:` / `false:` as Python bools; the cond matcher
+    must hit those branches when the cond resolves to a truthy/falsy value."""
+    step_def = {
+        'name': 'opt_step',
+        'when': {
+            'cond': '{params.run_it}',
+            True: 'true',
+            False: 'false',
+        },
+        'command': 'echo',
+        'container': 'alpine',
+    }
+    from scitq2.workflow import Workflow
+    workflow = Workflow(name='test', version='1.0.0')
+    assert yr._build_step(workflow, step_def, step_map={},
+                          params=SimpleNamespace(run_it=True)) is not None
+    assert yr._build_step(workflow, step_def, step_map={},
+                          params=SimpleNamespace(run_it=False)) is None

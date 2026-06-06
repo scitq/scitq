@@ -2013,14 +2013,28 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
                 verbose: bool = False) -> Step:
     """Build a single step from a YAML definition."""
 
-    # when: conditional — skip step if falsy. The value can be a literal
-    # bool, a single ref like `{params.oral}`, or a full expression like
-    # `sample.read_type == 'long'` / `params.n_reads >= 1_000_000` /
-    # `params.profile in ('full', 'extended')` / `sample.path ~ '\\.bam$'`.
+    # when: conditional — skip step if falsy. The value can be:
+    #   - a literal bool (`when: false`),
+    #   - a single ref like `when: "{params.oral}"`,
+    #   - a full expression like `when: "sample.depth_gb > 100"` (F'), or
+    #   - a cond block dict that dispatches the truthy branch on a value:
+    #       when:
+    #         cond: "{params.mode}"
+    #         igc2: "true"
+    #         oral: "false"
+    #         both: "true"
+    # The cond-block path goes through `_resolve_field` (same as
+    # inputs/vars cond blocks) so its branch result then runs through the
+    # usual falsy-string check below. The previous shortcut that simply
+    # passed dicts through unchanged silently always-fired the step (any
+    # non-empty dict is truthy).
     when = step_def.get('when')
     if when is not None:
         if isinstance(when, str):
             resolved = _eval_template_expression(when, params, itervar, workflow_vars)
+        elif isinstance(when, dict):
+            resolved = _resolve_field(when, params, itervar,
+                                      step_fields=step_def, extra_vars=workflow_vars)
         else:
             resolved = when
         step_label = step_def.get('name', step_def.get('module', step_def.get('import', '?')))

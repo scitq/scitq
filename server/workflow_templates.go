@@ -161,6 +161,21 @@ func (s *taskQueueServer) scriptRunner(
 		return "", "", -1, fmt.Errorf("unknown mode: %q", mode)
 	}
 
+	// Block until the venv bootstrap (server startup goroutine in server.go)
+	// has finished installing scitq2 into the venv. Without this the script
+	// invocation below races against `pip install --upgrade` and fails with
+	// ModuleNotFoundError on every retry the caller does inside the
+	// bootstrap window — costing 30+s of UploadTemplate retries per test
+	// run on a fresh venv. Honors the request context so an early-cancelled
+	// upload doesn't deadlock here.
+	if s.pythonReady != nil {
+		select {
+		case <-s.pythonReady:
+		case <-ctx.Done():
+			return "", "", -1, fmt.Errorf("scriptRunner: aborted waiting for python venv readiness: %w", ctx.Err())
+		}
+	}
+
 	venvPython := filepath.Join(s.cfg.Scitq.ScriptVenv, "bin", "python")
 	cmd := exec.CommandContext(ctx, venvPython, args...)
 
@@ -870,9 +885,13 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 
 	var paramList []ParamSpec
 	if err := json.Unmarshal([]byte(stdoutParams), &paramList); err != nil {
+		// Note: this used to log stdoutMeta/stderrMeta (the metadata-phase
+		// output, which is always either valid JSON or the YAML-metadata
+		// scanner's output), hiding what actually went wrong with --params.
+		// Log the params-phase stdout/stderr so failures are diagnosable.
 		return &pb.UploadTemplateResponse{
 			Success: false,
-			Message: fmt.Sprintf("invalid JSON output from --params: %v\n%s\n%s", err, stdoutMeta, stderrMeta),
+			Message: fmt.Sprintf("invalid JSON output from --params: %v\nstdout=%q\nstderr=%q", err, stdoutParams, stderrParams),
 		}, nil
 	}
 
