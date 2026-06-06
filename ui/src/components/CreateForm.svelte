@@ -1,43 +1,45 @@
 <script lang="ts">
+  import { run } from 'svelte/legacy';
+
   import { onMount } from "svelte";
   import { getFlavors, newWorker, getWorkFlow, getStatus, getSteps } from "../lib/api";
   import "../styles/createForm.css";
   import { JobId, WorkerDetails, Workflow, Job } from "../../gen/taskqueue";
 
   // Form state
-  let provider = "";
-  let flavor = "";
-  let region = "";
-  let number = 1;
-  let concurrency = 1;
-  let prefetch = 1;
-  let wfStep = "";
-  let wf = "";
-  let step = "";
+  let provider = $state("");
+  let flavor = $state("");
+  let region = $state("");
+  let number = $state(1);
+  let concurrency = $state(1);
+  let prefetch = $state(1);
+  let wfStep = $state("");
+  let wf = $state("");
+  let step = $state("");
 
   // Data stores
-  let listFlavor: Array<{ flavorName: string, region: string, provider: string }> = [];
-  let listWf: Workflow[] = [];
-  let listStep: Array<{ name: string }> = [];
+  let listFlavor: Array<{ flavorName: string, region: string, provider: string }> = $state([]);
+  let listWf: Workflow[] = $state([]);
+  let listStep: Array<{ name: string }> = $state([]);
 
   // UI state
-  let isLoadingSteps = false;
-  let showFlavorSuggestions = false;
-  let showRegionSuggestions = false;
-  let showProviderSuggestions = false;
-  let showWfSuggestions = false;
-  let showStepSuggestions = false;
-  let hoveredWf: string | null = null;
+  let isLoadingSteps = $state(false);
+  let showFlavorSuggestions = $state(false);
+  let showRegionSuggestions = $state(false);
+  let showProviderSuggestions = $state(false);
+  let showWfSuggestions = $state(false);
+  let showStepSuggestions = $state(false);
+  let hoveredWf: string | null = $state(null);
 
   // Error message state
-  let errorMessage = "";
+  let errorMessage = $state("");
 
   // Filtered suggestions
-  let flavorSuggestions: string[] = [];
-  let regionSuggestions: string[] = [];
-  let providerSuggestions: string[] = [];
-  let wfSuggestions: string[] = [];
-  let stepSuggestions: string[] = [];
+  let flavorSuggestions: string[] = $state([]);
+  let regionSuggestions: string[] = $state([]);
+  let providerSuggestions: string[] = $state([]);
+  let wfSuggestions: string[] = $state([]);
+  let stepSuggestions: string[] = $state([]);
 
   /**
    * Lifecycle hook that runs on component mount.
@@ -53,57 +55,67 @@
    * Computed property that updates flavor suggestions based on input and available data.
    * @type {string[]}
    */
-  $: flavorSuggestions = Array.from(
-    new Set(
-      listFlavor
-        .map(f => f.flavorName)
-        .filter(name => name?.toLowerCase().includes(flavor.toLowerCase()))
-    )
-  );
+  run(() => {
+    flavorSuggestions = Array.from(
+      new Set(
+        listFlavor
+          .map(f => f.flavorName)
+          .filter(name => name?.toLowerCase().includes(flavor.toLowerCase()))
+      )
+    );
+  });
 
   /** 
    * Computed property that updates region suggestions based on input and available data.
    * @type {string[]}
    */
-  $: regionSuggestions = Array.from(
-    new Set(
-      listFlavor
-        .map(f => f.region)
-        .filter(name => name?.toLowerCase().includes(region.toLowerCase()))
-    )
-  );
+  run(() => {
+    regionSuggestions = Array.from(
+      new Set(
+        listFlavor
+          .map(f => f.region)
+          .filter(name => name?.toLowerCase().includes(region.toLowerCase()))
+      )
+    );
+  });
 
   /** 
    * Computed property that updates provider suggestions based on input and available data.
    * @type {string[]}
    */
-  $: providerSuggestions = Array.from(
-    new Set(
-      listFlavor
-        .map(f => f.provider)
-        .filter(name => name?.toLowerCase().includes(provider.toLowerCase()))
-    )
-  );
+  run(() => {
+    providerSuggestions = Array.from(
+      new Set(
+        listFlavor
+          .map(f => f.provider)
+          .filter(name => name?.toLowerCase().includes(provider.toLowerCase()))
+      )
+    );
+  });
 
   /** 
    * Computed property that updates workflow name suggestions based on input and available workflows.
    * @type {string[]}
    */
-  $: wfSuggestions = Array.from(
-    new Set(
-      listWf
-        .map(wf => wf.name)
-        .filter(name => name?.toLowerCase().includes(wf.toLowerCase()))
-    )
-  );
+  run(() => {
+    wfSuggestions = Array.from(
+      new Set(
+        listWf
+          .map(wf => wf.name)
+          .filter(name => name?.toLowerCase().includes(wf.toLowerCase()))
+      )
+    );
+  });
 
   /** 
    * Computed property that updates step suggestions from the fetched listStep, filtered by input.
    * @type {string[]}
    */
-  $: stepSuggestions = listStep?.map(s => s.name)?.filter(name =>
-    name?.toLowerCase().includes(step.toLowerCase())
-  ) || [];
+  run(() => {
+    stepSuggestions = listStep?.map(s => s.name)?.filter(name =>
+      name?.toLowerCase().includes(step.toLowerCase())
+    ) || [];
+  });
 
   /**
    * Selects a flavor from the suggestions.
@@ -251,15 +263,15 @@
       bind:value={flavor}
       autocomplete="off"
       placeholder="Type to search..."
-      on:focus={() => showFlavorSuggestions = true}
-      on:input={() => showFlavorSuggestions = true}
-      on:blur={() => setTimeout(() => showFlavorSuggestions = false, 150)}
+      onfocus={() => showFlavorSuggestions = true}
+      oninput={() => showFlavorSuggestions = true}
+      onblur={() => setTimeout(() => showFlavorSuggestions = false, 150)}
     />
     {#if showFlavorSuggestions && flavorSuggestions.length > 0}
       <ul class="createForm-suggestions">
         {#each flavorSuggestions as suggestion}
           <li>
-            <button class="createForm-suggestion-item" type="button" on:click={() => selectFlavor(suggestion)}>
+            <button class="createForm-suggestion-item" type="button" onclick={() => selectFlavor(suggestion)}>
               {suggestion}
             </button>
           </li>
@@ -279,15 +291,15 @@
       bind:value={region}
       autocomplete="off"
       placeholder="Type to search..."
-      on:focus={() => showRegionSuggestions = true}
-      on:input={() => showRegionSuggestions = true}
-      on:blur={() => setTimeout(() => showRegionSuggestions = false, 150)}
+      onfocus={() => showRegionSuggestions = true}
+      oninput={() => showRegionSuggestions = true}
+      onblur={() => setTimeout(() => showRegionSuggestions = false, 150)}
     />
     {#if showRegionSuggestions && regionSuggestions.length > 0}
       <ul class="createForm-suggestions">
         {#each regionSuggestions as suggestion}
           <li>
-            <button class="createForm-suggestion-item" type="button" on:click={() => selectRegion(suggestion)}>
+            <button class="createForm-suggestion-item" type="button" onclick={() => selectRegion(suggestion)}>
               {suggestion}
             </button>
           </li>
@@ -307,15 +319,15 @@
       bind:value={provider}
       autocomplete="off"
       placeholder="Type to search..."
-      on:focus={() => showProviderSuggestions = true}
-      on:input={() => showProviderSuggestions = true}
-      on:blur={() => setTimeout(() => showProviderSuggestions = false, 150)}
+      onfocus={() => showProviderSuggestions = true}
+      oninput={() => showProviderSuggestions = true}
+      onblur={() => setTimeout(() => showProviderSuggestions = false, 150)}
     />
     {#if showProviderSuggestions && providerSuggestions.length > 0}
       <ul class="createForm-suggestions">
         {#each providerSuggestions as suggestion}
           <li>
-            <button class="createForm-suggestion-item" type="button" on:click={() => selectProvider(suggestion)}>
+            <button class="createForm-suggestion-item" type="button" onclick={() => selectProvider(suggestion)}>
               {suggestion}
             </button>
           </li>
@@ -335,12 +347,12 @@
       bind:value={wfStep}
       autocomplete="off"
       placeholder="Type to search..."
-      on:focus={() => showWfSuggestions = true}
-      on:input={(e) => {
+      onfocus={() => showWfSuggestions = true}
+      oninput={(e) => {
         wf = e.target.value.split('.')[0];
         showWfSuggestions = true;
       }}
-      on:blur={() => setTimeout(() => {
+      onblur={() => setTimeout(() => {
         showWfSuggestions = false;
         showStepSuggestions = false;
         hoveredWf = null;
@@ -357,8 +369,8 @@
                 <button 
                   class="createForm-suggestion-item {hoveredWf === suggestionWf ? 'active' : ''}" 
                   type="button" 
-                  on:click={() => selectWf(suggestionWf)}
-                  on:mouseenter={() => handleWfHover(suggestionWf)}
+                  onclick={() => selectWf(suggestionWf)}
+                  onmouseenter={() => handleWfHover(suggestionWf)}
                 >
                   {suggestionWf}
                 </button>
@@ -377,7 +389,7 @@
                     <button 
                       class="createForm-suggestion-item" 
                       type="button" 
-                      on:click={() => selectStep(stepObj.name)}
+                      onclick={() => selectStep(stepObj.name)}
                     >
                       {stepObj.name}
                     </button>
@@ -400,7 +412,7 @@
   </div>
 
   <!-- Submit button -->
-  <button class="btn-validate createForm-add-button" on:click={handleAddWorker} aria-label="Add" data-testid="add-worker-button">
+  <button class="btn-validate createForm-add-button" onclick={handleAddWorker} aria-label="Add" data-testid="add-worker-button">
     Add
   </button>
 

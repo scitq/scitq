@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { stopPropagation } from 'svelte/legacy';
+
   import StepList from './StepList.svelte';
   import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronRight, ChevronDown, HelpCircle } from 'lucide-svelte';
   import {delWorkflow} from '../lib/api';
@@ -6,22 +8,24 @@
   import TemplateRunModal from './TemplateRunModal.svelte';
   import { wfCounters } from '../lib/wfCounters';
 
-  let modalRunId: number | null = null;
+  let modalRunId: number | null = $state(null);
   function openModal(id: number) { modalRunId = id; }
   function closeModal() { modalRunId = null; }
   
-  /**
-   * List of workflows passed as a prop to the component
-   * @type {Array<{workflowId: number, name: string}>}
-   */
-  export let workflows = [];
-  export let workersPerStepId: Map<number, taskqueue.Worker[]>;
+  
+  interface Props {
+    /** List of workflows passed as a prop to the component */
+    workflows?: Array<{workflowId: number, name: string}>;
+    workersPerStepId: Map<number, taskqueue.Worker[]>;
+  }
+
+  let { workflows = [], workersPerStepId }: Props = $props();
 
   /**
    * Set tracking which workflows are currently expanded
    * @type {Set<number>}
    */
-  let expandedWorkflows = new Set<number>();
+  let expandedWorkflows = $state(new Set<number>());
 
   /**
    * Toggles the expanded state of a workflow
@@ -101,7 +105,7 @@
       <!-- Individual workflow item -->
       <div class="wf-item" data-testid={`wf-${wf.workflowId}`}>
         <!-- Expand/collapse toggle button -->
-        <button class="wf-chevron-btn" on:click={() => toggleWorkflow(wf.workflowId)}>
+        <button class="wf-chevron-btn" onclick={() => toggleWorkflow(wf.workflowId)}>
           {#if expandedWorkflows.has(wf.workflowId)}
             <ChevronDown class="wf-chevron" data-testid={`chevronDown-${wf.workflowId}`}/>
           {:else}
@@ -120,7 +124,7 @@
           {#if wf.templateRunId}
             <button
               class="wf-info-btn"
-              on:click|stopPropagation={() => openModal(wf.templateRunId)}
+              onclick={stopPropagation(() => openModal(wf.templateRunId))}
               title="Show template run details"
               aria-label="Show template run details"
               data-testid={`info-btn-${wf.workflowId}`}
@@ -149,7 +153,7 @@
           <button class="btn-action" title="Pause"><PauseCircle /></button>
           <button class="btn-action" title="Reset"><RefreshCw /></button>
           <button class="btn-action" title="Break"><CircleX /></button>
-          <button class="btn-action" title="Clear" data-testid={`delete-btn-${wf.workflowId}`} on:click={() => delWorkflow(wf.workflowId)}><Eraser /></button>
+          <button class="btn-action" title="Clear" data-testid={`delete-btn-${wf.workflowId}`} onclick={() => delWorkflow(wf.workflowId)}><Eraser /></button>
         </div>
       </div>
 

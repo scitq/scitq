@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { run } from 'svelte/legacy';
+
   import { onMount, onDestroy } from 'svelte';
   import * as grpcWeb from 'grpc-web';
 import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api';
@@ -7,12 +9,17 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
   import { RefreshCw, PauseCircle, CircleX, Eraser } from 'lucide-svelte';
   import { formatDuration, showIfNonZero } from '../lib/format';
 
-  /**
+  
+  interface Props {
+    /**
    * Workflow ID passed as a prop to the component
    * @type {number}
    */
-  export let workflowId: number;
-  export let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
+    workflowId: number;
+    workersPerStepId?: Map<number, taskqueue.Worker[]>;
+  }
+
+  let { workflowId, workersPerStepId = new Map() }: Props = $props();
 
   // Local, reactive copy of the parent-provided map to avoid mutating props.
   //
@@ -27,19 +34,21 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
   // bottom of the template to re-render across every step. On a
   // workflow with thousands of tasks expanded into this StepList that
   // cascade allocated 1+ GB in a single delta and crashed the tab.
-  let workersByStep: Map<number, taskqueue.Worker[]> = new Map();
-  let _lastWorkersPerStepIdRef: Map<number, taskqueue.Worker[]> | null = null;
-  $: if (workersPerStepId && workersPerStepId !== _lastWorkersPerStepIdRef) {
-    _lastWorkersPerStepIdRef = workersPerStepId;
-    // Recreate the map to preserve Svelte reactivity and avoid sharing references
-    workersByStep = new Map(workersPerStepId);
-  }
+  let workersByStep: Map<number, taskqueue.Worker[]> = $state(new Map());
+  let _lastWorkersPerStepIdRef: Map<number, taskqueue.Worker[]> | null = $state(null);
+  run(() => {
+    if (workersPerStepId && workersPerStepId !== _lastWorkersPerStepIdRef) {
+      _lastWorkersPerStepIdRef = workersPerStepId;
+      // Recreate the map to preserve Svelte reactivity and avoid sharing references
+      workersByStep = new Map(workersPerStepId);
+    }
+  });
 
   /**
    * Array of loaded steps for the workflow
    * @type {Array<Object>}
    */
-  let steps = [];
+  let steps = $state([]);
 
   /**
    * Array of pending steps waiting to be loaded
@@ -63,7 +72,7 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
    * Reference to the table container element
    * @type {HTMLDivElement}
    */
-  let tableContainer: HTMLDivElement;
+  let tableContainer: HTMLDivElement = $state();
 
   /**
    * Flag indicating if the table is scrolled to top
@@ -75,13 +84,13 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
    * Count of new steps available
    * @type {number}
    */
-  let newStepsCount = 0;
+  let newStepsCount = $state(0);
 
   /**
    * Flag to show new steps notification
    * @type {boolean}
    */
-  let showNewStepsNotification = false;
+  let showNewStepsNotification = $state(false);
 
   /**
    * Last scroll position of the table
@@ -618,9 +627,9 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
 <!-- Steps container component -->
 <div class="steps-container">
   {#if steps && steps.length > 0}
-    <div class="steps-table-wrapper" bind:this={tableContainer} on:scroll={handleScroll}>
+    <div class="steps-table-wrapper" bind:this={tableContainer} onscroll={handleScroll}>
       {#if showNewStepsNotification}
-        <button class="new-steps-notification" on:click={loadNewSteps}>
+        <button class="new-steps-notification" onclick={loadNewSteps}>
           {newStepsCount} new step{newStepsCount > 1 ? 's' : ''} available
           <span class="show-new-btn">Show</span>
         </button>
@@ -725,7 +734,7 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
                 <button class="btn-action" title="Pause"><PauseCircle /></button>
                 <button class="btn-action" title="Reset"><RefreshCw /></button>
                 <button class="btn-action" title="Break"><CircleX /></button>
-                <button class="btn-action" title="Clear" data-testid={`delete-step-${step.stepId}`} on:click={() => delStep(step.stepId)}><Eraser /></button>
+                <button class="btn-action" title="Clear" data-testid={`delete-step-${step.stepId}`} onclick={() => delStep(step.stepId)}><Eraser /></button>
               </td>
             </tr>
           {/each}

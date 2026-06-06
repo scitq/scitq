@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { run, preventDefault, createBubbler, stopPropagation } from 'svelte/legacy';
+
+  const bubble = createBubbler();
   import { onMount, onDestroy, tick } from 'svelte';
   import { wsClient } from '../lib/wsClient';
   import {
@@ -18,44 +21,44 @@
 
   // --- State Management ---
   // List of available workers
-  let workers: Worker[] = [];
+  let workers: Worker[] = $state([]);
   // List of available workflows
-  let workflows: Workflow[] = [];
+  let workflows: Workflow[] = $state([]);
   // All steps across workflows
-  let allSteps: Step[] = [];
+  let allSteps: Step[] = $state([]);
 
   // --- Filtering State ---
   // Currently selected worker filter
-  let selectedWorkerId: number = undefined;
+  let selectedWorkerId: number = $state(undefined);
   // Currently selected workflow filter
-  let selectedWfId: number = undefined;
+  let selectedWfId: number = $state(undefined);
   // Currently selected step filter
-  let selectedStepId: number = undefined;
+  let selectedStepId: number = $state(undefined);
   // Currently selected command filter
-  let selectedCommand: string = undefined;
+  let selectedCommand: string = $state(undefined);
   // Currently selected status filter
   let selectedStatus: string = '';
   // Show hidden tasks toggle
-  let showHidden: boolean = false;
+  let showHidden: boolean = $state(false);
   // Status of the selected task (for log modal)
-  let selectedTaskStatus: string = '';
+  let selectedTaskStatus: string = $state('');
   // Command of the selected task (for log modal)
-  let selectedTaskCommand: String = undefined;
-  let editMode = false;
-  let editCommandText = '';
-  let editError = '';
+  let selectedTaskCommand: String = $state(undefined);
+  let editMode = $state(false);
+  let editCommandText = $state('');
+  let editError = $state('');
   // Current sorting method
-  let sortBy: 'task' | 'worker' | 'wf' | 'step' = 'task';
+  let sortBy: 'task' | 'worker' | 'wf' | 'step' = $state('task');
   // Steps for the currently selected workflow
-  let workflowSteps: Step[] = [];
+  let workflowSteps: Step[] = $state([]);
 
   // --- Log Management ---
   // Number of log lines to load at once
   const CHUNK_SIZE = 50;
   // Whether more stdout logs are available to load
-  let hasMoreStdout = true;
+  let hasMoreStdout = $state(true);
   // Whether more stderr logs are available to load
-  let hasMoreStderr = true;
+  let hasMoreStderr = $state(true);
   
   // Tracks how many logs have been skipped for each task
   type LogSkip = {
@@ -65,47 +68,47 @@
   let logSkipTracker: Record<number, LogSkip> = {};
 
   // Stores stdout logs by task ID
-  let taskLogsOut: Record<number, TaskLog[]> = {};
+  let taskLogsOut: Record<number, TaskLog[]> = $state({});
   // Stores stderr logs by task ID
-  let taskLogsErr: Record<number, TaskLog[]> = {};
+  let taskLogsErr: Record<number, TaskLog[]> = $state({});
   // Stores saved log chunks
-  let taskLogsSaved: LogChunk[] = [];
+  let taskLogsSaved: LogChunk[] = $state([]);
   // Tracks which tasks are currently being streamed
   const streamedTasks = new Set<number>();
 
   // --- UI State ---
   // Currently selected task ID (for log modal)
-  let selectedTaskId: number | null = null;
+  let selectedTaskId: number | null = $state(null);
   // Whether log modal is visible
-  let showLogModal = false;
+  let showLogModal = $state(false);
   // Logs to display in stdout panel
-  let logsToShowOut: TaskLog[] = [];
+  let logsToShowOut: TaskLog[] = $state([]);
   // Logs to display in stderr panel
-  let logsToShowErr: TaskLog[] = [];
+  let logsToShowErr: TaskLog[] = $state([]);
   // Reference to stdout pre element
-  let stdoutPre: HTMLPreElement | null = null;
+  let stdoutPre: HTMLPreElement | null = $state(null);
   // Reference to stderr pre element
-  let stderrPre: HTMLPreElement | null = null;
+  let stderrPre: HTMLPreElement | null = $state(null);
   // Whether stdout panel is scrolled to bottom
-  let isScrolledToBottomOut = true;
+  let isScrolledToBottomOut = $state(true);
   // Whether stderr panel is scrolled to bottom
-  let isScrolledToBottomErr = true;
+  let isScrolledToBottomErr = $state(true);
 
   // --- Task List Pagination ---
   // Number of tasks to load at once
   const TASKS_CHUNK_SIZE = 25;
   // Currently displayed tasks
-  let displayedTasks: Task[] = [];
+  let displayedTasks: Task[] = $state([]);
   // First loaded tasks (used for resetting search)
   let firstTasks: Task[] = [];
   // New tasks waiting to be displayed
-  let pendingTasks: Task[] = [];
+  let pendingTasks: Task[] = $state([]);
   // Whether more tasks are available to load
-  let hasMoreTasks = true;
+  let hasMoreTasks = $state(true);
   // Whether tasks are currently loading
-  let isLoading = false;
+  let isLoading = $state(false);
   // Reference to tasks container element
-  let tasksContainer: HTMLDivElement;
+  let tasksContainer: HTMLDivElement = $state();
   // Whether list is scrolled to top
   let isScrolledToTop = false;
   // Whether list is scrolled to bottom
@@ -113,7 +116,7 @@
   // Last scroll position (for maintaining position during updates)
   let lastScrollPosition = 0;
   // Whether to show new tasks notification
-  let showNewTasksNotification = false;
+  let showNewTasksNotification = $state(false);
   // Function to unsubscribe from WebSocket
   let unsubscribeWS: (() => void) | null = null;
 
@@ -757,28 +760,34 @@ async function handleWebSocketMessage(message) {
   // --- Reactive Statements ---
 
   // Update logs when selected task changes
-  $: if (selectedTaskId !== null) {
-    logsToShowOut = taskLogsOut[selectedTaskId] ?? [];
-    logsToShowErr = taskLogsErr[selectedTaskId] ?? [];
-  }
+  run(() => {
+    if (selectedTaskId !== null) {
+      logsToShowOut = taskLogsOut[selectedTaskId] ?? [];
+      logsToShowErr = taskLogsErr[selectedTaskId] ?? [];
+    }
+  });
 
   // Auto-scroll stdout when new logs arrive
-  $: if (logsToShowOut.length > 0) {
-    tick().then(() => {
-      setTimeout(() => {
-        if (stdoutPre && isScrolledToBottomOut) stdoutPre.scrollTop = stdoutPre.scrollHeight;
-      }, 0);
-    });
-  }
+  run(() => {
+    if (logsToShowOut.length > 0) {
+      tick().then(() => {
+        setTimeout(() => {
+          if (stdoutPre && isScrolledToBottomOut) stdoutPre.scrollTop = stdoutPre.scrollHeight;
+        }, 0);
+      });
+    }
+  });
 
   // Auto-scroll stderr when new logs arrive
-  $: if (logsToShowErr.length > 0) {
-    tick().then(() => {
-      setTimeout(() => {
-        if (stderrPre && isScrolledToBottomErr) stderrPre.scrollTop = stderrPre.scrollHeight;
-      }, 0);
-    });
-  }
+  run(() => {
+    if (logsToShowErr.length > 0) {
+      tick().then(() => {
+        setTimeout(() => {
+          if (stderrPre && isScrolledToBottomErr) stderrPre.scrollTop = stderrPre.scrollHeight;
+        }, 0);
+      });
+    }
+  });
 </script>
 
 <!-- Main Tasks Container -->
@@ -787,19 +796,19 @@ async function handleWebSocketMessage(message) {
     <div 
       class="new-tasks-notification"
       data-testid={`tasks-notification-${pendingTasks.length}`}
-      on:click={loadNewTasks}
-      on:keydown={e => e.key === 'Enter' && loadNewTasks()}
+      onclick={loadNewTasks}
+      onkeydown={e => e.key === 'Enter' && loadNewTasks()}
       tabindex="0"
       role="button"
       aria-label={`Show ${pendingTasks.length} new task${pendingTasks.length > 1 ? 's' : ''}`}
     >
     {pendingTasks.length} new task{pendingTasks.length > 1 ? 's' : ''} available
-      <button class="show-new-btn" on:click={loadNewTasks}>Show</button>
+      <button class="show-new-btn" onclick={loadNewTasks}>Show</button>
     </div>
   {/if}
 
   <!-- Filters Section -->
-  <form class="tasks-filters-form" on:submit|preventDefault={() => handleStatusClick()}>
+  <form class="tasks-filters-form" onsubmit={preventDefault(() => handleStatusClick())}>
 
     <!-- Command Search -->
     <div class="tasks-filter-group tasks-search-container {isLoading ? 'searching' : ''}">
@@ -811,13 +820,13 @@ async function handleWebSocketMessage(message) {
             bind:value={selectedCommand}
             placeholder="Search commands..."
             aria-label="Search tasks by command"
-            on:keydown={(e) => e.key === 'Enter' && handleStatusClick()}
+            onkeydown={(e) => e.key === 'Enter' && handleStatusClick()}
           />
         <div class="search-icons">
           {#if selectedCommand}
             <button 
               type="button" 
-              on:click={() => {
+              onclick={() => {
                 selectedCommand = '';
                 handleStatusClick();
               }}
@@ -829,7 +838,7 @@ async function handleWebSocketMessage(message) {
           {/if}
           <button 
             type="button" 
-            on:click={() => handleStatusClick()}
+            onclick={() => handleStatusClick()}
             class="search-button"
             disabled={isLoading}
             aria-label={isLoading ? "Searching..." : "Search"}
@@ -847,7 +856,7 @@ async function handleWebSocketMessage(message) {
     <!-- Sort By Dropdown -->
     <div class="tasks-filter-group">
       <label for="sortBy">Sort by</label>
-      <select id="sortBy" bind:value={sortBy} on:change={() => {
+      <select id="sortBy" bind:value={sortBy} onchange={() => {
           if (displayedTasks) {
               displayedTasks = handleSortBy();
           }
@@ -865,7 +874,7 @@ async function handleWebSocketMessage(message) {
       <select
         id="workerSelect"
         bind:value={selectedWorkerId}
-        on:change={() => {
+        onchange={() => {
           selectedWorkerId = selectedWorkerId !== '' ? Number(selectedWorkerId) : '';
           handleStatusClick();
         }}
@@ -883,7 +892,7 @@ async function handleWebSocketMessage(message) {
       <select 
         id="wfSelect" 
         bind:value={selectedWfId} 
-        on:change={() => {
+        onchange={() => {
           selectedWfId = selectedWfId !== '' ? Number(selectedWfId) : '';
           handleWfClick();
         }}
@@ -902,7 +911,7 @@ async function handleWebSocketMessage(message) {
         <select
           id="stepSelect"
           bind:value={selectedStepId}
-          on:change={() => {
+          onchange={() => {
             selectedStepId = selectedStepId !== '' ? Number(selectedStepId) : undefined;
             handleStatusClick();
           }}
@@ -919,28 +928,28 @@ async function handleWebSocketMessage(message) {
 
   <!-- Status Filter Tabs -->
   <div class="tasks-status-filters-bar tasks-status-tabs">
-    <button class="tasks-status-all" on:click={() => handleStatusClick()}>All</button>
-    <button class="tasks-status-pending" on:click={() => handleStatusClick('P')}>Pending</button>
-    <button class="tasks-status-assigned" on:click={() => handleStatusClick('A')}>Assigned</button>
-    <button class="tasks-status-accepted" on:click={() => handleStatusClick('C')}>Accepted</button>
-    <button class="tasks-status-downloading" on:click={() => handleStatusClick('D')}>Downloading</button>
-    <button class="tasks-status-on-hold" on:click={() => handleStatusClick('O')}>On-hold</button>
-    <button class="tasks-status-running" on:click={() => handleStatusClick('R')}>Running</button>
-    <button class="tasks-status-uploading-as" on:click={() => handleStatusClick('U')}>Uploading (AS)</button>
-    <button class="tasks-status-succeeded" on:click={() => handleStatusClick('S')}>Succeeded</button>
-    <button class="tasks-status-uploading-af" on:click={() => handleStatusClick('V')}>Uploading (AF)</button>
-    <button class="tasks-status-failed" on:click={() => handleStatusClick('F')}>Failed</button>
-    <button class="tasks-status-waiting" on:click={() => handleStatusClick('W')}>Waiting</button>
-    <button class="tasks-status-suspended" on:click={() => handleStatusClick('Z')}>Suspended</button>
-    <button class="tasks-status-canceled" on:click={() => handleStatusClick('X')}>Canceled</button>
+    <button class="tasks-status-all" onclick={() => handleStatusClick()}>All</button>
+    <button class="tasks-status-pending" onclick={() => handleStatusClick('P')}>Pending</button>
+    <button class="tasks-status-assigned" onclick={() => handleStatusClick('A')}>Assigned</button>
+    <button class="tasks-status-accepted" onclick={() => handleStatusClick('C')}>Accepted</button>
+    <button class="tasks-status-downloading" onclick={() => handleStatusClick('D')}>Downloading</button>
+    <button class="tasks-status-on-hold" onclick={() => handleStatusClick('O')}>On-hold</button>
+    <button class="tasks-status-running" onclick={() => handleStatusClick('R')}>Running</button>
+    <button class="tasks-status-uploading-as" onclick={() => handleStatusClick('U')}>Uploading (AS)</button>
+    <button class="tasks-status-succeeded" onclick={() => handleStatusClick('S')}>Succeeded</button>
+    <button class="tasks-status-uploading-af" onclick={() => handleStatusClick('V')}>Uploading (AF)</button>
+    <button class="tasks-status-failed" onclick={() => handleStatusClick('F')}>Failed</button>
+    <button class="tasks-status-waiting" onclick={() => handleStatusClick('W')}>Waiting</button>
+    <button class="tasks-status-suspended" onclick={() => handleStatusClick('Z')}>Suspended</button>
+    <button class="tasks-status-canceled" onclick={() => handleStatusClick('X')}>Canceled</button>
     <label style="margin-left:1em;display:flex;align-items:center;gap:0.3em;font-size:0.85em;color:gray;cursor:pointer;">
-      <input type="checkbox" bind:checked={showHidden} on:change={loadInitialTasks} />
+      <input type="checkbox" bind:checked={showHidden} onchange={loadInitialTasks} />
       Show hidden
     </label>
   </div>
 
   <!-- Task List Container -->
-  <div class="tasks-list-container" data-testid="tasks-list" bind:this={tasksContainer} on:scroll={handleScroll}>
+  <div class="tasks-list-container" data-testid="tasks-list" bind:this={tasksContainer} onscroll={handleScroll}>
 
       <!-- Task List Component -->
       <TaskList 
@@ -971,8 +980,8 @@ async function handleWebSocketMessage(message) {
     data-testid={`modal-log-${selectedTaskId}`}
     tabindex="0"
     aria-label="Close modal"
-    on:click={closeLogModal}
-    on:keydown={(e) => {
+    onclick={closeLogModal}
+    onkeydown={(e) => {
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') closeLogModal();
     }}
   >
@@ -982,8 +991,8 @@ async function handleWebSocketMessage(message) {
       aria-modal="true"
       tabindex="0"
       aria-labelledby="modal-title"
-      on:click|stopPropagation
-      on:keydown={(e) => {
+      onclick={stopPropagation(bubble('click'))}
+      onkeydown={(e) => {
         if (e.key === 'Escape') closeLogModal();
       }}
     >
@@ -1063,7 +1072,7 @@ async function handleWebSocketMessage(message) {
               {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedTaskStatus) && hasMoreStdout}
                 <button
                   class="tasks-load-more-arrow"
-                  on:click={() => { loadMoreLogs(selectedTaskId, 'stdout'); scrollToTop('stdout');; }}
+                  onclick={() => { loadMoreLogs(selectedTaskId, 'stdout'); scrollToTop('stdout');; }}
                   title="Load more Stdout"
                   data-testid={`load-more-stdout-${selectedTaskId}`}
                   aria-label="Load more logs"
@@ -1075,7 +1084,7 @@ async function handleWebSocketMessage(message) {
               <pre
                 bind:this={stdoutPre}
                 class="tasks-log-pre"
-                on:scroll={() => {
+                onscroll={() => {
                   if (!stdoutPre) return;
                   const threshold = 10;
                   const atBottom =
@@ -1098,7 +1107,7 @@ async function handleWebSocketMessage(message) {
               {#if selectedTaskId !== null && !['R', 'U', 'V'].includes(selectedTaskStatus) && hasMoreStderr}
                 <button
                   class="tasks-load-more-arrow"
-                  on:click={() => { loadMoreLogs(selectedTaskId, 'stderr'); scrollToTop('stderr');; }}
+                  onclick={() => { loadMoreLogs(selectedTaskId, 'stderr'); scrollToTop('stderr');; }}
                   title="Load more Stderr"
                   aria-label="Load more stderr logs"
                 >
@@ -1109,7 +1118,7 @@ async function handleWebSocketMessage(message) {
               <pre
                 bind:this={stderrPre}
                 class="tasks-log-pre"
-                on:scroll={() => {
+                onscroll={() => {
                   if (!stderrPre) return;
                   const threshold = 10;
                   const atBottom =
@@ -1126,13 +1135,13 @@ async function handleWebSocketMessage(message) {
       </div>
       <div style="display:flex;gap:0.5em;justify-content:flex-end;margin-top:0.5em;">
         {#if editMode}
-          <button class="tasks-modal-close" style="background:#4caf50;" on:click={submitEditAndRetry}>Save & Retry</button>
-          <button class="tasks-modal-close" on:click={() => { editMode = false; editError = ''; }}>Cancel</button>
+          <button class="tasks-modal-close" style="background:#4caf50;" onclick={submitEditAndRetry}>Save & Retry</button>
+          <button class="tasks-modal-close" onclick={() => { editMode = false; editError = ''; }}>Cancel</button>
         {:else}
           {#if selectedTaskStatus === 'F'}
-            <button class="tasks-modal-close" style="background:#ff9800;" on:click={startEditMode}>Edit & Retry</button>
+            <button class="tasks-modal-close" style="background:#ff9800;" onclick={startEditMode}>Edit & Retry</button>
           {/if}
-          <button class="tasks-modal-close" on:click={closeLogModal}>Close</button>
+          <button class="tasks-modal-close" onclick={closeLogModal}>Close</button>
         {/if}
       </div>
     </div>

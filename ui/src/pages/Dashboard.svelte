@@ -13,7 +13,7 @@ import { getJobs, delWorker, delJob } from '../lib/api';
    * Array of currently displayed jobs
    * @type {Array<Object>}
    */
-  let jobs = [];
+  let jobs = $state([]);
 
   /**
    * Array of pending jobs waiting to be loaded
@@ -25,19 +25,19 @@ import { getJobs, delWorker, delJob } from '../lib/api';
    * Flag indicating if more jobs are available to load
    * @type {boolean}
    */
-  let hasMoreJobs = true;
+  let hasMoreJobs = $state(true);
 
   /**
    * Loading state flag
    * @type {boolean}
    */
-  let isLoading = false;
+  let isLoading = $state(false);
 
   /**
    * Reference to the jobs container DOM element
    * @type {HTMLDivElement}
    */
-  let jobsContainer: HTMLDivElement;
+  let jobsContainer: HTMLDivElement = $state();
 
   /**
    * Flag indicating if the jobs container is scrolled to top
@@ -49,13 +49,13 @@ import { getJobs, delWorker, delJob } from '../lib/api';
    * Count of new jobs available
    * @type {number}
    */
-  let newJobsCount = 0;
+  let newJobsCount = $state(0);
 
   /**
    * Flag to show new jobs notification
    * @type {boolean}
    */
-  let showNewJobsNotification = false;
+  let showNewJobsNotification = $state(false);
 
   /**
    * Number of jobs to load at once
@@ -88,7 +88,7 @@ import { getJobs, delWorker, delJob } from '../lib/api';
    * become surface-worthy. Recompute reactively whenever jobs
    * changes (WS pushes update the array). See AlertBanner.svelte.
    */
-  $: alerts = (() => {
+  let alerts = $derived((() => {
     const out: Array<{ class: 'auth' | 'capacity' | 'quota' | 'warning' | 'info'; title: string; body?: string }> = [];
     if (!jobs || jobs.length === 0) return out;
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
@@ -106,7 +106,7 @@ import { getJobs, delWorker, delJob } from '../lib/api';
       });
     }
     return out;
-  })();
+  })());
 
   /**
    * Component lifecycle hook that runs on mount
@@ -224,12 +224,12 @@ import { getJobs, delWorker, delJob } from '../lib/api';
   <!-- Bottom section with jobs and create form -->
   <div class="dashboard-bottom-div">
     <!-- Jobs container with scroll handling -->
-    <div class="dashboard-job-section" bind:this={jobsContainer} on:scroll={handleScroll} data-testid="jobs-container">
+    <div class="dashboard-job-section" bind:this={jobsContainer} onscroll={handleScroll} data-testid="jobs-container">
       <!-- New jobs notification -->
       {#if showNewJobsNotification}
         <button
           class="new-jobs-notification"
-          on:click={loadNewJobs}
+          onclick={loadNewJobs}
           aria-label={`Show ${newJobsCount} new job${newJobsCount > 1 ? 's' : ''}`}
           data-testid="new-jobs-notification"
         >

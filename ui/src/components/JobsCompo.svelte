@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { run } from 'svelte/legacy';
+
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { Trash, RefreshCw } from 'lucide-svelte';
   import { getJobs, getJobStatusClass, getJobStatusText, delJob, getJobStatus } from '../lib/api';
@@ -9,30 +11,35 @@
   import { wsClient } from '../lib/wsClient';
   import type { WSMessage } from '../lib/wsTypes';
 
-  /**
+  
+  interface Props {
+    /**
    * List of all jobs passed as a prop to the component
    * @type {Job[]}
    */
-  export let jobs: Job[] = [];
+    jobs?: Job[];
+  }
+
+  let { jobs = $bindable([]) }: Props = $props();
 
   /**
    * Jobs enriched with status and progression for display
    * @type {Array<Job & { status?: string, progression?: number }>}
    */
-  let displayJobs: (Job & { status?: string, progression?: number })[] = [];
+  let displayJobs: (Job & { status?: string, progression?: number })[] = $state([]);
 
 
   /**
    * Flag to track initial data load status
    * @type {boolean}
    */
-  let hasLoaded = false;
+  let hasLoaded = $state(false);
 
   /**
    * Map storing job statuses and progressions by job ID
    * @type {Map<number, { status: string, progression?: number }>}
    */
-  let jobStatusMap = new Map<number, { status: string, progression?: number }>();
+  let jobStatusMap = $state(new Map<number, { status: string, progression?: number }>());
 
   let deleting = new Set<number>();
 
@@ -43,7 +50,7 @@
   let inFlightDeletes = 0;
 
   const dispatch = createEventDispatcher();
-  let sentinel: HTMLDivElement | null = null;
+  let sentinel: HTMLDivElement | null = $state(null);
   let observer: IntersectionObserver | null = null;
   let lastLoadRequest = 0;
 
@@ -206,27 +213,7 @@
     };
   });
 
-  /**
-   * Reactive statement that updates job data when jobs are initialized
-   * One-shot status hydration after first jobs arrive
-   */
-  $: if (jobs.length > 0 && !hasLoaded) {
-    // One-shot status hydration after first jobs arrive
-    updateJobData();
-    hasLoaded = true;
-  }
 
-  /**
-   * Reactive statement that creates display jobs with enriched status data
-   */
-  $: displayJobs = jobs.map(job => {
-    const statusInfo = jobStatusMap.get(job.jobId) || {};
-    return {
-      ...job,
-      status: statusInfo.status || job.status || 'unknown',
-      progression: statusInfo.progression ?? job.progression
-    } as Job & { status?: string; progression?: number };
-  });
 
   /**
    * Fetches latest job statuses and progressions
@@ -258,6 +245,30 @@
     console.log('Restarting job:', jobId);
     // TODO: Implement actual restart logic
   }
+  /**
+   * Reactive statement that updates job data when jobs are initialized
+   * One-shot status hydration after first jobs arrive
+   */
+  run(() => {
+    if (jobs.length > 0 && !hasLoaded) {
+      // One-shot status hydration after first jobs arrive
+      updateJobData();
+      hasLoaded = true;
+    }
+  });
+  /**
+   * Reactive statement that creates display jobs with enriched status data
+   */
+  run(() => {
+    displayJobs = jobs.map(job => {
+      const statusInfo = jobStatusMap.get(job.jobId) || {};
+      return {
+        ...job,
+        status: statusInfo.status || job.status || 'unknown',
+        progression: statusInfo.progression ?? job.progression
+      } as Job & { status?: string; progression?: number };
+    });
+  });
 </script>
 
 {#if displayJobs && displayJobs.length > 0}
@@ -318,7 +329,7 @@
                 <button
                   class="btn-action"
                   data-testid={`refresh-button-${job.jobId}`}
-                  on:click={() => handleRestart(job.jobId)}
+                  onclick={() => handleRestart(job.jobId)}
                   title="Restart"
                 >
                   <RefreshCw />
@@ -328,7 +339,7 @@
               <button
                 class="btn-action"
                 title="Delete"
-                on:click={() => deleteJob(job.jobId)}
+                onclick={() => deleteJob(job.jobId)}
                 data-testid={`trash-button-${job.jobId}`}
                 disabled={deleting.has(job.jobId) || pendingDelete.has(job.jobId)}
               >

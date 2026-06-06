@@ -16,37 +16,37 @@
    * Username input bound variable.
    * @type {string}
    */
-  let username = '';
+  let username = $state('');
 
   /**
    * Password input bound variable.
    * @type {string}
    */
-  let password = '';
+  let password = $state('');
 
   /**
    * Email input bound variable.
    * @type {string}
    */
-  let email = '';
+  let email = $state('');
 
   /**
    * Boolean flag indicating whether the new user is an admin.
    * @type {boolean}
    */
-  let isAdmin = false;
+  let isAdmin = $state(false);
 
   /**
    * Boolean flag to toggle password visibility in the input field.
    * @type {boolean}
    */
-  let showPassword = false;
+  let showPassword = $state(false);
 
   /**
    * Success message displayed after user creation.
    * @type {string}
    */
-  let successMessage: string = '';
+  let successMessage: string = $state('');
 
   /**
    * Timeout reference for clearing the success message.
@@ -140,7 +140,7 @@
       <button 
         type="button" 
         class="createForm-eye-button" 
-        on:click={toggleShowPassword} 
+        onclick={toggleShowPassword} 
         aria-label={showPassword ? "Hide password" : "Show password"}
       >
         {#if showPassword}
@@ -166,7 +166,7 @@
   <!-- Submit Button -->
   <button
     class="btn-validate createForm-add-button"
-    on:click={handleCreateUser}
+    onclick={handleCreateUser}
     aria-label="Create user"
     data-testid="create-user-button"
   >

@@ -9,23 +9,23 @@
   import '../styles/SettingPage.css';
 
   // Current authenticated user data
-  let user: User = undefined;
+  let user: User = $state(undefined);
 
   // Controls visibility of password change modal
-  let showModal = false;
+  let showModal = $state(false);
 
   // Password fields for change password operation
-  let oldPassword = '';
-  let newPassword = '';
-  let confirmNewPassword = '';
+  let oldPassword = $state('');
+  let newPassword = $state('');
+  let confirmNewPassword = $state('');
 
   // Stores error messages for password change operations
-  let errorMessage = '';
+  let errorMessage = $state('');
 
   // Toggle states for password visibility
-  let showOld = false;
-  let showNew = false;
-  let showConfirm = false;
+  let showOld = $state(false);
+  let showNew = $state(false);
+  let showConfirm = $state(false);
 
   /**
    * Component initialization lifecycle hook
@@ -114,7 +114,7 @@
           <span style="font-size: 0.7rem; margin-left: 0.5rem;">{user.isAdmin ? 'Admin' : 'No Admin'}</span>
         </div>
       </div>
-      <button class="link settings-change-password" data-testid="change-pswd-button" on:click={openModal}>Change your password here</button>
+      <button class="link settings-change-password" data-testid="change-pswd-button" onclick={openModal}>Change your password here</button>
     {/if}
   </div>
 
@@ -140,25 +140,25 @@
       <h3>Change your password</h3>
       <div class="settings-password-field">
         <input type={showOld ? 'text' : 'password'} bind:value={oldPassword} placeholder="Current Password" class="settings-input-password" />
-        <button class="settings-eye-button" on:click={() => toggleShow('old')}>
+        <button class="settings-eye-button" onclick={() => toggleShow('old')}>
           {#if showOld}<EyeOff size="20" />{:else}<Eye size="20" />{/if}
         </button>
       </div>
       <div class="settings-password-field">
         <input type={showNew ? 'text' : 'password'} bind:value={newPassword} placeholder="New Password" class="settings-input-password" />
-        <button class="settings-eye-button" on:click={() => toggleShow('new')}>
+        <button class="settings-eye-button" onclick={() => toggleShow('new')}>
           {#if showNew}<EyeOff size="20" />{:else}<Eye size="20" />{/if}
         </button>
       </div>
       <div class="settings-password-field">
         <input type={showConfirm ? 'text' : 'password'} bind:value={confirmNewPassword} placeholder="Confirm New Password" class="settings-input-password" />
-        <button class="settings-eye-button" on:click={() => toggleShow('confirm')}>
+        <button class="settings-eye-button" onclick={() => toggleShow('confirm')}>
           {#if showConfirm}<EyeOff size="20" />{:else}<Eye size="20" />{/if}
         </button>
       </div>
       <div class="settings-modal-buttons">
-        <button class="settings-confirm-btn" on:click={confirmPasswordChange}>Confirm</button>
-        <button class="settings-cancel-btn" on:click={closeModal}>Cancel</button>
+        <button class="settings-confirm-btn" onclick={confirmPasswordChange}>Confirm</button>
+        <button class="settings-cancel-btn" onclick={closeModal}>Cancel</button>
       </div>
       {#if errorMessage}<p style="color: red;">{errorMessage}</p>{/if}
     </div>

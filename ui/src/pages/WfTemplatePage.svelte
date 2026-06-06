@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { preventDefault } from 'svelte/legacy';
+
   import { onMount, onDestroy, tick } from 'svelte';
   import { wsClient } from '../lib/wsClient';
   import { Plus, Check } from 'lucide-svelte';
@@ -8,47 +10,47 @@
   import type { UploadTemplateResponse } from '../lib/types';
   import { Template } from '../../gen/taskqueue';
 
-  let showRunSuccessModal = false;
-  let showRunErrorModal = false;
-  let successMessage = '';
+  let showRunSuccessModal = $state(false);
+  let showRunErrorModal = $state(false);
+  let successMessage = $state('');
 
   // Array of workflow templates
-  let workflowsTemp = [];
+  let workflowsTemp = $state([]);
   // Current sorting method ('template' or 'name'). Default 'name' so the
   // listing is alphabetical out of the box; the dropdown lets the operator
   // switch to 'template' (id desc) when they want chronological / newest-
   // upload-first order.
-  let sortBy: 'template' | 'name' = 'name';
+  let sortBy: 'template' | 'name' = $state('name');
   // Currently selected file for upload
-  let selectedFile: File | null = null;
+  let selectedFile: File | null = $state(null);
   // Reference to file input element
-  let fileInput: HTMLInputElement;
+  let fileInput: HTMLInputElement = $state();
   // Content of selected file as Uint8Array
   let fileContent: Uint8Array | null = null;
   // Response from template upload API
   let uploadResponse: UploadTemplateResponse = {};
   // Whether to show error modal
-  let showErrorModal = false;
+  let showErrorModal = $state(false);
   // Error message to display
-  let errorMessage = '';
+  let errorMessage = $state('');
   // Whether to show parameter modal
-  let showParamModal = false;
+  let showParamModal = $state(false);
   // Currently selected template for parameter input
-  let selectedTemplate: Template | null = null;
+  let selectedTemplate: Template | null = $state(null);
   // User-provided parameter values
-  let userParams: Record<string, any> = {};
+  let userParams: Record<string, any> = $state({});
   // --- Advanced run options (collapsed by default) ---
   // runMode: 'new' (default), 'continue' (extend the last matching run), or
   // 'extend' (extend a specific workflow id). See specs/workflow_extend.md.
-  let runMode: 'new' | 'continue' | 'extend' = 'new';
-  let runExtendWorkflowId: number | null = null;
-  let runRetryFailedOnly = false;
+  let runMode: 'new' | 'continue' | 'extend' = $state('new');
+  let runExtendWorkflowId: number | null = $state(null);
+  let runRetryFailedOnly = $state(false);
   // Parameter validation errors
   let paramErrors: Record<string, string> = {};
   // Whether to show parameter errors
-  let showParamErrors = false;
+  let showParamErrors = $state(false);
   // Tracks which parameter help texts are visible
-  let showHelp: Record<string, boolean> = {};
+  let showHelp: Record<string, boolean> = $state({});
   // Function to unsubscribe from WebSocket
   let unsubscribeWS: (() => void) | null = null;
 
@@ -95,7 +97,7 @@
   // Whether the listing should include templates the operator has hidden
   // (via the per-row hide button or `scitq template update --hide`). The
   // toggle is bound to a checkbox in the template page header.
-  let showHidden = false;
+  let showHidden = $state(false);
 
   /** Reload templates from the server honouring the showHidden toggle. */
   async function reloadTemplates() {
@@ -359,10 +361,10 @@
   <!-- Header section with sorting and file actions -->
   <div class="wfTemp-header">
     <!-- Sort form -->
-    <form class="wfTemp-sort-form" on:submit|preventDefault={() => handleSortBy()}>
+    <form class="wfTemp-sort-form" onsubmit={preventDefault(() => handleSortBy())}>
       <div class="wfTemp-sort-group">
         <label for="sortBy">Sort by</label>
-        <select id="sortBy" bind:value={sortBy} on:change={() => handleSortBy()}>
+        <select id="sortBy" bind:value={sortBy} onchange={() => handleSortBy()}>
           <option value="template">Template</option>
           <option value="name">Name</option>
         </select>
@@ -374,7 +376,7 @@
       type="file"
       aria-label="File upload"
       bind:this={fileInput}
-      on:change={handleFileChange}
+      onchange={handleFileChange}
       style="display: none;"
     />
 
@@ -391,7 +393,7 @@
         />
 
         {#if selectedFile}
-          <button class="wfTemp-clear-file" on:click={resetFileSelection} title="Clear selected file">
+          <button class="wfTemp-clear-file" onclick={resetFileSelection} title="Clear selected file">
             &times;
           </button>
         {/if}
@@ -399,12 +401,12 @@
       
       <!-- Action buttons -->
       <div class="wfTemp-button-group">
-        <button class="wfTemp-action-button wfTemp-add-button" on:click={handleAdd}>
+        <button class="wfTemp-action-button wfTemp-add-button" onclick={handleAdd}>
           <Plus size={20} title="Add Workflow" />
         </button>
         <button 
           class="wfTemp-action-button wfTemp-validate-button" 
-          on:click={() => handleValidate(false)}
+          onclick={() => handleValidate(false)}
           disabled={!selectedFile}
         >
           <Check size={20} title="Validate" />
@@ -418,7 +420,7 @@
        hidden are excluded by default to keep the page focused on what's
        currently runnable. -->
   <label class="wfTemp-show-hidden">
-    <input type="checkbox" bind:checked={showHidden} on:change={reloadTemplates} />
+    <input type="checkbox" bind:checked={showHidden} onchange={reloadTemplates} />
     Show hidden templates
   </label>
 
@@ -433,8 +435,8 @@
       <h2>Upload Error</h2>
       <p>{errorMessage}</p>
       <div class="wfTemp-modal-actions">
-        <button on:click={handleForceUpload}>Force Upload</button>
-        <button on:click={resetFileSelection}>Cancel</button>
+        <button onclick={handleForceUpload}>Force Upload</button>
+        <button onclick={resetFileSelection}>Cancel</button>
       </div>
     </div>
   </div>
@@ -447,7 +449,7 @@
     role="dialog"
     aria-modal="true"
     tabindex="0"
-    on:keydown={(e) => {
+    onkeydown={(e) => {
       if (e.key === 'Escape') showRunSuccessModal = false;
     }}
   >
@@ -455,10 +457,10 @@
       <h2>Workflow Created</h2>
       <p>{successMessage}</p>
       <div class="wfTemp-modal-actions">
-        <button class="button-primary" on:click={() => { showRunSuccessModal = false; window.location.hash = '#/workflows'; }}>
+        <button class="button-primary" onclick={() => { showRunSuccessModal = false; window.location.hash = '#/workflows'; }}>
           Go to workflows
         </button>
-        <button class="button-secondary" on:click={() => (showRunSuccessModal = false)}>
+        <button class="button-secondary" onclick={() => (showRunSuccessModal = false)}>
           Close
         </button>
       </div>
@@ -469,12 +471,12 @@
 <!-- ----------- RUN ERROR MODAL ---------- -->
 {#if showRunErrorModal}
   <div class="wfTemp-modal-backdrop" role="dialog" aria-modal="true" tabindex="0"
-    on:keydown={(e) => { if (e.key === 'Escape') showRunErrorModal = false; }}>
+    onkeydown={(e) => { if (e.key === 'Escape') showRunErrorModal = false; }}>
     <div class="wfTemp-modal wfTemp-error-modal">
       <h2 style="color: #ff5555;">Template Error: Workflow Not Created</h2>
       <p>{errorMessage}</p>
       <div class="wfTemp-modal-actions">
-        <button class="button-primary" on:click={() => showRunErrorModal = false}>Close</button>
+        <button class="button-primary" onclick={() => showRunErrorModal = false}>Close</button>
       </div>
     </div>
   </div>
@@ -553,7 +555,7 @@
                 <div class="wfTemp-text">
                   <input
                     type="file"
-                    on:change={(e) => {
+                    onchange={(e) => {
                       const f = e.target.files && e.target.files[0];
                       if (!f) return;
                       const r = new FileReader();
@@ -582,7 +584,7 @@
               {/if}
               
               {#if param.help}
-                <button class="wfTemp-help-button" on:click={() => toggleHelp(param.name)}>
+                <button class="wfTemp-help-button" onclick={() => toggleHelp(param.name)}>
                   ?
                 </button>
               {/if}
@@ -621,7 +623,7 @@
               placeholder="id"
               class="wfTemp-extend-id"
               bind:value={runExtendWorkflowId}
-              on:focus={() => (runMode = 'extend')}
+              onfocus={() => (runMode = 'extend')}
             />
           </label>
           <label class="wfTemp-run-opt wfTemp-run-subopt" class:wfTemp-opt-disabled={runMode === 'new'}>
@@ -633,8 +635,8 @@
 
       <!-- Modal action buttons -->
       <div class="wfTemp-modal-actions">
-        <button on:click={handleRunTemplate}>Run</button>
-        <button on:click={() => showParamModal = false}>Cancel</button>
+        <button onclick={handleRunTemplate}>Run</button>
+        <button onclick={() => showParamModal = false}>Cancel</button>
       </div>
     </div>
   </div>

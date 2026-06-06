@@ -1,5 +1,7 @@
 <script lang="ts">
-  /**
+  
+  interface Props {
+    /**
    * Generic alert banner. Takes a list of alerts and renders one
    * coloured banner per alert. Designed to handle multiple emergency
    * types (auth errors today, future: prolonged stuck-D worker piles,
@@ -11,11 +13,14 @@
    * was failing — the signal needs to be one glance away on every
    * page that loads the dashboard.
    */
-  export let alerts: Array<{
+    alerts?: Array<{
     class: 'auth' | 'capacity' | 'quota' | 'warning' | 'info';
     title: string;
     body?: string;
-  }> = [];
+  }>;
+  }
+
+  let { alerts = [] }: Props = $props();
 </script>
 
 {#if alerts.length > 0}

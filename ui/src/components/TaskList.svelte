@@ -1,55 +1,41 @@
 <script lang="ts">
-  import { onMount, afterUpdate } from 'svelte';
-  import { getJobStatusClass, getJobStatusText, getAllTasks, getSteps, retryTask } from '../lib/api';
-  import { RefreshCcw, Download, Trash, Eye, Workflow } from 'lucide-svelte';
+  import { getJobStatusClass, getJobStatusText, retryTask } from '../lib/api';
+  import { RefreshCcw, Download, Trash, Eye } from 'lucide-svelte';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
-  import { wsClient } from '../lib/wsClient';
 
+  interface Props {
+    /** Mapping of task IDs to their saved logs */
+    taskLogsSaved?: LogChunk[];
+    /** List of all available workers */
+    workers?: Worker[];
+    /** List of all available workflows */
+    workflows?: Workflow[];
+    /** List of all steps from all workflows */
+    allSteps?: Step[];
+    /** Callback function triggered when "Full Log" button is clicked */
+    onOpenModal: (taskId: number) => void;
+    /** Currently displayed tasks in the table */
+    displayedTasks?: Task[];
+  }
 
-  /**
-   * Mapping of task IDs to their saved logs
-   * @type {LogChunk[]}
-   */
-  export let taskLogsSaved: LogChunk[] = [];
+  let {
+    taskLogsSaved = [],
+    workers = [],
+    workflows = [],
+    allSteps = [],
+    onOpenModal,
+    displayedTasks = [],
+  }: Props = $props();
 
-  /**
-   * List of all available workers
-   * @type {Worker[]}
-   */
-  export let workers: Worker[] = [];
+  /** Mapping of task IDs to their log containers for auto-scrolling.
+   *  No bind:this site populates this map in the current template, so the
+   *  effect below is effectively a no-op until a `bind:this={logContainers[task.taskId]}`
+   *  is wired in. Keeping the structure so the intent (auto-scroll log
+   *  panes to the bottom whenever new lines arrive) is preserved. */
+  let logContainers: Record<number, HTMLDivElement> = $state({});
 
-  /**
-   * List of all available workflows
-   * @type {Workflow[]}
-   */
-  export let workflows: Workflow[] = [];
-
-  /**
-   * List of all steps from all workflows
-   * @type {Step[]}
-   */
-  export let allSteps: Step[] = [];
-
-  /**
-   * Callback function triggered when "Full Log" button is clicked
-   * @type {(taskId: number) => void}
-   */
-  export let onOpenModal: (taskId: number) => void;
-
-  /**
-   * Currently displayed tasks in the table
-   * @type {Task[]}
-   */
-  export let displayedTasks: Task[] = [];
-
-  /**
-   * Mapping of task IDs to their log containers for auto-scrolling
-   * @type {Record<number, HTMLDivElement>}
-   */
-  let logContainers: Record<number, HTMLDivElement> = {};
-
-  let errorMessage: string | null = null;
+  let errorMessage: string | null = $state(null);
 
   /**
    * Resolves and returns a display name based on provided identifiers
@@ -78,10 +64,13 @@
   }
 
   /**
-   * Auto-scrolls log containers to bottom after DOM updates
-   * @returns {void}
+   * Auto-scrolls log containers to bottom after the reactive system flushes
+   * (replaces Svelte 4's afterUpdate). Touches `taskLogsSaved` so the effect
+   * re-runs whenever new log lines arrive.
    */
-  afterUpdate(() => {
+  $effect(() => {
+    // Reactive dep: rerun when log content changes.
+    void taskLogsSaved;
     Object.values(logContainers).forEach(container => {
       if (container) container.scrollTop = container.scrollHeight;
     });
@@ -193,8 +182,8 @@ async function retryTaskClick(taskId: number) {
             
             <!-- Action Buttons -->
             <td class="workerCompo-actions">
-              <button class="btn-action" title="Full Log" data-testid={`full-log-${task.taskId}`} on:click={() => onOpenModal(task.taskId)}><Eye /></button>
-              <button class="btn-action" title="Restart" on:click={() => retryTaskClick(task.taskId)}><RefreshCcw /></button>
+              <button class="btn-action" title="Full Log" data-testid={`full-log-${task.taskId}`} onclick={() => onOpenModal(task.taskId)}><Eye /></button>
+              <button class="btn-action" title="Restart" onclick={() => retryTaskClick(task.taskId)}><RefreshCcw /></button>
               <br />
               <button class="btn-action" title="Download"><Download /></button>
               <button class="btn-action" title="Delete"><Trash /></button>

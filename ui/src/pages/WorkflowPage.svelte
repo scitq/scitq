@@ -3,28 +3,28 @@
   import { getWorkFlow, getWorkers, getListUser } from '../lib/api';
   // Workers and mapping by stepId (passed down to WorkflowList → StepList)
   let workers: taskqueue.Worker[] = [];
-  let workersPerStepId: Map<number, taskqueue.Worker[]> = new Map();
+  let workersPerStepId: Map<number, taskqueue.Worker[]> = $state(new Map());
   import { wsClient } from '../lib/wsClient';
   import { wfCounters } from '../lib/wfCounters';
   import WorkflowList from '../components/WorkflowList.svelte';
   import '../styles/workflow.css';
 
   // Array of currently displayed workflows
-  let workflows = [];
+  let workflows = $state([]);
   // Array of newly created workflows waiting to be displayed
   let pendingWorkflows = [];    
   // Flag indicating if more workflows are available to load
-  let hasMoreWorkflows = true;
+  let hasMoreWorkflows = $state(true);
   // Loading state flag
-  let isLoading = false;
+  let isLoading = $state(false);
   // Reference to the list container DOM element
-  let listContainer: HTMLDivElement;
+  let listContainer: HTMLDivElement = $state();
   // Flag indicating if list is scrolled to top
   let isScrolledToTop = true;
   // Count of new workflows waiting to be displayed
-  let newWorkflowsCount = 0;
+  let newWorkflowsCount = $state(0);
   // Flag to show new workflows notification
-  let showNewWorkflowsNotification = false;
+  let showNewWorkflowsNotification = $state(false);
 
   // Number of workflows to load at once
   const WORKFLOWS_CHUNK_SIZE = 25;
@@ -80,7 +80,7 @@
 
   // Name filter (case-insensitive substring match server-side). Initialized
   // from the URL so the filter survives navigation and is link-shareable.
-  let nameFilter = readUrlParam('search');
+  let nameFilter = $state(readUrlParam('search'));
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // User filter, also in the URL hash (same survival/sharing semantics as
@@ -100,14 +100,14 @@
   // round-trip to compute "users with workflows", and we explicitly avoid
   // deriving the list from already-loaded workflows since pagination
   // would silently hide users whose runs haven't been fetched yet.
-  let otherUsers: string[] = [];
-  let userFilter: string = (() => {
+  let otherUsers: string[] = $state([]);
+  let userFilter: string = $state((() => {
     const hash = window.location.hash;
     const qIdx = hash.indexOf('?');
     const params = qIdx >= 0 ? new URLSearchParams(hash.slice(qIdx + 1)) : new URLSearchParams();
     if (params.has('user')) return params.get('user') || '';  // explicit empty = All users
     return '@me';                                              // never visited → default
-  })();
+  })());
 
   // WebSocket unsubscribe function
   let unsubscribeWS: (() => void) | null = null;
@@ -360,7 +360,7 @@
         type="text"
         class="wf-search-input"
         bind:value={nameFilter}
-        on:input={onSearchInput}
+        oninput={onSearchInput}
         placeholder="Search workflows by name…"
         aria-label="Search workflows by name"
         data-testid="wf-search-input"
@@ -368,7 +368,7 @@
       <select
         class="wf-user-select"
         bind:value={userFilter}
-        on:change={onUserFilterChange}
+        onchange={onUserFilterChange}
         aria-label="Filter workflows by user"
         data-testid="wf-user-select"
       >
@@ -392,7 +392,7 @@
     {#if showNewWorkflowsNotification}
       <button 
         class="new-workflows-notification" 
-        on:click={loadNewWorkflows}
+        onclick={loadNewWorkflows}
         aria-label={`View ${newWorkflowsCount} new workflow(s)`}
       >
         {newWorkflowsCount} new workflow(s) available
@@ -404,7 +404,7 @@
     <div
       class="workflow-list-scroll-container"
       bind:this={listContainer}
-      on:scroll={handleScroll}
+      onscroll={handleScroll}
     >
       <WorkflowList {workflows} workersPerStepId={workersPerStepId} />
 
@@ -412,7 +412,7 @@
         <div class="load-more-row">
           <button
             class="load-more-btn"
-            on:click={loadMoreWorkflows}
+            onclick={loadMoreWorkflows}
             disabled={isLoading}
             data-testid="wf-load-more"
           >

@@ -3,12 +3,16 @@
   import { X } from 'lucide-svelte';
   import { getTemplateRun } from '../lib/api';
 
-  export let templateRunId: number | null = null;
-  export let onClose: () => void;
+  interface Props {
+    templateRunId?: number | null;
+    onClose: () => void;
+  }
 
-  let run: taskqueue.TemplateRun | null = null;
-  let loading = true;
-  let error = '';
+  let { templateRunId = null, onClose }: Props = $props();
+
+  let run: taskqueue.TemplateRun | null = $state(null);
+  let loading = $state(true);
+  let error = $state('');
 
   onMount(async () => {
     if (templateRunId == null) {
@@ -27,7 +31,7 @@
   });
 
   // Pretty-print param_values_json into a sorted key/value table.
-  $: params = (() => {
+  let params = $derived((() => {
     if (!run?.paramValuesJson) return [];
     try {
       const obj = JSON.parse(run.paramValuesJson);
@@ -35,18 +39,18 @@
     } catch {
       return [{ key: '(raw)', val: run.paramValuesJson }];
     }
-  })();
+  })());
 
   function onBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onClose();
   }
 </script>
 
-<div class="modal-backdrop" on:click={onBackdropClick} on:keydown={(e) => e.key === 'Escape' && onClose()} role="dialog" aria-modal="true" tabindex="-1">
+<div class="modal-backdrop" onclick={onBackdropClick} onkeydown={(e) => e.key === 'Escape' && onClose()} role="dialog" aria-modal="true" tabindex="-1">
   <div class="modal-card">
     <div class="modal-header">
       <h2>Template run details</h2>
-      <button class="modal-close" on:click={onClose} aria-label="Close"><X size="18" /></button>
+      <button class="modal-close" onclick={onClose} aria-label="Close"><X size="18" /></button>
     </div>
     <div class="modal-body">
       {#if loading}

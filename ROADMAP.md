@@ -32,6 +32,7 @@
 [✅] add access to timeout in python DSL
 [✅] add run duration measurement
 [✅] add helper as `source /resource/shell_helpers.sh` (or `source /builtinresource/shell_helpers.sh` ?), rather than copying it in all scripts, same for find_pairs, (`source /builtinresource/shell_biology.sh`)
+[✅] migrate UI to Svelte 5 runes mode — we're already on Svelte 5.27 but in legacy mode, which preserves Svelte 4 reactivity (incl. the `safe_not_equal` cascade we hit on the workflows page). Runes (`$state`, `$derived`, `$effect`) would make that class of bug impossible. Driver script ready at `tools/svelte5_migrate_driver.py`; budget ~a weekend for the silent-bug hunt after the mechanical pass. Sideband-store workaround stays as defence in depth.
 
 # TODO later
 
@@ -40,4 +41,4 @@
 [ ] implement workflow strategy (sticky)
 [ ] heterogeneous worker pools per step — currently a step has one `worker_pool` and one `task_spec`, which assumes every worker serving the step shares the same per-task budget shape. Some workloads would benefit from declaring N pools per step with paired task_specs (e.g. a NUMA-bound megahit step that recruits both EPYC 7451 boxes and Intel single-socket machines, each with its own `task_spec.numa` derivation). Goes beyond NUMA — same model unlocks "GPU pool + CPU pool serving the same step" and similar. Worth doing once a real workload demands it.
 [ ] chaining workflow v2 — next iteration of the workflow_chain feature shipped in commit 49d6a19 (`specs/workflow_chain.md`). Scope TBD when a real need surfaces.
-[ ] migrate UI to Svelte 5 runes mode — we're already on Svelte 5.27 but in legacy mode, which preserves Svelte 4 reactivity (incl. the `safe_not_equal` cascade we hit on the workflows page). Runes (`$state`, `$derived`, `$effect`) would make that class of bug impossible. Driver script ready at `tools/svelte5_migrate_driver.py`; budget ~a weekend for the silent-bug hunt after the mechanical pass. Sideband-store workaround stays as defence in depth.
+

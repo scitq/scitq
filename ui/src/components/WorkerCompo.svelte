@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { run, stopPropagation, createBubbler } from 'svelte/legacy';
+
+  const bubble = createBubbler();
   import { onMount, onDestroy } from 'svelte';
   import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, listWorkerEvents} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
@@ -11,36 +14,41 @@
   /**
    * Internal array of workers (stateful, managed here)
    */
-  let internalWorkers: Array<Worker> = [];
+  let internalWorkers: Array<Worker> = $state([]);
   
-  /**
+  
+  interface Props {
+    /**
    * Callback function when worker is updated
    * @type {(event: { detail: { workerId: number; updates: Partial<Worker> } }) => void}
    */
-  export let onWorkerUpdated: (event: { detail: { workerId: number; updates: Partial<Worker> } }) => void = () => {};
+    onWorkerUpdated?: (event: { detail: { workerId: number; updates: Partial<Worker> } }) => void;
+  }
+
+  let { onWorkerUpdated = () => {} }: Props = $props();
   
   /**
    * Map of worker statistics by worker ID
    * @type {Record<number, taskqueue.WorkerStats>}
    */
-  let workersStatsMap: Record<number, taskqueue.WorkerStats> = {};
+  let workersStatsMap: Record<number, taskqueue.WorkerStats> = $state({});
 
   /**
    * Count of tasks by worker ID and status
    * @type {Record<number, Record<string, number>>}
    */
-  let tasksCount: Record<number, Record<string, number>> = {};
+  let tasksCount: Record<number, Record<string, number>> = $state({});
   
   /**
    * Count of all tasks by status
    * @type {Record<string, number>}
    */
-  let allCount: Record<string, number> = {};
+  let allCount: Record<string, number> = $state({});
   /**
    * Total number of tasks
    * @type {number}
    */
-  let totalCount = 0;
+  let totalCount = $state(0);
   
   // Set of worker IDs currently being acted upon (pause/delete)
   let acting = new Set<number>();
@@ -49,13 +57,13 @@
    * Per-worker display mode ('table' or 'charts'), keyed by workerId.
    * Workers not in the map have stats collapsed (no stats shown).
    */
-  let workerDisplayMode: Record<number, 'table' | 'charts'> = {};
+  let workerDisplayMode: Record<number, 'table' | 'charts'> = $state({});
 
   /**
    * Flag indicating if data has been loaded
    * @type {boolean}
    */
-  let hasLoaded = false;
+  let hasLoaded = $state(false);
 
 
   /**
@@ -74,44 +82,42 @@
    * Per-worker history of disk I/O metrics
    * @type {Record<number, Array<{time: Date, read: number, write: number}>>}
    */
-  let diskHistories: Record<number, {time: Date, read: number, write: number}[]> = {};
+  let diskHistories: Record<number, {time: Date, read: number, write: number}[]> = $state({});
   /**
    * Per-worker history of network I/O metrics
    * @type {Record<number, Array<{time: Date, sent: number, received: number}>>}
    */
-  let networkHistories: Record<number, {time: Date, sent: number, received: number}[]> = {};
+  let networkHistories: Record<number, {time: Date, sent: number, received: number}[]> = $state({});
   
   // Zoom controls
   /**
    * Current zoom level for disk chart
    * @type {number}
    */
-  let diskZoom = 1;
+  let diskZoom = $state(1);
   
   /**
    * Current zoom level for network chart
    * @type {number}
    */
-  let networkZoom = 1;
+  let networkZoom = $state(1);
   
   /**
    * Flag for auto-zoom on disk chart
    * @type {boolean}
    */
-  let diskAutoZoom = true;
+  let diskAutoZoom = $state(true);
   
   /**
    * Flag for auto-zoom on network chart
    * @type {boolean}
    */
-  let networkAutoZoom = true;
+  let networkAutoZoom = $state(true);
 
   // --- WS unsubscribe reference for cleanup ---
   let unsubscribeWS: (() => void) | null = null;
 
 
-  // Make reactive
-  $: diskZoom, networkZoom, diskAutoZoom, networkAutoZoom;
 
   /**
    * Component mount lifecycle hook
@@ -262,11 +268,6 @@
     };
   });
 
-  // Reactive statements
-  $: if (internalWorkers.length > 0 && !hasLoaded) {
-    updateWorkerData();
-    hasLoaded = true;
-  }
 
 
   /**
@@ -614,25 +615,25 @@
   }
 
   /** State for workflow/step editor */
-  let editingWorkflowStepFor: number | null = null;
+  let editingWorkflowStepFor: number | null = $state(null);
 
-  let workflowOptions: Array<any> = [];
-  let workflowOffset: number = 0;
-  let selectedWorkflowId: number | null = null;
-  let workflowSearch: string = "";
+  let workflowOptions: Array<any> = $state([]);
+  let workflowOffset: number = $state(0);
+  let selectedWorkflowId: number | null = $state(null);
+  let workflowSearch: string = $state("");
   let workflowSearchTimer: ReturnType<typeof setTimeout> | null = null;
   const WORKFLOW_PAGE = 50;
 
-  let stepOptions: Array<any> = [];
-  let selectedStepId: number | null = null;
+  let stepOptions: Array<any> = $state([]);
+  let selectedStepId: number | null = $state(null);
 
-  let loadingWorkflows: boolean = false;
+  let loadingWorkflows: boolean = $state(false);
   let loadingSteps: boolean = false;
 
   /** Worker-events viewer state (the info/warning badge opens this). */
-  let eventsWorker: any = null;          // worker whose events are shown, or null
-  let workerEvents: Array<any> = [];
-  let eventsLoading: boolean = false;
+  let eventsWorker: any = $state(null);          // worker whose events are shown, or null
+  let workerEvents: Array<any> = $state([]);
+  let eventsLoading: boolean = $state(false);
 
   async function openWorkerEvents(worker: any) {
     eventsWorker = worker;
@@ -733,6 +734,17 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
     }
   }
 
+  // Make reactive
+  run(() => {
+    diskZoom, networkZoom, diskAutoZoom, networkAutoZoom;
+  });
+  // Reactive statements
+  run(() => {
+    if (internalWorkers.length > 0 && !hasLoaded) {
+      updateWorkerData();
+      hasLoaded = true;
+    }
+  });
 </script>
 
 {#if internalWorkers && internalWorkers.length > 0}
@@ -840,14 +852,14 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                     type="button"
                     class="worker-events-badge worker-events-warn"
                     title="{worker.recentFailures} task failure(s) since this worker's last success — it may be broken for this step. Click for events."
-                    on:click|stopPropagation={() => openWorkerEvents(worker)}
+                    onclick={stopPropagation(() => openWorkerEvents(worker))}
                   >⚠</button>
                 {:else}
                   <button
                     type="button"
                     class="worker-events-badge worker-events-info"
                     title="Worker events"
-                    on:click|stopPropagation={() => openWorkerEvents(worker)}
+                    onclick={stopPropagation(() => openWorkerEvents(worker))}
                   >ⓘ</button>
                 {/if}
               </td>
@@ -861,12 +873,12 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
           type="text"
           placeholder="search…"
           bind:value={workflowSearch}
-          on:input={onWorkflowSearchInput}
+          oninput={onWorkflowSearchInput}
           class="wf-search"
         />
         <select
           bind:value={selectedWorkflowId}
-          on:change={() => loadStepsForWorkflow(selectedWorkflowId !== null && Number(selectedWorkflowId) > 0 ? Number(selectedWorkflowId) : null)}
+          onchange={() => loadStepsForWorkflow(selectedWorkflowId !== null && Number(selectedWorkflowId) > 0 ? Number(selectedWorkflowId) : null)}
         >
           <option value={null}>-- select workflow --</option>
           <option value={-1}>-- Clear --</option>
@@ -878,7 +890,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 
       <button
         class="btn-action"
-        on:click={loadWorkflows}
+        onclick={loadWorkflows}
         disabled={loadingWorkflows || Number(selectedWorkflowId) === -1}
         title="Load more workflows"
       >+</button>
@@ -900,7 +912,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       <button
         class="btn-action"
         title="Save"
-        on:click={async () => {
+        onclick={async () => {
           if (Number(selectedWorkflowId) === -1) {
             await updateWorkerConfig(worker.workerId, { clearStep: true });
             internalWorkers = internalWorkers.map(w =>
@@ -934,7 +946,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       <button
         class="btn-action"
         title="Cancel"
-        on:click={() => {
+        onclick={() => {
           editingWorkflowStepFor = null;
           stepOptions = [];
         }}
@@ -956,7 +968,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       <button
         class="btn-action"
         title="Edit workflow/step"
-        on:click={() => {
+        onclick={() => {
           editingWorkflowStepFor = worker.workerId;
           selectedWorkflowId = worker.workflowId ?? null;
           selectedStepId = worker.stepId ?? null;
@@ -981,12 +993,12 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   <div class="controls">
                     <button 
                       class="small-btn" 
-                      on:click={() => updateValue(worker, 'concurrency', 1)}
+                      onclick={() => updateValue(worker, 'concurrency', 1)}
                       data-testid={`increase-concurrency-${worker.workerId}`}
                     >+</button>
                     <button 
                       class="small-btn" 
-                      on:click={() => updateValue(worker, 'concurrency', -1)}
+                      onclick={() => updateValue(worker, 'concurrency', -1)}
                       data-testid={`decrease-concurrency-${worker.workerId}`}
                     >-</button>
                   </div>
@@ -999,12 +1011,12 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                   <div class="controls">
                     <button 
                       class="small-btn" 
-                      on:click={() => updateValue(worker, 'prefetch', 1)}
+                      onclick={() => updateValue(worker, 'prefetch', 1)}
                       data-testid={`increase-prefetch-${worker.workerId}`}
                     >+</button>
                     <button 
                       class="small-btn" 
-                      on:click={() => updateValue(worker, 'prefetch', -1)}
+                      onclick={() => updateValue(worker, 'prefetch', -1)}
                       data-testid={`decrease-prefetch-${worker.workerId}`}
                     >-</button>
                   </div>
@@ -1231,21 +1243,21 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 
               <td class="workerCompo-actions">
                 <div class="action-row">
-                  <button class="btn-action" title="Pause" on:click={() => pauseWorker(worker)} disabled={acting.has(worker.workerId)} data-testid={`pause-worker-${worker.workerId}`}>
+                  <button class="btn-action" title="Pause" onclick={() => pauseWorker(worker)} disabled={acting.has(worker.workerId)} data-testid={`pause-worker-${worker.workerId}`}>
                     <PauseCircle />
                   </button>
                   <button class="btn-action" title="Clean"><Eraser /></button>
                 </div>
                 <div class="action-row">
                   <button class="btn-action" title="Restart"><RefreshCw /></button>
-                  <button class="btn-action" title="Delete" on:click={() => { deleteWorker(worker.workerId); }} data-testid={`delete-worker-${worker.workerId}`} disabled={acting.has(worker.workerId)}>
+                  <button class="btn-action" title="Delete" onclick={() => { deleteWorker(worker.workerId); }} data-testid={`delete-worker-${worker.workerId}`} disabled={acting.has(worker.workerId)}>
                     <Trash />
                   </button>
                   <button
                     class="btn-action"
                     class:btn-permanent-active={worker.isPermanent}
                     title={worker.isPermanent ? 'Unset permanent' : 'Set permanent'}
-                    on:click={async () => {
+                    onclick={async () => {
                       await updateWorkerConfig(worker.workerId, { isPermanent: !worker.isPermanent });
                       worker.isPermanent = !worker.isPermanent;
                     }}
@@ -1260,7 +1272,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                       title={worker.upgradeRequested
                         ? `Upgrade pending (${worker.upgradeRequested}) — click to cancel`
                         : 'Upgrade worker (click=normal idle-wait, shift-click=emergency drain)'}
-                      on:click={(ev) => upgradeWorker(worker, ev)}
+                      onclick={(ev) => upgradeWorker(worker, ev)}
                       disabled={acting.has(worker.workerId)}
                       data-testid={`upgrade-worker-${worker.workerId}`}
                     >
@@ -1270,11 +1282,11 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                 </div>
                 <div class="action-row">
                     {#if workerDisplayMode[worker.workerId] === 'charts'}
-                      <button data-testid={`table-worker-${worker.workerId}`} class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'table'; workerDisplayMode = workerDisplayMode; }} title="Numbers">
+                      <button data-testid={`table-worker-${worker.workerId}`} class="btn-action" onclick={() => { workerDisplayMode[worker.workerId] = 'table'; workerDisplayMode = workerDisplayMode; }} title="Numbers">
                         <FileDigit />
                       </button>
                     {:else}
-                      <button data-testid={`charts-worker-${worker.workerId}`} class="btn-action" on:click={() => { workerDisplayMode[worker.workerId] = 'charts'; workerDisplayMode = workerDisplayMode; }} title="Charts">
+                      <button data-testid={`charts-worker-${worker.workerId}`} class="btn-action" onclick={() => { workerDisplayMode[worker.workerId] = 'charts'; workerDisplayMode = workerDisplayMode; }} title="Charts">
                         <BarChart/>
                       </button>
                     {/if}
@@ -1292,14 +1304,14 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 
 <!-- Worker-events viewer (opened from the ℹ︎/⚠ badge in the worker name cell). -->
 {#if eventsWorker}
-  <div class="worker-events-overlay" on:click={closeWorkerEvents} role="presentation">
+  <div class="worker-events-overlay" onclick={closeWorkerEvents} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
     <!-- The on:click here is purely containment: it stops the overlay click
          (which would close the dialog) from bubbling when the user clicks
          INSIDE the panel. It's not a user action — no keyboard equivalent
          needed. tabindex="-1" lets the dialog be focused programmatically
          (e.g. for screen-reader announce) without being in the tab order. -->
-    <div class="worker-events-panel" on:click|stopPropagation role="dialog" aria-modal="true" tabindex="-1">
+    <div class="worker-events-panel" onclick={stopPropagation(bubble('click'))} role="dialog" aria-modal="true" tabindex="-1">
       <div class="worker-events-header">
         <span>
           Events — <strong>{eventsWorker.name}</strong>
@@ -1307,7 +1319,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
             <span class="worker-events-warn-text">⚠ {eventsWorker.recentFailures} failures since last success</span>
           {/if}
         </span>
-        <button type="button" class="worker-events-close" on:click={closeWorkerEvents} title="Close">✕</button>
+        <button type="button" class="worker-events-close" onclick={closeWorkerEvents} title="Close">✕</button>
       </div>
       <div class="worker-events-body">
         {#if eventsLoading}

@@ -9,18 +9,18 @@
    * State variables for controlling submenu visibility
    * @type {boolean}
    */
-  let tasksOpen = false;
-  let awaitingExecutionOpen = false;
-  let inProgressOpen = false;
-  let successfulTasksOpen = false;
-  let failsTasksOpen = false;
-  let inactiveTasksOpen = false;
+  let tasksOpen = $state(false);
+  let awaitingExecutionOpen = $state(false);
+  let inProgressOpen = $state(false);
+  let successfulTasksOpen = $state(false);
+  let failsTasksOpen = $state(false);
+  let inactiveTasksOpen = $state(false);
 
   /**
    * Controls visibility of logout confirmation popup
    * @type {boolean}
    */
-  let showLogoutPopup = false;
+  let showLogoutPopup = $state(false);
 
   /**
    * Toggles between dark and light theme
@@ -112,7 +112,7 @@
         <button 
           data-testid="tasks-chevron" 
           class="dashboard-chevron-button {tasksOpen ? 'rotate' : ''}" 
-          on:click={() => (tasksOpen = !tasksOpen)}
+          onclick={() => (tasksOpen = !tasksOpen)}
           aria-expanded={tasksOpen}
           aria-controls="task-submenu"
         >
@@ -128,7 +128,7 @@
             <button 
               class="dashboard-submenu-header" 
               data-testid="starting-button" 
-              on:click={() => toggleSubMenu('awaitingExecution')}
+              onclick={() => toggleSubMenu('awaitingExecution')}
               aria-expanded={awaitingExecutionOpen}
             >
               Starting
@@ -147,7 +147,7 @@
           <div>
             <button 
               class="dashboard-submenu-header" 
-              on:click={() => toggleSubMenu('inProgress')}
+              onclick={() => toggleSubMenu('inProgress')}
               aria-expanded={inProgressOpen}
             >
               Progress
@@ -166,7 +166,7 @@
           <div>
             <button 
               class="dashboard-submenu-header" 
-              on:click={() => toggleSubMenu('successfulTasks')}
+              onclick={() => toggleSubMenu('successfulTasks')}
               aria-expanded={successfulTasksOpen}
             >
               Success
@@ -184,7 +184,7 @@
           <div>
             <button 
               class="dashboard-submenu-header" 
-              on:click={() => toggleSubMenu('failsTasks')}
+              onclick={() => toggleSubMenu('failsTasks')}
               aria-expanded={failsTasksOpen}
             >
               Fail
@@ -202,7 +202,7 @@
           <div>
             <button 
               class="dashboard-submenu-header" 
-              on:click={() => toggleSubMenu('inactiveTasks')}
+              onclick={() => toggleSubMenu('inactiveTasks')}
               aria-expanded={inactiveTasksOpen}
             >
               Inactive
@@ -242,7 +242,7 @@
     <button 
       class="dashboard-nav-link dashboard-logout" 
       data-testid="logout-button" 
-      on:click={confirmLogout}
+      onclick={confirmLogout}
     >
       <Power class="dashboard-icon" aria-hidden="true" /> 
       Log Out
@@ -252,7 +252,7 @@
   <!-- Theme toggle button -->
   <div class="theme-toggle-container">
     <button 
-      on:click={toggleTheme} 
+      onclick={toggleTheme} 
       class="theme-toggle" 
       title="Toggle theme" 
       data-testid="theme-button"
@@ -275,14 +275,14 @@
       <div class="dashboard-popup-actions">
         <button 
           class="dashboard-confirm" 
-          on:click={performLogout}
+          onclick={performLogout}
           data-testid="confirm-logout-button"
         >
           Log out
         </button>
         <button 
           class="dashboard-cancel" 
-          on:click={cancelLogout}
+          onclick={cancelLogout}
           data-testid="cancel-logout-button"
         >
           Cancel

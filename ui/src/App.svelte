@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { run } from 'svelte/legacy';
+
   import Sidebar from './components/SideBar.svelte';
   import LoginPage from './pages/LoginPage.svelte';
   import './app.css';
@@ -17,12 +19,16 @@
   import WorkflowPage from './pages/WorkflowPage.svelte';
   import WfTemplatePage from './pages/WfTemplatePage.svelte';
 
-  let isSidebarVisible = true;
-  let logged = false;
+  let isSidebarVisible = $state(true);
+  let logged = $state(false);
 
   // React to login state changes
-  $: $isLoggedIn;
-  $: logged = $isLoggedIn;
+  run(() => {
+    $isLoggedIn;
+  });
+  run(() => {
+    logged = $isLoggedIn;
+  });
 
   // Toggle sidebar visibility
   const toggleSidebar = () => {
@@ -43,9 +49,9 @@
   });
 
   // Update body class based on login state
-  $: {
+  run(() => {
     document.body.className = logged ? 'body-dashboard' : 'body-login';
-  }
+  });
 
   // Define application routes
   const routes = {
@@ -64,7 +70,7 @@
     {/if}
     <div class="main-content">
       <!-- Sidebar toggle button positioned to the right -->
-      <button class="hamburger-button" on:click={toggleSidebar} aria-label="Toggle sidebar">
+      <button class="hamburger-button" onclick={toggleSidebar} aria-label="Toggle sidebar">
         <span class="hamburger-icon"></span>
         <span class="hamburger-icon"></span>
         <span class="hamburger-icon"></span>

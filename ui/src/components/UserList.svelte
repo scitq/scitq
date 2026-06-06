@@ -12,7 +12,7 @@
    * Array of user objects
    * @type {User[]}
    */
-  let users: User[] = [];
+  let users: User[] = $state([]);
 
   /**
    * User currently being edited
@@ -24,55 +24,55 @@
    * Flag to show/hide edit modal
    * @type {boolean}
    */
-  let showEditModal = false;
+  let showEditModal = $state(false);
 
   /**
    * Temporary storage for edited username
    * @type {string}
    */
-  let editedUsername = '';
+  let editedUsername = $state('');
 
   /**
    * Temporary storage for edited email
    * @type {string}
    */
-  let editedEmail = '';
+  let editedEmail = $state('');
 
   /**
    * Temporary storage for edited admin status
    * @type {boolean}
    */
-  let editedIsAdmin = false;
+  let editedIsAdmin = $state(false);
 
   /**
    * Flag to show/hide password modal
    * @type {boolean}
    */
-  let showPasswordModal = false;
+  let showPasswordModal = $state(false);
 
   /**
    * User whose password is being changed
    * @type {User | null}
    */
-  let passwordUser: User = null;
+  let passwordUser: User = $state(null);
 
   /**
    * New password value
    * @type {string}
    */
-  let newPassword = '';
+  let newPassword = $state('');
 
   /**
    * Flag to show/hide password text
    * @type {boolean}
    */
-  let showForgotPassword = false;
+  let showForgotPassword = $state(false);
 
   /**
    * Success message to display
    * @type {string}
    */
-  let successMessage: string = '';
+  let successMessage: string = $state('');
 
   /**
    * Timeout reference for clearing messages
@@ -344,17 +344,17 @@
             <td>{user.email}</td>
             <td>{user.isAdmin ? 'Yes' : 'No'}</td>
             <td class="workerCompo-actions">
-              <button class="btn-action" title="Delete" data-testid={`delete-btn-user-${user.userId}`} on:click={() => handleDeleteUser(user.userId)}>
+              <button class="btn-action" title="Delete" data-testid={`delete-btn-user-${user.userId}`} onclick={() => handleDeleteUser(user.userId)}>
                 <Trash />
               </button>
-              <button class="btn-action" title="Edit User" data-testid={`edit-btn-user-${user.userId}`} on:click={() => openEditModal(user)}>
+              <button class="btn-action" title="Edit User" data-testid={`edit-btn-user-${user.userId}`} onclick={() => openEditModal(user)}>
                 <Pencil />
               </button>
               <button
                 class="btn-action"
                 title="Forgot Password"
                 data-testid={`forgot-pswd-button-${user.userId}`}
-                on:click={() => openPasswordModal(user)}
+                onclick={() => openPasswordModal(user)}
               >
                 <Lock />
               </button>
@@ -390,8 +390,8 @@
 
 
       <div class="settings-modal-buttons">
-        <button class="settings-confirm-btn" on:click={confirmEdit}>Confirm</button>
-        <button class="settings-cancel-btn" on:click={closeEditModal}>Cancel</button>
+        <button class="settings-confirm-btn" onclick={confirmEdit}>Confirm</button>
+        <button class="settings-cancel-btn" onclick={closeEditModal}>Cancel</button>
       </div>
     </div>
   </div>
@@ -415,7 +415,7 @@
             <button
               type="button"
               class="settings-toggle-password-btn"
-              on:click={() => showForgotPassword = !showForgotPassword}
+              onclick={() => showForgotPassword = !showForgotPassword}
             >
               {#if showForgotPassword}
                 <EyeOff size="20" />
@@ -428,8 +428,8 @@
       </div>
 
       <div class="userList-modal-buttons">
-        <button class="settings-confirm-btn" on:click={confirmPasswordChange}>Confirm</button>
-        <button class="settings-cancel-btn" on:click={closePasswordModal}>Cancel</button>
+        <button class="settings-confirm-btn" onclick={confirmPasswordChange}>Confirm</button>
+        <button class="settings-cancel-btn" onclick={closePasswordModal}>Cancel</button>
       </div>
     </div>
   </div>

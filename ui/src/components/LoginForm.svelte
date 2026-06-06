@@ -9,37 +9,37 @@
    * User's login username/email input
    * @type {string}
    */
-  let username = '';
+  let username = $state('');
 
   /**
    * User's login password input
    * @type {string}
    */
-  let password = '';
+  let password = $state('');
 
   /**
    * Feedback message displayed to user (error/success)
    * @type {string}
    */
-  let message = '';
+  let message = $state('');
 
   /**
    * Loading state flag for login button
    * @type {boolean}
    */
-  let isLoading = false;
+  let isLoading = $state(false);
 
   /**
    * Controls visibility of the password reset modal
    * @type {boolean}
    */
-  let showModal = false;
+  let showModal = $state(false);
 
   /**
    * Toggles password visibility in the input field
    * @type {boolean}
    */
-  let showPassword = false;
+  let showPassword = $state(false);
 
   /**
    * Handles the user login process:
@@ -114,7 +114,7 @@
       <button
         type="button"
         aria-label={showPassword ? "Hide password" : "Show password"}
-        on:click={togglePasswordVisibility}
+        onclick={togglePasswordVisibility}
         class="password-toggle-button"
         data-testid="toggle-password-visibility"
       >
@@ -130,7 +130,7 @@
   <!-- Login submit button -->
   <button 
     class="loginform-button btn-validate" 
-    on:click={handleLogin} 
+    onclick={handleLogin} 
     disabled={isLoading}
     aria-busy={isLoading}
     data-testid="login-button"
@@ -143,7 +143,7 @@
     <button 
       type="button" 
       class="loginform-forgot" 
-      on:click={() => showModal = true}
+      onclick={() => showModal = true}
       data-testid="forgot-password-button"
     >
       Forgot Password?
@@ -164,7 +164,7 @@
       <button
         type="button"
         class="loginform-modal-close-button btn-validate"
-        on:click={() => showModal = false}
+        onclick={() => showModal = false}
         aria-label="Close password reset modal"
         data-testid="close-modal-button"
       >

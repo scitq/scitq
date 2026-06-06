@@ -1,36 +1,46 @@
 <script lang="ts">
+  import { run, stopPropagation, createBubbler } from 'svelte/legacy';
+
+  const bubble = createBubbler();
   import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronDown, Play, Eye, EyeOff } from 'lucide-svelte';
   import { onDestroy } from 'svelte';
   import { getTemplates } from '../lib/api';
   import type { Template } from '../../gen/taskqueue';
 
-  /**
+  
+
+  
+
+  
+  interface Props {
+    /**
    * Array of workflow templates to display
    * @type {Template[]}
    */
-  export let workflowsTemp: Template[] = [];
-
-  /**
+    workflowsTemp?: Template[];
+    /**
    * Callback function to open parameter modal
    * @type {(template: Template) => void}
    */
-  export let openParamModal: (template: Template) => void;
-
-  /**
+    openParamModal: (template: Template) => void;
+    /**
    * Optional callback to hide/unhide a template. When omitted, the
    * eye-toggle button is not rendered (page didn't wire it up).
    * @type {(templateId: number, hidden: boolean) => void}
    */
-  export let toggleHidden: ((templateId: number, hidden: boolean) => void) | undefined = undefined;
+    toggleHidden?: ((templateId: number, hidden: boolean) => void) | undefined;
+  }
+
+  let { workflowsTemp = [], openParamModal, toggleHidden = undefined }: Props = $props();
 
   // Per-row dropdown state. Only one dropdown is open at a time; the row's
   // workflowTemplateId acts as the discriminator. The version list itself
   // is fetched on demand and cached by template name (operators rarely
   // flip through versions, so on-demand keeps the initial list payload
   // small).
-  let openTemplateId: number | null = null;
+  let openTemplateId: number | null = $state(null);
   type VersionRow = Template;
-  let versionsByName: Record<string, VersionRow[] | 'loading' | 'error'> = {};
+  let versionsByName: Record<string, VersionRow[] | 'loading' | 'error'> = $state({});
 
   async function ensureVersionsLoaded(name: string) {
     if (versionsByName[name] && versionsByName[name] !== 'error') return;
@@ -78,7 +88,9 @@
   // Close the dropdown when the underlying list changes (e.g. parent page
   // refetches after a hide/unhide). Avoids a stale openTemplateId pointing
   // at a row that's no longer rendered.
-  $: if (workflowsTemp) openTemplateId = null;
+  run(() => {
+    if (workflowsTemp) openTemplateId = null;
+  });
 
   onDestroy(() => {
     openTemplateId = null;
@@ -114,7 +126,7 @@
                 title={`Show ${t.versionCount} versions`}
                 aria-haspopup="listbox"
                 aria-expanded={openTemplateId === (t.workflowTemplateId ?? 0)}
-                on:click|stopPropagation={() => toggleDropdown(t)}
+                onclick={stopPropagation(() => toggleDropdown(t))}
               >
                 <span class="wf-id">v{t.version}</span>
                 <ChevronDown size={14} />
@@ -127,7 +139,7 @@
                      in-menu click from bubbling to the outer "open / close"
                      toggle. Real menu items below have their own buttons /
                      <a>s with keyboard support. -->
-                <ul class="wf-version-menu" role="listbox" on:click|stopPropagation>
+                <ul class="wf-version-menu" role="listbox" onclick={stopPropagation(bubble('click'))}>
                   {#if versionsByName[t.name] === 'loading'}
                     <li class="wf-version-status">Loading…</li>
                   {:else if versionsByName[t.name] === 'error'}
@@ -140,7 +152,7 @@
                           aria-selected={v.workflowTemplateId === t.workflowTemplateId}>
                         <button class="wf-version-link" type="button"
                                 title={`Run version ${v.version}`}
-                                on:click={() => { openTemplateId = null; openParamModal(v); }}>
+                                onclick={() => { openTemplateId = null; openParamModal(v); }}>
                           <span class="wf-id">v{v.version}</span>
                           <span class="wf-version-meta">
                             {new Date(v.uploadedAt).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
@@ -178,7 +190,7 @@
         <!-- Workflow template action buttons -->
         <div class="wf-actions">
           <!-- Play button to open parameters modal -->
-          <button class="btn-action" title="Play" on:click={() => openParamModal(t)}><Play /></button>
+          <button class="btn-action" title="Play" onclick={() => openParamModal(t)}><Play /></button>
           <!-- Pause button -->
           <button class="btn-action" title="Pause"><PauseCircle /></button>
           <!-- Reset button -->
@@ -192,11 +204,11 @@
                hide), crossed-eye = currently hidden (click to unhide). -->
           {#if toggleHidden}
             {#if t.hidden}
-              <button class="btn-action" title="Unhide" on:click={() => toggleHidden(t.workflowTemplateId ?? 0, false)}>
+              <button class="btn-action" title="Unhide" onclick={() => toggleHidden(t.workflowTemplateId ?? 0, false)}>
                 <EyeOff />
               </button>
             {:else}
-              <button class="btn-action" title="Hide" on:click={() => toggleHidden(t.workflowTemplateId ?? 0, true)}>
+              <button class="btn-action" title="Hide" onclick={() => toggleHidden(t.workflowTemplateId ?? 0, true)}>
                 <Eye />
               </button>
             {/if}

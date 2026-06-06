@@ -1,94 +1,125 @@
 <script lang="ts">
-  /**
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+  interface Props {
+    /**
    * Array of points for the first data line in "x,y" format
    * @type {string[]}
    */
-  export let line1: string[];
-
-  /**
+    line1: string[];
+    /**
    * Array of points for the second data line in "x,y" format
    * @type {string[]}
    */
-  export let line2: string[];
-
-  /**
+    line2: string[];
+    /**
    * Color for the first data line
    * @type {string}
    */
-  export let color1: string;
-
-  /**
+    color1: string;
+    /**
    * Color for the second data line
    * @type {string}
    */
-  export let color2: string;
-
-  /**
+    color2: string;
+    /**
    * Title/label for the first data series
    * @type {string}
    */
-  export let title1: string;
-
-  /**
+    title1: string;
+    /**
    * Title/label for the second data series
    * @type {string}
    */
-  export let title2: string;
-
-  /**
+    title2: string;
+    /**
    * Current value for the first data series
    * @type {string}
    */
-  export let value1: string;
-
-  /**
+    value1: string;
+    /**
    * Current value for the second data series
    * @type {string}
    */
-  export let value2: string;
-
-  /**
+    value2: string;
+    /**
    * Total/cumulative value for the first data series
    * @type {string}
    */
-  export let total1: string;
-
-  /**
+    total1: string;
+    /**
    * Total/cumulative value for the second data series
    * @type {string}
    */
-  export let total2: string;
-
-  /**
+    total2: string;
+    /**
    * Current zoom level (multiplier)
    * @type {number}
    */
-  export let zoomLevel: number;
-
-  /**
+    zoomLevel: number;
+    /**
    * Whether auto-zoom is enabled
    * @type {boolean}
    */
-  export let autoZoom: boolean;
-
-  /**
-   * Intensity of the zoom effect (affects line width)
-   * @type {number}
-   * @default 1
-   */
-  export let zoomIntensity = 1;
-
-  /**
+    autoZoom: boolean;
+    /** Intensity of the zoom effect (affects line width) */
+    zoomIntensity?: number;
+    /**
    * Callback function for zoom actions
    * @type {(direction: 'in' | 'out' | 'reset') => void}
    */
-  export let onZoom: (direction: 'in' | 'out' | 'reset') => void;
-
-  /**
+    onZoom: (direction: 'in' | 'out' | 'reset') => void;
+    /**
    * Callback function for toggling auto-zoom
    * @type {() => void}
    */
-  export let onToggleAutoZoom: () => void;
+    onToggleAutoZoom: () => void;
+  }
+
+  let {
+    line1,
+    line2,
+    color1,
+    color2,
+    title1,
+    title2,
+    value1,
+    value2,
+    total1,
+    total2,
+    zoomLevel,
+    autoZoom = $bindable(),
+    zoomIntensity = 1,
+    onZoom,
+    onToggleAutoZoom
+  }: Props = $props();
 </script>
 
 <div class="chart-container">
@@ -136,7 +167,7 @@
   <div class="chart-controls">
     <!-- Auto-zoom toggle -->
     <label class="toggle-auto-zoom {autoZoom ? 'active' : ''}" data-testid={title1.toLowerCase() + '-auto-zoom-toggle'}>
-      <input type="checkbox" bind:checked={autoZoom} on:change={onToggleAutoZoom}> 
+      <input type="checkbox" bind:checked={autoZoom} onchange={onToggleAutoZoom}> 
       Auto Zoom {autoZoom ? '(ON)' : '(OFF)'}
     </label>
 
@@ -145,7 +176,7 @@
       <div class="manual-zoom">
         <button 
           class="small-btn" 
-          on:click={() => onZoom('out')} 
+          onclick={() => onZoom('out')} 
           title="Zoom Out" 
           data-testid={title1.toLowerCase() + '-zoom-out'}
         >
@@ -156,7 +187,7 @@
         </span>
         <button 
           class="small-btn" 
-          on:click={() => onZoom('in')} 
+          onclick={() => onZoom('in')} 
           title="Zoom In" 
           data-testid={title1.toLowerCase() + '-zoom-in'}
         >
@@ -164,7 +195,7 @@
         </button>
         <button 
           class="small-btn" 
-          on:click={() => onZoom('reset')} 
+          onclick={() => onZoom('reset')} 
           title="Reset Zoom" 
           data-testid={title1.toLowerCase() + '-zoom-reset'}
         >
