@@ -5173,15 +5173,33 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 	// we can filter by username in a single SQL pass — no separate
 	// scitq_user lookup. LEFT JOINs throughout: older workflows created
 	// before the template_run link existed stay visible with NULLs.
+	//
+	// User filter joins via w.created_by (populated on every workflow
+	// insert in CreateWorkflow). The older path of joining via
+	// template_run.run_by silently dropped workflows that weren't
+	// launched through a template — see migration 000036.
+	// LATERAL on template_run: a single workflow can have multiple
+	// template_run rows (re-runs, chained runs, ad-hoc re-submits). A
+	// plain LEFT JOIN multiplies the result row count by the number of
+	// template_runs, producing duplicate workflow_id entries in the
+	// final list. The LATERAL with LIMIT 1 pins each workflow to exactly
+	// one provenance row (the most recent template_run by id). Without
+	// this, the UI's keyed-each block sees duplicate keys and throws.
 	query := `
         SELECT w.workflow_id, w.workflow_name, w.status, w.run_strategy, w.maximum_workers, w.live,
                tr.template_run_id, wt.name, wt.version,
                tr.script_name, tr.script_sha256,
                w.parent_workflow_id
         FROM workflow w
-        LEFT JOIN template_run tr ON tr.workflow_id = w.workflow_id
+        LEFT JOIN LATERAL (
+            SELECT template_run_id, workflow_template_id, script_name, script_sha256
+            FROM template_run
+            WHERE workflow_id = w.workflow_id
+            ORDER BY template_run_id DESC
+            LIMIT 1
+        ) tr ON TRUE
         LEFT JOIN workflow_template wt ON wt.workflow_template_id = tr.workflow_template_id
-        LEFT JOIN scitq_user u ON u.user_id = tr.run_by
+        LEFT JOIN scitq_user u ON u.user_id = w.created_by
     `
 	var args []interface{}
 
@@ -5319,20 +5337,32 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 
 	liveVal := req.Live != nil && *req.Live
 
+	// Capture creator from the authenticated context. Unauthenticated
+	// (e.g. internal-only) creates leave this NULL — the column is
+	// nullable for backward compatibility with pre-migration rows.
+	var createdBy *int32
+	var createdByUsername *string
+	if u := GetUserFromContext(ctx); u != nil {
+		uid := int32(u.UserID)
+		createdBy = &uid
+		uname := u.Username
+		createdByUsername = &uname
+	}
+
 	var workflowID int32
 	var err error
 	if req.MaximumWorkers == nil {
 		err = s.db.QueryRow(`
-			INSERT INTO workflow (workflow_name, run_strategy, status, live)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO workflow (workflow_name, run_strategy, status, live, created_by)
+			VALUES ($1, $2, $3, $4, $5)
 			RETURNING workflow_id
-		`, req.Name, req.RunStrategy, statusVal, liveVal).Scan(&workflowID)
+		`, req.Name, req.RunStrategy, statusVal, liveVal, createdBy).Scan(&workflowID)
 	} else {
 		err = s.db.QueryRow(`
-		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers, status, live)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO workflow (workflow_name, run_strategy, maximum_workers, status, live, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING workflow_id
-	`, req.Name, req.RunStrategy, *req.MaximumWorkers, statusVal, liveVal).Scan(&workflowID)
+	`, req.Name, req.RunStrategy, *req.MaximumWorkers, statusVal, liveVal, createdBy).Scan(&workflowID)
 	}
 
 	if err != nil {
@@ -5340,13 +5370,15 @@ func (s *taskQueueServer) CreateWorkflow(ctx context.Context, req *pb.WorkflowRe
 	}
 
 	ws.EmitWS("workflow", workflowID, "created", struct {
-		WorkflowId int32   `json:"workflowId"`
-		Name       *string `json:"name,omitempty"`
-		Status     *string `json:"status,omitempty"`
+		WorkflowId        int32   `json:"workflowId"`
+		Name              *string `json:"name,omitempty"`
+		Status            *string `json:"status,omitempty"`
+		CreatedByUsername *string `json:"createdByUsername,omitempty"`
 	}{
-		WorkflowId: workflowID,
-		Name:       &req.Name,
-		Status:     &statusVal,
+		WorkflowId:        workflowID,
+		Name:              &req.Name,
+		Status:            &statusVal,
+		CreatedByUsername: createdByUsername,
 	})
 	return &pb.WorkflowId{WorkflowId: workflowID}, nil
 }

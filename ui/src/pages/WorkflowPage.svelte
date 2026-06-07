@@ -10,7 +10,13 @@
   import '../styles/workflow.css';
 
   // Array of currently displayed workflows
-  let workflows = $state([]);
+  // $state.raw — opt out of deep proxying. With 25+ workflows × ~15 field
+  // reads per row in WorkflowList, $state([]) was deep-proxying every
+  // element and Svelte 5's reactive scheduler tipped into pathological
+  // (effectively-frozen) flushes on any list reassignment. Workflow
+  // objects are replaced wholesale on update, not mutated in place, so
+  // shallow reactivity is the right model here.
+  let workflows = $state.raw([]);
   // Array of newly created workflows waiting to be displayed
   let pendingWorkflows = [];    
   // Flag indicating if more workflows are available to load
@@ -253,15 +259,29 @@
 
       if (action === 'created') {
         const newWf = p;
+
+        // Filter-match check. The server broadcasts workflow/created
+        // for every new workflow regardless of subscriber filter, so
+        // the client has to drop events that don't match the active
+        // userFilter / nameFilter. Without this check the displayed
+        // list silently grows with rows that don't match the user's
+        // current view, which (a) is wrong semantically and (b) was
+        // partly implicated in the sparse-list reactive-flush freeze.
+        const effectiveUserFilter = userFilter === '@me' ? currentUsername : userFilter;
+        const matchesUserFilter = !effectiveUserFilter || newWf.createdByUsername === effectiveUserFilter;
+        const matchesNameFilter = !nameFilter || (typeof newWf.name === 'string' && newWf.name.toLowerCase().includes(nameFilter.toLowerCase()));
+        if (!matchesUserFilter || !matchesNameFilter) return;
+
         const existsInDisplayed = workflows.some(wf => wf.workflowId === newWf.workflowId);
         const existsInPending = pendingWorkflows.some(wf => wf.workflowId === newWf.workflowId);
         if (!existsInDisplayed && !existsInPending) {
-          wfCounters.seed(newWf.workflowId, newWf);
           if (isScrolledToTop) {
             workflows = [newWf, ...workflows];
+            wfCounters.seed(newWf.workflowId, newWf);
             console.log('workflow created via WebSocket:', newWf.workflowId);
           } else {
             pendingWorkflows = [newWf, ...pendingWorkflows];
+            wfCounters.seed(newWf.workflowId, newWf);
             newWorkflowsCount = pendingWorkflows.length;
             showNewWorkflowsNotification = true;
           }
@@ -272,6 +292,8 @@
       if (action === 'deleted') {
         const idToRemove = typeof p.workflowId === 'number' ? p.workflowId : message.id;
         if (typeof idToRemove === 'number') {
+          // Same order rationale as the 'created' branch: reassign the
+          // workflows array BEFORE notifying the wfCounters store.
           workflows = workflows.filter(wf => wf.workflowId !== idToRemove);
           pendingWorkflows = pendingWorkflows.filter(wf => wf.workflowId !== idToRemove);
           wfCounters.drop(idToRemove);
@@ -286,9 +308,13 @@
           // Index-assignment, not whole-array map: only this row's
           // bindings re-evaluate. See StepList.svelte for the same
           // pattern + rationale (keyed-each `tl()` walk avoidance).
+          // $state.raw: index-set on the raw array doesn't fire reactivity;
+          // we have to reassign the array reference.
           const idx = workflows.findIndex(wf => wf.workflowId === wfId);
           if (idx !== -1) {
-            workflows[idx] = { ...workflows[idx], status: newStatus };
+            const next = workflows.slice();
+            next[idx] = { ...next[idx], status: newStatus };
+            workflows = next;
           }
         }
         return;
