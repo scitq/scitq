@@ -474,20 +474,30 @@ class Scitq2Client:
         Returns:
         - int: The recruiter ID
         """
+        # Coerce int32 fields at the gRPC boundary. task_spec.cpu can be
+        # a float in YAML (e.g. `cpu: 4.0`, or a curve max derived from a
+        # mixed-type list), but the Recruiter proto declares
+        # cpu_per_task / concurrency / prefetch / rounds / timeout /
+        # prefetch_percent / concurrency_min / concurrency_max as int32.
+        # Coercion here keeps every caller safe without forcing each
+        # call-site to remember the int requirement. memory_per_task /
+        # disk_per_task stay float — those are proto floats.
+        def _i(v):
+            return None if v is None else int(v)
         request = taskqueue_pb2.Recruiter(
             step_id=step_id,
             protofilter=protofilter,
             rank=rank,
-            concurrency=concurrency,
-            prefetch=prefetch,
-            cpu_per_task=cpu_per_task,
+            concurrency=_i(concurrency),
+            prefetch=_i(prefetch),
+            cpu_per_task=_i(cpu_per_task),
             memory_per_task=memory_per_task,
             disk_per_task=disk_per_task,
-            prefetch_percent=prefetch_percent,
-            concurrency_min=concurrency_min,
-            concurrency_max=concurrency_max,
-            rounds=rounds,
-            timeout=timeout,
+            prefetch_percent=_i(prefetch_percent),
+            concurrency_min=_i(concurrency_min),
+            concurrency_max=_i(concurrency_max),
+            rounds=_i(rounds),
+            timeout=_i(timeout),
         )
         if max_recruited is not None:
             request.max_workers = max_recruited

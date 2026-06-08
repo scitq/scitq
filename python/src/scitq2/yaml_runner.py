@@ -551,7 +551,14 @@ def _resolve_refs(val, params, itervar=None, extra_vars=None, literal_format=Non
         if ref.startswith('params.'):
             attr = ref[7:]
             val = getattr(params, attr, None)
-            if val is None:
+            # Treat empty string the same as None when a default was
+            # provided. YAML users writing {params.x:default} expect the
+            # default to kick in for both missing AND blank values —
+            # most commonly because UI text fields send blank as ""
+            # not None. Without this, e.g. `match: "{params.filter:*}"`
+            # with a blank filter input matches the empty string rather
+            # than "all samples" and the iterator finds nothing.
+            if val is None or (default is not None and val == ''):
                 if default is not None:
                     return _resolve_refs(default, params, itervar, extra_vars, _depth=_depth + 1)
                 return ''
