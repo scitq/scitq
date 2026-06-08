@@ -3,7 +3,7 @@
 
   import { onMount, onDestroy, tick } from 'svelte';
   import { wsClient } from '../lib/wsClient';
-  import { Plus, Check } from 'lucide-svelte';
+  import { Plus, Check, Loader2 } from 'lucide-svelte';
   import { getTemplates, UploadTemplates, runTemp, updateTemplateHidden } from '../lib/api';
   import WfTemplateList from '../components/WfTemplateList.svelte';
   import '../styles/wfTemplate.css';
@@ -13,6 +13,12 @@
   let showRunSuccessModal = $state(false);
   let showRunErrorModal = $state(false);
   let successMessage = $state('');
+  // True while a RunTemplate gRPC call is in flight. Used to visibly
+  // disable the Run button and show a spinner so the user knows their
+  // click was registered — the server-side template script can take
+  // several seconds to compile for large workflows, during which a
+  // silent button looks broken.
+  let isRunningTemplate = $state(false);
 
   // Array of workflow templates
   let workflowsTemp = $state([]);
@@ -266,6 +272,8 @@
    * @async
    */
   async function handleRunTemplate() {
+    // Guard against double-clicks during the gRPC round-trip.
+    if (isRunningTemplate) return;
     showParamErrors = false;
     paramErrors = {};
 
@@ -286,6 +294,11 @@
       }
 
       if (!selectedTemplate) return;
+
+      // Mark in-flight only AFTER validation passed — we don't want
+      // the button to spin while the user is fixing a required-field
+      // error in the same modal.
+      isRunningTemplate = true;
 
       // Advanced run options (extend / continue / retry-failed-only).
       const runOpts: { extendWorkflowId?: number; continueLast?: boolean; retryFailedOnly?: boolean } = {};
@@ -332,6 +345,8 @@
       errorMessage = error.message || "Unknown error occurred.";
       showParamModal = false;
       showRunErrorModal = true;
+    } finally {
+      isRunningTemplate = false;
     }
   }
 
@@ -635,8 +650,15 @@
 
       <!-- Modal action buttons -->
       <div class="wfTemp-modal-actions">
-        <button onclick={handleRunTemplate}>Run</button>
-        <button onclick={() => showParamModal = false}>Cancel</button>
+        <button onclick={handleRunTemplate} disabled={isRunningTemplate} class="wfTemp-run-btn">
+          {#if isRunningTemplate}
+            <Loader2 size="14" class="wfTemp-spin" />
+            Running…
+          {:else}
+            Run
+          {/if}
+        </button>
+        <button onclick={() => showParamModal = false} disabled={isRunningTemplate}>Cancel</button>
       </div>
     </div>
   </div>

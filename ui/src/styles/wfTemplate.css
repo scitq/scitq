@@ -480,3 +480,29 @@ input[type="checkbox"] {
   padding: 1px 4px;
   font-size: 0.85rem;
 }
+
+/* Run-button spinner. The Loader2 icon spins via the @keyframes spin
+   below, and the button text shrinks-fades while the gRPC RunTemplate
+   call is in flight. Without this, large templates (~3-5s compile)
+   look like the page silently swallowed the click.
+
+   Cancel stays available but visually disabled — we don't want the
+   user clicking it mid-compile and being surprised the server is
+   already past the point of no return.
+*/
+.wfTemp-run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wfTemp-run-btn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+:global(.wfTemp-spin) {
+  animation: wfTemp-spin 0.9s linear infinite;
+}
+@keyframes wfTemp-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
