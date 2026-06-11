@@ -2002,6 +2002,26 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		s.stats.mu.Unlock()
 	}
 
+	// Auto-resume a Succeeded workflow when one of its tasks is retried.
+	// Without this, the retried task sits in Pending forever because the
+	// assignment loop skips workflows in S. The user just told the server
+	// "this task isn't actually done" — that's an implicit "this workflow
+	// isn't actually done either."
+	if wfID.Valid && wfStatus.String == "S" {
+		if _, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = 'R' WHERE workflow_id = $1`, wfID.Int32); err != nil {
+			log.Printf("⚠️ retry: failed to flip workflow %d back to R: %v", wfID.Int32, err)
+		} else {
+			ws.EmitWS("workflow", wfID.Int32, "status", struct {
+				WorkflowId int32  `json:"workflowId"`
+				Status     string `json:"status"`
+			}{
+				WorkflowId: wfID.Int32,
+				Status:     "R",
+			})
+			s.triggerAssign()
+		}
+	}
+
 	// 🔔 Emit WS events
 	ws.EmitWS("step-stats", wfID.Int32, "delta", struct {
 		WorkflowId int32  `json:"workflowId"`

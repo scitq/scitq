@@ -785,6 +785,20 @@ export async function delWorkflow(WorkflowId: number) {
   }
 }
 
+/**
+ * Updates a workflow's status (R = Running, P = Paused, D = Debug).
+ * Server will broadcast a workflow/status event so all clients see
+ * the change without polling.
+ */
+export async function updateWorkflowStatus(workflowId: number, status: 'R' | 'P' | 'D') {
+  try {
+    await client.updateWorkflowStatus({ workflowId, status }, await callOptionsUserToken());
+  } catch (error) {
+    console.error("Error updating workflow status: ", error);
+    throw error;
+  }
+}
+
 
 /**
  * Retrieves all steps associated with a specific workflow

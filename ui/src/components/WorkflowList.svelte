@@ -2,8 +2,8 @@
   import { stopPropagation } from 'svelte/legacy';
 
   import StepList from './StepList.svelte';
-  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronRight, ChevronDown, HelpCircle } from 'lucide-svelte';
-  import {delWorkflow} from '../lib/api';
+  import { RefreshCw, PauseCircle, PlayCircle, CircleX, Eraser, ChevronRight, ChevronDown, HelpCircle } from 'lucide-svelte';
+  import {delWorkflow, updateWorkflowStatus} from '../lib/api';
   import { onMount } from 'svelte';
   import TemplateRunModal from './TemplateRunModal.svelte';
   import { wfCounters } from '../lib/wfCounters';
@@ -116,8 +116,8 @@
         <!-- Workflow information section -->
         <div class="wf-info">
           <span class="wf-id">#{wf.workflowId}</span>
-          <span class="wf-status-dot {wf.status === 'S' ? 'wf-dot-green' : runningTasks > 0 ? 'wf-dot-blue' : failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
-                title={wf.status === 'S' ? 'Completed' : runningTasks > 0 ? `${runningTasks} active` : wf.status === 'F' ? `Stuck: ${failedTasks} failed` : failedTasks > 0 ? `${failedTasks} failed, no active tasks` : 'Idle'}></span>
+          <span class="wf-status-dot {wf.status === 'P' ? 'wf-dot-yellow' : wf.status === 'S' ? 'wf-dot-green' : runningTasks > 0 ? 'wf-dot-blue' : failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
+                title={wf.status === 'P' ? 'Paused' : wf.status === 'S' ? 'Completed' : runningTasks > 0 ? `${runningTasks} active` : wf.status === 'F' ? `Stuck: ${failedTasks} failed` : failedTasks > 0 ? `${failedTasks} failed, no active tasks` : 'Idle'}></span>
           <a href={`#/tasks?workflowId=${wf.workflowId}`}
              class="wf-name"
              title={launchSummary(wf) ? `Launched by: ${launchSummary(wf)}` : undefined}>{wf.name}</a>
@@ -150,7 +150,13 @@
 
         <!-- Workflow action buttons -->
         <div class="wf-actions">
-          <button class="btn-action" title="Pause"><PauseCircle /></button>
+          {#if wf.status === 'P'}
+            <button class="btn-action" title="Unpause (resume)"
+                    onclick={() => updateWorkflowStatus(wf.workflowId, 'R')}><PlayCircle /></button>
+          {:else}
+            <button class="btn-action" title="Pause"
+                    onclick={() => updateWorkflowStatus(wf.workflowId, 'P')}><PauseCircle /></button>
+          {/if}
           <button class="btn-action" title="Reset"><RefreshCw /></button>
           <button class="btn-action" title="Break"><CircleX /></button>
           <button class="btn-action" title="Clear" data-testid={`delete-btn-${wf.workflowId}`} onclick={() => delWorkflow(wf.workflowId)}><Eraser /></button>
