@@ -2241,6 +2241,45 @@ func (s *taskQueueServer) EditTask(ctx context.Context, req *pb.EditTaskRequest)
 		// A status change usually wants the assignment loop to wake up.
 		s.triggerAssign()
 	}
+
+	// 🔔 Broadcast edit. Without this, every connected client keeps its
+	// cached task row and the modal reopens with the pre-edit command
+	// until a page refresh. Only fields that were actually updated are
+	// emitted (omitempty + nil pointers); the client overlays them onto
+	// its local copy.
+	var inputVals, resourceVals []string
+	if req.Input != nil {
+		inputVals = req.Input.Values
+	}
+	if req.Resource != nil {
+		resourceVals = req.Resource.Values
+	}
+	ws.EmitWS("task", req.TaskId, "edited", struct {
+		TaskId           int32    `json:"taskId"`
+		Command          *string  `json:"command,omitempty"`
+		Container        *string  `json:"container,omitempty"`
+		ContainerOptions *string  `json:"containerOptions,omitempty"`
+		Shell            *string  `json:"shell,omitempty"`
+		Status           *string  `json:"status,omitempty"`
+		Output           *string  `json:"output,omitempty"`
+		Publish          *string  `json:"publish,omitempty"`
+		Retry            *int32   `json:"retry,omitempty"`
+		Input            []string `json:"input,omitempty"`
+		Resource         []string `json:"resource,omitempty"`
+	}{
+		TaskId:           req.TaskId,
+		Command:          req.Command,
+		Container:        req.Container,
+		ContainerOptions: req.ContainerOptions,
+		Shell:            req.Shell,
+		Status:           req.Status,
+		Output:           req.Output,
+		Publish:          req.Publish,
+		Retry:            req.Retry,
+		Input:            inputVals,
+		Resource:         resourceVals,
+	})
+
 	return &pb.TaskResponse{TaskId: req.TaskId}, nil
 }
 
@@ -2314,6 +2353,20 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 		return nil, fmt.Errorf("task %d not found or hidden", req.TaskId)
 	}
 	log.Printf("✏️ Task %d command edited, retrying", req.TaskId)
+
+	// 🔔 Broadcast the edit on the OLD task BEFORE retryTaskInternal
+	// emits the clone's status. The UI merges the clone with its parent
+	// (taking command from the parent's local row), so the parent's
+	// cached command must be refreshed first or the new row shows the
+	// stale text until a manual reload.
+	ws.EmitWS("task", req.TaskId, "edited", struct {
+		TaskId  int32  `json:"taskId"`
+		Command string `json:"command"`
+	}{
+		TaskId:  req.TaskId,
+		Command: req.Command,
+	})
+
 	return s.retryTaskInternal(ctx, &pb.RetryTaskRequest{TaskId: req.TaskId}, "R", false)
 }
 

@@ -116,6 +116,82 @@ func TestSignalA_CancelBeforeOrDuringLaunch(t *testing.T) {
 	t.Logf("Task %d killed successfully (caught at %s, ended in F)", taskID, caught)
 }
 
+// TestEditTaskInPlace_PendingState verifies that an in-place EditTask
+// on a not-yet-assigned task (P or W) followed by NO signal is enough
+// to make the worker run with the edited command — because the worker
+// will read the fresh row from PingAndTakeNewTasks when it picks up
+// the task, no stale local copy exists yet to invalidate.
+//
+// This is the UI's "Edit" button path for pre-assignment statuses
+// (which sends EditTask but skips SignalTask, since the server's
+// SignalTask WHERE clause is R/D/O/C and would reject P/W with a
+// "not in a running state" error).
+func TestEditTaskInPlace_PendingState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	serverAddr, workerToken, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
+	defer cleanup()
+
+	var c cli.CLI
+	c.Attr.Server = serverAddr
+	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
+	require.NoError(t, err)
+	token := extractToken(out)
+
+	qclient, err := lib.CreateClient(serverAddr, token)
+	require.NoError(t, err)
+	defer qclient.Close()
+	qc := qclient.Client
+
+	// Submit a task BEFORE starting the worker so we're guaranteed
+	// to catch it in P (no risk of A→C transition mid-edit).
+	shell := "sh"
+	originalCmd := "echo ORIGINAL_COMMAND_RAN_PW"
+	editedCmd := "echo EDITED_COMMAND_RAN_PW"
+	sub, err := qc.SubmitTask(ctx, &pb.TaskRequest{
+		Command:   originalCmd,
+		Shell:     &shell,
+		Container: "bare",
+		Status:    "P",
+		TaskName:  strPtr("edit-pw-test"),
+	})
+	require.NoError(t, err)
+	taskID := sub.TaskId
+
+	// Confirm we caught the task in P.
+	require.Equal(t, "P", getTask(t, ctx, qc, taskID).Status, "should still be P (no worker yet)")
+
+	// Edit in place, no signal — this is the UI flow for P/W.
+	_, err = qc.EditTask(ctx, &pb.EditTaskRequest{
+		TaskId:  taskID,
+		Command: &editedCmd,
+	})
+	require.NoError(t, err, "EditTask must succeed on P task")
+
+	// Sending B here is the bug we just fixed: server rejects it.
+	// Make that contract explicit so a regression on the server-side
+	// WHERE clause would be caught here too.
+	_, sigErr := qc.SignalTask(ctx, &pb.TaskSignalRequest{
+		TaskId: taskID,
+		Signal: "B",
+	})
+	require.Error(t, sigErr, "SignalTask B must be rejected on P (no worker has the task yet)")
+
+	// Start the worker — it will pick up the task with the edited
+	// command on its first ping.
+	cleanupClient, _ := startClientForTest(t, serverAddr, "edit-pw-worker", workerToken, 1)
+	defer cleanupClient()
+
+	require.Eventually(t, func() bool {
+		return getTask(t, ctx, qc, taskID).Status == "S"
+	}, 60*time.Second, 250*time.Millisecond, "task should succeed with the edited command")
+
+	final := getTask(t, ctx, qc, taskID)
+	require.Contains(t, final.Command, "EDITED_COMMAND_RAN_PW", "task command in DB should be the edited one")
+	t.Logf("Task %d picked up edited command without any signal (P state path)", taskID)
+}
+
 // TestSignalB_RereadCommandBeforeLaunch verifies the in-place edit +
 // signal B path: an operator changes a task's command while it's
 // still pre-running (P/W → C/D/O), sends signal B, and the worker

@@ -157,7 +157,27 @@ async function handleWebSocketMessage(message) {
       return;
     }
 
-    // --- 3️⃣ Task status ---
+    // --- 3️⃣ Task edited (EditTask / EditAndRetryTask) ---
+    // Payload carries only the fields that were actually updated.
+    // Overlay them onto the local row so reopening the modal shows the
+    // fresh command instead of the pre-edit cache.
+    if (action === 'edited') {
+      const idx = displayedTasks.findIndex(t => t.taskId === p.taskId);
+      if (idx !== -1) {
+        const current = displayedTasks[idx];
+        const patch = {};
+        for (const k of ['command', 'container', 'containerOptions', 'shell',
+                         'status', 'output', 'publish', 'retry',
+                         'input', 'resource']) {
+          if (p[k] !== undefined) patch[k] = p[k];
+        }
+        displayedTasks[idx] = { ...current, ...patch };
+        displayedTasks = [...displayedTasks];
+      }
+      return;
+    }
+
+    // --- 4️⃣ Task status ---
     if (action === 'status') {
       if (p.oldStatus === 'F' && p.status === 'P' && p.parentTaskId) {
         // Retry case
@@ -645,19 +665,39 @@ async function handleWebSocketMessage(message) {
     try {
       // Terminal states (F/S): clone-and-retry flow — creates a fresh
       // task_id with the new command.
-      // Pre-running states (P/W/C/D/O): patch the existing task in place
-      // and ping the worker via signal B so it re-reads the new command
-      // at its launch checkpoint instead of running the stale one it
-      // pulled at pickup. No new task_id.
-      // Running state (R): we don't reach this branch because the UI
-      // gate hides the button — see the {#if} below. If we ever lift
-      // that gate, the right call is signal K (kill the in-flight run)
-      // and the operator can decide whether to Edit & Retry afterwards.
+      // Not-yet-assigned (P/W): the worker hasn't picked the task up.
+      // A plain in-place edit is enough — when PingAndTakeNewTasks
+      // eventually delivers the task, the worker reads the fresh
+      // command directly from that response. Server-side SignalTask
+      // rejects these statuses (its WHERE clause is R/D/O/C only), so
+      // sending B here would 400.
+      // In flight (C/D/O): worker has the task with the stale command
+      // cached locally. Edit updates the DB; signal B tells the worker
+      // to re-read at its launch checkpoint before exec.
+      // Running (R): UI gate hides the button — see the {#if} below.
+      // editAndRetryTask creates a NEW task_id, so the local list will
+      // be refreshed when the WS event arrives. For the in-place edit
+      // paths (P/W and C/D/O) there is no such WS event today — the
+      // server stores the new command in DB but doesn't broadcast it
+      // — so reopening the modal would otherwise show the stale
+      // cached command. Patch the local row optimistically: the DB
+      // is the authority, our edit succeeded, mirror it.
+      const inPlace = !(selectedTaskStatus === 'F' || selectedTaskStatus === 'S');
       if (selectedTaskStatus === 'F' || selectedTaskStatus === 'S') {
         await editAndRetryTask(selectedTaskId, editCommandText);
+      } else if (selectedTaskStatus === 'P' || selectedTaskStatus === 'W') {
+        await editTaskCommand(selectedTaskId, editCommandText);
       } else {
+        // C / D / O
         await editTaskCommand(selectedTaskId, editCommandText);
         await signalTask(selectedTaskId, 'B');
+      }
+      if (inPlace) {
+        const idx = displayedTasks.findIndex(t => t.taskId === selectedTaskId);
+        if (idx !== -1) {
+          displayedTasks[idx] = { ...displayedTasks[idx], command: editCommandText };
+          displayedTasks = [...displayedTasks];
+        }
       }
       editMode = false;
       closeLogModal();
