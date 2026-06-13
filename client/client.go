@@ -119,6 +119,19 @@ type taskHooks struct {
 
 var taskHooksMap sync.Map // map[int32]*taskHooks
 
+// pendingDirectives carries signals that arrived before the worker had a
+// container to deliver them to (typically while the task is still in C/D/O).
+// The launch checkpoint in executeTask reads this map right before the
+// docker run / bare exec and either cancels the launch or re-reads the
+// task fields from the server, depending on the directive. Keyed by
+// task_id; value is "cancel" (K/T arrived) or "reread" (B arrived).
+//
+// We do this instead of trying to interrupt the in-flight download:
+// rclone cancellation requires context propagation through the fetch
+// layer that doesn't exist today, and forcibly killing the goroutine is
+// not a thing in Go. Phase-boundary handling is the natural fit.
+var pendingDirectives sync.Map // map[int32]string ("cancel" | "reread")
+
 // Track how long tasks have been locally active and whether they are executing
 var activeSince sync.Map    // map[int32]time.Time
 var executingTasks sync.Map // map[int32]struct{}
@@ -297,6 +310,50 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		})
 		return
 	}
+	// Launch checkpoint: signals that arrived while the task was in C/D/O
+	// (no container, no bare process to deliver to) were parked here as
+	// directives. Apply them now, BEFORE we commit to R and exec:
+	//   - "cancel": operator sent K/T while the task was still pre-running.
+	//               Mark as F with failure_class=cancelled and bail. We
+	//               don't try to interrupt the download — it already ran
+	//               or is running; the bandwidth is sunk cost — but the
+	//               CPU-bound run is skipped.
+	//   - "reread": operator edited the task fields (command, container,
+	//               container_options, shell) and sent signal B. Pull the
+	//               fresh values from the server before we exec.
+	if d, ok := pendingDirectives.LoadAndDelete(task.TaskId); ok {
+		directive := d.(string)
+		switch directive {
+		case "cancel":
+			reporter.Event("I", "phase", "cancelled before launch (pre-launch signal)", map[string]any{
+				"task_id": task.TaskId,
+			})
+			task.Status = "F"
+			reporter.UpdateTask(task.TaskId, "F", "task cancelled before launch by operator signal", "cancelled")
+			return
+		case "reread":
+			// Re-fetch task fields from the server. Only the fields the
+			// operator can edit in place: command, container,
+			// container_options, shell. Inputs/output/publish are
+			// deliberately not re-read — those are workflow-shape changes
+			// that need a fresh task_id, not an in-place patch.
+			ctxRR, cancelRR := context.WithTimeout(context.Background(), 5*time.Second)
+			fresh, rrErr := client.GetTask(ctxRR, &pb.TaskId{TaskId: task.TaskId})
+			cancelRR()
+			if rrErr != nil {
+				log.Printf("⚠️ pre-launch reread failed for task %d: %v (running with stale command)", task.TaskId, rrErr)
+			} else {
+				task.Command = fresh.Command
+				task.Container = fresh.Container
+				task.ContainerOptions = fresh.ContainerOptions
+				task.Shell = fresh.Shell
+				reporter.Event("I", "phase", "pre-launch reread applied", map[string]any{
+					"task_id": task.TaskId,
+				})
+			}
+		}
+	}
+
 	// Promote to Running locally and on the server
 	reporter.Event("I", "phase", "promoting to R (start exec)", map[string]any{
 		"task_id": task.TaskId,
@@ -1137,7 +1194,17 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		return true
 	})
 
-	// Execute signals (K=SIGKILL via docker kill, T=SIGTERM via docker stop)
+	// Execute signals.
+	//   K = SIGKILL via docker kill (or pgkill for bare)
+	//   T = SIGTERM via docker stop (or SIGTERM-then-grace-then-SIGKILL for bare)
+	//   B = reread-on-edit; equivalent to K when a container exists (input
+	//       may have been touched by the in-progress run, safest to kill
+	//       and let the operator re-launch deliberately).
+	// For all three, if NO bare process and NO container exist yet (task
+	// still in C/D/O), the signal is parked in pendingDirectives — the
+	// launch checkpoint in executeTask reads it and either cancels the
+	// launch (K/T) or re-reads task fields from the server (B) before
+	// docker run.
 	for _, sig := range res.Signals {
 		sig := sig
 		go func() {
@@ -1161,13 +1228,26 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 						}
 					}()
 				} else {
-					log.Printf("🔪 Killing bare task %d (SIGKILL to pgid %d)", sig.TaskId, p.Pid)
+					// K or B — both kill the bare process. B can't safely
+					// hot-swap the command on a running task.
+					log.Printf("🔪 Killing bare task %d (SIGKILL to pgid %d, signal=%s)", sig.TaskId, p.Pid, sig.Signal)
 					syscall.Kill(pgid, syscall.SIGKILL)
 				}
 				return
 			}
 			// Docker container signal
 			containerName := fmt.Sprintf("scitq-%s-task-%d", w.Name, sig.TaskId)
+			parkPendingDirective := func(reason string) {
+				// Container/bare process doesn't exist — the task hasn't
+				// reached launch yet. Park the directive for the launch
+				// checkpoint to pick up.
+				directive := "cancel"
+				if sig.Signal == "B" {
+					directive = "reread"
+				}
+				pendingDirectives.Store(sig.TaskId, directive)
+				log.Printf("📌 Signal %s parked as %q for task %d (%s)", sig.Signal, directive, sig.TaskId, reason)
+			}
 			if sig.Signal == "T" {
 				args := []string{"stop"}
 				if sig.GracePeriod != nil && *sig.GracePeriod > 0 {
@@ -1179,15 +1259,21 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 					outStr := strings.TrimSpace(string(out))
 					log.Printf("⚠️ docker stop %s failed: %v (%s)", containerName, err, outStr)
 					if strings.Contains(outStr, "No such container") {
+						parkPendingDirective("container not yet launched")
 						signalRecover(sig.TaskId, "docker stop reported container already gone")
 					}
 				}
 			} else {
-				log.Printf("🔪 Killing container %s (task %d, SIGKILL)", containerName, sig.TaskId)
+				// K or B — both translate to docker kill when a container
+				// exists. B differs from K only when the container does
+				// NOT yet exist (parkPendingDirective uses sig.Signal to
+				// pick "cancel" vs "reread").
+				log.Printf("🔪 Killing container %s (task %d, signal=%s)", containerName, sig.TaskId, sig.Signal)
 				if out, err := exec.Command("docker", "kill", containerName).CombinedOutput(); err != nil {
 					outStr := strings.TrimSpace(string(out))
 					log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, outStr)
 					if strings.Contains(outStr, "No such container") {
+						parkPendingDirective("container not yet launched")
 						signalRecover(sig.TaskId, "docker kill reported container already gone")
 					}
 				}

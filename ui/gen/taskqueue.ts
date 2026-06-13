@@ -14889,6 +14889,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ForceRunTask", options: {}, I: ForceRunTaskRequest, O: Ack },
     { name: "EditAndRetryTask", options: {}, I: EditAndRetryTaskRequest, O: TaskResponse },
     { name: "EditTask", options: {}, I: EditTaskRequest, O: TaskResponse },
+    { name: "GetTask", options: {}, I: TaskId, O: Task },
     { name: "EditStepCommand", options: {}, I: EditStepCommandRequest, O: EditStepCommandResponse },
     { name: "ListWorkers", options: {}, I: ListWorkersRequest, O: WorkersList },
     { name: "CreateWorker", options: {}, I: WorkerRequest, O: WorkerIds },

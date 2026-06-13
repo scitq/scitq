@@ -539,6 +539,38 @@ export async function editAndRetryTask(taskId: number, command: string): Promise
   return data.new_task_id;
 }
 
+/**
+ * Edit a task's command in place (no retry, no new task_id). Used when
+ * the task is still in a pre-running state (P/W/C/D/O) and the operator
+ * wants the worker to run the corrected command instead. After updating
+ * the DB the caller should send signal B so the worker re-reads the
+ * task at its launch checkpoint — without that, the worker would run
+ * the stale command it pulled at task pickup.
+ */
+export async function editTaskCommand(taskId: number, command: string): Promise<void> {
+  try {
+    await client.editTask({ taskId, command }, await callOptionsUserToken());
+  } catch (error) {
+    console.error("Error editing task command: ", error);
+    throw error;
+  }
+}
+
+/**
+ * Send a signal to a task (K = kill, T = SIGTERM, B = reread-on-edit).
+ * For pre-running tasks (C/D/O) the worker parks the signal and applies
+ * it at the launch checkpoint; for running tasks (R) it's delivered
+ * immediately to the container.
+ */
+export async function signalTask(taskId: number, signal: 'K' | 'T' | 'B', gracePeriod?: number): Promise<void> {
+  try {
+    await client.signalTask({ taskId, signal, gracePeriod }, await callOptionsUserToken());
+  } catch (error) {
+    console.error(`Error sending signal ${signal} to task ${taskId}: `, error);
+    throw error;
+  }
+}
+
 /* -------------------------------- JOB -------------------------------- */
 
 /**

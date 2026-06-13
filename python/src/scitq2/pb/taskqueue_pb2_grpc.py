@@ -100,6 +100,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.EditTaskRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.TaskResponse.FromString,
                 _registered_method=True)
+        self.GetTask = channel.unary_unary(
+                '/taskqueue.TaskQueue/GetTask',
+                request_serializer=taskqueue__pb2.TaskId.SerializeToString,
+                response_deserializer=taskqueue__pb2.Task.FromString,
+                _registered_method=True)
         self.EditStepCommand = channel.unary_unary(
                 '/taskqueue.TaskQueue/EditStepCommand',
                 request_serializer=taskqueue__pb2.EditStepCommandRequest.SerializeToString,
@@ -601,6 +606,13 @@ class TaskQueueServicer(object):
 
     def EditTask(self, request, context):
         """Update fields on a task in-place (no retry)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetTask(self, request, context):
+        """Fetch a single task by id; used by the worker pre-launch reread checkpoint when signal B is parked.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1207,6 +1219,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.EditTask,
                     request_deserializer=taskqueue__pb2.EditTaskRequest.FromString,
                     response_serializer=taskqueue__pb2.TaskResponse.SerializeToString,
+            ),
+            'GetTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetTask,
+                    request_deserializer=taskqueue__pb2.TaskId.FromString,
+                    response_serializer=taskqueue__pb2.Task.SerializeToString,
             ),
             'EditStepCommand': grpc.unary_unary_rpc_method_handler(
                     servicer.EditStepCommand,
@@ -1980,6 +1997,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/EditTask',
             taskqueue__pb2.EditTaskRequest.SerializeToString,
             taskqueue__pb2.TaskResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/GetTask',
+            taskqueue__pb2.TaskId.SerializeToString,
+            taskqueue__pb2.Task.FromString,
             options,
             channel_credentials,
             insecure,

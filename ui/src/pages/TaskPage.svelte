@@ -12,7 +12,9 @@
     streamTaskLogsOutput,
     streamTaskLogsErr,
     getLogsBatch,
-    editAndRetryTask
+    editAndRetryTask,
+    editTaskCommand,
+    signalTask
   } from '../lib/api';
   import TaskList from '../components/TaskList.svelte';
   import { LogChunk, TaskLog } from '../../gen/taskqueue';
@@ -641,11 +643,26 @@ async function handleWebSocketMessage(message) {
     if (!selectedTaskId) return;
     editError = '';
     try {
-      const newId = await editAndRetryTask(selectedTaskId, editCommandText);
+      // Terminal states (F/S): clone-and-retry flow — creates a fresh
+      // task_id with the new command.
+      // Pre-running states (P/W/C/D/O): patch the existing task in place
+      // and ping the worker via signal B so it re-reads the new command
+      // at its launch checkpoint instead of running the stale one it
+      // pulled at pickup. No new task_id.
+      // Running state (R): we don't reach this branch because the UI
+      // gate hides the button — see the {#if} below. If we ever lift
+      // that gate, the right call is signal K (kill the in-flight run)
+      // and the operator can decide whether to Edit & Retry afterwards.
+      if (selectedTaskStatus === 'F' || selectedTaskStatus === 'S') {
+        await editAndRetryTask(selectedTaskId, editCommandText);
+      } else {
+        await editTaskCommand(selectedTaskId, editCommandText);
+        await signalTask(selectedTaskId, 'B');
+      }
       editMode = false;
       closeLogModal();
     } catch (err) {
-      editError = err.message || 'Failed to edit and retry task';
+      editError = err.message || 'Failed to edit task';
     }
   }
 
@@ -1140,11 +1157,22 @@ async function handleWebSocketMessage(message) {
       </div>
       <div style="display:flex;gap:0.5em;justify-content:flex-end;margin-top:0.5em;">
         {#if editMode}
-          <button class="tasks-modal-close" style="background:#4caf50;" onclick={submitEditAndRetry}>Save & Retry</button>
+          <button class="tasks-modal-close" style="background:#4caf50;" onclick={submitEditAndRetry}>
+            {selectedTaskStatus === 'F' || selectedTaskStatus === 'S' ? 'Save & Retry' : 'Save'}
+          </button>
           <button class="tasks-modal-close" onclick={() => { editMode = false; editError = ''; }}>Cancel</button>
         {:else}
-          {#if selectedTaskStatus === 'F'}
+          <!-- Edit button on every non-terminal-running state:
+               F/S → "Edit & Retry" creates a new task_id (clone-and-retry).
+               P/W/C/D/O → "Edit" patches the existing task in place; the
+                           submit handler also pings the worker (signal B)
+                           so it re-reads at its launch checkpoint.
+               R → no button; in-flight container can't be hot-swapped.
+                   Operator kills first, then edits the resulting F. -->
+          {#if selectedTaskStatus === 'F' || selectedTaskStatus === 'S'}
             <button class="tasks-modal-close" style="background:#ff9800;" onclick={startEditMode}>Edit & Retry</button>
+          {:else if selectedTaskStatus === 'P' || selectedTaskStatus === 'W' || selectedTaskStatus === 'C' || selectedTaskStatus === 'D' || selectedTaskStatus === 'O'}
+            <button class="tasks-modal-close" style="background:#ff9800;" onclick={startEditMode}>Edit</button>
           {/if}
           <button class="tasks-modal-close" onclick={closeLogModal}>Close</button>
         {/if}

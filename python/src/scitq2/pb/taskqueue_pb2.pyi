@@ -44,7 +44,7 @@ class ServerVersionResponse(_message.Message):
     def __init__(self, version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ...) -> None: ...
 
 class TaskRequest(_message.Message):
-    __slots__ = ("command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "dependency", "task_name", "skip_if_exists", "accept_failure", "publish", "reuse_key", "consume_reuse")
+    __slots__ = ("command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "dependency", "task_name", "skip_if_exists", "accept_failure", "publish", "reuse_key", "consume_reuse", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "cpu_curve", "mem_curve", "disk_curve", "publish_mode")
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     SHELL_FIELD_NUMBER: _ClassVar[int]
     CONTAINER_FIELD_NUMBER: _ClassVar[int]
@@ -67,6 +67,15 @@ class TaskRequest(_message.Message):
     PUBLISH_FIELD_NUMBER: _ClassVar[int]
     REUSE_KEY_FIELD_NUMBER: _ClassVar[int]
     CONSUME_REUSE_FIELD_NUMBER: _ClassVar[int]
+    SCITQ_AUTH_FIELD_NUMBER: _ClassVar[int]
+    NUMA_FIELD_NUMBER: _ClassVar[int]
+    MIN_CPU_FIELD_NUMBER: _ClassVar[int]
+    MIN_MEM_FIELD_NUMBER: _ClassVar[int]
+    MIN_DISK_FIELD_NUMBER: _ClassVar[int]
+    CPU_CURVE_FIELD_NUMBER: _ClassVar[int]
+    MEM_CURVE_FIELD_NUMBER: _ClassVar[int]
+    DISK_CURVE_FIELD_NUMBER: _ClassVar[int]
+    PUBLISH_MODE_FIELD_NUMBER: _ClassVar[int]
     command: str
     shell: str
     container: str
@@ -89,10 +98,19 @@ class TaskRequest(_message.Message):
     publish: str
     reuse_key: str
     consume_reuse: bool
-    def __init__(self, command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., dependency: _Optional[_Iterable[int]] = ..., task_name: _Optional[str] = ..., skip_if_exists: bool = ..., accept_failure: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., consume_reuse: bool = ...) -> None: ...
+    scitq_auth: bool
+    numa: int
+    min_cpu: float
+    min_mem: float
+    min_disk: float
+    cpu_curve: _containers.RepeatedScalarFieldContainer[float]
+    mem_curve: _containers.RepeatedScalarFieldContainer[float]
+    disk_curve: _containers.RepeatedScalarFieldContainer[float]
+    publish_mode: str
+    def __init__(self, command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., dependency: _Optional[_Iterable[int]] = ..., task_name: _Optional[str] = ..., skip_if_exists: bool = ..., accept_failure: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., consume_reuse: bool = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., publish_mode: _Optional[str] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "worker_id", "workflow_id", "task_name", "retry_count", "hidden", "previous_task_id", "weight", "run_start_time", "skip_if_exists", "publish", "reuse_key", "download_duration", "run_duration", "upload_duration", "quality_score", "quality_vars")
+    __slots__ = ("task_id", "command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "worker_id", "workflow_id", "task_name", "retry_count", "hidden", "previous_task_id", "weight", "run_start_time", "skip_if_exists", "publish", "reuse_key", "download_duration", "run_duration", "upload_duration", "quality_score", "quality_vars", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "cpu_curve", "mem_curve", "disk_curve", "failure_class", "publish_mode")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     SHELL_FIELD_NUMBER: _ClassVar[int]
@@ -125,6 +143,16 @@ class Task(_message.Message):
     UPLOAD_DURATION_FIELD_NUMBER: _ClassVar[int]
     QUALITY_SCORE_FIELD_NUMBER: _ClassVar[int]
     QUALITY_VARS_FIELD_NUMBER: _ClassVar[int]
+    SCITQ_AUTH_FIELD_NUMBER: _ClassVar[int]
+    NUMA_FIELD_NUMBER: _ClassVar[int]
+    MIN_CPU_FIELD_NUMBER: _ClassVar[int]
+    MIN_MEM_FIELD_NUMBER: _ClassVar[int]
+    MIN_DISK_FIELD_NUMBER: _ClassVar[int]
+    CPU_CURVE_FIELD_NUMBER: _ClassVar[int]
+    MEM_CURVE_FIELD_NUMBER: _ClassVar[int]
+    DISK_CURVE_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_CLASS_FIELD_NUMBER: _ClassVar[int]
+    PUBLISH_MODE_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     command: str
     shell: str
@@ -157,7 +185,17 @@ class Task(_message.Message):
     upload_duration: int
     quality_score: float
     quality_vars: str
-    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., worker_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., task_name: _Optional[str] = ..., retry_count: _Optional[int] = ..., hidden: bool = ..., previous_task_id: _Optional[int] = ..., weight: _Optional[float] = ..., run_start_time: _Optional[int] = ..., skip_if_exists: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., download_duration: _Optional[int] = ..., run_duration: _Optional[int] = ..., upload_duration: _Optional[int] = ..., quality_score: _Optional[float] = ..., quality_vars: _Optional[str] = ...) -> None: ...
+    scitq_auth: bool
+    numa: int
+    min_cpu: float
+    min_mem: float
+    min_disk: float
+    cpu_curve: _containers.RepeatedScalarFieldContainer[float]
+    mem_curve: _containers.RepeatedScalarFieldContainer[float]
+    disk_curve: _containers.RepeatedScalarFieldContainer[float]
+    failure_class: str
+    publish_mode: str
+    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., worker_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., task_name: _Optional[str] = ..., retry_count: _Optional[int] = ..., hidden: bool = ..., previous_task_id: _Optional[int] = ..., weight: _Optional[float] = ..., run_start_time: _Optional[int] = ..., skip_if_exists: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., download_duration: _Optional[int] = ..., run_duration: _Optional[int] = ..., upload_duration: _Optional[int] = ..., quality_score: _Optional[float] = ..., quality_vars: _Optional[str] = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., failure_class: _Optional[str] = ..., publish_mode: _Optional[str] = ...) -> None: ...
 
 class TaskList(_message.Message):
     __slots__ = ("tasks",)
@@ -240,7 +278,7 @@ class EditStepCommandResponse(_message.Message):
     def __init__(self, edited_count: _Optional[int] = ..., new_task_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class Worker(_message.Message):
-    __slots__ = ("worker_id", "name", "concurrency", "prefetch", "status", "ipv4", "ipv6", "flavor", "provider", "region", "step_id", "step_name", "is_permanent", "recyclable_scope", "workflow_id", "workflow_name", "flavor_cpu", "flavor_mem", "flavor_disk", "version", "commit", "build_arch", "upgrade_status", "upgrade_requested")
+    __slots__ = ("worker_id", "name", "concurrency", "prefetch", "status", "ipv4", "ipv6", "flavor", "provider", "region", "step_id", "step_name", "is_permanent", "recyclable_scope", "workflow_id", "workflow_name", "flavor_cpu", "flavor_mem", "flavor_disk", "version", "commit", "build_arch", "upgrade_status", "upgrade_requested", "recent_failures")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
@@ -265,6 +303,7 @@ class Worker(_message.Message):
     BUILD_ARCH_FIELD_NUMBER: _ClassVar[int]
     UPGRADE_STATUS_FIELD_NUMBER: _ClassVar[int]
     UPGRADE_REQUESTED_FIELD_NUMBER: _ClassVar[int]
+    RECENT_FAILURES_FIELD_NUMBER: _ClassVar[int]
     worker_id: int
     name: str
     concurrency: int
@@ -289,7 +328,8 @@ class Worker(_message.Message):
     build_arch: str
     upgrade_status: str
     upgrade_requested: str
-    def __init__(self, worker_id: _Optional[int] = ..., name: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., status: _Optional[str] = ..., ipv4: _Optional[str] = ..., ipv6: _Optional[str] = ..., flavor: _Optional[str] = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., step_id: _Optional[int] = ..., step_name: _Optional[str] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_id: _Optional[int] = ..., workflow_name: _Optional[str] = ..., flavor_cpu: _Optional[int] = ..., flavor_mem: _Optional[float] = ..., flavor_disk: _Optional[float] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ..., upgrade_status: _Optional[str] = ..., upgrade_requested: _Optional[str] = ...) -> None: ...
+    recent_failures: int
+    def __init__(self, worker_id: _Optional[int] = ..., name: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., status: _Optional[str] = ..., ipv4: _Optional[str] = ..., ipv6: _Optional[str] = ..., flavor: _Optional[str] = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., step_id: _Optional[int] = ..., step_name: _Optional[str] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_id: _Optional[int] = ..., workflow_name: _Optional[str] = ..., flavor_cpu: _Optional[int] = ..., flavor_mem: _Optional[float] = ..., flavor_disk: _Optional[float] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ..., upgrade_status: _Optional[str] = ..., upgrade_requested: _Optional[str] = ..., recent_failures: _Optional[int] = ...) -> None: ...
 
 class WorkersList(_message.Message):
     __slots__ = ("workers",)
@@ -320,14 +360,20 @@ class WorkerUpgradeReply(_message.Message):
     def __init__(self, affected_worker_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class ClientUpgradeInfo(_message.Message):
-    __slots__ = ("binary_url", "sha256_url", "insecure_skip_verify")
+    __slots__ = ("binary_url", "sha256_url", "insecure_skip_verify", "cli_binary_url", "cli_sha256_url", "cli_install_path")
     BINARY_URL_FIELD_NUMBER: _ClassVar[int]
     SHA256_URL_FIELD_NUMBER: _ClassVar[int]
     INSECURE_SKIP_VERIFY_FIELD_NUMBER: _ClassVar[int]
+    CLI_BINARY_URL_FIELD_NUMBER: _ClassVar[int]
+    CLI_SHA256_URL_FIELD_NUMBER: _ClassVar[int]
+    CLI_INSTALL_PATH_FIELD_NUMBER: _ClassVar[int]
     binary_url: str
     sha256_url: str
     insecure_skip_verify: bool
-    def __init__(self, binary_url: _Optional[str] = ..., sha256_url: _Optional[str] = ..., insecure_skip_verify: bool = ...) -> None: ...
+    cli_binary_url: str
+    cli_sha256_url: str
+    cli_install_path: str
+    def __init__(self, binary_url: _Optional[str] = ..., sha256_url: _Optional[str] = ..., insecure_skip_verify: bool = ..., cli_binary_url: _Optional[str] = ..., cli_sha256_url: _Optional[str] = ..., cli_install_path: _Optional[str] = ...) -> None: ...
 
 class TaskUpdate(_message.Message):
     __slots__ = ("weight",)
@@ -359,7 +405,7 @@ class TaskSignal(_message.Message):
     def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ..., grace_period: _Optional[int] = ...) -> None: ...
 
 class TaskListAndOther(_message.Message):
-    __slots__ = ("tasks", "concurrency", "updates", "active_tasks", "signals", "upgrade_requested", "server_upgrade_in_progress")
+    __slots__ = ("tasks", "concurrency", "updates", "active_tasks", "signals", "upgrade_requested", "server_upgrade_in_progress", "max_cpu", "max_mem")
     TASKS_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     UPDATES_FIELD_NUMBER: _ClassVar[int]
@@ -367,6 +413,8 @@ class TaskListAndOther(_message.Message):
     SIGNALS_FIELD_NUMBER: _ClassVar[int]
     UPGRADE_REQUESTED_FIELD_NUMBER: _ClassVar[int]
     SERVER_UPGRADE_IN_PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    MAX_CPU_FIELD_NUMBER: _ClassVar[int]
+    MAX_MEM_FIELD_NUMBER: _ClassVar[int]
     tasks: _containers.RepeatedCompositeFieldContainer[Task]
     concurrency: int
     updates: TaskUpdateList
@@ -374,7 +422,9 @@ class TaskListAndOther(_message.Message):
     signals: _containers.RepeatedCompositeFieldContainer[TaskSignal]
     upgrade_requested: str
     server_upgrade_in_progress: bool
-    def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., concurrency: _Optional[int] = ..., updates: _Optional[_Union[TaskUpdateList, _Mapping]] = ..., active_tasks: _Optional[_Iterable[int]] = ..., signals: _Optional[_Iterable[_Union[TaskSignal, _Mapping]]] = ..., upgrade_requested: _Optional[str] = ..., server_upgrade_in_progress: bool = ...) -> None: ...
+    max_cpu: int
+    max_mem: float
+    def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., concurrency: _Optional[int] = ..., updates: _Optional[_Union[TaskUpdateList, _Mapping]] = ..., active_tasks: _Optional[_Iterable[int]] = ..., signals: _Optional[_Iterable[_Union[TaskSignal, _Mapping]]] = ..., upgrade_requested: _Optional[str] = ..., server_upgrade_in_progress: bool = ..., max_cpu: _Optional[int] = ..., max_mem: _Optional[float] = ...) -> None: ...
 
 class TaskSignalRequest(_message.Message):
     __slots__ = ("task_id", "signal", "grace_period")
@@ -387,16 +437,18 @@ class TaskSignalRequest(_message.Message):
     def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ..., grace_period: _Optional[int] = ...) -> None: ...
 
 class TaskStatusUpdate(_message.Message):
-    __slots__ = ("task_id", "new_status", "duration", "free_retry")
+    __slots__ = ("task_id", "new_status", "duration", "free_retry", "failure_class")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     NEW_STATUS_FIELD_NUMBER: _ClassVar[int]
     DURATION_FIELD_NUMBER: _ClassVar[int]
     FREE_RETRY_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_CLASS_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     new_status: str
     duration: int
     free_retry: bool
-    def __init__(self, task_id: _Optional[int] = ..., new_status: _Optional[str] = ..., duration: _Optional[int] = ..., free_retry: bool = ...) -> None: ...
+    failure_class: str
+    def __init__(self, task_id: _Optional[int] = ..., new_status: _Optional[str] = ..., duration: _Optional[int] = ..., free_retry: bool = ..., failure_class: _Optional[str] = ...) -> None: ...
 
 class TaskLog(_message.Message):
     __slots__ = ("task_id", "log_type", "log_text")
@@ -499,12 +551,16 @@ class WorkerIds(_message.Message):
     def __init__(self, workers_details: _Optional[_Iterable[_Union[WorkerDetails, _Mapping]]] = ...) -> None: ...
 
 class PingAndGetNewTasksRequest(_message.Message):
-    __slots__ = ("worker_id", "stats")
+    __slots__ = ("worker_id", "stats", "known_task_ids", "reports_known_tasks")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     STATS_FIELD_NUMBER: _ClassVar[int]
+    KNOWN_TASK_IDS_FIELD_NUMBER: _ClassVar[int]
+    REPORTS_KNOWN_TASKS_FIELD_NUMBER: _ClassVar[int]
     worker_id: int
     stats: WorkerStats
-    def __init__(self, worker_id: _Optional[int] = ..., stats: _Optional[_Union[WorkerStats, _Mapping]] = ...) -> None: ...
+    known_task_ids: _containers.RepeatedScalarFieldContainer[int]
+    reports_known_tasks: bool
+    def __init__(self, worker_id: _Optional[int] = ..., stats: _Optional[_Union[WorkerStats, _Mapping]] = ..., known_task_ids: _Optional[_Iterable[int]] = ..., reports_known_tasks: bool = ...) -> None: ...
 
 class Ack(_message.Message):
     __slots__ = ("success",)
@@ -573,7 +629,7 @@ class CreateWorkerByNameRequest(_message.Message):
     def __init__(self, provider: _Optional[str] = ..., flavor: _Optional[str] = ..., region: _Optional[str] = ..., count: _Optional[int] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., step_id: _Optional[int] = ...) -> None: ...
 
 class WorkerUpdateRequest(_message.Message):
-    __slots__ = ("worker_id", "provider_id", "flavor_id", "region_id", "concurrency", "prefetch", "step_id", "is_permanent", "recyclable_scope", "workflow_name", "step_name")
+    __slots__ = ("worker_id", "provider_id", "flavor_id", "region_id", "concurrency", "prefetch", "step_id", "is_permanent", "recyclable_scope", "workflow_name", "step_name", "max_cpu", "max_mem", "clear_step")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_ID_FIELD_NUMBER: _ClassVar[int]
     FLAVOR_ID_FIELD_NUMBER: _ClassVar[int]
@@ -585,6 +641,9 @@ class WorkerUpdateRequest(_message.Message):
     RECYCLABLE_SCOPE_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_NAME_FIELD_NUMBER: _ClassVar[int]
     STEP_NAME_FIELD_NUMBER: _ClassVar[int]
+    MAX_CPU_FIELD_NUMBER: _ClassVar[int]
+    MAX_MEM_FIELD_NUMBER: _ClassVar[int]
+    CLEAR_STEP_FIELD_NUMBER: _ClassVar[int]
     worker_id: int
     provider_id: int
     flavor_id: int
@@ -596,7 +655,10 @@ class WorkerUpdateRequest(_message.Message):
     recyclable_scope: str
     workflow_name: str
     step_name: str
-    def __init__(self, worker_id: _Optional[int] = ..., provider_id: _Optional[int] = ..., flavor_id: _Optional[int] = ..., region_id: _Optional[int] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., step_id: _Optional[int] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_name: _Optional[str] = ..., step_name: _Optional[str] = ...) -> None: ...
+    max_cpu: int
+    max_mem: float
+    clear_step: bool
+    def __init__(self, worker_id: _Optional[int] = ..., provider_id: _Optional[int] = ..., flavor_id: _Optional[int] = ..., region_id: _Optional[int] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., step_id: _Optional[int] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_name: _Optional[str] = ..., step_name: _Optional[str] = ..., max_cpu: _Optional[int] = ..., max_mem: _Optional[float] = ..., clear_step: bool = ...) -> None: ...
 
 class ListFlavorsRequest(_message.Message):
     __slots__ = ("limit", "filter")
@@ -957,14 +1019,16 @@ class RecruiterList(_message.Message):
     def __init__(self, recruiters: _Optional[_Iterable[_Union[Recruiter, _Mapping]]] = ...) -> None: ...
 
 class WorkflowFilter(_message.Message):
-    __slots__ = ("name_like", "limit", "offset")
+    __slots__ = ("name_like", "limit", "offset", "username_filter")
     NAME_LIKE_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
+    USERNAME_FILTER_FIELD_NUMBER: _ClassVar[int]
     name_like: str
     limit: int
     offset: int
-    def __init__(self, name_like: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
+    username_filter: str
+    def __init__(self, name_like: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., username_filter: _Optional[str] = ...) -> None: ...
 
 class WorkflowId(_message.Message):
     __slots__ = ("workflow_id",)
@@ -973,7 +1037,7 @@ class WorkflowId(_message.Message):
     def __init__(self, workflow_id: _Optional[int] = ...) -> None: ...
 
 class Workflow(_message.Message):
-    __slots__ = ("workflow_id", "name", "status", "run_strategy", "maximum_workers", "total_tasks", "succeeded_tasks", "failed_tasks", "running_tasks", "retrying_tasks", "live", "template_run_id", "template_name", "template_version", "script_name", "script_sha256")
+    __slots__ = ("workflow_id", "name", "status", "run_strategy", "maximum_workers", "total_tasks", "succeeded_tasks", "failed_tasks", "running_tasks", "retrying_tasks", "live", "template_run_id", "template_name", "template_version", "script_name", "script_sha256", "parent_workflow_id")
     WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
@@ -990,6 +1054,7 @@ class Workflow(_message.Message):
     TEMPLATE_VERSION_FIELD_NUMBER: _ClassVar[int]
     SCRIPT_NAME_FIELD_NUMBER: _ClassVar[int]
     SCRIPT_SHA256_FIELD_NUMBER: _ClassVar[int]
+    PARENT_WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
     workflow_id: int
     name: str
     status: str
@@ -1006,7 +1071,8 @@ class Workflow(_message.Message):
     template_version: str
     script_name: str
     script_sha256: str
-    def __init__(self, workflow_id: _Optional[int] = ..., name: _Optional[str] = ..., status: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., total_tasks: _Optional[int] = ..., succeeded_tasks: _Optional[int] = ..., failed_tasks: _Optional[int] = ..., running_tasks: _Optional[int] = ..., retrying_tasks: _Optional[int] = ..., live: bool = ..., template_run_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., script_name: _Optional[str] = ..., script_sha256: _Optional[str] = ...) -> None: ...
+    parent_workflow_id: int
+    def __init__(self, workflow_id: _Optional[int] = ..., name: _Optional[str] = ..., status: _Optional[str] = ..., run_strategy: _Optional[str] = ..., maximum_workers: _Optional[int] = ..., total_tasks: _Optional[int] = ..., succeeded_tasks: _Optional[int] = ..., failed_tasks: _Optional[int] = ..., running_tasks: _Optional[int] = ..., retrying_tasks: _Optional[int] = ..., live: bool = ..., template_run_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., script_name: _Optional[str] = ..., script_sha256: _Optional[str] = ..., parent_workflow_id: _Optional[int] = ...) -> None: ...
 
 class WorkflowRequest(_message.Message):
     __slots__ = ("name", "run_strategy", "maximum_workers", "status", "live")
@@ -1037,6 +1103,102 @@ class WorkflowStatusUpdate(_message.Message):
     status: str
     maximum_workers: int
     def __init__(self, workflow_id: _Optional[int] = ..., status: _Optional[str] = ..., maximum_workers: _Optional[int] = ...) -> None: ...
+
+class ChainEntry(_message.Message):
+    __slots__ = ("chain_entry_id", "parent_workflow_id", "idx", "template_name", "template_version", "params_template_json", "when_expr", "on_status", "always_new", "status", "child_workflow_id", "error_message", "created_at", "fired_at", "last_fired_at")
+    CHAIN_ENTRY_ID_FIELD_NUMBER: _ClassVar[int]
+    PARENT_WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
+    IDX_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_NAME_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_VERSION_FIELD_NUMBER: _ClassVar[int]
+    PARAMS_TEMPLATE_JSON_FIELD_NUMBER: _ClassVar[int]
+    WHEN_EXPR_FIELD_NUMBER: _ClassVar[int]
+    ON_STATUS_FIELD_NUMBER: _ClassVar[int]
+    ALWAYS_NEW_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    CHILD_WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    FIRED_AT_FIELD_NUMBER: _ClassVar[int]
+    LAST_FIRED_AT_FIELD_NUMBER: _ClassVar[int]
+    chain_entry_id: int
+    parent_workflow_id: int
+    idx: int
+    template_name: str
+    template_version: str
+    params_template_json: str
+    when_expr: str
+    on_status: str
+    always_new: bool
+    status: str
+    child_workflow_id: int
+    error_message: str
+    created_at: str
+    fired_at: str
+    last_fired_at: str
+    def __init__(self, chain_entry_id: _Optional[int] = ..., parent_workflow_id: _Optional[int] = ..., idx: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., params_template_json: _Optional[str] = ..., when_expr: _Optional[str] = ..., on_status: _Optional[str] = ..., always_new: bool = ..., status: _Optional[str] = ..., child_workflow_id: _Optional[int] = ..., error_message: _Optional[str] = ..., created_at: _Optional[str] = ..., fired_at: _Optional[str] = ..., last_fired_at: _Optional[str] = ...) -> None: ...
+
+class ChainEntryList(_message.Message):
+    __slots__ = ("entries",)
+    ENTRIES_FIELD_NUMBER: _ClassVar[int]
+    entries: _containers.RepeatedCompositeFieldContainer[ChainEntry]
+    def __init__(self, entries: _Optional[_Iterable[_Union[ChainEntry, _Mapping]]] = ...) -> None: ...
+
+class ChainEntryId(_message.Message):
+    __slots__ = ("chain_entry_id",)
+    CHAIN_ENTRY_ID_FIELD_NUMBER: _ClassVar[int]
+    chain_entry_id: int
+    def __init__(self, chain_entry_id: _Optional[int] = ...) -> None: ...
+
+class ChainEntryDraft(_message.Message):
+    __slots__ = ("template_name", "template_version", "params_template_json", "when_expr", "on_status", "always_new")
+    TEMPLATE_NAME_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_VERSION_FIELD_NUMBER: _ClassVar[int]
+    PARAMS_TEMPLATE_JSON_FIELD_NUMBER: _ClassVar[int]
+    WHEN_EXPR_FIELD_NUMBER: _ClassVar[int]
+    ON_STATUS_FIELD_NUMBER: _ClassVar[int]
+    ALWAYS_NEW_FIELD_NUMBER: _ClassVar[int]
+    template_name: str
+    template_version: str
+    params_template_json: str
+    when_expr: str
+    on_status: str
+    always_new: bool
+    def __init__(self, template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., params_template_json: _Optional[str] = ..., when_expr: _Optional[str] = ..., on_status: _Optional[str] = ..., always_new: bool = ...) -> None: ...
+
+class CreateChainEntriesRequest(_message.Message):
+    __slots__ = ("workflow_id", "entries")
+    WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
+    ENTRIES_FIELD_NUMBER: _ClassVar[int]
+    workflow_id: int
+    entries: _containers.RepeatedCompositeFieldContainer[ChainEntryDraft]
+    def __init__(self, workflow_id: _Optional[int] = ..., entries: _Optional[_Iterable[_Union[ChainEntryDraft, _Mapping]]] = ...) -> None: ...
+
+class ListChainEntriesRequest(_message.Message):
+    __slots__ = ("parent_workflow_id", "status_filter")
+    PARENT_WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FILTER_FIELD_NUMBER: _ClassVar[int]
+    parent_workflow_id: int
+    status_filter: str
+    def __init__(self, parent_workflow_id: _Optional[int] = ..., status_filter: _Optional[str] = ...) -> None: ...
+
+class EditChainEntryRequest(_message.Message):
+    __slots__ = ("chain_entry_id", "template_name", "template_version", "params_template_json", "when_expr", "on_status", "always_new")
+    CHAIN_ENTRY_ID_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_NAME_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_VERSION_FIELD_NUMBER: _ClassVar[int]
+    PARAMS_TEMPLATE_JSON_FIELD_NUMBER: _ClassVar[int]
+    WHEN_EXPR_FIELD_NUMBER: _ClassVar[int]
+    ON_STATUS_FIELD_NUMBER: _ClassVar[int]
+    ALWAYS_NEW_FIELD_NUMBER: _ClassVar[int]
+    chain_entry_id: int
+    template_name: str
+    template_version: str
+    params_template_json: str
+    when_expr: str
+    on_status: str
+    always_new: bool
+    def __init__(self, chain_entry_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., params_template_json: _Optional[str] = ..., when_expr: _Optional[str] = ..., on_status: _Optional[str] = ..., always_new: bool = ...) -> None: ...
 
 class DebugAssignRequest(_message.Message):
     __slots__ = ("workflow_id", "task_id")
@@ -1298,14 +1460,20 @@ class UploadTemplateResponse(_message.Message):
     def __init__(self, success: bool = ..., message: _Optional[str] = ..., workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ...) -> None: ...
 
 class RunTemplateRequest(_message.Message):
-    __slots__ = ("workflow_template_id", "param_values_json", "no_recruiters")
+    __slots__ = ("workflow_template_id", "param_values_json", "no_recruiters", "extend_workflow_id", "retry_failed_only", "continue_last")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     PARAM_VALUES_JSON_FIELD_NUMBER: _ClassVar[int]
     NO_RECRUITERS_FIELD_NUMBER: _ClassVar[int]
+    EXTEND_WORKFLOW_ID_FIELD_NUMBER: _ClassVar[int]
+    RETRY_FAILED_ONLY_FIELD_NUMBER: _ClassVar[int]
+    CONTINUE_LAST_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     param_values_json: str
     no_recruiters: bool
-    def __init__(self, workflow_template_id: _Optional[int] = ..., param_values_json: _Optional[str] = ..., no_recruiters: bool = ...) -> None: ...
+    extend_workflow_id: int
+    retry_failed_only: bool
+    continue_last: bool
+    def __init__(self, workflow_template_id: _Optional[int] = ..., param_values_json: _Optional[str] = ..., no_recruiters: bool = ..., extend_workflow_id: _Optional[int] = ..., retry_failed_only: bool = ..., continue_last: bool = ...) -> None: ...
 
 class TemplateFilter(_message.Message):
     __slots__ = ("workflow_template_id", "name", "version", "all_versions", "show_hidden")
@@ -1358,7 +1526,7 @@ class TemplateList(_message.Message):
     def __init__(self, templates: _Optional[_Iterable[_Union[Template, _Mapping]]] = ...) -> None: ...
 
 class TemplateRun(_message.Message):
-    __slots__ = ("template_run_id", "workflow_template_id", "template_name", "template_version", "workflow_name", "run_by", "status", "workflow_id", "created_at", "param_values_json", "error_message", "run_by_username", "script_name", "script_sha256")
+    __slots__ = ("template_run_id", "workflow_template_id", "template_name", "template_version", "workflow_name", "run_by", "status", "workflow_id", "created_at", "param_values_json", "error_message", "run_by_username", "script_name", "script_sha256", "parent_template_run_id")
     TEMPLATE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     TEMPLATE_NAME_FIELD_NUMBER: _ClassVar[int]
@@ -1373,6 +1541,7 @@ class TemplateRun(_message.Message):
     RUN_BY_USERNAME_FIELD_NUMBER: _ClassVar[int]
     SCRIPT_NAME_FIELD_NUMBER: _ClassVar[int]
     SCRIPT_SHA256_FIELD_NUMBER: _ClassVar[int]
+    PARENT_TEMPLATE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     template_run_id: int
     workflow_template_id: int
     template_name: str
@@ -1387,7 +1556,8 @@ class TemplateRun(_message.Message):
     run_by_username: str
     script_name: str
     script_sha256: str
-    def __init__(self, template_run_id: _Optional[int] = ..., workflow_template_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., workflow_name: _Optional[str] = ..., run_by: _Optional[int] = ..., status: _Optional[str] = ..., workflow_id: _Optional[int] = ..., created_at: _Optional[str] = ..., param_values_json: _Optional[str] = ..., error_message: _Optional[str] = ..., run_by_username: _Optional[str] = ..., script_name: _Optional[str] = ..., script_sha256: _Optional[str] = ...) -> None: ...
+    parent_template_run_id: int
+    def __init__(self, template_run_id: _Optional[int] = ..., workflow_template_id: _Optional[int] = ..., template_name: _Optional[str] = ..., template_version: _Optional[str] = ..., workflow_name: _Optional[str] = ..., run_by: _Optional[int] = ..., status: _Optional[str] = ..., workflow_id: _Optional[int] = ..., created_at: _Optional[str] = ..., param_values_json: _Optional[str] = ..., error_message: _Optional[str] = ..., run_by_username: _Optional[str] = ..., script_name: _Optional[str] = ..., script_sha256: _Optional[str] = ..., parent_template_run_id: _Optional[int] = ...) -> None: ...
 
 class TemplateRunList(_message.Message):
     __slots__ = ("runs",)
@@ -1396,10 +1566,12 @@ class TemplateRunList(_message.Message):
     def __init__(self, runs: _Optional[_Iterable[_Union[TemplateRun, _Mapping]]] = ...) -> None: ...
 
 class TemplateRunFilter(_message.Message):
-    __slots__ = ("workflow_template_id",)
+    __slots__ = ("workflow_template_id", "template_run_id")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
-    def __init__(self, workflow_template_id: _Optional[int] = ...) -> None: ...
+    template_run_id: int
+    def __init__(self, workflow_template_id: _Optional[int] = ..., template_run_id: _Optional[int] = ...) -> None: ...
 
 class UpdateTemplateRunRequest(_message.Message):
     __slots__ = ("template_run_id", "workflow_id", "error_message", "module_pins")
@@ -1486,20 +1658,30 @@ class ModuleEntry(_message.Message):
     def __init__(self, path: _Optional[str] = ..., version: _Optional[str] = ..., origin: _Optional[str] = ..., description: _Optional[str] = ...) -> None: ...
 
 class ModuleListFilter(_message.Message):
-    __slots__ = ("path", "latest_only", "origin")
+    __slots__ = ("path", "latest_only", "origin", "conflicts_only")
     PATH_FIELD_NUMBER: _ClassVar[int]
     LATEST_ONLY_FIELD_NUMBER: _ClassVar[int]
     ORIGIN_FIELD_NUMBER: _ClassVar[int]
+    CONFLICTS_ONLY_FIELD_NUMBER: _ClassVar[int]
     path: str
     latest_only: bool
     origin: str
-    def __init__(self, path: _Optional[str] = ..., latest_only: bool = ..., origin: _Optional[str] = ...) -> None: ...
+    conflicts_only: bool
+    def __init__(self, path: _Optional[str] = ..., latest_only: bool = ..., origin: _Optional[str] = ..., conflicts_only: bool = ...) -> None: ...
 
 class DownloadModuleRequest(_message.Message):
     __slots__ = ("filename",)
     FILENAME_FIELD_NUMBER: _ClassVar[int]
     filename: str
     def __init__(self, filename: _Optional[str] = ...) -> None: ...
+
+class DeleteModuleRequest(_message.Message):
+    __slots__ = ("path", "version")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    version: str
+    def __init__(self, path: _Optional[str] = ..., version: _Optional[str] = ...) -> None: ...
 
 class UpgradeBundledModulesRequest(_message.Message):
     __slots__ = ("apply",)

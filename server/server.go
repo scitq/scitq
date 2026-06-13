@@ -2125,8 +2125,18 @@ func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTask
 }
 
 func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequest) (*pb.Ack, error) {
-	if req.Signal != "K" && req.Signal != "T" {
-		return nil, fmt.Errorf("unsupported signal %q (K for kill, T for terminate)", req.Signal)
+	// K = SIGKILL (or "cancel before launch" if the task isn't running yet —
+	//     the worker reinterprets at the launch checkpoint).
+	// T = SIGTERM (graceful kill of a running container).
+	// B = "re-read command before launch" — operator edited the task's
+	//     command/container in place while the task is in C/D/O. The
+	//     worker re-queries the task from the server right before exec
+	//     and runs with the new fields. If the task is already in R, the
+	//     worker treats B as K — input may have been touched by the
+	//     in-progress run, so we kill and let the operator decide whether
+	//     to Edit & Retry deliberately.
+	if req.Signal != "K" && req.Signal != "T" && req.Signal != "B" {
+		return nil, fmt.Errorf("unsupported signal %q (K for kill, T for terminate, B for reread-on-edit)", req.Signal)
 	}
 	var grace interface{} = nil
 	if req.GracePeriod != nil {
@@ -2141,7 +2151,7 @@ func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequ
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return nil, fmt.Errorf("task %d not found or not in a running state", req.TaskId)
 	}
-	sigName := map[string]string{"K": "SIGKILL", "T": "SIGTERM"}[req.Signal]
+	sigName := map[string]string{"K": "SIGKILL", "T": "SIGTERM", "B": "REREAD-ON-EDIT"}[req.Signal]
 	log.Printf("🔪 %s signal queued for task %d", sigName, req.TaskId)
 	return &pb.Ack{}, nil
 }
@@ -2240,6 +2250,56 @@ func pluralS(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// GetTask returns a single task by id. Used by the worker's pre-launch
+// reread checkpoint: when an operator edited a pre-running task's
+// command/container in place and parked signal B, the worker calls
+// GetTask right before docker run to pick up the new fields. Fewer
+// columns than ListTasks — we don't need stats/durations/quality here.
+func (s *taskQueueServer) GetTask(ctx context.Context, req *pb.TaskId) (*pb.Task, error) {
+	if req.TaskId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "task_id is required")
+	}
+	var (
+		task                                                          pb.Task
+		taskName, shellNull, outputNull, publishNull                  sql.NullString
+		inputNull, resourceNull                                       pq.StringArray
+		workerIDNull, stepIDNull, prevTaskID, wfIDNull, retryNull     sql.NullInt32
+	)
+	err := s.db.QueryRowContext(ctx, `
+        SELECT
+            t.task_id, t.task_name, t.command, t.container, t.container_options, t.status,
+            t.worker_id, t.step_id, t.previous_task_id,
+            s.workflow_id, t.weight, t.shell, t.input, t.resource, t.output, t.retry,
+            t.publish
+        FROM task t
+        LEFT JOIN step s ON s.step_id = t.step_id
+        WHERE t.task_id = $1
+    `, req.TaskId).Scan(
+		&task.TaskId, &taskName, &task.Command, &task.Container, &task.ContainerOptions, &task.Status,
+		&workerIDNull, &stepIDNull, &prevTaskID,
+		&wfIDNull, &task.Weight, &shellNull, &inputNull, &resourceNull, &outputNull, &retryNull,
+		&publishNull,
+	)
+	if err == sql.ErrNoRows {
+		return nil, status.Errorf(codes.NotFound, "task %d not found", req.TaskId)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query task %d: %w", req.TaskId, err)
+	}
+	task.TaskName = utils.NullStringToPtr(taskName)
+	task.Shell = utils.NullStringToPtr(shellNull)
+	task.Input = utils.StringArrayToSlice(inputNull)
+	task.Resource = utils.StringArrayToSlice(resourceNull)
+	task.Output = utils.NullStringToPtr(outputNull)
+	task.Publish = utils.NullStringToPtr(publishNull)
+	task.WorkerId = utils.NullInt32ToPtr(workerIDNull)
+	task.StepId = utils.NullInt32ToPtr(stepIDNull)
+	task.PreviousTaskId = utils.NullInt32ToPtr(prevTaskID)
+	task.WorkflowId = utils.NullInt32ToPtr(wfIDNull)
+	task.Retry = utils.NullInt32ToPtr(retryNull)
+	return &task, nil
 }
 
 func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndRetryTaskRequest) (*pb.TaskResponse, error) {
