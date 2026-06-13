@@ -982,6 +982,11 @@ async function handleWebSocketMessage(message) {
     aria-label="Close modal"
     onclick={closeLogModal}
     onkeydown={(e) => {
+      // Only react to keys that landed on the backdrop itself —
+      // otherwise Enter/Space typed inside the Edit & Retry textarea
+      // bubbles up here and closes the modal mid-edit. Escape still
+      // closes from anywhere (the inner modal also handles it).
+      if (e.target !== e.currentTarget) return;
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') closeLogModal();
     }}
   >
