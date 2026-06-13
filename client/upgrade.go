@@ -33,8 +33,11 @@ import (
 // emergencyDrainTimeout caps how long an emergency drain will wait for
 // in-flight tasks to finish before forcibly upgrading. The operator
 // chose emergency knowing this; tasks killed past the cap are marked
-// failed and re-scheduled by normal recruitment.
-const emergencyDrainTimeout = 30 * time.Minute
+// failed and re-scheduled by normal recruitment. 2 min is short enough
+// that "force upgrade" feels forced (the original 30 min meant a forced
+// upgrade could sit waiting half an hour, defeating the purpose) and
+// long enough for a nearly-done upload to land before the kill.
+const emergencyDrainTimeout = 2 * time.Minute
 
 const supportedUpgradeArch = "linux/amd64"
 

@@ -959,7 +959,12 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	)
 
 	if err == sql.ErrNoRows {
-		return &pb.Ack{Success: false}, fmt.Errorf("task %d not found", req.TaskId)
+		// codes.NotFound is the terminal "this task does not exist" signal
+		// — the worker's retry loop reads the code and stops retrying. A
+		// bare Unknown would leak as a transient failure and the worker
+		// would keep hammering the server forever (observed Jun 2026:
+		// 4000+ retries on a single task that had been replaced).
+		return &pb.Ack{Success: false}, status.Errorf(codes.NotFound, "task %d not found", req.TaskId)
 	}
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update task status: %w", err)
@@ -968,7 +973,11 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	if !didUpdate {
 		if wasHidden {
 			log.Printf("🛡️ refusing UpdateTaskStatus on hidden task %d (no-op prevented)", req.TaskId)
-			return &pb.Ack{Success: false}, fmt.Errorf("task %d is hidden and read-only", req.TaskId)
+			// FailedPrecondition (not NotFound): the row exists, it's
+			// just no longer the canonical task — superseded by a
+			// retry. Distinct code lets logs differentiate; the worker
+			// treats both as terminal.
+			return &pb.Ack{Success: false}, status.Errorf(codes.FailedPrecondition, "task %d is hidden and read-only", req.TaskId)
 		}
 		if sameStatus {
 			log.Printf("ℹ️ no-op: task %d already in status %s", req.TaskId, req.NewStatus)

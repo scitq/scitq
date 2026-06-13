@@ -10,6 +10,8 @@ import (
 
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/lib"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const idleTimeout = 60 * time.Second
@@ -220,13 +222,46 @@ func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 		case itStatus:
 			// Terminal statuses (S/F) are the authoritative end-of-task
 			// signal: losing one strands the task on the server (pinned in an
-			// active state) while the worker has moved on. So retry those
-			// until they land (or the worker is told to quit), instead of the
-			// bounded best-effort used for transient statuses (R/D/O/V/…),
-			// which a newer update supersedes anyway. This stays on the
-			// per-task serialized queue, so ordering behind any earlier
-			// transient update is preserved — sending the terminal status
-			// out-of-band would let it race ahead and be overwritten.
+			// active state) while the worker has moved on. So we retry far
+			// more aggressively for those than for transient statuses
+			// (R/D/O/V/…), which a newer update supersedes anyway. This
+			// stays on the per-task serialized queue, so ordering behind any
+			// earlier transient update is preserved — sending the terminal
+			// status out-of-band would let it race ahead and be overwritten.
+			//
+			// Retry budget for terminal statuses splits by failure class:
+			//   - server responding with an error (Internal, Aborted, …):
+			//     the server is alive but rejecting this update. Cap at
+			//     attemptCapServerError — ~7.5h with the linear backoff
+			//     below — beyond which the row is almost certainly stuck
+			//     in a state we can't recover automatically.
+			//   - server unreachable (Unavailable / DeadlineExceeded /
+			//     Canceled): a full outage. Cap at attemptCapServerDown,
+			//     ~49h with the backoff ceiling — enough to survive a
+			//     weekend without losing the terminal status update.
+			// NotFound / FailedPrecondition are immediate-give-up (the
+			// row is gone or superseded; retry never lands).
+			//
+			// Backoff: linear ramp 1s + 0.3s·attempt, capped at 30s — hits
+			// the cap around attempt 97. Slower than the original 2s flat
+			// loop (so the first burst doesn't hammer the server) but with
+			// a real ceiling so 6000 attempts span ~49h instead of the
+			// 3h-ish a fixed 2s loop would give.
+			const (
+				attemptCapServerError = 1000
+				attemptCapServerDown  = 6000
+				backoffBase           = 1 * time.Second
+				backoffStep           = 300 * time.Millisecond
+				backoffCap            = 30 * time.Second
+			)
+			isServerDown := func(err error) bool {
+				switch status.Code(err) {
+				case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
+					return true
+				}
+				return false
+			}
+
 			terminal := it.status == "S" || it.status == "F"
 			timeout := max(r.Timeout, 5*time.Second)
 			for attempt := 0; ; attempt++ {
@@ -249,17 +284,42 @@ func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 					break
 				}
 				log.Printf("⚠️ update task %d to %s failed: %v", taskID, it.status, err)
-				if !terminal && attempt >= 2 {
-					break // transient status: give up after 3 tries
+				// Terminal server-side conditions: row is gone (NotFound
+				// — task deleted) or no longer canonical
+				// (FailedPrecondition — task was hidden by a retry).
+				// Retrying never lands.
+				if code := status.Code(err); code == codes.NotFound || code == codes.FailedPrecondition {
+					log.Printf("🛑 giving up on task %d %s: server reports %s — task is gone or superseded", taskID, it.status, code)
+					break
 				}
-				time.Sleep(2 * time.Second)
-				if timeout < 15*time.Second {
-					timeout += 5 * time.Second
+				if !terminal {
+					if attempt >= 2 {
+						break // transient status: give up after 3 tries
+					}
+				} else {
+					attemptCap := attemptCapServerError
+					if isServerDown(err) {
+						attemptCap = attemptCapServerDown
+					}
+					if attempt+1 >= attemptCap {
+						log.Printf("🛑 giving up on task %d %s after %d attempts (cap for this error class)", taskID, it.status, attempt+1)
+						break
+					}
 				}
+
+				sleep := backoffBase + time.Duration(attempt)*backoffStep
+				if sleep > backoffCap {
+					sleep = backoffCap
+				}
+				// Interruptible sleep: emergency drain closes w.quit, and
+				// we don't want a fresh 30s nap blocking it.
 				select {
 				case <-w.quit:
 					return
-				default:
+				case <-time.After(sleep):
+				}
+				if timeout < 15*time.Second {
+					timeout += 5 * time.Second
 				}
 			}
 		case itLog:
