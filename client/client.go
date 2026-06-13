@@ -1577,11 +1577,20 @@ func excuterThread(
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
 
-			// execution finished; clear trackers
+			// Container is done; release the executing slot so the next task can
+			// start. activeTasks ownership now belongs to the uploader: deleting
+			// it here would drop the task from the worker's KnownTaskIds while it
+			// is still uploading, and any upload taking more than the server's
+			// 60s reconcile grace would be falsely flagged as "lost" — the server
+			// would mark it F and create a spurious retry (observed Jun 2026 on
+			// large hermes outputs). The uploader's watchCompletions clears
+			// activeTasks once all uploads finish; the upload-failure path in the
+			// main loop does the same for failures. activeSince still rolls off
+			// here so STALE-O ("active without executing >10m") doesn't fire on
+			// long uploads.
 			executingTasks.Delete(t.TaskId)
-			activeTasks.Delete(t.TaskId)
 			activeSince.Delete(t.TaskId)
-			log.Printf("🧹 Cleared local flags for task %d (done)", t.TaskId)
+			log.Printf("🧹 Cleared executing flag for task %d (upload pending)", t.TaskId)
 
 			// Clean up memory if task is done
 			taskWeights.Delete(t.TaskId)

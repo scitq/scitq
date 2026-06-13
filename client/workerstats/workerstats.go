@@ -135,37 +135,35 @@ func CollectWorkerStats() (*WorkerStats, error) {
 	}
 	stats.Load1Min = float32(loadAvg.Load1)
 
-	/*
-		times, err := cpu.Times(false)
-		if err == nil && len(times) > 0 {
-			if len(lastCPUTimes) == len(times) {
-				// Calculate delta-based iowait percent
-				totalDelta := float64(0)
-				iowaitDelta := float64(0)
-				for i := range times {
-					prev := lastCPUTimes[i]
-					curr := times[i]
-
-					prevTotal := prev.User + prev.System + prev.Idle + prev.Nice + prev.Iowait + prev.Irq + prev.Softirq + prev.Steal + prev.Guest + prev.GuestNice
-					currTotal := curr.User + curr.System + curr.Idle + curr.Nice + curr.Iowait + curr.Irq + curr.Softirq + curr.Steal + curr.Guest + curr.GuestNice
-
-					total := currTotal - prevTotal
-					iowait := curr.Iowait - prev.Iowait
-
-					if total > 0 {
-						iowaitDelta += iowait
-						totalDelta += total
-					}
-				}
-				if totalDelta > 0 {
-					stats.IOWaitPercent = float32((iowaitDelta / totalDelta) * 100.0)
+	// IOWait is delta-based: gopsutil exposes cumulative jiffies, so we
+	// compare against the previous sample to get the % of that interval
+	// spent waiting on IO. Without a prior sample (first call) we leave
+	// it at 0 — the next collection cycle will report a real number.
+	// statsMu (held above) guards lastCPUTimes against concurrent callers
+	// inside the same process (fake provider with multiple fake workers).
+	times, err := cpu.Times(false)
+	if err == nil && len(times) > 0 {
+		if len(lastCPUTimes) == len(times) {
+			totalDelta := float64(0)
+			iowaitDelta := float64(0)
+			for i := range times {
+				prev := lastCPUTimes[i]
+				curr := times[i]
+				prevTotal := prev.User + prev.System + prev.Idle + prev.Nice + prev.Iowait + prev.Irq + prev.Softirq + prev.Steal + prev.Guest + prev.GuestNice
+				currTotal := curr.User + curr.System + curr.Idle + curr.Nice + curr.Iowait + curr.Irq + curr.Softirq + curr.Steal + curr.Guest + curr.GuestNice
+				total := currTotal - prevTotal
+				iowait := curr.Iowait - prev.Iowait
+				if total > 0 {
+					iowaitDelta += iowait
+					totalDelta += total
 				}
 			}
-			// Save for next interval
-			lastCPUTimes = times
+			if totalDelta > 0 {
+				stats.IOWaitPercent = float32((iowaitDelta / totalDelta) * 100.0)
+			}
 		}
-	*/
-	stats.IOWaitPercent = 0
+		lastCPUTimes = times
+	}
 
 	partitions, err := disk.Partitions(true)
 	if err != nil {
