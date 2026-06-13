@@ -1550,11 +1550,27 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			LEFT JOIN step s ON t.step_id = s.step_id
 			WHERE t.task_id = $1
 		`, req.TaskId).Scan(&reuseKey, &outputPath, &publish, &stepName)
-		if reuseKey.Valid && reuseKey.String != "" {
+		// Skip the reuse cache for tasks with `publish` set. The cache stores
+		// a single path per reuse_key, but published tasks land at a per-task
+		// subpath that the WORKER derives at runtime from the working directory
+		// structure (e.g. `mkdir /output/{SAMPLE}` → files at
+		// `<publish>/{SAMPLE}/…`). The server only sees the publish base
+		// string, which is either:
+		//   - shared across tasks of the step (hermes-collect's
+		//     `s3://rnd/raw/SCAPIS/`) — caching it gives every future task
+		//     a useless catch-all redirect to the shared parent;
+		//   - per-task (rare; authors who want unique-per-task publish
+		//     usually inline the placeholder into the path) — in which case
+		//     publish ≈ output and the cache entry is redundant with the
+		//     workspace data path.
+		// Workspace `output` isn't safe either: it gets evicted after a
+		// successful publish, so the cached path becomes invalid silently.
+		// If a step author wants opportunistic reuse, they should leave
+		// publish unset and let downstream tasks consume the workspace
+		// `output` directly. See incident 2026-06-08 (hermes-collect step
+		// 73283 instant-succeed loop).
+		if reuseKey.Valid && reuseKey.String != "" && !(publish.Valid && publish.String != "") {
 			stablePath := outputPath.String
-			if publish.Valid && publish.String != "" {
-				stablePath = publish.String
-			}
 			if stablePath != "" {
 				var wfID sql.NullInt32
 				if workflowID.Valid {
@@ -1863,7 +1879,17 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				t.input_hash, t.task_id, 0, t.task_name, t.scitq_auth,
 				t.publish, t.skip_if_exists,
 				(t.status = 'S' AND t.skip_if_exists),
-				t.reuse_key, t.consume_reuse, t.numa,
+				-- Explicit retry must bypass opportunistic reuse. The original
+				-- task either failed without output or "succeeded" without
+				-- producing the expected files — in either case the user is
+				-- explicitly asking for the work to be redone, not for a
+				-- cached output from a sibling to be substituted. We keep
+				-- reuse_key in place (so this task still contributes to
+				-- task_reuse on its own success, preserving the cache for
+				-- future fresh submissions) but force consume_reuse=FALSE so
+				-- reuseCheckTasks doesn't immediately match this clone to
+				-- some prior task and mark it S without running anything.
+				t.reuse_key, FALSE, t.numa,
 				-- edit_and_retry resets retry_count to 0 — start of a fresh
 				-- attempt chain — so the curve indexes from the top again.
 				CASE WHEN t.failure_class = 'eviction' THEN t.min_cpu
