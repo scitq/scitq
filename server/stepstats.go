@@ -93,17 +93,21 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 		SELECT
 			s.workflow_id,
 			s.step_id,
-			-- totals and status counters (count only non-null task rows)
+			-- totals and status counters (count only non-null task rows).
+			-- ALL active-state buckets filter NOT hidden: a manual retry of
+			-- a non-terminal task (e.g. one stuck in C/O) hides the
+			-- original row without changing its status, so an unfiltered
+			-- COUNT would persistently overcount Accepted/Running/etc.
+			-- until someone rebuilds the aggregator from scratch. The
+			-- delta path (UpdateTaskStatus) already handles the hide
+			-- correctly; this query is what every 5-min Reconcile reads,
+			-- so any missing filter here is exactly the drift surface.
 			COUNT(*) FILTER (WHERE NOT t.hidden) AS total,
-			COUNT(*) FILTER (WHERE t.status = 'W') AS waiting,
-			COUNT(*) FILTER (WHERE t.status IN ('P','I')) AS pending,
-			COUNT(*) FILTER (WHERE t.status IN ('C','D','O')) AS accepted,
-			COUNT(*) FILTER (WHERE t.status = 'R') AS running,
-			COUNT(*) FILTER (WHERE t.status IN ('U','V')) AS uploading,
-			-- Succeeded must mirror Total's NOT hidden filter: a manual retry of
-			-- an S task hides the original without changing its status, so an
-			-- unfiltered COUNT would persistently show Succeeded > Total until
-			-- someone rebuilds the aggregator from scratch.
+			COUNT(*) FILTER (WHERE t.status = 'W' AND NOT t.hidden) AS waiting,
+			COUNT(*) FILTER (WHERE t.status IN ('P','I') AND NOT t.hidden) AS pending,
+			COUNT(*) FILTER (WHERE t.status IN ('C','D','O') AND NOT t.hidden) AS accepted,
+			COUNT(*) FILTER (WHERE t.status = 'R' AND NOT t.hidden) AS running,
+			COUNT(*) FILTER (WHERE t.status IN ('U','V') AND NOT t.hidden) AS uploading,
 			COUNT(*) FILTER (WHERE t.status = 'S' AND NOT t.hidden) AS succeeded,
 			COUNT(*) FILTER (WHERE t.status = 'F' AND t.hidden) AS failed,
 			COUNT(*) FILTER (WHERE t.status = 'F' AND NOT t.hidden) AS reallyfailed,
@@ -138,9 +142,10 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 				0
 			)::bigint AS end_epoch,
 
-			-- running tasks as separate arrays
-			array_agg(t.task_id) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS running_task_ids,
-			array_agg(EXTRACT(EPOCH FROM t.run_started_at)::bigint) FILTER (WHERE t.status = 'R' AND t.run_started_at IS NOT NULL) AS running_task_times,
+			-- running tasks as separate arrays (NOT hidden, same reason as
+			-- the running counter above — a hidden R task is a ghost).
+			array_agg(t.task_id) FILTER (WHERE t.status = 'R' AND NOT t.hidden AND t.run_started_at IS NOT NULL) AS running_task_ids,
+			array_agg(EXTRACT(EPOCH FROM t.run_started_at)::bigint) FILTER (WHERE t.status = 'R' AND NOT t.hidden AND t.run_started_at IS NOT NULL) AS running_task_times,
 
 			-- in-flight retry clones so RetryingSet can decrement Retrying when they finish
 			COALESCE(array_agg(t.task_id) FILTER (WHERE NOT t.hidden AND t.previous_task_id IS NOT NULL AND t.status NOT IN ('S','F')), '{}') AS retrying_task_ids
