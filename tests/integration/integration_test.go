@@ -385,6 +385,26 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	// In DisableHTTPS mode (always true here) the HTTP listener at
+	// gRPC port+1 serves /scitq-client.sha256 and other endpoints
+	// exercised by worker_upgrade tests. The server binds it
+	// synchronously now, so it should be up as soon as gRPC is — but
+	// probe explicitly anyway: a flaky failure here is far more
+	// useful than a downstream ECONNREFUSED from a test's http.Get.
+	httpDeadline := time.Now().Add(15 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", serverPort+1), 500*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			log.Println("✅ HTTP companion port is ready")
+			break
+		}
+		if time.Now().After(httpDeadline) {
+			t.Fatalf("HTTP companion port did not become ready within timeout: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
 	// Cleanup func closes container and temp dirs
 	cleanup = func() {
 		log.Println("🧼 Server cleanup called")

@@ -6836,13 +6836,21 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	} else {
 		log.Printf("🌙 HTTPS disabled — starting plain HTTP for MCP and API endpoints")
 		httpPort := cfg.Scitq.Port + 1
+		// Bind the listener synchronously. Otherwise the previous
+		// ListenAndServe-in-a-goroutine pattern races: integration tests
+		// probe gRPC readiness and may issue HTTP requests before the
+		// goroutine has bound the port, getting ECONNREFUSED on a
+		// loaded CI runner (TestClientSha256Endpoint flake).
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", httpPort))
+		if err != nil {
+			return fmt.Errorf("HTTP listen on :%d: %w", httpPort, err)
+		}
 		httpServer := &http.Server{
-			Addr:    fmt.Sprintf(":%d", httpPort),
 			Handler: corsMiddleware(finalHandler),
 		}
+		log.Printf("🌐 HTTP server listening on :%d (MCP at /mcp)", httpPort)
 		go func() {
-			log.Printf("🌐 HTTP server listening on :%d (MCP at /mcp)", httpPort)
-			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 				log.Printf("⚠️ HTTP server error: %v", err)
 			}
 		}()
