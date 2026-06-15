@@ -244,6 +244,28 @@
           }
           case 'updated':
             break;
+          case 'hidden': {
+            // Task became hidden (e.g. via retry/edit-and-retry). The
+            // server now emits this so the per-worker counter for the
+            // old task's status can decrement on the right worker —
+            // without it, retrying a task in C/D/O/R/U/V/S/W/P leaves
+            // that worker's bucket stuck (the hidden-F policy: hidden F
+            // still counts in F, so we skip the decrement only when
+            // oldStatus is F).
+            const workerId = payload.workerId;
+            const oldStatus = payload.oldStatus;
+            if (oldStatus && oldStatus !== 'F') {
+              allCount[oldStatus] = (allCount[oldStatus] || 0) - 1;
+              if (allCount[oldStatus] < 0) allCount[oldStatus] = 0;
+              allCount = { ...allCount };
+              if (workerId !== undefined && tasksCount[workerId]) {
+                tasksCount[workerId][oldStatus] = (tasksCount[workerId][oldStatus] || 0) - 1;
+                if (tasksCount[workerId][oldStatus] < 0) tasksCount[workerId][oldStatus] = 0;
+                tasksCount = { ...tasksCount };
+              }
+            }
+            break;
+          }
           case 'deleted':
             allCount[payload.status]--;
             if (allCount[payload.status] < 0) allCount[payload.status] = 0;

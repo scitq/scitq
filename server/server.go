@@ -1801,12 +1801,13 @@ func (s *taskQueueServer) checkStaleReuse(ctx context.Context, failedTaskID int3
 
 func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTaskRequest, resumeStatus string, requireDebug bool) (*pb.TaskResponse, error) {
 	var (
-		oldID         = req.TaskId
-		newID         int32
-		wfID          sql.NullInt32
-		stepID        sql.NullInt32
-		wfStatus      sql.NullString
-		oldTaskStatus sql.NullString
+		oldID            = req.TaskId
+		newID            int32
+		wfID             sql.NullInt32
+		stepID           sql.NullInt32
+		wfStatus         sql.NullString
+		oldTaskStatus    sql.NullString
+		oldTaskWorkerID  sql.NullInt32
 	)
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1837,7 +1838,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		validated AS (
 			SELECT
 				t.task_id, t.retry, t.step_id, s.workflow_id, w.status AS wf_status,
-				t.status AS task_status
+				t.status AS task_status, t.worker_id AS task_worker_id
 			FROM task t
 			LEFT JOIN step s ON t.step_id = s.step_id
 			LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
@@ -1927,9 +1928,9 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 			WHERE task_id = (SELECT task_id FROM validated)
 			RETURNING TRUE
 		)
-		SELECT v.workflow_id, v.step_id, v.wf_status, v.task_status, c.task_id
+		SELECT v.workflow_id, v.step_id, v.wf_status, v.task_status, v.task_worker_id, c.task_id
 		FROM validated v, cloned c;
-	`, oldID, req.Retry).Scan(&wfID, &stepID, &wfStatus, &oldTaskStatus, &newID)
+	`, oldID, req.Retry).Scan(&wfID, &stepID, &wfStatus, &oldTaskStatus, &oldTaskWorkerID, &newID)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task %d not found, not failed, or not retryable", oldID)
@@ -2073,6 +2074,27 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		NewStatus:  "P",
 		Retried:    true,
 	})
+
+	// Tell connected UIs the OLD task is now hidden. Dedicated "hidden"
+	// action (not "status") so the regular status-merge path doesn't try
+	// to apply this as a real transition. The per-status counter on the
+	// worker page reads the old status + worker_id from the payload to
+	// decrement the right bucket; without this, retrying a task in O
+	// state leaves that worker's O count stuck at 1 forever (hidden-F is
+	// the only "hidden but counted" case — see GetTaskStatusCounts and
+	// stepstats — every other status's hidden ghost should be removed
+	// from the live counters).
+	if oldTaskWorkerID.Valid {
+		ws.EmitWS("task", oldID, "hidden", struct {
+			TaskId    int32  `json:"taskId"`
+			WorkerId  int32  `json:"workerId"`
+			OldStatus string `json:"oldStatus"`
+		}{
+			TaskId:    oldID,
+			WorkerId:  oldTaskWorkerID.Int32,
+			OldStatus: oldTaskStatus.String,
+		})
+	}
 
 	ws.EmitWS("task", newID, "status", struct {
 		TaskId       int32  `json:"taskId"`
@@ -4042,10 +4064,19 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 func (s *taskQueueServer) GetTaskStatusCounts(ctx context.Context, req *pb.TaskStatusCountsRequest) (*pb.TaskStatusCountsResponse, error) {
 	showHidden := req.ShowHidden != nil && *req.ShowHidden
 
-	// Global counts: SELECT status, COUNT(*) FROM task GROUP BY status
+	// Hidden-task policy (matches stepstats / yesterday's fix): when
+	// showHidden=true, only F-hidden rows are surfaced — those are
+	// historical failed attempts the operator wants to see ("3 failed
+	// retries before it finally succeeded"). Hidden rows in any other
+	// status are pre-retry ghosts; their successor carries the current
+	// truth, so counting them on top would double-count and drift the
+	// worker-page C/D/O/R/U/V/S counters upward. With showHidden=false
+	// we drop hidden everywhere as before.
 	hiddenClause := ""
 	if !showHidden {
 		hiddenClause = " WHERE hidden = FALSE"
+	} else {
+		hiddenClause = " WHERE (NOT hidden OR status = 'F')"
 	}
 	globalQuery := `SELECT status, COUNT(*)::int FROM task` + hiddenClause + ` GROUP BY status`
 	rows, err := s.db.QueryContext(ctx, globalQuery)
@@ -4072,10 +4103,14 @@ func (s *taskQueueServer) GetTaskStatusCounts(ctx context.Context, req *pb.TaskS
 		return nil, fmt.Errorf("error reading global counts: %w", err)
 	}
 
-	// Per-worker counts: SELECT status, worker_id, COUNT(*) FROM task WHERE worker_id IS NOT NULL GROUP BY status, worker_id
+	// Per-worker counts: same policy as global — when showHidden=true,
+	// only F-hidden rows are surfaced; other hidden statuses are filtered
+	// out. This is what the worker page's per-status columns read.
 	perWorkerQuery := `SELECT status, worker_id, COUNT(*)::int FROM task WHERE worker_id IS NOT NULL`
 	if !showHidden {
 		perWorkerQuery += ` AND hidden = FALSE`
+	} else {
+		perWorkerQuery += ` AND (NOT hidden OR status = 'F')`
 	}
 	perWorkerQuery += ` GROUP BY status, worker_id`
 	rows2, err := s.db.QueryContext(ctx, perWorkerQuery)
