@@ -726,7 +726,7 @@ export async function UploadTemplates(script: Uint8Array, force: boolean): Promi
 export async function runTemp(
   workflowTemplateId: number,
   paramValuesJson: string,
-  opts?: { extendWorkflowId?: number; continueLast?: boolean; retryFailedOnly?: boolean }
+  opts?: { extendWorkflowId?: number; continueLast?: boolean; retryFailedOnly?: boolean; noRecruiters?: boolean }
 ): Promise<taskqueue.TemplateRun> {
   try {
     const req: any = { workflowTemplateId, paramValuesJson };
@@ -735,6 +735,7 @@ export async function runTemp(
     }
     if (opts?.continueLast) req.continueLast = true;
     if (opts?.retryFailedOnly) req.retryFailedOnly = true;
+    if (opts?.noRecruiters) req.noRecruiters = true;
     const runTempUnary = await client.runTemplate(req, await callOptionsUserToken());
     return runTempUnary.response!;
   } catch (error) {

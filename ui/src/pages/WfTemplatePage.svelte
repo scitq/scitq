@@ -51,6 +51,12 @@
   let runMode: 'new' | 'continue' | 'extend' = $state('new');
   let runExtendWorkflowId: number | null = $state(null);
   let runRetryFailedOnly = $state(false);
+  // Skip the recruiters: workflow is created and tasks submitted but no
+  // workers auto-deploy. Useful when permanent workers are already set
+  // up for the step, or when the operator wants to inspect the workflow
+  // before any cost is incurred. Orthogonal to runMode — works with new
+  // / continue / extend.
+  let runNoRecruiters = $state(false);
   // Parameter validation errors
   let paramErrors: Record<string, string> = {};
   // Whether to show parameter errors
@@ -300,8 +306,8 @@
       // error in the same modal.
       isRunningTemplate = true;
 
-      // Advanced run options (extend / continue / retry-failed-only).
-      const runOpts: { extendWorkflowId?: number; continueLast?: boolean; retryFailedOnly?: boolean } = {};
+      // Advanced run options (extend / continue / retry-failed-only / no-recruiters).
+      const runOpts: { extendWorkflowId?: number; continueLast?: boolean; retryFailedOnly?: boolean; noRecruiters?: boolean } = {};
       if (runMode === 'continue') {
         runOpts.continueLast = true;
       } else if (runMode === 'extend') {
@@ -314,6 +320,9 @@
       }
       if (runMode !== 'new' && runRetryFailedOnly) {
         runOpts.retryFailedOnly = true;
+      }
+      if (runNoRecruiters) {
+        runOpts.noRecruiters = true;
       }
 
       // Only include paramJson if userParams is non-empty
@@ -644,6 +653,10 @@
           <label class="wfTemp-run-opt wfTemp-run-subopt" class:wfTemp-opt-disabled={runMode === 'new'}>
             <input type="checkbox" bind:checked={runRetryFailedOnly} disabled={runMode === 'new'} />
             Retry failed only <span class="wfTemp-opt-hint">(re-run only failed tasks, no cascade)</span>
+          </label>
+          <label class="wfTemp-run-opt">
+            <input type="checkbox" bind:checked={runNoRecruiters} />
+            No recruiters <span class="wfTemp-opt-hint">(skip auto-deploy; tasks run only on workers you attach manually)</span>
           </label>
         </div>
       </details>
