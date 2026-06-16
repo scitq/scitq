@@ -237,10 +237,10 @@ class GroupedStep:
         return self.step.output(name, move=move, action=action, grouped=True)
 
 class Task:
-    def __init__(self, tag: str, command: str, container: str, 
+    def __init__(self, tag: str, command: str, container: str,
                  step: "Step",
                  inputs: Optional[Union[str, OutputBase, List[str], List[OutputBase]]] = None,
-                 resources: Optional[List[Resource]] = None, 
+                 resources: Optional[List[Resource]] = None,
                  language: Optional[Language] = None,
                  depends: Optional[Union[List["Task"],"GroupedStep"]] = None,
                  publish: Optional[str]=None,
@@ -255,6 +255,12 @@ class Task:
         self.full_name = self.step.naming_strategy(self.step.name, self.tag) if self.tag else self.step.name
         self.depends = depends
         self.publish = publish
+        # Reference tasks (see Task.as_reference) are synthesised by
+        # Step.compile during extend to represent existing tasks that
+        # weren't in this run's sample list, so grouped/fan-in outputs
+        # enumerate the full set. They skip the submit / edit-and-retry
+        # path entirely — the task_id is already known from prefetch.
+        self.is_reference = False
         # publish_mode: forwarded to TaskRequest.publish_mode; the server
         # persists it on the task row and the worker uploads to both
         # workspace and publish when "copy". Empty / "move" preserves
@@ -278,7 +284,53 @@ class Task:
         self.task_id: Optional[int] = None
         self.reuse_key: Optional[str] = None
 
+    @classmethod
+    def as_reference(cls, *, step: "Step", task_name: str, task_id: int, publish: Optional[str]):
+        """Build a reference-only Task representing an existing task that
+        is NOT being (re)submitted this pass — used by Step.compile on
+        extend to widen step.tasks so grouped/fan-in outputs include
+        pre-existing samples. The returned task has its task_id already
+        set; its compile() is a no-op.
+
+        Why include failed predecessors unconditionally: see
+        memory feedback_no_silent_filtering — quietly dropping anomalies
+        from aggregation is the worst kind of "safe". This factory does
+        not look at status; if a task is in the prefetched set, it is
+        included. Operators who want a failed task out of compile delete
+        or hide it deliberately.
+        """
+        ref = cls.__new__(cls)
+        ref.tag = None
+        ref.command = ""
+        ref.container = ""
+        ref.step = step
+        # The DB-stored task_name IS the full_name (see how active
+        # tasks set it from step.naming_strategy). Preserve it verbatim
+        # so build_path produces the same workspace path the original
+        # task used.
+        ref.full_name = task_name
+        ref.depends = None
+        ref.publish = publish
+        ref.publish_mode = None
+        ref.skip_if_exists = False
+        ref.accept_failure = False
+        ref.inputs = []
+        ref.resources = []
+        ref.language = Raw()
+        ref.retry = None
+        ref.dependency_task_ids = []
+        ref.task_id = task_id
+        ref.reuse_key = None
+        ref.is_reference = True
+        return ref
+
     def compile(self, client: Scitq2Client, opportunistic: bool = False, untrusted: Optional[List[str]] = None):
+        # Reference tasks were synthesised in Step.compile from the
+        # extend prefetch. Their task_id is already bound; everything
+        # downstream (build_path, resolve_task_id, dependency wiring)
+        # works off self.task_id and self.full_name. Nothing to do.
+        if self.is_reference:
+            return
         # Resolve command using the language's compile_command method
         resolved_command = self.language.compile_command(self.command)
         resolved_shell = self.language.executable()
@@ -446,13 +498,33 @@ class Task:
                 ext.changed.add(self.task_id)
         else:
             # Extend reconcile: a task with this (step, tag) already exists.
-            existing_id, existing_cmd, existing_status = existing
+            # 4-tuple from _build_extend_context; publish is unused here
+            # but kept symmetric with the prefetch shape used by Step.compile
+            # when synthesising reference tasks.
+            existing_id, existing_cmd, existing_status, _existing_publish = existing
+            # Inputs / resources / depends overrides for the retry clone.
+            # In extend mode these always reflect the current template's
+            # view — for fan-in / grouped tasks that means the freshly-
+            # added samples are wired into the new clone, not silently
+            # dropped because retry copies from the parent (see
+            # specs/workflow_extend.md fan-in case). Server-side
+            # EditAndRetryTask treats present-empty as "clear", so for
+            # tasks with no inputs/resources/depends we still pass empty
+            # lists rather than nil — the clone matches the template.
+            override_inputs = list(resolved_inputs)
+            override_resources = list(resolved_resources)
+            override_depends = list(resolved_depends)
             if ext.retry_failed_only:
                 # Only re-run failed tasks; leave S/R/P untouched. No cascade —
                 # a failed task's dependents are blocked in W and unblock when
                 # the retry succeeds.
                 if existing_status == "F":
-                    self.task_id = client.edit_and_retry_task(existing_id, resolved_command)
+                    self.task_id = client.edit_and_retry_task(
+                        existing_id, resolved_command,
+                        inputs=override_inputs,
+                        resources=override_resources,
+                        depends=override_depends,
+                    )
                     ext.changed.add(self.task_id)
                 else:
                     self.task_id = existing_id  # reference, untouched
@@ -464,7 +536,12 @@ class Task:
                 # chain consistent.
                 dep_changed = any(d in ext.changed for d in resolved_depends)
                 if existing_cmd != resolved_command or existing_status == "F" or dep_changed:
-                    self.task_id = client.edit_and_retry_task(existing_id, resolved_command)
+                    self.task_id = client.edit_and_retry_task(
+                        existing_id, resolved_command,
+                        inputs=override_inputs,
+                        resources=override_resources,
+                        depends=override_depends,
+                    )
                     ext.changed.add(self.task_id)
                 else:
                     self.task_id = existing_id  # converged, reference
@@ -838,7 +915,31 @@ class Step:
 
         for task in self.tasks:
             task.compile(client, opportunistic=opportunistic, untrusted=untrusted)
-    
+
+        # Extend: widen self.tasks so grouped/fan-in outputs see the full
+        # set of existing tasks for this step, not just the ones this run
+        # touched. Without this, a compile/aggregation step downstream
+        # (Step.output(grouped=True)) silently produces inputs for only
+        # the new samples, dropping anything previously processed.
+        #
+        # We include EVERY existing task — including failed ones —
+        # unconditionally. Silently filtering them produces aggregations
+        # that look fine but quietly omit data; if an operator wants a
+        # failed task excluded, they delete/hide it deliberately. See
+        # memory feedback_no_silent_filtering.
+        if ext is not None:
+            existing = ext.tasks_by_step.get(self.step_id, {})
+            already_covered = {t.full_name for t in self.tasks}
+            for task_name, (task_id, _cmd, _status, publish) in existing.items():
+                if task_name in already_covered:
+                    continue
+                self.tasks.append(Task.as_reference(
+                    step=self,
+                    task_name=task_name,
+                    task_id=task_id,
+                    publish=publish,
+                ))
+
     def grouped(self) -> GroupedStep:
         """Create a grouped step with a specific tag."""
         return GroupedStep(step=self)
@@ -867,7 +968,7 @@ class _ExtendContext:
         self.workflow_id = workflow_id
         self.retry_failed_only = retry_failed_only
         self.step_ids = step_ids            # {step_name: step_id}
-        self.tasks_by_step = tasks_by_step  # {step_id: {task_name: (task_id, command, status)}}
+        self.tasks_by_step = tasks_by_step  # {step_id: {task_name: (task_id, command, status, publish)}}
         self.workflow_name = workflow_name
         # task_ids (re)created or edit-and-retried this pass; drives the
         # default cascade ("re-run a dependent whose prerequisite changed").
@@ -1023,7 +1124,23 @@ class Workflow:
         for t in client.list_tasks(workflow_id=workflow_id, show_hidden=False):
             if not t.task_name:
                 continue
-            tasks_by_step.setdefault(t.step_id, {})[t.task_name] = (t.task_id, t.command, t.status)
+            # 4-tuple (was 3-tuple). The 4th element is "where do this
+            # task's outputs live?" — prefer publish, fall back to output.
+            # The DSL submit path aliases publish into the output column
+            # when no workspace_root is set (see Task.compile's
+            # resolved_output/resolved_publish logic), so a task that
+            # originally declared publish="..." in the DSL appears with
+            # publish=NULL and output=URI in the DB. Reference tasks we
+            # synthesise for grouped/fan-in outputs need the URI in
+            # either column to produce the right path; without this
+            # fallback, build_path returns None and silently drops the
+            # task from the aggregation.
+            publish = t.publish if t.HasField("publish") else None
+            if publish is None and t.HasField("output"):
+                publish = t.output
+            tasks_by_step.setdefault(t.step_id, {})[t.task_name] = (
+                t.task_id, t.command, t.status, publish,
+            )
         return _ExtendContext(workflow_id, retry_failed_only, step_ids, tasks_by_step, workflow_name)
 
     def compile(self, client: Scitq2Client, *, activate_leading_tasks: bool = False, workflow_status: Optional[str] = None,

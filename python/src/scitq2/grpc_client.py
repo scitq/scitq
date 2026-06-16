@@ -313,12 +313,28 @@ class Scitq2Client:
         req = taskqueue_pb2.StepFilter(WorkflowId=workflow_id)
         return self.stub.ListSteps(req).steps
 
-    def edit_and_retry_task(self, task_id: int, command: str) -> int:
+    def edit_and_retry_task(self, task_id: int, command: str,
+                            inputs: Optional[List[str]] = None,
+                            resources: Optional[List[str]] = None,
+                            depends: Optional[List[int]] = None) -> int:
         """Edit a task's command and retry it (clone with the new command, hide
-        the parent). Returns the new task's id."""
-        resp = self.stub.EditAndRetryTask(
-            taskqueue_pb2.EditAndRetryTaskRequest(task_id=task_id, command=command)
-        )
+        the parent). Returns the new task's id.
+
+        Optional `inputs` / `resources` / `depends` REPLACE the clone's
+        values instead of inheriting from the parent. None = inherit from
+        the parent (legacy behavior used by operator-driven retries).
+        Workflow.compile passes these during extend so re-run fan-in tasks
+        get the freshly-submitted samples wired in. See
+        specs/workflow_extend.md.
+        """
+        req = taskqueue_pb2.EditAndRetryTaskRequest(task_id=task_id, command=command)
+        if inputs is not None:
+            req.inputs.CopyFrom(taskqueue_pb2.StringList(values=list(inputs)))
+        if resources is not None:
+            req.resources.CopyFrom(taskqueue_pb2.StringList(values=list(resources)))
+        if depends is not None:
+            req.depends.CopyFrom(taskqueue_pb2.Int32List(values=list(depends)))
+        resp = self.stub.EditAndRetryTask(req)
         return resp.task_id
 
     def signal_task(self, task_id: int, signal: str = "K", grace_period: Optional[int] = None):
