@@ -394,12 +394,16 @@ func (rb *RcloneBackend) Copy(otherFsInterface FileSystemInterface, src, dst URI
 		if err != nil {
 			return fmt.Errorf("failed to create filter: %w", err)
 		}
-		err = filt.AddRule("+ " + pattern)
-		if err != nil {
-			return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+		// expandGlobPattern translates any bash extglob !(...) negations
+		// in the pattern into ordered include/exclude rules; a plain
+		// pattern returns just "+ <pattern>".
+		for _, rule := range expandGlobPattern(pattern) {
+			if err := filt.AddRule(rule); err != nil {
+				return fmt.Errorf("invalid glob pattern %q (rule %q): %w", pattern, rule, err)
+			}
 		}
 
-		// Optional: exclude everything else
+		// Catch-all: anything not matched by the rules above is excluded.
 		_ = filt.AddRule("- *")
 
 		//baseFs, err := fs.NewFs(ctx, basePath)
@@ -494,9 +498,13 @@ func (rb *RcloneBackend) List(path string) (fs.DirEntries, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create filter: %w", err)
 		}
-		err = filt.AddRule("+ " + pattern)
-		if err != nil {
-			return nil, fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+		// See expandGlobPattern: emits one "+ <pattern>" by default, or
+		// one or more "- <neg>" exclude rules followed by a positive
+		// include when the pattern contains bash extglob !(...).
+		for _, rule := range expandGlobPattern(pattern) {
+			if err := filt.AddRule(rule); err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q (rule %q): %w", pattern, rule, err)
+			}
 		}
 		_ = filt.AddRule("- *")
 	}
