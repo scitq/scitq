@@ -135,9 +135,16 @@
    */
   onMount(async () => {
     // Restore loaded count from sessionStorage so coming back from a task
-    // detail page doesn't reset the user to chunk 1.
+    // detail page doesn't reset the user to chunk 1. Floor at chunk size:
+    // a previous session can leave a tiny saved.loaded (a name search that
+    // matched 1, a workflow/deleted cascade that emptied the list, etc.),
+    // and using that verbatim makes the fresh page open with limit=1 — the
+    // user sees a single workflow despite having hundreds owned (observed
+    // Jun 2026). "Load more" still recovers, but the initial render is
+    // wrong. Always fetch at least one full chunk.
     const saved = readSessionState();
-    const targetCount = saved?.loaded && saved.loaded > 0 ? saved.loaded : WORKFLOWS_CHUNK_SIZE;
+    const restored = saved?.loaded && saved.loaded > 0 ? saved.loaded : 0;
+    const targetCount = Math.max(restored, WORKFLOWS_CHUNK_SIZE);
     workflows = await getWorkFlow(nameFilter || undefined, targetCount, 0, userFilter || undefined);
     wfCounters.seedMany(workflows);
     // If we asked for N and got exactly N back, assume more might exist.
