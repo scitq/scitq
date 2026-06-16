@@ -299,6 +299,15 @@ message ForceRunTaskRequest {
 message EditAndRetryTaskRequest {
     int32 task_id = 1;
     string command = 2; // New command to use for the retry
+    // Optional overrides applied to the retry clone. Absent (nil pointer)
+    // means "copy from the parent task" — the legacy behavior used by
+    // operator-driven retries from the UI/CLI. Present means "replace on
+    // the clone". Required for the workflow-extend fan-in case where
+    // re-running a grouped/compile task must wire the freshly-submitted
+    // samples into the new clone's inputs and prerequisite list.
+    optional StringList inputs = 3;
+    optional StringList resources = 4;
+    optional Int32List depends = 5;
 }
 
 // StringList wraps a `repeated string` so it can be carried as `optional`
@@ -309,6 +318,15 @@ message EditAndRetryTaskRequest {
 //   - field present, values non-empty   → replace the underlying list
 message StringList {
     repeated string values = 1;
+}
+
+// Int32List mirrors StringList for `repeated int32`. Same
+// absent/present-empty/present-non-empty semantics — used for
+// EditAndRetryTask.depends so we can distinguish "don't touch the
+// dependency list" (absent) from "wipe all dependencies" (present-empty)
+// from "replace with these task ids" (present-non-empty).
+message Int32List {
+    repeated int32 values = 1;
 }
 
 // EditTaskRequest updates fields on an existing task in place, without

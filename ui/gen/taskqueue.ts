@@ -476,6 +476,25 @@ export interface EditAndRetryTaskRequest {
      * @generated from protobuf field: string command = 2
      */
     command: string; // New command to use for the retry
+    /**
+     * Optional overrides applied to the retry clone. Absent (nil pointer)
+     * means "copy from the parent task" — the legacy behavior used by
+     * operator-driven retries from the UI/CLI. Present means "replace on
+     * the clone". Required for the workflow-extend fan-in case where
+     * re-running a grouped/compile task must wire the freshly-submitted
+     * samples into the new clone's inputs and prerequisite list.
+     *
+     * @generated from protobuf field: optional taskqueue.StringList inputs = 3
+     */
+    inputs?: StringList;
+    /**
+     * @generated from protobuf field: optional taskqueue.StringList resources = 4
+     */
+    resources?: StringList;
+    /**
+     * @generated from protobuf field: optional taskqueue.Int32List depends = 5
+     */
+    depends?: Int32List;
 }
 /**
  * StringList wraps a `repeated string` so it can be carried as `optional`
@@ -492,6 +511,21 @@ export interface StringList {
      * @generated from protobuf field: repeated string values = 1
      */
     values: string[];
+}
+/**
+ * Int32List mirrors StringList for `repeated int32`. Same
+ * absent/present-empty/present-non-empty semantics — used for
+ * EditAndRetryTask.depends so we can distinguish "don't touch the
+ * dependency list" (absent) from "wipe all dependencies" (present-empty)
+ * from "replace with these task ids" (present-non-empty).
+ *
+ * @generated from protobuf message taskqueue.Int32List
+ */
+export interface Int32List {
+    /**
+     * @generated from protobuf field: repeated int32 values = 1
+     */
+    values: number[];
 }
 /**
  * EditTaskRequest updates fields on an existing task in place, without
@@ -4734,7 +4768,10 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
     constructor() {
         super("taskqueue.EditAndRetryTaskRequest", [
             { no: 1, name: "task_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 2, name: "command", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 2, name: "command", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "inputs", kind: "message", T: () => StringList },
+            { no: 4, name: "resources", kind: "message", T: () => StringList },
+            { no: 5, name: "depends", kind: "message", T: () => Int32List }
         ]);
     }
     create(value?: PartialMessage<EditAndRetryTaskRequest>): EditAndRetryTaskRequest {
@@ -4756,6 +4793,15 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
                 case /* string command */ 2:
                     message.command = reader.string();
                     break;
+                case /* optional taskqueue.StringList inputs */ 3:
+                    message.inputs = StringList.internalBinaryRead(reader, reader.uint32(), options, message.inputs);
+                    break;
+                case /* optional taskqueue.StringList resources */ 4:
+                    message.resources = StringList.internalBinaryRead(reader, reader.uint32(), options, message.resources);
+                    break;
+                case /* optional taskqueue.Int32List depends */ 5:
+                    message.depends = Int32List.internalBinaryRead(reader, reader.uint32(), options, message.depends);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4774,6 +4820,15 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
         /* string command = 2; */
         if (message.command !== "")
             writer.tag(2, WireType.LengthDelimited).string(message.command);
+        /* optional taskqueue.StringList inputs = 3; */
+        if (message.inputs)
+            StringList.internalBinaryWrite(message.inputs, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional taskqueue.StringList resources = 4; */
+        if (message.resources)
+            StringList.internalBinaryWrite(message.resources, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional taskqueue.Int32List depends = 5; */
+        if (message.depends)
+            Int32List.internalBinaryWrite(message.depends, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4831,6 +4886,61 @@ class StringList$Type extends MessageType<StringList> {
  * @generated MessageType for protobuf message taskqueue.StringList
  */
 export const StringList = new StringList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Int32List$Type extends MessageType<Int32List> {
+    constructor() {
+        super("taskqueue.Int32List", [
+            { no: 1, name: "values", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Int32List>): Int32List {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.values = [];
+        if (value !== undefined)
+            reflectionMergePartial<Int32List>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Int32List): Int32List {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated int32 values */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.values.push(reader.int32());
+                    else
+                        message.values.push(reader.int32());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Int32List, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated int32 values = 1; */
+        if (message.values.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.values.length; i++)
+                writer.int32(message.values[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.Int32List
+ */
+export const Int32List = new Int32List$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
     constructor() {

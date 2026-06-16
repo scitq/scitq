@@ -1799,7 +1799,43 @@ func (s *taskQueueServer) checkStaleReuse(ctx context.Context, failedTaskID int3
 	}
 }
 
-func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTaskRequest, resumeStatus string, requireDebug bool) (*pb.TaskResponse, error) {
+// stringListToPqArray translates a *pb.StringList (proto3 optional
+// wrapper around `repeated string`) into something the lib/pq driver
+// sends as a Postgres text[]. nil → NULL (so COALESCE in the caller's
+// SQL falls through to the parent column); non-nil → an array value
+// (empty list is valid Postgres `{}`).
+func stringListToPqArray(list *pb.StringList) any {
+	if list == nil {
+		return nil
+	}
+	return pq.StringArray(list.Values)
+}
+
+// retryOverrides carries the fields that EditAndRetryTask may want to
+// REPLACE on the clone, rather than inherit from the parent task. Every
+// field is a pointer: nil = "leave the clone's value equal to the
+// parent's" (legacy behavior); non-nil = "use this value on the clone".
+//
+// The motivation is workflow extend's fan-in case (specs/workflow_extend.md):
+// when the operator extends a workflow with more samples, the compile /
+// grouped step at the bottom of the DAG needs its inputs and dependency
+// list re-wired to include the new samples. Without these overrides,
+// retry just copies the parent's frozen `input` and `task_dependencies`,
+// so the recomputed clone aggregates only the original sample set —
+// silently producing a stale output that omits the new samples. The
+// silent-omission failure mode is the one we deliberately avoid; see
+// the no-silent-filtering principle.
+//
+// Operator-driven retries (UI/CLI "retry" button, EditAndRetryTask
+// called with just task_id+command) pass retryOverrides{} and get the
+// previous clone-from-parent behavior, unchanged.
+type retryOverrides struct {
+	Inputs    *pb.StringList
+	Resources *pb.StringList
+	Depends   *pb.Int32List
+}
+
+func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTaskRequest, resumeStatus string, requireDebug bool, ovr retryOverrides) (*pb.TaskResponse, error) {
 	var (
 		oldID            = req.TaskId
 		newID            int32
@@ -1882,7 +1918,12 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 			)
 			SELECT
 				t.step_id, t.command, t.shell, t.container, t.container_options,
-				'P', NULL, t.input, t.resource,
+				'P', NULL,
+				-- Inputs / resources: caller may override (extend's fan-in
+				-- needs to wire newly-submitted samples into a re-run
+				-- compile/grouped task). nil → COALESCE picks parent.
+				COALESCE($3::text[], t.input) AS input,
+				COALESCE($4::text[], t.resource) AS resource,
 				t.output, '{}', FALSE,
 				COALESCE($2, (SELECT initial_retry FROM root)), t.is_final, t.uses_cache,
 				t.download_timeout, t.running_timeout, t.upload_timeout,
@@ -1930,7 +1971,12 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		)
 		SELECT v.workflow_id, v.step_id, v.wf_status, v.task_status, v.task_worker_id, c.task_id
 		FROM validated v, cloned c;
-	`, oldID, req.Retry).Scan(&wfID, &stepID, &wfStatus, &oldTaskStatus, &oldTaskWorkerID, &newID)
+	`,
+		oldID,
+		req.Retry,
+		stringListToPqArray(ovr.Inputs),
+		stringListToPqArray(ovr.Resources),
+	).Scan(&wfID, &stepID, &wfStatus, &oldTaskStatus, &oldTaskWorkerID, &newID)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task %d not found, not failed, or not retryable", oldID)
@@ -1945,16 +1991,35 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		}
 	}
 
-	// Dependencies rewiring (same as before)
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
-		SELECT $2, prerequisite_task_id
-		FROM task_dependencies
-		WHERE dependent_task_id = $1
-		ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
-	`, oldID, newID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to copy prerequisites: %w", err)
+	// Prerequisite list for the clone. Default: copy from the parent —
+	// what's been there since v1 for operator-driven retries. Override:
+	// the caller (EditAndRetryTask invoked from extend) supplied an
+	// explicit Depends list, so use that instead. Without this branch a
+	// re-run grouped/compile task can't be wired to newly-submitted
+	// samples, breaking extend on fan-in DAGs.
+	if ovr.Depends != nil {
+		// Replace, not append. Caller computed the full desired set.
+		// unnest unrolls the array into rows; ON CONFLICT covers the
+		// (very unlikely) case where the caller's list has duplicates.
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+			SELECT $1, unnest($2::int[])
+			ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
+		`, newID, pq.Array(ovr.Depends.Values))
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert overridden prerequisites: %w", err)
+		}
+	} else {
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO task_dependencies (dependent_task_id, prerequisite_task_id)
+			SELECT $2, prerequisite_task_id
+			FROM task_dependencies
+			WHERE dependent_task_id = $1
+			ON CONFLICT (dependent_task_id, prerequisite_task_id) DO NOTHING
+		`, oldID, newID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to copy prerequisites: %w", err)
+		}
 	}
 
 	_, err = tx.ExecContext(ctx, `
@@ -2132,7 +2197,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 }
 
 func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
-	return s.retryTaskInternal(ctx, req, "R", false)
+	return s.retryTaskInternal(ctx, req, "R", false, retryOverrides{})
 }
 
 func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTaskRequest) (*pb.Ack, error) {
@@ -2398,7 +2463,11 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 		Command: req.Command,
 	})
 
-	return s.retryTaskInternal(ctx, &pb.RetryTaskRequest{TaskId: req.TaskId}, "R", false)
+	return s.retryTaskInternal(ctx, &pb.RetryTaskRequest{TaskId: req.TaskId}, "R", false, retryOverrides{
+		Inputs:    req.Inputs,
+		Resources: req.Resources,
+		Depends:   req.Depends,
+	})
 }
 
 func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepCommandRequest) (*pb.EditStepCommandResponse, error) {
@@ -5767,7 +5836,7 @@ func (s *taskQueueServer) DebugRecruitStep(ctx context.Context, req *pb.DebugRec
 }
 
 func (s *taskQueueServer) DebugRetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
-	return s.retryTaskInternal(ctx, req, "D", true)
+	return s.retryTaskInternal(ctx, req, "D", true, retryOverrides{})
 }
 
 func (s *taskQueueServer) ListDependentPendingTasks(ctx context.Context, req *pb.TaskId) (*pb.TaskIds, error) {
