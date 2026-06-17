@@ -36,6 +36,8 @@
 
 # TODO later
 
+[ ] filtered worker list on step view — the step's "Workers" column currently lists every worker whose `worker.step_id` matches, including ones the resource-fit check excludes from assignment (production case: bigbrother 15.6 GB attached to a hermes step demanding 20 GB → silently never picks up tasks). The `worker_event` warning shipped in `assigntask.go:maybeWarnNoFit` makes the cause discoverable; this followup makes the step view truthful by hiding (or visually demoting — greyed-out + "incompatible" tag) workers whose flavor caps fail `fitsWorker` against the step's current `task_spec` minimums. Cheap server-side: same comparison the scheduler already does.
+[ ] concurrency=0 worker visualisation — when `worker.concurrency==0` the assignment SQL's `HAVING SUM < concurrency+prefetch` excludes the worker silently, so manually-recruited workers can sit idle forever until the operator notices. Plan: render the worker as yellow (same pause indicator) when `status=='P' OR concurrency==0`, with a tooltip that differentiates the two ("paused by operator" vs "concurrency 0 — set a positive value to start"). The play button on a `R+concurrency==0` worker opens a modal prompting the operator to raise concurrency before unpausing. Pure UI change — no server schema/status changes (which would force inventing a P→? auto-restore state machine).
 [ ] implement some timeouts for workflow template scripts
 [ ] implement debug mode
 [ ] implement workflow strategy (sticky)

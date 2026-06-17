@@ -97,6 +97,15 @@ type taskQueueServer struct {
 	activeLogStreams   sync.Map     // taskID -> chan struct{} (closed when log stream ends)
 	lostTaskSeen       sync.Map     // taskID -> time.Time first observed as server-active but absent from the worker's reported known_task_ids (reconciliation debounce)
 
+	// noFitMemos throttles the "worker is attached to a step but no
+	// pending task fits its flavor caps" diagnostic in
+	// assigntask.go. Key int32 = workerID; value *noFitMemo. Without
+	// this the worker_event table would fill up at the assignment
+	// loop's tick rate (~2/s) for every misaligned permanent worker.
+	// Cleared when the worker successfully picks up a task — see
+	// clearNoFitMemo. See maybeWarnNoFit for the throttle policy.
+	noFitMemos sync.Map
+
 	// Phase III: server received SIGUSR1 and is draining active admin
 	// jobs in preparation for a clean exit. Workers see this on ping
 	// (server_upgrade_in_progress) and stop requesting new task slots

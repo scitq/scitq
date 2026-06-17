@@ -17,6 +17,18 @@ import (
 
 const DefaultAssignTrigger int32 = 500 // 5 sec
 
+// workerCaps holds the per-worker flavor caps used by fitsWorker. NaN
+// on any dimension means "unset — bypass the check" (legacy workers
+// without a flavor row trivially accept any task). Hoisted to
+// package scope so the no-fit diagnostic helpers (whyDoesNotFit,
+// maybeWarnNoFit) below can share the type with assignPendingTasks.
+type workerCaps struct{ cpu, mem, disk float64 }
+
+// taskMins holds the per-task minimum resource requirements. NaN
+// means "unset — task always fits" (legacy tasks without min_*).
+// Same hoist rationale as workerCaps.
+type taskMins struct{ cpu, mem, disk float64 }
+
 func (s *taskQueueServer) waitForAssignEvents(context context.Context) {
 	for {
 		s.assignPendingTasks()
@@ -114,7 +126,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 	// the row) become NaN here so the fit check trivially passes — exactly
 	// what we want for legacy workers that pre-date the per-task resource
 	// fields.
-	type workerCaps struct{ cpu, mem, disk float64 }
 	workerCapacity := map[int32]int{}        // worker_id -> available slots
 	workerFlavorCaps := map[int32]workerCaps{}
 	stepWorkerMap := map[int32][]int32{}     // step_id -> list of worker_id
@@ -194,9 +205,6 @@ func (s *taskQueueServer) assignPendingTasks() {
 		return
 	}
 
-	// Per-task minimum resource requirements (NaN = unset). Used by the
-	// per-task fit check below when matching tasks to workers.
-	type taskMins struct{ cpu, mem, disk float64 }
 	stepPendingTasks := make(map[int32][]int32) // step_id -> list of pending task_id
 	taskMinReqs := make(map[int32]taskMins)
 	for taskRows.Next() {
@@ -265,17 +273,34 @@ func (s *taskQueueServer) assignPendingTasks() {
 				continue
 			}
 			caps := workerFlavorCaps[workerID]
+			// Track the first "doesn't fit" reason for the no-fit
+			// diagnostic below. Captures the bottleneck dimension
+			// (mem 20 > 15.6, etc.) so the operator sees which
+			// resource on the worker is too small without having to
+			// cross-reference task and flavor rows by hand.
+			var firstFailReason string
+			hadPending := len(stepPendingTasks[stepID]) > 0
 			fittingTasks := make([]int32, 0, available)
 			remainingTasks := stepPendingTasks[stepID][:0]
 			for _, tid := range stepPendingTasks[stepID] {
 				if len(fittingTasks) < available && fitsWorker(taskMinReqs[tid], caps) {
 					fittingTasks = append(fittingTasks, tid)
 				} else {
+					if firstFailReason == "" && !fitsWorker(taskMinReqs[tid], caps) {
+						firstFailReason = whyDoesNotFit(taskMinReqs[tid], caps)
+					}
 					remainingTasks = append(remainingTasks, tid)
 				}
 			}
 			stepPendingTasks[stepID] = remainingTasks
 			if len(fittingTasks) == 0 {
+				// Worker has capacity, step has pending tasks, but
+				// none of those tasks fit this worker's flavor caps.
+				// Emit a throttled worker_event so the operator can
+				// see which dimension is short. See maybeWarnNoFit.
+				if hadPending && firstFailReason != "" {
+					s.maybeWarnNoFit(workerID, stepID, firstFailReason)
+				}
 				continue
 			}
 
@@ -315,6 +340,15 @@ func (s *taskQueueServer) assignPendingTasks() {
 			}
 			rows.Close()
 			log.Printf("\u2705 Assigned %d tasks to worker %d", taskNum, workerID)
+
+			// Worker just picked up a task \u2014 clear any throttled
+			// "no-fit" memo so a future mismatch (e.g. operator
+			// lowered min_mem then raised it again) re-emits a
+			// fresh warning instead of staying silent under the
+			// stale cooldown.
+			if taskNum > 0 {
+				s.clearNoFitMemo(workerID)
+			}
 
 			if len(stepPendingTasks[stepID]) == 0 {
 				break
@@ -957,4 +991,101 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 		"workerId":  workerID.Int32,
 	})
 	return workerID.Int32, workflowID, nil
+}
+
+// ---- No-fit diagnostic ------------------------------------------------------
+//
+// When the assignment loop visits a worker that has free capacity at a step
+// where pending tasks exist BUT every task fails the resource-fit check
+// (task.min_cpu/min_mem/min_disk > worker.flavor.cpu/mem/disk), the worker
+// is silently skipped. From the operator's perspective the worker shows
+// as attached, healthy, and idle while tasks pile up — usually because
+// they manually attached an under-spec'd worker (the case that lit this
+// up in production: bigbrother with 15.6 GB attached to a step demanding
+// 20 GB). emitNoFitWarning makes that visible by writing a `W`-level
+// worker_event with the offending requirement vs. the worker's actual
+// caps, so the UI's warning icon lights up and `list_worker_events`
+// surfaces an actionable line.
+
+// noFitMemo is the per-worker throttle record. We re-emit if the
+// step changes (operator moved the worker, problem may be different),
+// if the message text changes (different bottleneck — mem vs cpu), or
+// after noFitRewarnInterval has passed (so a long-running mismatch
+// keeps reminding the operator without flooding).
+type noFitMemo struct {
+	stepID       int32
+	reason       string
+	lastWarnedAt time.Time
+}
+
+const noFitRewarnInterval = 15 * time.Minute
+
+// whyDoesNotFit returns a human-readable string describing why a task
+// with the given resource requirements doesn't fit a worker with the
+// given flavor caps. Returns "" if the task actually fits — caller
+// guards on fitsWorker == false before calling. Mirrors the same
+// dimension-by-dimension comparison the fit check itself does;
+// NaN-on-either-side semantics (legacy task without min_*, or legacy
+// worker without flavor row) report a less specific reason.
+func whyDoesNotFit(req taskMins, caps workerCaps) string {
+	if !math.IsNaN(req.cpu) && !math.IsNaN(caps.cpu) && req.cpu > caps.cpu {
+		return fmt.Sprintf("task needs cpu=%g, worker has cpu=%g", req.cpu, caps.cpu)
+	}
+	if !math.IsNaN(req.mem) && !math.IsNaN(caps.mem) && req.mem > caps.mem {
+		return fmt.Sprintf("task needs mem=%g GB, worker has mem=%g GB", req.mem, caps.mem)
+	}
+	if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk > caps.disk {
+		return fmt.Sprintf("task needs disk=%g GB, worker has disk=%g GB", req.disk, caps.disk)
+	}
+	return "no fitting task for this worker (resource curves don't intersect)"
+}
+
+// recordNoFit consults and updates the per-worker throttle memo.
+// Returns true iff the caller should actually emit a warning now —
+// i.e. this is a fresh condition (no prior memo), a different step
+// or reason from last time (operator moved the worker, or a
+// different resource dimension is now the bottleneck), or the
+// re-warn interval has elapsed. Separated from the DB-writing
+// caller (maybeWarnNoFit) so the state-machine logic is unit-
+// testable without a Postgres dependency.
+func (s *taskQueueServer) recordNoFit(workerID, stepID int32, reason string, now time.Time) bool {
+	if v, ok := s.noFitMemos.Load(workerID); ok {
+		memo := v.(*noFitMemo)
+		// Same step, same reason, recent warning → suppress.
+		if memo.stepID == stepID && memo.reason == reason && now.Sub(memo.lastWarnedAt) < noFitRewarnInterval {
+			return false
+		}
+	}
+	s.noFitMemos.Store(workerID, &noFitMemo{
+		stepID:       stepID,
+		reason:       reason,
+		lastWarnedAt: now,
+	})
+	return true
+}
+
+// maybeWarnNoFit emits a throttled worker_event when a worker can't
+// accommodate any of its step's pending tasks. See noFitMemo for the
+// throttling rules. Best-effort: a failed insert logs but does not
+// disturb the assignment loop.
+func (s *taskQueueServer) maybeWarnNoFit(workerID, stepID int32, reason string) {
+	if !s.recordNoFit(workerID, stepID, reason, time.Now()) {
+		return
+	}
+	details := fmt.Sprintf(`{"step_id": %d, "reason": %q}`, stepID, reason)
+	if _, err := s.db.Exec(`
+		INSERT INTO worker_event (worker_id, event_class, level, message, details_json)
+		VALUES ($1, 'fit', 'W', $2, $3::jsonb)
+	`, workerID, "worker has capacity but no pending task at step fits its flavor: "+reason, details); err != nil {
+		log.Printf("⚠️ Failed to record no-fit event for worker %d: %v", workerID, err)
+	}
+}
+
+// clearNoFitMemo drops the throttle record for a worker that just
+// successfully picked up a task. Without this, the operator's
+// resource-curve adjustment (or a freshly-recruited bigger flavor)
+// would not produce a fresh "now fits" → "no longer fits" warning
+// later, because the memo would still be in the cooldown window.
+func (s *taskQueueServer) clearNoFitMemo(workerID int32) {
+	s.noFitMemos.Delete(workerID)
 }
