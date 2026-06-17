@@ -5,7 +5,7 @@
   import { onMount, onDestroy } from 'svelte';
   import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, listWorkerEvents} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
-  import { Edit, PauseCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star, ArrowUpCircle } from 'lucide-svelte';
+  import { Edit, PauseCircle, PlayCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star, ArrowUpCircle } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
   import '../styles/worker.css';
   import { WorkerStats } from '../../gen/taskqueue';
@@ -533,6 +533,80 @@
     }
   }
 
+  // A "running" worker with concurrency=0 is excluded from assignment
+  // by the SQL's `HAVING SUM < concurrency+prefetch` clause — silently.
+  // The operator sees a green-dot worker that picks up nothing. To make
+  // that condition discoverable, treat it as a visual variant of
+  // "paused": yellow dot, play icon on the action button, and a click
+  // that opens the raise-concurrency modal rather than firing P→R.
+  // The DB status itself is left alone — see ROADMAP rationale (no
+  // P→? auto-restore state machine to invent).
+  function isConcurrencyZeroIdle(worker): boolean {
+    return worker?.status === 'R' && (worker?.concurrency ?? 0) === 0;
+  }
+
+  function workerEffectiveStatusClass(worker): string {
+    if (isConcurrencyZeroIdle(worker)) return 'paused';
+    return getWorkerStatusClass(worker?.status ?? '');
+  }
+
+  function workerEffectiveStatusText(worker): string {
+    if (isConcurrencyZeroIdle(worker)) {
+      return 'Concurrency 0 — set a positive value to start';
+    }
+    if (worker?.status === 'P' && (worker?.concurrency ?? 0) === 0) {
+      return 'Paused (concurrency is also 0 — raise it before unpausing)';
+    }
+    return getWorkerStatusText(worker?.status ?? '');
+  }
+
+  // Show play icon whenever the worker is effectively idle from the
+  // operator's perspective — true pause OR concurrency=0 — so the
+  // action they probably want next is "make it work again".
+  function showPlayIcon(worker): boolean {
+    return worker?.status === 'P' || isConcurrencyZeroIdle(worker);
+  }
+
+  // Raise-concurrency modal state. Opened when the operator clicks
+  // play/pause on a worker whose concurrency is 0 — proceeding with a
+  // plain P→R would leave the worker yellow because the SQL would
+  // still skip it. The modal forces the operator to set a value first.
+  let raiseConcModalWorker: any = $state(null);
+  let raiseConcModalValue: number = $state(1);
+
+  function openRaiseConcurrencyModal(worker) {
+    raiseConcModalWorker = worker;
+    raiseConcModalValue = 1;
+  }
+
+  function closeRaiseConcurrencyModal() {
+    raiseConcModalWorker = null;
+  }
+
+  async function confirmRaiseConcurrency() {
+    const worker = raiseConcModalWorker;
+    if (!worker) return;
+    const newConc = Math.max(1, Math.floor(raiseConcModalValue || 1));
+    try {
+      await updateWorkerConfig(worker.workerId, { concurrency: newConc });
+      // If the worker was Paused, also unpause it — the operator asked
+      // to "play". If it was R+concurrency==0, leave status alone (it
+      // already is R; raising concurrency is sufficient to start work).
+      if (worker.status === 'P') {
+        await updateWorkerStatus({ workerId: worker.workerId, status: 'R' });
+      }
+      internalWorkers = internalWorkers.map(w =>
+        w.workerId === worker.workerId
+          ? { ...w, concurrency: newConc, status: worker.status === 'P' ? 'R' : w.status }
+          : w
+      );
+    } catch (err) {
+      console.error('Failed to raise concurrency / unpause', worker.workerId, err);
+    } finally {
+      closeRaiseConcurrencyModal();
+    }
+  }
+
   /**
    * Pause/resume/quiet/unquiet a worker.
    * @param {Object} worker - Worker object
@@ -540,6 +614,20 @@
    */
   async function pauseWorker(worker): Promise<void> {
     const curr = worker.status;
+
+    // Special case: the operator clicked "play" on a worker that the
+    // scheduler is silently ignoring because of concurrency=0. A plain
+    // status update wouldn't make tasks flow — the SQL would still
+    // skip the worker. Open the raise-concurrency modal so the
+    // operator sets a value, then the unpause is folded into the
+    // confirm path. Covers both R+conc=0 (worker visible as yellow
+    // but DB-paused=false) and P+conc=0 (truly paused AND zero
+    // capacity — even unpausing won't help).
+    if ((curr === 'R' || curr === 'P') && (worker.concurrency ?? 0) === 0) {
+      openRaiseConcurrencyModal(worker);
+      return;
+    }
+
     const next = computeNextStatusForPause(curr);
     if (!next) return;
 
@@ -1006,7 +1094,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 </td>
               <td>{worker.recyclableScope}</td>
               <td>
-                <div class="workerCompo-status-pill {getWorkerStatusClass(worker.status)}" title={getWorkerStatusText(worker.status)}></div>
+                <div class="workerCompo-status-pill {workerEffectiveStatusClass(worker)}" title={workerEffectiveStatusText(worker)}></div>
               </td>
 
               <td class="value-cell">
@@ -1265,8 +1353,22 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
 
               <td class="workerCompo-actions">
                 <div class="action-row">
-                  <button class="btn-action" title="Pause" onclick={() => pauseWorker(worker)} disabled={acting.has(worker.workerId)} data-testid={`pause-worker-${worker.workerId}`}>
-                    <PauseCircle />
+                  <button
+                    class="btn-action"
+                    title={showPlayIcon(worker)
+                      ? (isConcurrencyZeroIdle(worker)
+                          ? 'Start (concurrency is 0 — will prompt for a value)'
+                          : 'Resume')
+                      : 'Pause'}
+                    onclick={() => pauseWorker(worker)}
+                    disabled={acting.has(worker.workerId)}
+                    data-testid={`pause-worker-${worker.workerId}`}
+                  >
+                    {#if showPlayIcon(worker)}
+                      <PlayCircle />
+                    {:else}
+                      <PauseCircle />
+                    {/if}
                   </button>
                   <button class="btn-action" title="Clean"><Eraser /></button>
                 </div>
@@ -1362,3 +1464,118 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
     </div>
   </div>
 {/if}
+
+{#if raiseConcModalWorker}
+  <!-- Raise-concurrency modal. Opened when the operator clicks
+       play/pause on a worker with concurrency=0. Without raising the
+       value first, the scheduler would keep skipping the worker
+       (the assignment SQL's HAVING SUM < concurrency+prefetch
+       clause excludes it silently). See ROADMAP entry
+       "concurrency=0 worker visualisation" for the rationale on
+       handling this in the UI rather than auto-flipping status
+       server-side. -->
+  <div
+    class="raise-conc-modal-backdrop"
+    onclick={closeRaiseConcurrencyModal}
+    onkeydown={(e) => { if (e.key === 'Escape') closeRaiseConcurrencyModal(); }}
+    role="presentation"
+  >
+    <div
+      class="raise-conc-modal"
+      onclick={stopPropagation(bubble('click'))}
+      onkeydown={(e) => { if (e.key === 'Escape') closeRaiseConcurrencyModal(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="raise-conc-title"
+      tabindex="-1"
+    >
+      <h3 id="raise-conc-title">Set concurrency for {raiseConcModalWorker.name}</h3>
+      <p class="raise-conc-hint">
+        This worker has <strong>concurrency 0</strong>, so the scheduler
+        skips it. Set a positive value to let it pick up tasks.
+        {#if raiseConcModalWorker.status === 'P'}
+          The worker is also paused — confirming will both raise
+          concurrency and resume it.
+        {/if}
+      </p>
+      <label class="raise-conc-field">
+        Concurrency
+        <input
+          type="number"
+          min="1"
+          bind:value={raiseConcModalValue}
+          data-testid="raise-conc-input"
+        />
+      </label>
+      <div class="raise-conc-actions">
+        <button onclick={closeRaiseConcurrencyModal}>Cancel</button>
+        <button
+          class="raise-conc-confirm"
+          onclick={confirmRaiseConcurrency}
+          data-testid="raise-conc-confirm"
+        >
+          {raiseConcModalWorker.status === 'P' ? 'Set & resume' : 'Set concurrency'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .raise-conc-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .raise-conc-modal {
+    background: var(--background, #222);
+    color: var(--text, #eee);
+    padding: 1.25rem 1.5rem;
+    border-radius: 6px;
+    min-width: 320px;
+    max-width: 480px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  .raise-conc-modal h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1.05rem;
+  }
+  .raise-conc-hint {
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+    opacity: 0.85;
+  }
+  .raise-conc-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+  }
+  .raise-conc-field input {
+    padding: 0.4rem 0.5rem;
+    font-size: 1rem;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.25);
+    color: inherit;
+  }
+  .raise-conc-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+  }
+  .raise-conc-actions button {
+    padding: 0.4rem 0.85rem;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .raise-conc-confirm {
+    background: #2c5cdd;
+    color: white;
+    border: 1px solid #1f48b8;
+  }
+</style>
