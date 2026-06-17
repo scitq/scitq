@@ -514,8 +514,14 @@ func (s *taskQueueServer) GetClientUpgradeInfo(ctx context.Context, _ *emptypb.E
 	}
 	var base string
 	if s.cfg.Scitq.DisableHTTPS {
-		// HTTPS off → plain HTTP runs at gRPC port + 1 (see Serve()).
-		base = fmt.Sprintf("http://%s:%d", host, s.cfg.Scitq.Port+1)
+		// HTTPS off → plain HTTP. Mirror the listener's fallback in
+		// Serve(): honour cfg.Scitq.HTTPPort if set (integration tests
+		// reserve two independent free ports), else Port+1 (production).
+		httpPort := s.cfg.Scitq.HTTPPort
+		if httpPort == 0 {
+			httpPort = s.cfg.Scitq.Port + 1
+		}
+		base = fmt.Sprintf("http://%s:%d", host, httpPort)
 	} else {
 		port := s.cfg.Scitq.HTTPSPort
 		if port == 0 {
