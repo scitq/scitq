@@ -1,0 +1,7 @@
+-- No-op. The "down" of this migration would be to re-stringify
+-- bool/int/float defaults and choices in workflow_template.params_schema,
+-- i.e. deliberately re-introduce the encoder bug fixed in 3a35e8c.
+-- We don't do that — rolling back the schema migration sequence
+-- shouldn't corrupt user-visible defaults. If you genuinely need to
+-- revert past the encoder fix, downgrade the python DSL too and
+-- re-upload the affected templates.

@@ -832,6 +832,22 @@ export async function updateWorkflowStatus(workflowId: number, status: 'R' | 'P'
   }
 }
 
+/**
+ * Sets the workflow's maximum_workers cap. Reuses the
+ * UpdateWorkflowStatus RPC with an empty status — server treats
+ * status="" as "leave status alone" (see server.go:5694). Note the
+ * server only broadcasts a WS event on status changes, so other
+ * clients won't see this update until their next refresh.
+ */
+export async function updateWorkflowMaxWorkers(workflowId: number, maximumWorkers: number) {
+  try {
+    await client.updateWorkflowStatus({ workflowId, status: '', maximumWorkers }, await callOptionsUserToken());
+  } catch (error) {
+    console.error("Error updating workflow maximum_workers: ", error);
+    throw error;
+  }
+}
+
 
 /**
  * Retrieves all steps associated with a specific workflow

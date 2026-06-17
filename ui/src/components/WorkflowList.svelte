@@ -3,7 +3,7 @@
 
   import StepList from './StepList.svelte';
   import { RefreshCw, PauseCircle, PlayCircle, CircleX, Eraser, ChevronRight, ChevronDown, HelpCircle } from 'lucide-svelte';
-  import {delWorkflow, updateWorkflowStatus} from '../lib/api';
+  import {delWorkflow, updateWorkflowStatus, updateWorkflowMaxWorkers} from '../lib/api';
   import { onMount } from 'svelte';
   import TemplateRunModal from './TemplateRunModal.svelte';
   import { wfCounters } from '../lib/wfCounters';
@@ -65,6 +65,40 @@
       }
     }
   });
+
+  // Optimistic overrides for workflow.maximum_workers. The parent
+  // (WorkflowPage) holds `workflows` as $state.raw to skip deep
+  // proxying, so mutating wf.maximumWorkers in place wouldn't be
+  // reactive. The server also doesn't emit a WS event when only
+  // maximum_workers changes (see server.go:5730 — broadcast is gated
+  // on a status change), so a corrected value from the server won't
+  // arrive until the next refresh. This Map bridges that gap.
+  let maxWorkersOverrides = $state(new Map<number, number>());
+
+  function effectiveMax(wf): number | null {
+    if (maxWorkersOverrides.has(wf.workflowId)) {
+      return maxWorkersOverrides.get(wf.workflowId)!;
+    }
+    return wf.maximumWorkers ?? null;
+  }
+
+  async function bumpMax(wf, delta: number): Promise<void> {
+    const cur = effectiveMax(wf);
+    // null means "no limit". + on null seeds at 1; we don't expose an
+    // "unset back to null" path because the proto's `optional int32`
+    // can only be cleared by sending nil, which the JS client side
+    // can't easily do — same limitation the CLI has.
+    const next = cur === null ? Math.max(1, delta) : Math.max(0, cur + delta);
+    if (cur !== null && next === cur) return;
+    maxWorkersOverrides.set(wf.workflowId, next);
+    maxWorkersOverrides = new Map(maxWorkersOverrides);
+    try {
+      await updateWorkflowMaxWorkers(wf.workflowId, next);
+    } catch (err) {
+      maxWorkersOverrides.delete(wf.workflowId);
+      maxWorkersOverrides = new Map(maxWorkersOverrides);
+    }
+  }
 
   /**
    * Describe what launched a workflow (template name@version, local
@@ -165,6 +199,24 @@
 
       <!-- Steps list for expanded workflows -->
       {#if expandedWorkflows.has(wf.workflowId)}
+        {@const curMax = effectiveMax(wf)}
+        <div class="wf-meta">
+          <span class="wf-meta-label">Max workers:</span>
+          <span class="wf-meta-value" title={curMax === null ? 'No limit set' : ''}>{curMax === null ? '—' : curMax}</span>
+          <div class="wf-meta-controls">
+            <button class="wf-meta-btn"
+                    onclick={() => bumpMax(wf, 1)}
+                    aria-label="Increase maximum workers"
+                    title="Increase"
+                    data-testid={`max-workers-inc-${wf.workflowId}`}>+</button>
+            <button class="wf-meta-btn"
+                    onclick={() => bumpMax(wf, -1)}
+                    disabled={curMax === null || curMax === 0}
+                    aria-label="Decrease maximum workers"
+                    title={curMax === null ? 'No limit set' : 'Decrease'}
+                    data-testid={`max-workers-dec-${wf.workflowId}`}>−</button>
+          </div>
+        </div>
         <div class="wf-steps">
           <StepList workflowId={wf.workflowId} workersPerStepId={workersPerStepId} />
         </div>
@@ -195,5 +247,49 @@
   .wf-info-btn:hover {
     color: var(--primary-color);
     background: var(--bg-secondary);
+  }
+
+  .wf-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 1rem 0;
+    font-size: 0.75rem;
+    color: var(--text-secondary, var(--text-primary));
+  }
+  .wf-meta-label {
+    font-weight: 500;
+  }
+  .wf-meta-value {
+    font-weight: bold;
+    color: var(--text-primary);
+    min-width: 1.5em;
+    text-align: center;
+  }
+  .wf-meta-controls {
+    display: inline-flex;
+    gap: 2px;
+  }
+  .wf-meta-btn {
+    width: 20px;
+    height: 20px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 0.85rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .wf-meta-btn:hover:not(:disabled) {
+    background: var(--bg-primary);
+  }
+  .wf-meta-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 </style>
