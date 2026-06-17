@@ -69,6 +69,24 @@ class NfPipeline:
 # Parser
 # ---------------------------------------------------------------------------
 
+def _looks_like_float(value: str) -> bool:
+    """True iff `value` parses as a float but isn't pure-integer text.
+    Used by the param-default sniffer to choose Param.float over
+    Param.string for `params.foo = 1.5` etc. The isdigit branch
+    handles plain integers, so we only land here for things with a
+    dot or exponent. We test float() last because bare strings like
+    "inf" or "nan" also parse to floats — those should remain strings."""
+    if not value or value.isdigit():
+        return False
+    if not any(c in value for c in ('.', 'e', 'E')):
+        return False
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
+
 def _strip_comments(text: str) -> str:
     """Remove // line comments (but not inside strings)."""
     lines = []
@@ -529,6 +547,11 @@ def generate(pipeline: NfPipeline, config: Optional[Dict] = None) -> str:
                 lines.append(f'    {name} = Param.boolean(default={default.capitalize()}, help="{name}")')
             elif default.isdigit():
                 lines.append(f'    {name} = Param.integer(default={default}, help="{name}")')
+            elif _looks_like_float(default):
+                # Catch "1.5", ".5", "1e-4", "-3.0" etc. — Nextflow params
+                # are stringly-typed in nextflow.config; we sniff the
+                # default to pick the most specific scitq Param type.
+                lines.append(f'    {name} = Param.float(default={default}, help="{name}")')
             else:
                 lines.append(f'    {name} = Param.string(default="{default}", help="{name}")')
         lines.append('    location = Param.provider_region(required=True, help="Provider and region")')

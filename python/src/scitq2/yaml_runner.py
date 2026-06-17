@@ -722,6 +722,8 @@ def _build_params_class(params_def: Dict[str, dict]) -> type:
             namespace[name] = Param.integer(**kwargs)
         elif typ == 'boolean':
             namespace[name] = Param.boolean(**kwargs)
+        elif typ == 'float':
+            namespace[name] = Param.float(**kwargs)
         else:
             namespace[name] = Param.string(**kwargs)
     return ParamSpec('YAMLParams', (), namespace)

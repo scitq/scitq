@@ -103,6 +103,15 @@ class Param:
         return Param(typ=bool, **kwargs)
 
     @staticmethod
+    def float(**kwargs):
+        # Note: this shadows the builtin `float` inside the class body
+        # but Param is only ever used via `Param.float(...)` from outside,
+        # so the shadow is local-scope only. The schema surfaces this
+        # type as "float" (Python's float.__name__).
+        import builtins
+        return Param(typ=builtins.float, **kwargs)
+
+    @staticmethod
     def enum(choices: List[Any], **kwargs):
         inferred_type = type(choices[0]) if choices else str
         return Param(typ=inferred_type, choices=choices, **kwargs)

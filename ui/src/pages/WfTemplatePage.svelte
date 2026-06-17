@@ -569,6 +569,20 @@
                   placeholder="Enter number"
                 />
 
+              {:else if param.type === 'float'}
+                <!-- Number input for float parameters. step="any" lets
+                     the browser accept decimals and scientific notation
+                     (e.g. 1e-4) — without it the spinner snaps to
+                     integers and rejects exponent input. -->
+                <input
+                  type="number"
+                  step="any"
+                  id={param.name}
+                  bind:value={userParams[param.name]}
+                  class:error={showParamErrors && param.required && !userParams[param.name]}
+                  placeholder="Enter decimal"
+                />
+
               {:else if param.type === 'text'}
                 <!-- text: long / multi-line string. Operator can upload
                      a local file (read client-side via FileReader and
