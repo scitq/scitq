@@ -3,7 +3,6 @@ package integration_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +23,7 @@ func TestTaskStdoutStderrLogs(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +28,7 @@ func TestSkipIfExistsSkipsTask(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)
@@ -80,7 +79,7 @@ func TestSkipIfExistsRunsWhenMissing(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)
@@ -132,7 +131,7 @@ func TestSkipIfExistsPromotesDependents(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)
@@ -189,7 +188,7 @@ func TestSkipIfExistsWithGlob(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)
@@ -250,7 +249,7 @@ func TestSkipIfExistsUsesPublishPath(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)
@@ -298,7 +297,7 @@ func TestPublishOnlyOnSuccess(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)
@@ -375,7 +374,7 @@ func TestForceRunTask(t *testing.T) {
 	c.Attr.Server = serverAddr
 	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
 	require.NoError(t, err)
-	c.Attr.Token = strings.TrimSpace(out)
+	c.Attr.Token = extractToken(out)
 
 	qclient, err := lib.CreateClient(serverAddr, c.Attr.Token)
 	require.NoError(t, err)
