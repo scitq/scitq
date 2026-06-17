@@ -142,6 +142,16 @@ type Config struct {
 		// HTTPSPort is the TCP port used for HTTPS connections.
 		HTTPSPort int `yaml:"https_port" default:"443"`
 
+		// HTTPPort is the TCP port used for plain HTTP (MCP, API endpoints,
+		// the worker-binary download endpoint). Only consulted when HTTPS
+		// is disabled (e.g. integration tests). Default 0 means "derive
+		// from Port + 1", which is what production deployments rely on.
+		// The override exists for tests that need to reserve two
+		// independent free ports (without the +1 assumption that
+		// otherwise races with parallel tests reserving consecutive
+		// numbers).
+		HTTPPort int `yaml:"http_port" default:"0"`
+
 		// GRPCDSLTimeout is the timeout (in seconds) for DSL scripts which can take a long time to complete.
 		GRPCDSLTimeout int `yaml:"grpc_dsl_timeout" default:"1800"`
 

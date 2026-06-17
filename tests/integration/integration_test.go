@@ -47,6 +47,14 @@ var cliMu sync.Mutex // protects os.Args in runCLICommand
 // Populated by startServerForTest, read by dbURLForAddr.
 var dbURLByAddr sync.Map
 
+// httpPortByAddr maps serverAddr → its HTTP companion port. Same
+// motivation as dbURLByAddr: keep startServerForTest's return tuple
+// stable while letting tests that need the HTTP URL (mcp, the
+// worker-binary upgrade endpoints, …) discover it. Used to replace
+// the previous `gRPC port + 1` derivation that races with parallel
+// tests reserving consecutive port numbers.
+var httpPortByAddr sync.Map
+
 // Shared Python venv (created once, reused by all tests to avoid pip races)
 var sharedPythonVenv string
 var sharedPythonOnce sync.Once
@@ -60,6 +68,19 @@ func dbURLForAddr(t *testing.T, serverAddr string) string {
 		t.Fatalf("no DB URL recorded for server %s — startServerForTest must run first", serverAddr)
 	}
 	return v.(string)
+}
+
+// httpPortForAddr returns the test server's HTTP companion port (the
+// one serving /mcp, /scitq-client, etc.). Use this instead of deriving
+// `gRPC port + 1` — the test fixture now reserves the two ports
+// independently, so the +1 assumption is wrong.
+func httpPortForAddr(t *testing.T, serverAddr string) int {
+	t.Helper()
+	v, ok := httpPortByAddr.Load(serverAddr)
+	if !ok {
+		t.Fatalf("no HTTP port recorded for server %s — startServerForTest must run first", serverAddr)
+	}
+	return v.(int)
 }
 
 // extractToken finds a JWT token (eyJ...) in CLI output, which may contain
@@ -304,13 +325,31 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	})
 	tempPythonEnv := sharedPythonVenv
 
-	// Pick a free server port to avoid collisions between tests
+	// Pick two independent free ports — one for gRPC, one for the HTTP
+	// companion server. The naive "ask for one, use port+1 for HTTP"
+	// pattern races on a busy CI runner: while test A is reserving N,
+	// test B (running in parallel after the mutex releases) can pick
+	// up N+1 for its OWN gRPC, and now A's HTTP companion N+1 collides
+	// with B's gRPC. Reserving the two ports independently and passing
+	// both via config eliminates the +1 assumption. There's still a
+	// small TOCTOU window between Close() and server.Serve's net.Listen
+	// (the kernel can in principle hand the same number to another
+	// concurrent net.Listen) but it's far narrower than the +1 race.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("cannot grab free port: %v", err)
 	}
 	serverPort := ln.Addr().(*net.TCPAddr).Port
+
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_ = ln.Close()
+		t.Fatalf("cannot grab second free port: %v", err)
+	}
+	httpPort := ln2.Addr().(*net.TCPAddr).Port
+
 	_ = ln.Close()
+	_ = ln2.Close()
 
 	// Generate secrets
 	b := make([]byte, 4)
@@ -338,6 +377,7 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 
 		cfg.Scitq.DBURL = dbURL
 		cfg.Scitq.Port = serverPort
+		cfg.Scitq.HTTPPort = httpPort
 		cfg.Scitq.ServerFQDN = "localhost"
 		cfg.Scitq.LogLevel = "debug"
 		cfg.Scitq.LogRoot = tempLogRoot
@@ -368,6 +408,7 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	// Record DB URL for tests that need direct DB access. See
 	// dbURLForAddr above the function definitions.
 	dbURLByAddr.Store(serverAddr, dbURL)
+	httpPortByAddr.Store(serverAddr, httpPort)
 
 	// Wait for gRPC server readiness
 	deadline := time.Now().Add(60 * time.Second) // Python venv bootstrap can be slow on CI
@@ -385,15 +426,18 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// In DisableHTTPS mode (always true here) the HTTP listener at
-	// gRPC port+1 serves /scitq-client.sha256 and other endpoints
-	// exercised by worker_upgrade tests. The server binds it
-	// synchronously now, so it should be up as soon as gRPC is — but
-	// probe explicitly anyway: a flaky failure here is far more
-	// useful than a downstream ECONNREFUSED from a test's http.Get.
+	// In DisableHTTPS mode (always true here) the HTTP listener serves
+	// /scitq-client.sha256 and other endpoints exercised by
+	// worker_upgrade tests. The server binds it synchronously now, so
+	// it should be up as soon as gRPC is — but probe explicitly anyway:
+	// a flaky failure here is far more useful than a downstream
+	// ECONNREFUSED from a test's http.Get. Probe the EXPLICIT httpPort
+	// we passed via cfg.Scitq.HTTPPort, not serverPort+1: that pair-
+	// derivation race is exactly what the two-independent-port
+	// reservation above is fixing.
 	httpDeadline := time.Now().Add(15 * time.Second)
 	for {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", serverPort+1), 500*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", httpPort), 500*time.Millisecond)
 		if err == nil {
 			conn.Close()
 			log.Println("✅ HTTP companion port is ready")

@@ -6669,11 +6669,6 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		return fmt.Errorf("migration error: %v", err)
 	}
 
-	// Apply any database migrations needed at startup
-	if err := applyMigrations(db); err != nil {
-		return fmt.Errorf("migration error: %v", err)
-	}
-
 	// Bootstrap Python DSL asynchronously (can take 30+ seconds on fresh install)
 	pythonReady := make(chan struct{})
 	go func() {
@@ -6904,7 +6899,16 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		}
 	} else {
 		log.Printf("🌙 HTTPS disabled — starting plain HTTP for MCP and API endpoints")
-		httpPort := cfg.Scitq.Port + 1
+		// HTTP port: explicit override via cfg.Scitq.HTTPPort if set,
+		// else derive from Port+1 (production deployments rely on this).
+		// The override exists so integration tests can reserve two
+		// independent free ports — the +1 derivation otherwise races
+		// with parallel tests choosing consecutive port numbers and
+		// occasionally produces "bind: address already in use".
+		httpPort := cfg.Scitq.HTTPPort
+		if httpPort == 0 {
+			httpPort = cfg.Scitq.Port + 1
+		}
 		// Bind the listener synchronously. Otherwise the previous
 		// ListenAndServe-in-a-goroutine pattern races: integration tests
 		// probe gRPC readiness and may issue HTTP requests before the

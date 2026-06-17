@@ -648,12 +648,22 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 }
 
 type ParamSpec struct {
-	Name     string   `json:"name"`
-	Type     string   `json:"type"`
-	Required bool     `json:"required"`
-	Default  string   `json:"default"`
-	Help     string   `json:"help"` // Or `json:"description"` if your field is named so
-	Choices  []string `json:"choices,omitempty"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+	// Default and Choices accept whatever JSON type the schema carries —
+	// boolean, integer, float, string, etc. The Python side
+	// (ParamSpec.schema in python/src/scitq2/param.py) emits native
+	// types, not stringified defaults, so a YAML `default: true` round-
+	// trips as the JSON literal `true`. Trying to unmarshal that into
+	// `string` aborted the whole UploadTemplate with "json: cannot
+	// unmarshal bool into Go struct field". Neither field is consumed
+	// downstream (UploadTemplate only validates Name/Type and then
+	// stores the schema verbatim), so the loose `interface{}` typing
+	// has no downside.
+	Default interface{}   `json:"default"`
+	Help    string        `json:"help"` // Or `json:"description"` if your field is named so
+	Choices []interface{} `json:"choices,omitempty"`
 }
 
 // extractYAMLMetadata parses a YAML template and returns JSON metadata

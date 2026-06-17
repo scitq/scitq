@@ -104,4 +104,29 @@ def test_schema_emits_float_type_name():
     assert by_name["threshold"]["type"] == "float"
     assert by_name["threshold"]["required"] is True
     assert by_name["rate"]["type"] == "float"
-    assert by_name["rate"]["default"] == "0.05"
+    # Default carries its native type now (was previously stringified —
+    # that broke `default: false` for booleans because "False" reads as
+    # truthy in JS; fixing it for booleans also restores native floats
+    # so the UI's number input gets a real number instead of "0.05").
+    assert by_name["rate"]["default"] == 0.05
+    assert isinstance(by_name["rate"]["default"], float)
+
+
+def test_schema_preserves_native_default_types():
+    """Catches the original bug: a boolean `default: false` must survive
+    schema → JSON → UI as the literal `false`, NOT the string "False".
+    The string form is truthy in JS so a checkbox bound via bind:checked
+    flipped to ON, exactly the opposite of what the operator declared.
+    Same hazard for `default: 0` (the string "0" is truthy too)."""
+    class P(metaclass=ParamSpec):
+        flag = Param.boolean(default=False)
+        flag_true = Param.boolean(default=True)
+        n = Param.integer(default=0)
+        s = Param.string(default="hello")
+
+    by_name = {p["name"]: p for p in P.schema()}
+    assert by_name["flag"]["default"] is False
+    assert by_name["flag_true"]["default"] is True
+    assert by_name["n"]["default"] == 0
+    assert isinstance(by_name["n"]["default"], int)
+    assert by_name["s"]["default"] == "hello"

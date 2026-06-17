@@ -195,7 +195,7 @@ class Params(metaclass=ParamSpec):
     parallel = Param.integer(default=1, help="How many parallel tasks to run")
 ```
 
-This syntax is very similar to Django or SQLAlchemy syntax. It declare parameter as class level variables, specifying their type with Param.string or Param.integer. Appart from the name, it has self explanatory attributes (default, required, help): the help message is used by the UI or the CLI to help users launch the template.
+This syntax is very similar to Django or SQLAlchemy syntax. It declare parameter as class level variables, specifying their type with `Param.string`, `Param.integer`, `Param.float`, `Param.boolean`, `Param.enum(choices=[...])`, `Param.path`, `Param.text`, or `Param.provider_region`. Apart from the name, each takes self-explanatory attributes (`default`, `required`, `help`, optional `choices`): the help message is used by the UI or the CLI to help users launch the template. `Param.float` accepts decimal strings and scientific notation (`"1e-4"`, `"0.05"`, `2.5`) — use it for rates, tolerances, p-values and any other non-integer numeric value.
 
 ### A more realistic Workflow
 

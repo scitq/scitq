@@ -145,6 +145,11 @@ params:
     type: integer
     default: 10
 
+  tolerance:
+    type: float
+    default: 0.8
+    help: "Decimal threshold (0 < t <= 1). Accepts scientific notation: 1e-4."
+
   location:
     type: provider_region
     required: true
@@ -154,7 +159,9 @@ params:
     default: true
 ```
 
-Supported types: `string`, `integer`, `boolean`, `enum` (with `choices`), `provider_region`, `path`, `text`.
+Supported types: `string`, `integer`, `float`, `boolean`, `enum` (with `choices`), `provider_region`, `path`, `text`.
+
+`float` accepts decimals (`0.8`) and scientific notation (`1e-4`, `-3.0e2`). Use `integer` for whole numbers and `float` for any value where decimals or exponents matter (rates, tolerances, p-values, learning rates, …). The CLI and UI both accept the same syntax; the UI renders `float` params with a `step="any"` number input that does not snap to integers.
 
 Parameters are referenced in the template as `{params.name}`. Optional parameters use the syntax `{params.name:default_value}` — the default is used when the parameter is not provided.
 

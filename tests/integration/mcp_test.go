@@ -59,9 +59,10 @@ func TestMCPEndToEnd(t *testing.T) {
 	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
 	defer cleanup()
 
-	// HTTP server is on gRPC port + 1 when HTTPS is disabled
-	parts := splitHostPort(t, serverAddr)
-	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", parts.port+1)
+	// HTTP server port is recorded by startServerForTest. The previous
+	// "gRPC port + 1" derivation races with parallel tests that
+	// reserve consecutive ports — see httpPortForAddr's docstring.
+	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", httpPortForAddr(t, serverAddr))
 
 	// Wait for HTTP server to be ready
 	require.Eventually(t, func() bool {

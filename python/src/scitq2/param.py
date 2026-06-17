@@ -202,13 +202,27 @@ class ParamSpec(type):
         return obj
 
     def schema(cls):
+        # Emit defaults / choices as their native types (bool, int, float,
+        # str, …) so JSON carries the type through to the consumer. The
+        # previous `str(param.default)` stringification turned a YAML
+        # `default: false` into the JSON string "False", which the UI's
+        # boolean checkbox (bind:checked) then read as a non-empty
+        # truthy string and rendered as CHECKED — the operator saw an
+        # explicit `false` default flipped to true. Same trap would bite
+        # `default: 0` (the string "0" is truthy in JS). The CLI's
+        # human-readable JSON output is unaffected — JSON renders bool
+        # and number defaults naturally.
+        #
+        # str-subclass types (Path, Text, ProviderRegion) round-trip
+        # through JSON as plain strings, which is what consumers want;
+        # no special casing needed here.
         return [
             {
                 "name": name,
                 "type": type_name(param.typ),
                 "required": param.required,
-                "default": str(param.default) if param.default is not None else None,
-                "choices": [str(c) for c in param.choices] if param.choices else None,
+                "default": param.default if param.default is not None else None,
+                "choices": list(param.choices) if param.choices else None,
                 "help": param.help,
             }
             for name, param in cls._declared_params.items()

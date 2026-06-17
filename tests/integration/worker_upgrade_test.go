@@ -39,15 +39,16 @@ func startServerWithClientBinary(t *testing.T, content []byte) (serverAddr, work
 
 	serverAddr, workerToken, adminUser, adminPassword, cleanup = startServerForTest(t, override)
 
-	// startServerForTest forces DisableHTTPS=true; in that mode the
-	// HTTP listener runs at gRPC port + 1. The base URL has no scheme
-	// here so callers can prepend http:// or https:// as needed.
+	// startServerForTest forces DisableHTTPS=true. The HTTP companion
+	// port is recorded by the fixture (see httpPortForAddr); we used
+	// to derive `gRPC port + 1` here, but that raced with parallel
+	// tests reserving consecutive port numbers — the fixture now
+	// reserves the two ports independently. Host stays from
+	// serverAddr (always "localhost" in tests), just the port comes
+	// from the recorded map.
 	parts := strings.Split(serverAddr, ":")
 	require.Len(t, parts, 2)
-	port := 0
-	_, err := fmt.Sscanf(parts[1], "%d", &port)
-	require.NoError(t, err)
-	httpBase = fmt.Sprintf("http://%s:%d", parts[0], port+1)
+	httpBase = fmt.Sprintf("http://%s:%d", parts[0], httpPortForAddr(t, serverAddr))
 	return
 }
 

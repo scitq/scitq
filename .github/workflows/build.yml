@@ -8,6 +8,16 @@ on:
       - '**'
   pull_request:
 
+# GitHub is forcing all JavaScript-based actions onto Node 24 in June 2026.
+# Some actions we depend on (actions/setup-go@v5 as of this writing) still
+# declare Node 20, which surfaces as a noisy deprecation warning on every
+# job. Opting in early via the documented env var silences the warning and
+# matches what GitHub will enforce by default — when an updated setup-go
+# ships, we can drop this. See:
+# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build:
     runs-on: ubuntu-latest
