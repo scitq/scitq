@@ -20,6 +20,7 @@ service TaskQueue {
     rpc ForceRunTask (ForceRunTaskRequest) returns (Ack); // Force W→P, bypassing dependency checks
     rpc EditAndRetryTask (EditAndRetryTaskRequest) returns (TaskResponse); // Edit command and retry a single task
     rpc EditTask (EditTaskRequest) returns (TaskResponse); // Update fields on a task in-place (no retry)
+    rpc DeleteTask (TaskId) returns (Ack); // Remove a single task row. task_dependencies CASCADE on both sides drops the dep edges automatically. Does not auto-kill running workers; if the task is active, the operator should kill_task first or be ready for the worker's next status update to no-op against a missing row.
     rpc GetTask (TaskId) returns (Task); // Fetch a single task by id; used by the worker pre-launch reread checkpoint when signal B is parked.
     rpc EditStepCommand (EditStepCommandRequest) returns (EditStepCommandResponse); // Find/replace in all failed tasks of a step and retry them
     rpc ListWorkers (ListWorkersRequest) returns (WorkersList);

@@ -521,6 +521,22 @@ export async function retryTask(taskId: number, retryCount?: number): Promise<nu
 }
 
 /**
+ * Delete a task. If the task is active (A/C/D/O/R/U/V) the server
+ * queues SIGKILL on the worker and waits up to 15s for the worker to
+ * ack the ping before removing the row — see server.DeleteTask for
+ * the rationale. May take a few seconds when killing is involved.
+ */
+export async function deleteTask(taskId: number): Promise<void> {
+  try {
+    await client.deleteTask({ taskId }, await callOptionsUserToken());
+  } catch (error) {
+    console.error("Error while deleting task:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to delete task ${taskId}: ${errMsg}`);
+  }
+}
+
+/**
  * Edit a task's command and retry it via the HTTP API endpoint.
  * Returns the new task ID.
  */

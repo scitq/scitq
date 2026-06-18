@@ -100,6 +100,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.EditTaskRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.TaskResponse.FromString,
                 _registered_method=True)
+        self.DeleteTask = channel.unary_unary(
+                '/taskqueue.TaskQueue/DeleteTask',
+                request_serializer=taskqueue__pb2.TaskId.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
         self.GetTask = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetTask',
                 request_serializer=taskqueue__pb2.TaskId.SerializeToString,
@@ -606,6 +611,13 @@ class TaskQueueServicer(object):
 
     def EditTask(self, request, context):
         """Update fields on a task in-place (no retry)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteTask(self, request, context):
+        """Remove a single task row. task_dependencies CASCADE on both sides drops the dep edges automatically. Does not auto-kill running workers; if the task is active, the operator should kill_task first or be ready for the worker's next status update to no-op against a missing row.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1219,6 +1231,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.EditTask,
                     request_deserializer=taskqueue__pb2.EditTaskRequest.FromString,
                     response_serializer=taskqueue__pb2.TaskResponse.SerializeToString,
+            ),
+            'DeleteTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteTask,
+                    request_deserializer=taskqueue__pb2.TaskId.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
             'GetTask': grpc.unary_unary_rpc_method_handler(
                     servicer.GetTask,
@@ -1997,6 +2014,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/EditTask',
             taskqueue__pb2.EditTaskRequest.SerializeToString,
             taskqueue__pb2.TaskResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/DeleteTask',
+            taskqueue__pb2.TaskId.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
             options,
             channel_credentials,
             insecure,

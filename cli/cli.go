@@ -112,6 +112,10 @@ type Attr struct {
 			ID    int32  `arg:"--id,required" help:"Task ID to stop"`
 			Grace *int32 `arg:"--grace" help:"Grace period in seconds before SIGKILL (default: 10)"`
 		} `arg:"subcommand:stop" help:"Send stop signal (SIGTERM) to a running task"`
+
+		Delete *struct {
+			ID int32 `arg:"--id,required" help:"Task ID to delete"`
+		} `arg:"subcommand:delete" help:"Remove a task row (and its dependency edges via CASCADE). If the task is active, a SIGKILL is queued on the worker first; the call waits up to 15s for the worker to ack before removing the row."`
 	} `arg:"subcommand:task" help:"Manage tasks"`
 
 	// Worker Commands (Sub-Subcommands)
@@ -920,6 +924,26 @@ func (c *CLI) TaskStop() error {
 		return nil
 	}
 	fmt.Printf("🛑 Stop signal (SIGTERM) sent for task %d\n", c.Attr.Task.Stop.ID)
+	return nil
+}
+
+// TaskDelete removes a task row. If the task is active, the server
+// queues SIGKILL on the worker first and waits up to 15s for the
+// worker to ack the ping before removing the row — see
+// server.DeleteTask for the rationale.
+func (c *CLI) TaskDelete() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	_, err := c.QC.Client.DeleteTask(ctx, &pb.TaskId{TaskId: c.Attr.Task.Delete.ID})
+	if err != nil {
+		return fmt.Errorf("failed to delete task: %w", err)
+	}
+
+	if c.jsonOut(map[string]any{"task_id": c.Attr.Task.Delete.ID, "deleted": true}) {
+		return nil
+	}
+	fmt.Printf("🗑️ Task %d deleted\n", c.Attr.Task.Delete.ID)
 	return nil
 }
 
@@ -3229,6 +3253,8 @@ func Run(c CLI) error {
 			err = c.TaskKill()
 		case c.Attr.Task.Stop != nil:
 			err = c.TaskStop()
+		case c.Attr.Task.Delete != nil:
+			err = c.TaskDelete()
 		}
 	// Worker commands
 	case c.Attr.Worker != nil:

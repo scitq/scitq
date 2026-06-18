@@ -6168,6 +6168,106 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 	return &pb.StepId{StepId: stepID}, nil
 }
 
+// DeleteTask removes a single task row. The schema's
+// task_dependencies → task ON DELETE CASCADE (000001_init_schema.up.sql)
+// drops the dependency edges on both sides automatically — nothing else
+// needs to be touched.
+//
+// If the task is currently on a worker (status A/C/D/O/R/U/V), we queue
+// a SIGKILL via the standard signal channel and wait — up to 15s — for
+// the worker to ping AFTER signalAt before we DELETE the row. Without
+// that wait, the cascade vacates the row in the same DB roundtrip and
+// the worker that polls a moment later sees nothing to signal; the
+// container keeps running until orphan-detect kicks in. The pattern
+// mirrors DeleteWorkflow's pre-delete signal/wait flow.
+func (s *taskQueueServer) DeleteTask(ctx context.Context, req *pb.TaskId) (*pb.Ack, error) {
+	if GetUserFromContext(ctx) == nil {
+		return nil, status.Error(codes.PermissionDenied, "user authentication required")
+	}
+	if req.TaskId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "task_id is required")
+	}
+
+	var taskStatus string
+	var workerID sql.NullInt32
+	err := s.db.QueryRowContext(ctx,
+		`SELECT status, worker_id FROM task WHERE task_id = $1`,
+		req.TaskId).Scan(&taskStatus, &workerID)
+	if err == sql.ErrNoRows {
+		return nil, status.Error(codes.NotFound, "task not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up task %d: %w", req.TaskId, err)
+	}
+
+	isActive := false
+	switch taskStatus {
+	case "A", "C", "D", "O", "R", "U", "V":
+		isActive = true
+	}
+
+	if isActive && workerID.Valid {
+		signalAt := time.Now()
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE task SET signal = 'K', signal_grace = NULL
+			   WHERE task_id = $1 AND status IN ('A','C','D','O','R','U','V')`,
+			req.TaskId); err != nil {
+			log.Printf("⚠️ DeleteTask %d: pre-delete signal queue failed (%v); proceeding — orphan-detect will catch a leaked container",
+				req.TaskId, err)
+		} else {
+			log.Printf("🔪 DeleteTask %d: queued SIGKILL on worker %d before delete", req.TaskId, workerID.Int32)
+		}
+
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			var notReady int
+			err := s.db.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM worker
+				  WHERE worker_id = $1
+				    AND deleted_at IS NULL
+				    AND (last_ping IS NULL OR last_ping < $2)`,
+				workerID.Int32, signalAt,
+			).Scan(&notReady)
+			if err != nil {
+				log.Printf("⚠️ DeleteTask %d: ping-ack query failed (%v); proceeding to delete", req.TaskId, err)
+				break
+			}
+			if notReady == 0 {
+				log.Printf("✅ DeleteTask %d: worker %d acknowledged signal — deleting", req.TaskId, workerID.Int32)
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if time.Now().After(deadline) {
+			log.Printf("⚠️ DeleteTask %d: timed out waiting for worker %d ping-ack (15s); deleting anyway — orphan-detect will catch a leaked container",
+				req.TaskId, workerID.Int32)
+		}
+	}
+
+	res, err := s.db.ExecContext(ctx, `DELETE FROM task WHERE task_id = $1`, req.TaskId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete task %d: %w", req.TaskId, err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return nil, status.Error(codes.NotFound, "task not found")
+	}
+
+	payload := struct {
+		TaskId   int32  `json:"taskId"`
+		WorkerId int32  `json:"workerId,omitempty"`
+		Status   string `json:"status"`
+	}{
+		TaskId: req.TaskId,
+		Status: taskStatus,
+	}
+	if workerID.Valid {
+		payload.WorkerId = workerID.Int32
+	}
+	ws.EmitWS("task", req.TaskId, "deleted", payload)
+
+	return &pb.Ack{Success: true}, nil
+}
+
 func (s *taskQueueServer) DeleteStep(ctx context.Context, req *pb.StepId) (*pb.Ack, error) {
 	_, err := s.db.Exec(`DELETE FROM step WHERE step_id = $1`, req.StepId)
 	if err != nil {

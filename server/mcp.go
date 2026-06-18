@@ -564,6 +564,15 @@ func (h *mcpHandler) listTools() []mcpTool {
 			},
 		},
 		{
+			Name:        "delete_task",
+			Description: "Remove a single task row (and its dependency edges via CASCADE). If the task is currently on a worker (status A/C/D/O/R/U/V), a SIGKILL is queued first and the call waits up to 15s for the worker to ack the ping before removing the row, so the container is killed rather than orphaned. Use this when kill_task isn't enough and you actually need the row gone — e.g. to unblock dependents or stop a stuck task from being retried.",
+			InputSchema: inputSchema{
+				Type:       "object",
+				Properties: map[string]schemaProperty{"task_id": {Type: "integer", Description: "Task ID"}},
+				Required:   []string{"task_id"},
+			},
+		},
+		{
 			Name:        "task_status_counts",
 			Description: "Get task count per status for a workflow or globally.",
 			InputSchema: inputSchema{
@@ -915,6 +924,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolKillTask(authCtx, call.Arguments)
 	case "stop_task":
 		return h.toolStopTask(authCtx, call.Arguments)
+	case "delete_task":
+		return h.toolDeleteTask(authCtx, call.Arguments)
 	case "task_status_counts":
 		return h.toolTaskStatusCounts(authCtx, call.Arguments)
 	case "list_workers":
@@ -1427,6 +1438,16 @@ func (h *mcpHandler) toolStopTask(ctx context.Context, args json.RawMessage) (an
 		return errorResult(err), nil
 	}
 	return textResult(fmt.Sprintf("Stop signal (SIGTERM) queued for task %d", p.TaskID)), nil
+}
+
+func (h *mcpHandler) toolDeleteTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct{ TaskID int32 `json:"task_id"` }
+	json.Unmarshal(args, &p)
+	_, err := h.server.DeleteTask(ctx, &pb.TaskId{TaskId: p.TaskID})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Task %d deleted", p.TaskID)), nil
 }
 
 func (h *mcpHandler) toolTaskStatusCounts(ctx context.Context, args json.RawMessage) (any, *rpcError) {

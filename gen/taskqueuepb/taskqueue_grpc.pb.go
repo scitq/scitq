@@ -33,6 +33,7 @@ const (
 	TaskQueue_ForceRunTask_FullMethodName              = "/taskqueue.TaskQueue/ForceRunTask"
 	TaskQueue_EditAndRetryTask_FullMethodName          = "/taskqueue.TaskQueue/EditAndRetryTask"
 	TaskQueue_EditTask_FullMethodName                  = "/taskqueue.TaskQueue/EditTask"
+	TaskQueue_DeleteTask_FullMethodName                = "/taskqueue.TaskQueue/DeleteTask"
 	TaskQueue_GetTask_FullMethodName                   = "/taskqueue.TaskQueue/GetTask"
 	TaskQueue_EditStepCommand_FullMethodName           = "/taskqueue.TaskQueue/EditStepCommand"
 	TaskQueue_ListWorkers_FullMethodName               = "/taskqueue.TaskQueue/ListWorkers"
@@ -137,6 +138,7 @@ type TaskQueueClient interface {
 	ForceRunTask(ctx context.Context, in *ForceRunTaskRequest, opts ...grpc.CallOption) (*Ack, error)
 	EditAndRetryTask(ctx context.Context, in *EditAndRetryTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	EditTask(ctx context.Context, in *EditTaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
+	DeleteTask(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (*Ack, error)
 	GetTask(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (*Task, error)
 	EditStepCommand(ctx context.Context, in *EditStepCommandRequest, opts ...grpc.CallOption) (*EditStepCommandResponse, error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*WorkersList, error)
@@ -405,6 +407,16 @@ func (c *taskQueueClient) EditTask(ctx context.Context, in *EditTaskRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskResponse)
 	err := c.cc.Invoke(ctx, TaskQueue_EditTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) DeleteTask(ctx context.Context, in *TaskId, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_DeleteTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1278,6 +1290,7 @@ type TaskQueueServer interface {
 	ForceRunTask(context.Context, *ForceRunTaskRequest) (*Ack, error)
 	EditAndRetryTask(context.Context, *EditAndRetryTaskRequest) (*TaskResponse, error)
 	EditTask(context.Context, *EditTaskRequest) (*TaskResponse, error)
+	DeleteTask(context.Context, *TaskId) (*Ack, error)
 	GetTask(context.Context, *TaskId) (*Task, error)
 	EditStepCommand(context.Context, *EditStepCommandRequest) (*EditStepCommandResponse, error)
 	ListWorkers(context.Context, *ListWorkersRequest) (*WorkersList, error)
@@ -1439,6 +1452,9 @@ func (UnimplementedTaskQueueServer) EditAndRetryTask(context.Context, *EditAndRe
 }
 func (UnimplementedTaskQueueServer) EditTask(context.Context, *EditTaskRequest) (*TaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EditTask not implemented")
+}
+func (UnimplementedTaskQueueServer) DeleteTask(context.Context, *TaskId) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteTask not implemented")
 }
 func (UnimplementedTaskQueueServer) GetTask(context.Context, *TaskId) (*Task, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
@@ -1921,6 +1937,24 @@ func _TaskQueue_EditTask_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).EditTask(ctx, req.(*EditTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_DeleteTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).DeleteTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_DeleteTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).DeleteTask(ctx, req.(*TaskId))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3501,6 +3535,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EditTask",
 			Handler:    _TaskQueue_EditTask_Handler,
+		},
+		{
+			MethodName: "DeleteTask",
+			Handler:    _TaskQueue_DeleteTask_Handler,
 		},
 		{
 			MethodName: "GetTask",

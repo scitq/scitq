@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getJobStatusClass, getJobStatusText, retryTask } from '../lib/api';
+  import { getJobStatusClass, getJobStatusText, retryTask, deleteTask } from '../lib/api';
   import { RefreshCcw, Download, Trash, Eye } from 'lucide-svelte';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
@@ -123,6 +123,31 @@ async function retryTaskClick(taskId: number) {
     errorMessage = err.message || `Failed to retry task ${taskId}`;
   }
 }
+
+// In-flight set so a slow delete (active task → kill + 15s wait) doesn't
+// allow a double-click to fire a second DeleteTask. WS task.deleted will
+// remove the row from displayedTasks once the server confirms.
+let deletingTasks: Set<number> = $state(new Set());
+
+async function deleteTaskClick(taskId: number, status: string) {
+  errorMessage = null;
+  const active = ['A','C','D','O','R','U','V'].includes(status);
+  const prompt = active
+    ? `Task ${taskId} is active (status ${status}). The worker will be sent SIGKILL and the row removed once the kill is acknowledged. Continue?`
+    : `Delete task ${taskId}? This removes the row and its dependency edges; it cannot be undone.`;
+  if (!confirm(prompt)) return;
+  deletingTasks.add(taskId);
+  deletingTasks = new Set(deletingTasks);
+  try {
+    await deleteTask(taskId);
+  } catch (err) {
+    console.error("Error deleting task:", err);
+    errorMessage = err.message || `Failed to delete task ${taskId}`;
+  } finally {
+    deletingTasks.delete(taskId);
+    deletingTasks = new Set(deletingTasks);
+  }
+}
 </script>
 
 {#if displayedTasks && displayedTasks.length > 0}
@@ -186,7 +211,11 @@ async function retryTaskClick(taskId: number) {
               <button class="btn-action" title="Restart" onclick={() => retryTaskClick(task.taskId)}><RefreshCcw /></button>
               <br />
               <button class="btn-action" title="Download"><Download /></button>
-              <button class="btn-action" title="Delete"><Trash /></button>
+              <button class="btn-action"
+                      title={deletingTasks.has(task.taskId) ? 'Deleting…' : 'Delete task'}
+                      disabled={deletingTasks.has(task.taskId)}
+                      data-testid={`delete-task-${task.taskId}`}
+                      onclick={() => deleteTaskClick(task.taskId, task.status)}><Trash /></button>
             </td>
           </tr>
         {/each}
