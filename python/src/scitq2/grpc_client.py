@@ -316,7 +316,8 @@ class Scitq2Client:
     def edit_and_retry_task(self, task_id: int, command: str,
                             inputs: Optional[List[str]] = None,
                             resources: Optional[List[str]] = None,
-                            depends: Optional[List[int]] = None) -> int:
+                            depends: Optional[List[int]] = None,
+                            container: Optional[str] = None) -> int:
         """Edit a task's command and retry it (clone with the new command, hide
         the parent). Returns the new task's id.
 
@@ -326,6 +327,11 @@ class Scitq2Client:
         Workflow.compile passes these during extend so re-run fan-in tasks
         get the freshly-submitted samples wired in. See
         specs/workflow_extend.md.
+
+        Optional `container` is UPDATED on the parent before the retry,
+        so the clone picks up the new image. None = leave the parent's
+        container alone. Workflow.compile passes this during extend when
+        the template's container differs from what's already in the DB.
         """
         req = taskqueue_pb2.EditAndRetryTaskRequest(task_id=task_id, command=command)
         if inputs is not None:
@@ -334,6 +340,8 @@ class Scitq2Client:
             req.resources.CopyFrom(taskqueue_pb2.StringList(values=list(resources)))
         if depends is not None:
             req.depends.CopyFrom(taskqueue_pb2.Int32List(values=list(depends)))
+        if container is not None:
+            req.container = container
         resp = self.stub.EditAndRetryTask(req)
         return resp.task_id
 

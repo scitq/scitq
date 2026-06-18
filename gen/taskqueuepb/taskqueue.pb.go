@@ -1076,9 +1076,17 @@ type EditAndRetryTaskRequest struct {
 	// the clone". Required for the workflow-extend fan-in case where
 	// re-running a grouped/compile task must wire the freshly-submitted
 	// samples into the new clone's inputs and prerequisite list.
-	Inputs        *StringList `protobuf:"bytes,3,opt,name=inputs,proto3,oneof" json:"inputs,omitempty"`
-	Resources     *StringList `protobuf:"bytes,4,opt,name=resources,proto3,oneof" json:"resources,omitempty"`
-	Depends       *Int32List  `protobuf:"bytes,5,opt,name=depends,proto3,oneof" json:"depends,omitempty"`
+	Inputs    *StringList `protobuf:"bytes,3,opt,name=inputs,proto3,oneof" json:"inputs,omitempty"`
+	Resources *StringList `protobuf:"bytes,4,opt,name=resources,proto3,oneof" json:"resources,omitempty"`
+	Depends   *Int32List  `protobuf:"bytes,5,opt,name=depends,proto3,oneof" json:"depends,omitempty"`
+	// New container for the parent task before retry. The retry clones
+	// from the parent, so UPDATEing the parent's container makes the
+	// clone use it. Absent = leave the parent's container alone (legacy
+	// behavior). Required for the workflow-extend case where the fix
+	// for a failing step involves both a new command and a new
+	// container — without this the command change ships with the old
+	// container and the retry fails the same way (Vadim's case).
+	Container     *string `protobuf:"bytes,6,opt,name=container,proto3,oneof" json:"container,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1146,6 +1154,13 @@ func (x *EditAndRetryTaskRequest) GetDepends() *Int32List {
 		return x.Depends
 	}
 	return nil
+}
+
+func (x *EditAndRetryTaskRequest) GetContainer() string {
+	if x != nil && x.Container != nil {
+		return *x.Container
+	}
+	return ""
 }
 
 // StringList wraps a `repeated string` so it can be carried as `optional`
@@ -11261,18 +11276,21 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05retry\x18\x02 \x01(\x05H\x00R\x05retry\x88\x01\x01B\b\n" +
 	"\x06_retry\".\n" +
 	"\x13ForceRunTaskRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\x94\x02\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\xc5\x02\n" +
 	"\x17EditAndRetryTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x122\n" +
 	"\x06inputs\x18\x03 \x01(\v2\x15.taskqueue.StringListH\x00R\x06inputs\x88\x01\x01\x128\n" +
 	"\tresources\x18\x04 \x01(\v2\x15.taskqueue.StringListH\x01R\tresources\x88\x01\x01\x123\n" +
-	"\adepends\x18\x05 \x01(\v2\x14.taskqueue.Int32ListH\x02R\adepends\x88\x01\x01B\t\n" +
+	"\adepends\x18\x05 \x01(\v2\x14.taskqueue.Int32ListH\x02R\adepends\x88\x01\x01\x12!\n" +
+	"\tcontainer\x18\x06 \x01(\tH\x03R\tcontainer\x88\x01\x01B\t\n" +
 	"\a_inputsB\f\n" +
 	"\n" +
 	"_resourcesB\n" +
 	"\n" +
-	"\b_depends\"$\n" +
+	"\b_dependsB\f\n" +
+	"\n" +
+	"_container\"$\n" +
 	"\n" +
 	"StringList\x12\x16\n" +
 	"\x06values\x18\x01 \x03(\tR\x06values\"#\n" +

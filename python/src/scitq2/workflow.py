@@ -498,10 +498,10 @@ class Task:
                 ext.changed.add(self.task_id)
         else:
             # Extend reconcile: a task with this (step, tag) already exists.
-            # 4-tuple from _build_extend_context; publish is unused here
+            # 5-tuple from _build_extend_context; publish is unused here
             # but kept symmetric with the prefetch shape used by Step.compile
             # when synthesising reference tasks.
-            existing_id, existing_cmd, existing_status, _existing_publish = existing
+            existing_id, existing_cmd, existing_container, existing_status, _existing_publish = existing
             # Inputs / resources / depends overrides for the retry clone.
             # In extend mode these always reflect the current template's
             # view — for fan-in / grouped tasks that means the freshly-
@@ -514,6 +514,12 @@ class Task:
             override_inputs = list(resolved_inputs)
             override_resources = list(resolved_resources)
             override_depends = list(resolved_depends)
+            # Container drift: if the template now declares a different
+            # image, pass it through so the retry runs with the new one.
+            # Without this, a fix that involved BOTH a new command and a
+            # new container would ship the command change with the old
+            # image and fail the same way as before.
+            container_override = self.container if self.container != existing_container else None
             if ext.retry_failed_only:
                 # Only re-run failed tasks; leave S/R/P untouched. No cascade —
                 # a failed task's dependents are blocked in W and unblock when
@@ -524,23 +530,28 @@ class Task:
                         inputs=override_inputs,
                         resources=override_resources,
                         depends=override_depends,
+                        container=container_override,
                     )
                     ext.changed.add(self.task_id)
                 else:
                     self.task_id = existing_id  # reference, untouched
             else:
-                # Default cascade reconcile: re-run if the command drifted, the
-                # task failed, OR any prerequisite was re-run this pass (its
-                # inputs changed). edit_and_retry rewires dependents to the new
-                # clone server-side, so editing in dependency order keeps the
-                # chain consistent.
+                # Default cascade reconcile: re-run if the command drifted,
+                # the container drifted, the task failed, OR any prerequisite
+                # was re-run this pass (its inputs changed). edit_and_retry
+                # rewires dependents to the new clone server-side, so editing
+                # in dependency order keeps the chain consistent.
                 dep_changed = any(d in ext.changed for d in resolved_depends)
-                if existing_cmd != resolved_command or existing_status == "F" or dep_changed:
+                if (existing_cmd != resolved_command
+                        or container_override is not None
+                        or existing_status == "F"
+                        or dep_changed):
                     self.task_id = client.edit_and_retry_task(
                         existing_id, resolved_command,
                         inputs=override_inputs,
                         resources=override_resources,
                         depends=override_depends,
+                        container=container_override,
                     )
                     ext.changed.add(self.task_id)
                 else:
@@ -930,7 +941,7 @@ class Step:
         if ext is not None:
             existing = ext.tasks_by_step.get(self.step_id, {})
             already_covered = {t.full_name for t in self.tasks}
-            for task_name, (task_id, _cmd, _status, publish) in existing.items():
+            for task_name, (task_id, _cmd, _container, _status, publish) in existing.items():
                 if task_name in already_covered:
                     continue
                 self.tasks.append(Task.as_reference(
@@ -968,7 +979,7 @@ class _ExtendContext:
         self.workflow_id = workflow_id
         self.retry_failed_only = retry_failed_only
         self.step_ids = step_ids            # {step_name: step_id}
-        self.tasks_by_step = tasks_by_step  # {step_id: {task_name: (task_id, command, status, publish)}}
+        self.tasks_by_step = tasks_by_step  # {step_id: {task_name: (task_id, command, container, status, publish)}}
         self.workflow_name = workflow_name
         # task_ids (re)created or edit-and-retried this pass; drives the
         # default cascade ("re-run a dependent whose prerequisite changed").
@@ -1139,7 +1150,7 @@ class Workflow:
             if publish is None and t.HasField("output"):
                 publish = t.output
             tasks_by_step.setdefault(t.step_id, {})[t.task_name] = (
-                t.task_id, t.command, t.status, publish,
+                t.task_id, t.command, t.container, t.status, publish,
             )
         return _ExtendContext(workflow_id, retry_failed_only, step_ids, tasks_by_step, workflow_name)
 

@@ -309,6 +309,14 @@ message EditAndRetryTaskRequest {
     optional StringList inputs = 3;
     optional StringList resources = 4;
     optional Int32List depends = 5;
+    // New container for the parent task before retry. The retry clones
+    // from the parent, so UPDATEing the parent's container makes the
+    // clone use it. Absent = leave the parent's container alone (legacy
+    // behavior). Required for the workflow-extend case where the fix
+    // for a failing step involves both a new command and a new
+    // container — without this the command change ships with the old
+    // container and the retry fails the same way (Vadim's case).
+    optional string container = 6;
 }
 
 // StringList wraps a `repeated string` so it can be carried as `optional`

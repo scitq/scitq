@@ -17,6 +17,16 @@ from types import SimpleNamespace
 from scitq2.workflow import Workflow
 
 
+class _FakeTaskProto(SimpleNamespace):
+    """SimpleNamespace + HasField, so _build_extend_context's
+    `t.HasField("publish")` / `t.HasField("output")` checks (which expect
+    a proto3 `optional` field) don't AttributeError. For test purposes
+    "field has a non-None value" ≡ "proto HasField returns True"."""
+
+    def HasField(self, name):
+        return getattr(self, name, None) is not None
+
+
 class FakeClient:
     """Minimal in-memory stand-in for Scitq2Client.
 
@@ -60,20 +70,23 @@ class FakeClient:
     def update_workflow_status(self, **kw):  # pragma: no cover
         self.calls.append(("update_workflow_status", kw.get("status")))
 
-    def submit_task(self, *, step_id, command, task_name=None, status="P", **kw):
+    def submit_task(self, *, step_id, command, task_name=None, status="P", container=None, **kw):
         i = self._id()
         self.tasks[i] = dict(step_id=step_id, task_name=task_name, command=command,
-                             status=status, hidden=False)
+                             container=container, status=status, hidden=False)
         self.calls.append(("submit_task", task_name, command))
         return i
 
-    def edit_and_retry_task(self, task_id, command):
+    def edit_and_retry_task(self, task_id, command, container=None, **kw):
         old = self.tasks[task_id]
         old["hidden"] = True
+        if container is not None:
+            old["container"] = container
         i = self._id()
         self.tasks[i] = dict(step_id=old["step_id"], task_name=old["task_name"],
-                             command=command, status="P", hidden=False)
-        self.calls.append(("edit_and_retry", old["task_name"], command))
+                             command=command, container=old.get("container"),
+                             status="P", hidden=False)
+        self.calls.append(("edit_and_retry", old["task_name"], command, container))
         return i
 
     # --- queries the extend path uses -----------------------------------
@@ -93,9 +106,10 @@ class FakeClient:
             wf, _ = self.steps[t["step_id"]]
             if workflow_id is not None and wf != workflow_id:
                 continue
-            out.append(SimpleNamespace(task_id=tid, step_id=t["step_id"],
-                                       task_name=t["task_name"], command=t["command"],
-                                       status=t["status"]))
+            out.append(_FakeTaskProto(task_id=tid, step_id=t["step_id"],
+                                      task_name=t["task_name"], command=t["command"],
+                                      container=t.get("container"), status=t["status"],
+                                      publish=None, output=None))
         return out
 
     # --- test helpers ----------------------------------------------------
@@ -179,7 +193,7 @@ def test_extend_command_drift_cascades_to_dependents():
     wf2.Step(name="align", command="align v1", tag="S1", inputs=qc2.output())  # command SAME
     wf2.compile(c, extend_workflow_id=wid)
 
-    edited = {name for _, name, _ in c.ops("edit_and_retry")}
+    edited = {name for _, name, _cmd, _container in c.ops("edit_and_retry")}
     assert "qc.S1" in edited, "drifted command must be edit-and-retried"
     assert "align.S1" in edited, "dependent must cascade-retry even with unchanged command"
     assert c.ops("submit_task") == [], "nothing new to submit"
@@ -230,9 +244,88 @@ def test_extend_retry_failed_only_no_cascade():
     wf2.Step(name="align", command="align v1", tag="S1", inputs=qc2.output())  # depends on re-run qc.S1
     wf2.compile(c, extend_workflow_id=wid, retry_failed_only=True)
 
-    edited = {name for _, name, _ in c.ops("edit_and_retry")}
+    edited = {name for _, name, _cmd, _container in c.ops("edit_and_retry")}
     assert edited == {"qc.S1"}, (
         "only the failed task is re-run; the succeeded (drifted) task and the "
         "healthy dependent are left untouched (no cascade)"
     )
     assert c.ops("submit_task") == [], "no new tags"
+
+
+def test_extend_container_drift_triggers_edit_and_retry():
+    """(D) container drift alone (command unchanged) triggers edit-and-retry,
+    and the new container is propagated to the clone. This is the Vadim
+    case: the fix for a failing step needed a new image even though the
+    command text was the same — the old code only diffed command and
+    silently re-ran with the broken image.
+    """
+    c = FakeClient()
+
+    wf1 = _wf()  # workflow-default container='img'
+    wf1.Step(name="qc", command="run S1", tag="S1", container="img:v1")
+    wf1.Step(name="qc", command="run S2", tag="S2", container="img:v1")
+    wf1.compile(c)
+    wid = wf1.workflow_id
+    c.set_status("qc.S1", "S")
+    c.set_status("qc.S2", "S")
+
+    c.reset_calls()
+    wf2 = _wf()
+    wf2.Step(name="qc", command="run S1", tag="S1", container="img:v2")  # container drifted
+    wf2.Step(name="qc", command="run S2", tag="S2", container="img:v1")  # unchanged
+    wf2.compile(c, extend_workflow_id=wid)
+
+    edited = c.ops("edit_and_retry")
+    assert len(edited) == 1, f"only the drifted task is re-run, got {edited}"
+    op, name, command, container = edited[0]
+    assert name == "qc.S1", "drifted task must be the one re-run"
+    assert command == "run S1", "command unchanged — only the container drove the re-run"
+    assert container == "img:v2", "new container must be passed through to edit_and_retry_task"
+
+
+def test_extend_container_drift_passed_through_alongside_command():
+    """(E) when BOTH command and container drift, both are propagated. The
+    earlier code path edited the command but kept the old container,
+    which was the original Vadim symptom — the retry failed the same way
+    because it ran the new command against the broken image.
+    """
+    c = FakeClient()
+
+    wf1 = _wf()
+    wf1.Step(name="qc", command="run v1", tag="S1", container="img:v1")
+    wf1.compile(c)
+    wid = wf1.workflow_id
+    c.set_status("qc.S1", "F")  # failed too — exercises the F branch path
+
+    c.reset_calls()
+    wf2 = _wf()
+    wf2.Step(name="qc", command="run v2", tag="S1", container="img:v2")
+    wf2.compile(c, extend_workflow_id=wid)
+
+    edited = c.ops("edit_and_retry")
+    assert len(edited) == 1
+    _, name, command, container = edited[0]
+    assert name == "qc.S1"
+    assert command == "run v2"
+    assert container == "img:v2"
+
+
+def test_extend_container_unchanged_does_not_trigger_edit():
+    """(F) when neither command nor container changed and the task is
+    healthy, edit-and-retry must NOT fire — confirms the new container
+    check doesn't introduce false positives by, e.g., always passing
+    self.container as override."""
+    c = FakeClient()
+
+    wf1 = _wf()
+    wf1.Step(name="qc", command="run S1", tag="S1", container="img:v1")
+    wf1.compile(c)
+    wid = wf1.workflow_id
+    c.set_status("qc.S1", "S")
+
+    c.reset_calls()
+    wf2 = _wf()
+    wf2.Step(name="qc", command="run S1", tag="S1", container="img:v1")  # identical
+    wf2.compile(c, extend_workflow_id=wid)
+
+    assert c.ops("edit_and_retry") == [], "no drift → no edit"

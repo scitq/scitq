@@ -495,6 +495,18 @@ export interface EditAndRetryTaskRequest {
      * @generated from protobuf field: optional taskqueue.Int32List depends = 5
      */
     depends?: Int32List;
+    /**
+     * New container for the parent task before retry. The retry clones
+     * from the parent, so UPDATEing the parent's container makes the
+     * clone use it. Absent = leave the parent's container alone (legacy
+     * behavior). Required for the workflow-extend case where the fix
+     * for a failing step involves both a new command and a new
+     * container — without this the command change ships with the old
+     * container and the retry fails the same way (Vadim's case).
+     *
+     * @generated from protobuf field: optional string container = 6
+     */
+    container?: string;
 }
 /**
  * StringList wraps a `repeated string` so it can be carried as `optional`
@@ -4771,7 +4783,8 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
             { no: 2, name: "command", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "inputs", kind: "message", T: () => StringList },
             { no: 4, name: "resources", kind: "message", T: () => StringList },
-            { no: 5, name: "depends", kind: "message", T: () => Int32List }
+            { no: 5, name: "depends", kind: "message", T: () => Int32List },
+            { no: 6, name: "container", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<EditAndRetryTaskRequest>): EditAndRetryTaskRequest {
@@ -4802,6 +4815,9 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
                 case /* optional taskqueue.Int32List depends */ 5:
                     message.depends = Int32List.internalBinaryRead(reader, reader.uint32(), options, message.depends);
                     break;
+                case /* optional string container */ 6:
+                    message.container = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4829,6 +4845,9 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
         /* optional taskqueue.Int32List depends = 5; */
         if (message.depends)
             Int32List.internalBinaryWrite(message.depends, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* optional string container = 6; */
+        if (message.container !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.container);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

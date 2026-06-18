@@ -2453,30 +2453,52 @@ func (s *taskQueueServer) GetTask(ctx context.Context, req *pb.TaskId) (*pb.Task
 }
 
 func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndRetryTaskRequest) (*pb.TaskResponse, error) {
-	// Update the command on the original task, then retry
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE task SET command = $1 WHERE task_id = $2 AND NOT hidden`,
-		req.Command, req.TaskId)
+	// Update the parent task's command (and container, when supplied)
+	// in place, then retry. The clone in retryTaskInternal SELECTs
+	// t.command and t.container from the parent, so an in-place UPDATE
+	// here is enough to make the new attempt use them. Container is
+	// optional for backward compatibility with operator-driven retries
+	// (UI/CLI "Edit & Retry") that only change the command.
+	var (
+		setClauses = []string{"command = $1"}
+		args       = []any{req.Command}
+	)
+	if req.Container != nil {
+		args = append(args, *req.Container)
+		setClauses = append(setClauses, fmt.Sprintf("container = $%d", len(args)))
+	}
+	args = append(args, req.TaskId)
+	query := fmt.Sprintf(
+		`UPDATE task SET %s WHERE task_id = $%d AND NOT hidden`,
+		strings.Join(setClauses, ", "), len(args))
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to update command on task %d: %w", req.TaskId, err)
+		return nil, fmt.Errorf("failed to update task %d: %w", req.TaskId, err)
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return nil, fmt.Errorf("task %d not found or hidden", req.TaskId)
 	}
-	log.Printf("✏️ Task %d command edited, retrying", req.TaskId)
+	if req.Container != nil {
+		log.Printf("✏️ Task %d command + container edited, retrying", req.TaskId)
+	} else {
+		log.Printf("✏️ Task %d command edited, retrying", req.TaskId)
+	}
 
 	// 🔔 Broadcast the edit on the OLD task BEFORE retryTaskInternal
 	// emits the clone's status. The UI merges the clone with its parent
 	// (taking command from the parent's local row), so the parent's
 	// cached command must be refreshed first or the new row shows the
 	// stale text until a manual reload.
-	ws.EmitWS("task", req.TaskId, "edited", struct {
-		TaskId  int32  `json:"taskId"`
-		Command string `json:"command"`
+	editEvt := struct {
+		TaskId    int32   `json:"taskId"`
+		Command   string  `json:"command"`
+		Container *string `json:"container,omitempty"`
 	}{
-		TaskId:  req.TaskId,
-		Command: req.Command,
-	})
+		TaskId:    req.TaskId,
+		Command:   req.Command,
+		Container: req.Container,
+	}
+	ws.EmitWS("task", req.TaskId, "edited", editEvt)
 
 	return s.retryTaskInternal(ctx, &pb.RetryTaskRequest{TaskId: req.TaskId}, "R", false, retryOverrides{
 		Inputs:    req.Inputs,
