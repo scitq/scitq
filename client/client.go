@@ -540,6 +540,26 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	if isBare && cmd.Process != nil {
 		bareProcesses.Store(bareKey, cmd.Process)
 		defer bareProcesses.Delete(bareKey)
+
+		// Symmetric race recovery (mirror of onNoSuchContainer's
+		// bareProcesses re-check on the signal-handler side). A signal
+		// goroutine that started after the pre-launch checkpoint at
+		// line 324 but completed its docker-kill round-trip BEFORE
+		// bareProcesses.Store above may have parked its directive in
+		// the meantime — the pre-launch checkpoint already fired with
+		// nothing parked and won't read pendingDirectives again, so
+		// the directive would be orphaned and the bare task would run
+		// to completion. Consume it here and SIGKILL our own process
+		// group; the post-Wait path then marks the task V → F as if
+		// the kill had landed during execution. Race surfaced by
+		// TestSignalA_CancelBeforeOrDuringLaunch when docker kill
+		// returns fast enough that this Store hasn't happened yet.
+		if d, ok := pendingDirectives.LoadAndDelete(task.TaskId); ok {
+			directive := d.(string)
+			pgid := -cmd.Process.Pid
+			log.Printf("🔪 Late-applied parked %q directive: SIGKILL to bare task %d (pgid %d)", directive, task.TaskId, pgid)
+			syscall.Kill(pgid, syscall.SIGKILL)
+		}
 	}
 
 	// Open log stream
@@ -1248,6 +1268,44 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 				pendingDirectives.Store(sig.TaskId, directive)
 				log.Printf("📌 Signal %s parked as %q for task %d (%s)", sig.Signal, directive, sig.TaskId, reason)
 			}
+			// onNoSuchContainer handles the "docker can't find the
+			// container" outcome for both docker stop (T) and docker kill
+			// (K/B). Beyond parking the directive, it re-checks
+			// bareProcesses: the docker call takes 50–200ms, and a bare
+			// task that just passed the pre-launch checkpoint can finish
+			// registering in bareProcesses during that window. Without
+			// this second look we'd park "cancel" for a task that's now
+			// running — the launch path won't read pendingDirectives
+			// again (the checkpoint at line 324 already fired), so the
+			// signal would be lost and the test would time out. Race
+			// surfaced by TestSignalA_CancelBeforeOrDuringLaunch on bare
+			// tasks under CI load.
+			onNoSuchContainer := func(reason string) {
+				if proc, ok := bareProcesses.Load(bareKey); ok {
+					p := proc.(*os.Process)
+					pgid := -p.Pid
+					if sig.Signal == "T" {
+						log.Printf("🛑 Late-resolved: bare task %d registered after docker stop missed — SIGTERM to pgid %d", sig.TaskId, p.Pid)
+						syscall.Kill(pgid, syscall.SIGTERM)
+						grace := 10
+						if sig.GracePeriod != nil && *sig.GracePeriod > 0 {
+							grace = int(*sig.GracePeriod)
+						}
+						go func() {
+							time.Sleep(time.Duration(grace) * time.Second)
+							if _, stillRunning := bareProcesses.Load(bareKey); stillRunning {
+								syscall.Kill(pgid, syscall.SIGKILL)
+							}
+						}()
+					} else {
+						log.Printf("🔪 Late-resolved: bare task %d registered after docker kill missed — SIGKILL to pgid %d (signal=%s)", sig.TaskId, p.Pid, sig.Signal)
+						syscall.Kill(pgid, syscall.SIGKILL)
+					}
+					return
+				}
+				parkPendingDirective("container not yet launched")
+				signalRecover(sig.TaskId, reason)
+			}
 			if sig.Signal == "T" {
 				args := []string{"stop"}
 				if sig.GracePeriod != nil && *sig.GracePeriod > 0 {
@@ -1259,8 +1317,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 					outStr := strings.TrimSpace(string(out))
 					log.Printf("⚠️ docker stop %s failed: %v (%s)", containerName, err, outStr)
 					if strings.Contains(outStr, "No such container") {
-						parkPendingDirective("container not yet launched")
-						signalRecover(sig.TaskId, "docker stop reported container already gone")
+						onNoSuchContainer("docker stop reported container already gone")
 					}
 				}
 			} else {
@@ -1273,8 +1330,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 					outStr := strings.TrimSpace(string(out))
 					log.Printf("⚠️ docker kill %s failed: %v (%s)", containerName, err, outStr)
 					if strings.Contains(outStr, "No such container") {
-						parkPendingDirective("container not yet launched")
-						signalRecover(sig.TaskId, "docker kill reported container already gone")
+						onNoSuchContainer("docker kill reported container already gone")
 					}
 				}
 			}
