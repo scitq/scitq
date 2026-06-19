@@ -756,9 +756,20 @@ def _build_iterations(iterate_def, params, workflow_vars: Optional[Dict] = None)
             # didn't override them — this lets a workflow set e.g.
             # `fastq_pair_filtering` once at the top instead of repeating
             # it in every cond branch.
-            for inherit in ('name', 'match', 'fastq_pair_filtering'):
+            for inherit in ('name', 'fastq_pair_filtering'):
                 if inherit not in resolved and inherit in iterate_def:
                     resolved[inherit] = iterate_def[inherit]
+            # `match` only applies to file-group sources (uri/ena/sra),
+            # where it filters discovered sample names via fnmatch.
+            # `lines`/`list`/etc. don't expose it in their schema (the
+            # operator pre-filters the explicit list themselves), so a
+            # blind inherit-into-every-branch tripped the schema
+            # validator with a "doesn't recognise ['match']" error on
+            # templates that set `match` at the top to apply it to the
+            # uri branch only — see skani-search.yaml `data_source=list`.
+            if 'match' not in resolved and 'match' in iterate_def:
+                if resolved.get('source') in FILE_GROUP_SOURCES:
+                    resolved['match'] = iterate_def['match']
             return _build_iterations(resolved, params, workflow_vars=workflow_vars)
 
     # Single iterator (potentially with a `product:` outer-product dimension).
