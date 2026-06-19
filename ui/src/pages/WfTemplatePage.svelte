@@ -498,8 +498,11 @@
     onkeydown={(e) => { if (e.key === 'Escape') showRunErrorModal = false; }}>
     <div class="wfTemp-modal wfTemp-error-modal">
       <h2 style="color: #ff5555;">Template Error: Workflow Not Created</h2>
-      <p>{errorMessage}</p>
+      <pre class="wfTemp-error-trace">{errorMessage}</pre>
       <div class="wfTemp-modal-actions">
+        <button class="button-primary"
+                onclick={() => { navigator.clipboard?.writeText(errorMessage ?? ''); }}
+                title="Copy the full error to the clipboard">Copy</button>
         <button class="button-primary" onclick={() => showRunErrorModal = false}>Close</button>
       </div>
     </div>

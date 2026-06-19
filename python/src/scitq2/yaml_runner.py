@@ -1353,11 +1353,17 @@ def _build_worker_pool(wp_def: dict, params, extra_vars: Optional[Dict] = None) 
 
     for field in ('cpu', 'mem', 'disk', 'gpumem'):
         if field in wp_def:
-            val = wp_def[field]
+            # Always go through _resolve_field — handles cond: blocks (the
+            # bug surfaced when worker_pool.mem was `cond: …; refgenomes:
+            # ">= 8"; allgenomes: ">= 42"`, which left val as a dict; W.mem
+            # >= dict produced a FieldExpr whose hash blew up inside
+            # WorkerPool.__init__'s `set(match)`), param refs, and
+            # arithmetic. After resolution: a string like ">= 8" matches
+            # the operator regex below; a bare number falls through to the
+            # default `>=` filter.
+            val = _resolve_field(wp_def[field], params, extra_vars=extra_vars)
             if isinstance(val, str):
-                # Resolve refs and arithmetic first
-                val = _resolve_field(val, params, extra_vars=extra_vars)
-                m = re.match(r'(>=|<=|>|<|==)\s*(\d+)', str(val))
+                m = re.match(r'(>=|<=|>|<|==)\s*(\d+)', val)
                 if m:
                     op, num = m.group(1), int(m.group(2))
                     w_field = getattr(W, field)

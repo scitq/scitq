@@ -156,6 +156,35 @@
   flex-direction: column;
 }
 
+/* The error modal carries Python tracebacks — narrow 30% / 40% can't
+ * present them legibly. Widen + give it the room a stack trace needs;
+ * keeps the standard run modal sizing untouched. */
+.wfTemp-error-modal {
+  width: min(80ch, 90vw);
+  height: auto;
+  max-height: 80vh;
+}
+
+.wfTemp-error-trace {
+  flex: 1;
+  margin: 0.5rem 0 1rem 0;
+  padding: 0.75rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  background: var(--bg-primary, #0e0e0e);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  /* Preserve original whitespace (so traceback "^^^^" markers line up),
+   * but allow soft-wrap on very long lines so the modal never grows
+   * horizontally past its width. Vertical scroll for tall traces. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
 .wfTemp-modal-content {
   overflow-y: auto; /* Enable vertical scroll if needed */
   padding-right: 0.5rem; /* Space to prevent scroll from overlapping content */
