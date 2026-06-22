@@ -91,6 +91,24 @@ def _apply_filter(value: str, filter_name: str) -> str:
                 return fmt % value
         except (ValueError, TypeError):
             return value
+    elif filter_name == 'strip' or filter_name.startswith('strip:') or filter_name.startswith('strip='):
+        # `strip`     → str.strip()      — drop whitespace (space/tab/\n/\r) from both ends.
+        # `strip:/`   → str.strip('/')   — drop the given chars from both ends.
+        # `strip:./`  → str.strip('./')  — Python semantics: drop ANY of the listed
+        #                                  chars (so "./" strips both '.' and '/',
+        #                                  not the literal substring "./").
+        # Both `:` and `=` accepted, mirroring `format=…` for consistency.
+        #
+        # Char set is constrained by the outer placeholder regex
+        # (`[^\s\'"{},]+`) — `/`, `-`, `_`, `.`, alphanumerics all work; comma,
+        # whitespace, quotes, braces, and the pipe `|` itself can't appear
+        # in the arg. Use removeprefix/removesuffix filters (TBD) if you
+        # need substring-mode stripping instead.
+        if filter_name == 'strip':
+            return value.strip()
+        sep_len = len('strip:') if filter_name.startswith('strip:') else len('strip=')
+        arg = filter_name[sep_len:]
+        return value.strip(arg) if arg else value.strip()
     else:
         return value
 
