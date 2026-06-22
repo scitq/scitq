@@ -326,6 +326,26 @@
         }
         return;
       }
+
+      if (action === 'max_workers') {
+        // Emitted by the server when a recruiter create/update auto-bumps
+        // workflow.maximum_workers (server.go around the
+        // "📈 Auto-bumped workflow" log lines). Mirrors the 'status'
+        // branch: update the row in place and let WorkflowList drop
+        // any local override it might be holding via its maxWorkers
+        // event (handled in that component on its own reactive path).
+        const wfId = message.id;
+        const newMax = p.maximumWorkers;
+        if (typeof wfId === 'number' && typeof newMax === 'number') {
+          const idx = workflows.findIndex(wf => wf.workflowId === wfId);
+          if (idx !== -1) {
+            const next = workflows.slice();
+            next[idx] = { ...next[idx], maximumWorkers: newMax };
+            workflows = next;
+          }
+        }
+        return;
+      }
     }
 
     // Step-stats delta: update per-workflow counters via the sideband

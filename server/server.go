@@ -5307,6 +5307,14 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				*req.MaxWorkers, wfID.Int32)
 			log.Printf("📈 Auto-bumped workflow %d maximum_workers from %d to %d (recruiter create on step %d)",
 				wfID.Int32, wfMax.Int32, *req.MaxWorkers, req.StepId)
+			// Without this WS event the UI's workflow.maximumWorkers
+			// stays at the pre-bump value until a manual refresh — the
+			// silent UPDATE was invisible to subscribers. See
+			// WorkflowPage.handleMessage 'max_workers' action.
+			ws.EmitWS("workflow", wfID.Int32, "max_workers", struct {
+				WorkflowId     int32 `json:"workflowId"`
+				MaximumWorkers int32 `json:"maximumWorkers"`
+			}{WorkflowId: wfID.Int32, MaximumWorkers: *req.MaxWorkers})
 		}
 	}
 
@@ -5457,6 +5465,12 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 					*req.MaxWorkers, wfID.Int32)
 				log.Printf("📈 Auto-bumped workflow %d maximum_workers from %d to %d (recruiter update on step %d)",
 					wfID.Int32, wfMax.Int32, *req.MaxWorkers, req.StepId)
+				// Notify UI subscribers — see CreateRecruiter for the
+				// same rationale.
+				ws.EmitWS("workflow", wfID.Int32, "max_workers", struct {
+					WorkflowId     int32 `json:"workflowId"`
+					MaximumWorkers int32 `json:"maximumWorkers"`
+				}{WorkflowId: wfID.Int32, MaximumWorkers: *req.MaxWorkers})
 			}
 		}
 		return &pb.Ack{Success: true}, nil

@@ -100,6 +100,25 @@
     }
   }
 
+  // When the parent's workflow row updates its maximumWorkers (e.g. via
+  // the new `workflow.max_workers` WS event the server now emits on
+  // recruiter auto-bump), drop any stale local override that's been
+  // superseded by the upstream value. Without this the override would
+  // keep masking the fresh server value via effectiveMax above.
+  $effect(() => {
+    let changed = false;
+    for (const [wfId, override] of maxWorkersOverrides) {
+      const wf = workflows.find(w => w.workflowId === wfId);
+      if (wf && typeof wf.maximumWorkers === 'number' && wf.maximumWorkers >= override) {
+        maxWorkersOverrides.delete(wfId);
+        changed = true;
+      }
+    }
+    if (changed) {
+      maxWorkersOverrides = new Map(maxWorkersOverrides);
+    }
+  });
+
   /**
    * Describe what launched a workflow (template name@version, local
    * script name, or empty string for legacy rows without a template_run
@@ -218,7 +237,9 @@
           </div>
         </div>
         <div class="wf-steps">
-          <StepList workflowId={wf.workflowId} workersPerStepId={workersPerStepId} />
+          <StepList workflowId={wf.workflowId}
+                    workersPerStepId={workersPerStepId}
+                    workflowMaximumWorkers={curMax} />
         </div>
       {/if}
     {/each}

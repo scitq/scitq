@@ -6,7 +6,8 @@
 import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { scitqDebug } from '../lib/debug';
-  import { RefreshCw, PauseCircle, CircleX, Eraser } from 'lucide-svelte';
+  import { RefreshCw, PauseCircle, CircleX, Eraser, UserCog } from 'lucide-svelte';
+  import RecruiterModal from './RecruiterModal.svelte';
   import { formatDuration, showIfNonZero } from '../lib/format';
 
   
@@ -17,9 +18,28 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
    */
     workflowId: number;
     workersPerStepId?: Map<number, taskqueue.Worker[]>;
+    /**
+     * Current workflow.maximumWorkers, with the parent's local override
+     * applied if any. Used by RecruiterModal to show the "this will
+     * auto-bump workflow max" hint when the operator enters a per-step
+     * max_workers higher than the workflow's current cap. Null = no cap
+     * set.
+     */
+    workflowMaximumWorkers?: number | null;
   }
 
-  let { workflowId, workersPerStepId = new Map() }: Props = $props();
+  let { workflowId, workersPerStepId = new Map(), workflowMaximumWorkers = null }: Props = $props();
+
+  // Recruiter modal state — one modal at a time, gated on stepId.
+  let recruiterModalStepId: number | null = $state(null);
+  let recruiterModalStepName: string = $state('');
+  function openRecruiterModal(stepId: number, stepName: string) {
+    recruiterModalStepId = stepId;
+    recruiterModalStepName = stepName;
+  }
+  function closeRecruiterModal() {
+    recruiterModalStepId = null;
+  }
 
   // Local, reactive copy of the parent-provided map to avoid mutating props.
   //
@@ -734,6 +754,10 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
                 <button class="btn-action" title="Pause"><PauseCircle /></button>
                 <button class="btn-action" title="Reset"><RefreshCw /></button>
                 <button class="btn-action" title="Break"><CircleX /></button>
+                <button class="btn-action"
+                        title="Recruiters (manage worker pool for this step)"
+                        data-testid={`recruiter-btn-${step.stepId}`}
+                        onclick={() => openRecruiterModal(step.stepId, step.name)}><UserCog /></button>
                 <button class="btn-action" title="Clear" data-testid={`delete-step-${step.stepId}`} onclick={() => delStep(step.stepId)}><Eraser /></button>
               </td>
             </tr>
@@ -745,6 +769,14 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
     <p>No steps found for workflow #{workflowId}</p>
   {/if}
 </div>
+
+{#if recruiterModalStepId != null}
+  <RecruiterModal stepId={recruiterModalStepId}
+                  stepName={recruiterModalStepName}
+                  workflowMaximumWorkers={workflowMaximumWorkers}
+                  onClose={closeRecruiterModal} />
+{/if}
+
 <style>
   .success-cell {
     color: var(--status-success);

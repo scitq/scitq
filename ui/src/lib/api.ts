@@ -915,6 +915,113 @@ export async function delStep(StepId: number) {
 }
 
 /**
+ * Recruiter — fields mirroring `scitq recruiter update/create` 1:1.
+ * `rounds` and `timeout` are the only required non-optional fields on
+ * the Create RPC; everything else is optional and absent means "don't
+ * set" (or, on Update, "don't change"). Field names match the proto
+ * camelCase mapping (concurrency, prefetch, maxWorkers, …).
+ */
+export interface RecruiterFields {
+  protofilter?: string;
+  concurrency?: number;
+  prefetch?: number;
+  prefetchPercent?: number;
+  cpuPerTask?: number;
+  memoryPerTask?: number;
+  diskPerTask?: number;
+  concurrencyMin?: number;
+  concurrencyMax?: number;
+  maxWorkers?: number;
+  rounds?: number;
+  timeout?: number;
+}
+
+/**
+ * List recruiters for a single step. Empty array if no recruiter is
+ * attached to that step. The server returns them ordered by rank.
+ */
+export async function listRecruiters(stepId: number): Promise<taskqueue.Recruiter[]> {
+  try {
+    const resp = await client.listRecruiters({ stepId }, await callOptionsUserToken());
+    return resp.response.recruiters ?? [];
+  } catch (error) {
+    console.error("Error listing recruiters:", error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new recruiter for a step at the given rank. Server enforces
+ * the same validation as `scitq recruiter create` — either concurrency
+ * OR at least one of cpu/memory/disk per_task; either prefetch OR
+ * prefetch_percent; rounds > 0.
+ */
+export async function createRecruiter(stepId: number, rank: number, fields: RecruiterFields): Promise<void> {
+  try {
+    await client.createRecruiter({
+      stepId,
+      rank,
+      protofilter: fields.protofilter ?? '',
+      concurrency: fields.concurrency,
+      prefetch: fields.prefetch,
+      prefetchPercent: fields.prefetchPercent,
+      cpuPerTask: fields.cpuPerTask,
+      memoryPerTask: fields.memoryPerTask,
+      diskPerTask: fields.diskPerTask,
+      concurrencyMin: fields.concurrencyMin,
+      concurrencyMax: fields.concurrencyMax,
+      maxWorkers: fields.maxWorkers,
+      rounds: fields.rounds ?? 10,
+      timeout: fields.timeout ?? 300,
+    }, await callOptionsUserToken());
+  } catch (error) {
+    console.error("Error creating recruiter:", error);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing recruiter. Only set fields are sent — absent
+ * fields keep their current value (server matches CLI semantics).
+ */
+export async function updateRecruiter(stepId: number, rank: number, fields: RecruiterFields): Promise<void> {
+  try {
+    await client.updateRecruiter({
+      stepId,
+      rank,
+      protofilter: fields.protofilter,
+      concurrency: fields.concurrency,
+      prefetch: fields.prefetch,
+      prefetchPercent: fields.prefetchPercent,
+      cpuPerTask: fields.cpuPerTask,
+      memoryPerTask: fields.memoryPerTask,
+      diskPerTask: fields.diskPerTask,
+      concurrencyMin: fields.concurrencyMin,
+      concurrencyMax: fields.concurrencyMax,
+      maxWorkers: fields.maxWorkers,
+      rounds: fields.rounds,
+      timeout: fields.timeout,
+    }, await callOptionsUserToken());
+  } catch (error) {
+    console.error("Error updating recruiter:", error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a recruiter by (step_id, rank). The CASCADE on step_id frees
+ * the recruiter row; tasks already assigned by it stay running.
+ */
+export async function deleteRecruiter(stepId: number, rank: number): Promise<void> {
+  try {
+    await client.deleteRecruiter({ stepId, rank }, await callOptionsUserToken());
+  } catch (error) {
+    console.error("Error deleting recruiter:", error);
+    throw error;
+  }
+}
+
+/**
  * Retrieves statistics for steps, optionally filtered by workflow, step IDs, and hidden inclusion.
  * @param params - Optional parameters for filtering stats:
  *   - workflowId: filter by workflow ID
