@@ -60,6 +60,16 @@ class URI:
         uri = f"{uri_base.rstrip('/')}/{filter}" if filter else uri_base
         client = Scitq2Client()
         files = client.fetch_list(uri)
+        # Drop directory entries. fetch.List on the server side appends a
+        # trailing '/' to directories (fetch/fetch.go:891) and a bare name
+        # to files; without this filter, folders that sit at the listed
+        # level surface as iteration items alongside the real files (the
+        # cegat_import.yaml symptom: one task got
+        # 's3://.../<sample>/01_fastq/' as its input while a sibling got
+        # an actual fastq.gz). URI.find's contract is "find samples"
+        # which only makes sense for files; folders contribute to
+        # grouping via path.parent.name, not as standalone events.
+        files = [f for f in files if not f.endswith('/')]
         groups = {}
 
         if event_name is None:
