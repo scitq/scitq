@@ -3,7 +3,7 @@
 
   const bubble = createBubbler();
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, listWorkerEvents, resetWorkerCounters} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, listWorkerEvents, resetWorkerCounters, getWorkers} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, PlayCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star, ArrowUpCircle } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
@@ -744,11 +744,17 @@
   let eventsWorker: any = $state(null);          // worker whose events are shown, or null
   let workerEvents: Array<any> = $state([]);
   let eventsLoading: boolean = $state(false);
+  // Inline status line for the Clear/Reset buttons. Shown above the
+  // events list. Cleared on next panel open / on success refresh.
+  let eventsStatus: string = $state('');
+  let eventsBusy: boolean = $state(false);
 
   async function openWorkerEvents(worker: any) {
     eventsWorker = worker;
     eventsLoading = true;
     workerEvents = [];
+    eventsStatus = '';
+    eventsBusy = false;
     try {
       workerEvents = await listWorkerEvents(worker.workerId, 100);
     } catch (err) {
@@ -761,43 +767,83 @@
   function closeWorkerEvents() {
     eventsWorker = null;
     workerEvents = [];
+    eventsStatus = '';
+    eventsBusy = false;
+  }
+
+  // Re-syncs eventsWorker and internalWorkers from a fresh ListWorkers
+  // fetch so the badge / counters reflect actual server state. Used by
+  // the Clear/Reset handlers because we've seen at least one prod
+  // deployment where the RPC reply gets mangled in transit but the
+  // server-side write still lands — the user observed "click does
+  // nothing, refresh works", which is exactly the resync this avoids.
+  async function refreshWorkerFromServer(wid: number): Promise<{pendingWarnings: number; recentFailures: number} | null> {
+    try {
+      const fresh = await getWorkers();
+      const w = fresh.find((x: any) => x.workerId === wid) as any;
+      if (!w) return null;
+      if (eventsWorker && eventsWorker.workerId === wid) {
+        eventsWorker = w;
+      }
+      internalWorkers = internalWorkers.map(x => x.workerId === wid ? w : x);
+      return {
+        pendingWarnings: w.pendingWarnings ?? 0,
+        recentFailures: w.recentFailures ?? 0,
+      };
+    } catch (err) {
+      console.error('Failed to re-fetch worker after counter reset', wid, err);
+      return null;
+    }
   }
 
   async function handleClearWarnings() {
-    if (!eventsWorker) return;
+    if (!eventsWorker || eventsBusy) return;
     const wid = eventsWorker.workerId;
+    eventsBusy = true;
+    eventsStatus = 'Clearing warnings…';
+    let rpcErr: unknown = null;
     try {
       await resetWorkerCounters(wid, { clearWarnings: true });
-      // Optimistic local update so the badge clears immediately —
-      // the SQL count would agree on the next listWorkers fetch.
-      eventsWorker = { ...eventsWorker, pendingWarnings: 0 };
-      internalWorkers = internalWorkers.map(w =>
-        w.workerId === wid ? { ...w, pendingWarnings: 0 } : w
-      );
-      // Refresh the events list — acknowledged_at is now set, but the
-      // events themselves still show (they remain in the audit trail).
-      try {
-        workerEvents = await listWorkerEvents(wid, 100);
-      } catch (err) {
-        console.error('Failed to refresh worker events after ack', wid, err);
-      }
     } catch (err) {
-      console.error('Failed to clear warnings for worker', wid, err);
+      rpcErr = err;
+      console.error('resetWorkerCounters(clearWarnings) RPC error for worker', wid, err);
     }
+    // Re-fetch unconditionally: the server may have applied the write
+    // even if the RPC reply didn't make it back to the browser
+    // (alpha2-style proxy quirk). Trust the DB, not the local optimism.
+    const fresh = await refreshWorkerFromServer(wid);
+    if (fresh && fresh.pendingWarnings === 0) {
+      eventsStatus = 'Warnings cleared.';
+      try { workerEvents = await listWorkerEvents(wid, 100); } catch (e) { console.error(e); }
+    } else if (rpcErr) {
+      eventsStatus = 'Could not clear warnings — the server did not acknowledge. Check server logs.';
+    } else {
+      eventsStatus = '';
+    }
+    eventsBusy = false;
   }
 
   async function handleResetFailures() {
-    if (!eventsWorker) return;
+    if (!eventsWorker || eventsBusy) return;
     const wid = eventsWorker.workerId;
+    eventsBusy = true;
+    eventsStatus = 'Resetting failure counter…';
+    let rpcErr: unknown = null;
     try {
       await resetWorkerCounters(wid, { clearFailures: true });
-      eventsWorker = { ...eventsWorker, recentFailures: 0 };
-      internalWorkers = internalWorkers.map(w =>
-        w.workerId === wid ? { ...w, recentFailures: 0 } : w
-      );
     } catch (err) {
-      console.error('Failed to reset failures for worker', wid, err);
+      rpcErr = err;
+      console.error('resetWorkerCounters(clearFailures) RPC error for worker', wid, err);
     }
+    const fresh = await refreshWorkerFromServer(wid);
+    if (fresh && fresh.recentFailures === 0) {
+      eventsStatus = 'Failure counter reset.';
+    } else if (rpcErr) {
+      eventsStatus = 'Could not reset failures — the server did not acknowledge. Check server logs.';
+    } else {
+      eventsStatus = '';
+    }
+    eventsBusy = false;
   }
 
   /**
@@ -1489,6 +1535,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
             <button
               type="button"
               class="worker-events-ack"
+              disabled={eventsBusy}
               title="Acknowledge all unread warnings on this worker"
               onclick={() => handleClearWarnings()}
             >Clear warnings</button>
@@ -1497,6 +1544,7 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
             <button
               type="button"
               class="worker-events-ack"
+              disabled={eventsBusy}
               title="Reset the failure counter (older failed tasks stop being counted; rows are kept for history)"
               onclick={() => handleResetFailures()}
             >Reset failures</button>
@@ -1504,6 +1552,9 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
           <button type="button" class="worker-events-close" onclick={closeWorkerEvents} title="Close">✕</button>
         </span>
       </div>
+      {#if eventsStatus}
+        <div class="worker-events-status">{eventsStatus}</div>
+      {/if}
       <div class="worker-events-body">
         {#if eventsLoading}
           <p class="worker-events-empty">Loading…</p>

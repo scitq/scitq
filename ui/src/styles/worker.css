@@ -797,6 +797,16 @@
 .worker-events-ack:hover {
   background: rgba(255, 255, 255, 0.08);
 }
+.worker-events-ack[disabled] {
+  opacity: 0.5;
+  cursor: progress;
+}
+.worker-events-status {
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
 .worker-events-body {
   overflow-y: auto;
   padding: 6px 10px;
