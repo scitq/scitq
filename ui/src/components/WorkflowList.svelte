@@ -154,6 +154,13 @@
       {@const failedTasks = c?.failedTasks ?? wf.failedTasks}
       {@const runningTasks = c?.runningTasks ?? wf.runningTasks}
       {@const retryingTasks = c?.retryingTasks ?? wf.retryingTasks ?? 0}
+      <!-- pendingTasks: approximated from the aggregate so we can flag
+           the "waiting on a worker" state. The proto doesn't carry a
+           direct pending count; this is good-enough for the dot since
+           it's only a UI signal. -->
+      {@const pendingTasks = Math.max(0, totalTasks - succeededTasks - failedTasks - runningTasks - retryingTasks)}
+      {@const eligibleWorkers = wf.eligibleWorkerCount ?? 0}
+      {@const noWorkerStuck = wf.status === 'R' && pendingTasks > 0 && runningTasks === 0 && eligibleWorkers === 0}
 
       <!-- Individual workflow item -->
       <div class="wf-item" data-testid={`wf-${wf.workflowId}`}>
@@ -169,8 +176,8 @@
         <!-- Workflow information section -->
         <div class="wf-info">
           <span class="wf-id">#{wf.workflowId}</span>
-          <span class="wf-status-dot {wf.status === 'P' ? 'wf-dot-yellow' : wf.status === 'S' ? 'wf-dot-green' : wf.status === 'F' ? 'wf-dot-red' : runningTasks > 0 ? 'wf-dot-blue' : failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
-                title={wf.status === 'P' ? 'Paused' : wf.status === 'S' ? 'Completed' : wf.status === 'F' ? (failedTasks > 0 ? `Stuck: ${failedTasks} failed` : 'Stuck (no path to completion — needs operator unblock)') : runningTasks > 0 ? `${runningTasks} active` : failedTasks > 0 ? `${failedTasks} failed, no active tasks` : 'Idle'}></span>
+          <span class="wf-status-dot {wf.status === 'P' ? 'wf-dot-yellow' : wf.status === 'S' ? 'wf-dot-green' : wf.status === 'F' ? 'wf-dot-red' : noWorkerStuck ? 'wf-dot-amber' : runningTasks > 0 ? 'wf-dot-blue' : failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
+                title={wf.status === 'P' ? 'Paused' : wf.status === 'S' ? 'Completed' : wf.status === 'F' ? (failedTasks > 0 ? `Stuck: ${failedTasks} failed` : 'Stuck (no path to completion — needs operator unblock)') : noWorkerStuck ? `${pendingTasks} pending, no worker available (waiting for recruiter or manual attach)` : runningTasks > 0 ? `${runningTasks} active` : failedTasks > 0 ? `${failedTasks} failed, no active tasks` : 'Idle'}></span>
           <a href={`#/tasks?workflowId=${wf.workflowId}`}
              class="wf-name"
              title={launchSummary(wf) ? `Launched by: ${launchSummary(wf)}` : undefined}>{wf.name}</a>

@@ -770,6 +770,14 @@ export interface Worker {
      * @generated from protobuf field: optional int32 recent_failures = 25
      */
     recentFailures?: number;
+    /**
+     * Count of W-level worker_events with acknowledged_at IS NULL.
+     * The UI lights the warn badge (⚠) when this > 0 OR when
+     * recent_failures >= 2. Cleared via ResetWorkerCounters.
+     *
+     * @generated from protobuf field: optional int32 pending_warnings = 26
+     */
+    pendingWarnings?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -1394,6 +1402,31 @@ export interface WorkerUpdateRequest {
      * @generated from protobuf field: optional bool clear_step = 14
      */
     clearStep?: boolean;
+}
+/**
+ * @generated from protobuf message taskqueue.ResetWorkerCountersRequest
+ */
+export interface ResetWorkerCountersRequest {
+    /**
+     * @generated from protobuf field: int32 worker_id = 1
+     */
+    workerId: number;
+    /**
+     * Bump worker.failures_cleared_at so recent_failures (counted from
+     * F-tasks since last success) starts fresh. Does not delete any
+     * task rows — they remain visible in task history.
+     *
+     * @generated from protobuf field: bool clear_failures = 2
+     */
+    clearFailures: boolean;
+    /**
+     * Mark all unread W-level worker_events for this worker as
+     * acknowledged. Drops pending_warnings to 0 and lets the badge
+     * revert from ⚠ to ⓘ.
+     *
+     * @generated from protobuf field: bool clear_warnings = 3
+     */
+    clearWarnings: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.ListFlavorsRequest
@@ -2126,6 +2159,15 @@ export interface Workflow {
      * @generated from protobuf field: optional int32 parent_workflow_id = 17
      */
     parentWorkflowId?: number;
+    /**
+     * Count of workers in status 'R' currently attached to any step of
+     * this workflow. The UI distinguishes idle (R + pending > 0 + no
+     * eligible worker) from running by this — without it the dot
+     * colour can't tell "no worker available" from "actually running".
+     *
+     * @generated from protobuf field: int32 eligible_worker_count = 18
+     */
+    eligibleWorkerCount: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkflowRequest
@@ -5280,7 +5322,8 @@ class Worker$Type extends MessageType<Worker> {
             { no: 22, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 23, name: "upgrade_status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 24, name: "upgrade_requested", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 25, name: "recent_failures", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 25, name: "recent_failures", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 26, name: "pending_warnings", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -5381,6 +5424,9 @@ class Worker$Type extends MessageType<Worker> {
                 case /* optional int32 recent_failures */ 25:
                     message.recentFailures = reader.int32();
                     break;
+                case /* optional int32 pending_warnings */ 26:
+                    message.pendingWarnings = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5468,6 +5514,9 @@ class Worker$Type extends MessageType<Worker> {
         /* optional int32 recent_failures = 25; */
         if (message.recentFailures !== undefined)
             writer.tag(25, WireType.Varint).int32(message.recentFailures);
+        /* optional int32 pending_warnings = 26; */
+        if (message.pendingWarnings !== undefined)
+            writer.tag(26, WireType.Varint).int32(message.pendingWarnings);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7494,6 +7543,69 @@ class WorkerUpdateRequest$Type extends MessageType<WorkerUpdateRequest> {
  * @generated MessageType for protobuf message taskqueue.WorkerUpdateRequest
  */
 export const WorkerUpdateRequest = new WorkerUpdateRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ResetWorkerCountersRequest$Type extends MessageType<ResetWorkerCountersRequest> {
+    constructor() {
+        super("taskqueue.ResetWorkerCountersRequest", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "clear_failures", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "clear_warnings", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ResetWorkerCountersRequest>): ResetWorkerCountersRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = 0;
+        message.clearFailures = false;
+        message.clearWarnings = false;
+        if (value !== undefined)
+            reflectionMergePartial<ResetWorkerCountersRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ResetWorkerCountersRequest): ResetWorkerCountersRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 worker_id */ 1:
+                    message.workerId = reader.int32();
+                    break;
+                case /* bool clear_failures */ 2:
+                    message.clearFailures = reader.bool();
+                    break;
+                case /* bool clear_warnings */ 3:
+                    message.clearWarnings = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ResetWorkerCountersRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 worker_id = 1; */
+        if (message.workerId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.workerId);
+        /* bool clear_failures = 2; */
+        if (message.clearFailures !== false)
+            writer.tag(2, WireType.Varint).bool(message.clearFailures);
+        /* bool clear_warnings = 3; */
+        if (message.clearWarnings !== false)
+            writer.tag(3, WireType.Varint).bool(message.clearWarnings);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.ResetWorkerCountersRequest
+ */
+export const ResetWorkerCountersRequest = new ResetWorkerCountersRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListFlavorsRequest$Type extends MessageType<ListFlavorsRequest> {
     constructor() {
@@ -9749,7 +9861,8 @@ class Workflow$Type extends MessageType<Workflow> {
             { no: 14, name: "template_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 15, name: "script_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 16, name: "script_sha256", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 17, name: "parent_workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 17, name: "parent_workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 18, name: "eligible_worker_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Workflow>): Workflow {
@@ -9764,6 +9877,7 @@ class Workflow$Type extends MessageType<Workflow> {
         message.runningTasks = 0;
         message.retryingTasks = 0;
         message.live = false;
+        message.eligibleWorkerCount = 0;
         if (value !== undefined)
             reflectionMergePartial<Workflow>(this, message, value);
         return message;
@@ -9823,6 +9937,9 @@ class Workflow$Type extends MessageType<Workflow> {
                     break;
                 case /* optional int32 parent_workflow_id */ 17:
                     message.parentWorkflowId = reader.int32();
+                    break;
+                case /* int32 eligible_worker_count */ 18:
+                    message.eligibleWorkerCount = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -9887,6 +10004,9 @@ class Workflow$Type extends MessageType<Workflow> {
         /* optional int32 parent_workflow_id = 17; */
         if (message.parentWorkflowId !== undefined)
             writer.tag(17, WireType.Varint).int32(message.parentWorkflowId);
+        /* int32 eligible_worker_count = 18; */
+        if (message.eligibleWorkerCount !== 0)
+            writer.tag(18, WireType.Varint).int32(message.eligibleWorkerCount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15069,6 +15189,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "DeleteWorker", options: {}, I: WorkerDeletion, O: JobId },
     { name: "UpdateWorker", options: {}, I: WorkerUpdateRequest, O: Ack },
     { name: "UserUpdateWorker", options: {}, I: WorkerUpdateRequest, O: Ack },
+    { name: "ResetWorkerCounters", options: {}, I: ResetWorkerCountersRequest, O: Ack },
     { name: "GetWorkerStatuses", options: {}, I: WorkerStatusRequest, O: WorkerStatusResponse },
     { name: "ListJobs", options: {}, I: ListJobsRequest, O: JobsList },
     { name: "GetJobStatuses", options: {}, I: JobStatusRequest, O: JobStatusResponse },

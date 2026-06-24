@@ -30,6 +30,11 @@ service TaskQueue {
     rpc DeleteWorker(WorkerDeletion) returns (JobId);
     rpc UpdateWorker(WorkerUpdateRequest) returns (Ack);
     rpc UserUpdateWorker(WorkerUpdateRequest) returns (Ack);
+    // Reset operator-visible counters on a worker. clear_failures bumps
+    // worker.failures_cleared_at so the recent_failures subquery skips
+    // older F-tasks. clear_warnings acks all unread W-level
+    // worker_events for the worker. Either or both flags can be set.
+    rpc ResetWorkerCounters(ResetWorkerCountersRequest) returns (Ack);
     rpc GetWorkerStatuses (WorkerStatusRequest) returns (WorkerStatusResponse);
     rpc ListJobs (ListJobsRequest) returns (JobsList);
     rpc GetJobStatuses (JobStatusRequest) returns (JobStatusResponse);
@@ -419,6 +424,10 @@ message Worker {
     // surfaces it as a warning. 0 when the worker's latest task outcome is a
     // success (or it has no failures).
     optional int32 recent_failures = 25;
+    // Count of W-level worker_events with acknowledged_at IS NULL.
+    // The UI lights the warn badge (⚠) when this > 0 OR when
+    // recent_failures >= 2. Cleared via ResetWorkerCounters.
+    optional int32 pending_warnings = 26;
 }
 
 
@@ -669,6 +678,18 @@ message WorkerUpdateRequest {
     // setting step_id to NULL. Mutually exclusive with step_id /
     // workflow_name / step_name.
     optional bool clear_step = 14;
+}
+
+message ResetWorkerCountersRequest {
+    int32 worker_id = 1;
+    // Bump worker.failures_cleared_at so recent_failures (counted from
+    // F-tasks since last success) starts fresh. Does not delete any
+    // task rows — they remain visible in task history.
+    bool clear_failures = 2;
+    // Mark all unread W-level worker_events for this worker as
+    // acknowledged. Drops pending_warnings to 0 and lets the badge
+    // revert from ⚠ to ⓘ.
+    bool clear_warnings = 3;
 }
 
 message ListFlavorsRequest {
@@ -932,6 +953,11 @@ message Workflow {
     // When this workflow was created by a parent workflow's chain firing,
     // the parent's id. See specs/workflow_chain.md.
     optional int32 parent_workflow_id = 17;
+    // Count of workers in status 'R' currently attached to any step of
+    // this workflow. The UI distinguishes idle (R + pending > 0 + no
+    // eligible worker) from running by this — without it the dot
+    // colour can't tell "no worker available" from "actually running".
+    int32 eligible_worker_count = 18;
 }
 message WorkflowRequest {
     string name = 1;

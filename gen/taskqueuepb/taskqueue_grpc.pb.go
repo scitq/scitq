@@ -43,6 +43,7 @@ const (
 	TaskQueue_DeleteWorker_FullMethodName              = "/taskqueue.TaskQueue/DeleteWorker"
 	TaskQueue_UpdateWorker_FullMethodName              = "/taskqueue.TaskQueue/UpdateWorker"
 	TaskQueue_UserUpdateWorker_FullMethodName          = "/taskqueue.TaskQueue/UserUpdateWorker"
+	TaskQueue_ResetWorkerCounters_FullMethodName       = "/taskqueue.TaskQueue/ResetWorkerCounters"
 	TaskQueue_GetWorkerStatuses_FullMethodName         = "/taskqueue.TaskQueue/GetWorkerStatuses"
 	TaskQueue_ListJobs_FullMethodName                  = "/taskqueue.TaskQueue/ListJobs"
 	TaskQueue_GetJobStatuses_FullMethodName            = "/taskqueue.TaskQueue/GetJobStatuses"
@@ -148,6 +149,11 @@ type TaskQueueClient interface {
 	DeleteWorker(ctx context.Context, in *WorkerDeletion, opts ...grpc.CallOption) (*JobId, error)
 	UpdateWorker(ctx context.Context, in *WorkerUpdateRequest, opts ...grpc.CallOption) (*Ack, error)
 	UserUpdateWorker(ctx context.Context, in *WorkerUpdateRequest, opts ...grpc.CallOption) (*Ack, error)
+	// Reset operator-visible counters on a worker. clear_failures bumps
+	// worker.failures_cleared_at so the recent_failures subquery skips
+	// older F-tasks. clear_warnings acks all unread W-level
+	// worker_events for the worker. Either or both flags can be set.
+	ResetWorkerCounters(ctx context.Context, in *ResetWorkerCountersRequest, opts ...grpc.CallOption) (*Ack, error)
 	GetWorkerStatuses(ctx context.Context, in *WorkerStatusRequest, opts ...grpc.CallOption) (*WorkerStatusResponse, error)
 	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*JobsList, error)
 	GetJobStatuses(ctx context.Context, in *JobStatusRequest, opts ...grpc.CallOption) (*JobStatusResponse, error)
@@ -507,6 +513,16 @@ func (c *taskQueueClient) UserUpdateWorker(ctx context.Context, in *WorkerUpdate
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Ack)
 	err := c.cc.Invoke(ctx, TaskQueue_UserUpdateWorker_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ResetWorkerCounters(ctx context.Context, in *ResetWorkerCountersRequest, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_ResetWorkerCounters_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1300,6 +1316,11 @@ type TaskQueueServer interface {
 	DeleteWorker(context.Context, *WorkerDeletion) (*JobId, error)
 	UpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error)
 	UserUpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error)
+	// Reset operator-visible counters on a worker. clear_failures bumps
+	// worker.failures_cleared_at so the recent_failures subquery skips
+	// older F-tasks. clear_warnings acks all unread W-level
+	// worker_events for the worker. Either or both flags can be set.
+	ResetWorkerCounters(context.Context, *ResetWorkerCountersRequest) (*Ack, error)
 	GetWorkerStatuses(context.Context, *WorkerStatusRequest) (*WorkerStatusResponse, error)
 	ListJobs(context.Context, *ListJobsRequest) (*JobsList, error)
 	GetJobStatuses(context.Context, *JobStatusRequest) (*JobStatusResponse, error)
@@ -1482,6 +1503,9 @@ func (UnimplementedTaskQueueServer) UpdateWorker(context.Context, *WorkerUpdateR
 }
 func (UnimplementedTaskQueueServer) UserUpdateWorker(context.Context, *WorkerUpdateRequest) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UserUpdateWorker not implemented")
+}
+func (UnimplementedTaskQueueServer) ResetWorkerCounters(context.Context, *ResetWorkerCountersRequest) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResetWorkerCounters not implemented")
 }
 func (UnimplementedTaskQueueServer) GetWorkerStatuses(context.Context, *WorkerStatusRequest) (*WorkerStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkerStatuses not implemented")
@@ -2117,6 +2141,24 @@ func _TaskQueue_UserUpdateWorker_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).UserUpdateWorker(ctx, req.(*WorkerUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ResetWorkerCounters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetWorkerCountersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ResetWorkerCounters(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ResetWorkerCounters_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ResetWorkerCounters(ctx, req.(*ResetWorkerCountersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3575,6 +3617,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UserUpdateWorker",
 			Handler:    _TaskQueue_UserUpdateWorker_Handler,
+		},
+		{
+			MethodName: "ResetWorkerCounters",
+			Handler:    _TaskQueue_ResetWorkerCounters_Handler,
 		},
 		{
 			MethodName: "GetWorkerStatuses",

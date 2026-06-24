@@ -292,6 +292,34 @@ export async function updateWorkerConfig(
 }
 
 /**
+ * Resets operator-facing counters on a worker. Two orthogonal flags:
+ *  - clearFailures: bumps worker.failures_cleared_at so the recent
+ *    failures count (F-tasks since last success) drops to 0.
+ *  - clearWarnings: marks all unread W-level worker_events as
+ *    acknowledged, dropping pending_warnings to 0.
+ * The UI's warn badge (⚠) reverts to ⓘ once both counters fall below
+ * their warn thresholds.
+ */
+export async function resetWorkerCounters(
+  workerId: number,
+  opts: { clearFailures?: boolean; clearWarnings?: boolean }
+) {
+  try {
+    await client.resetWorkerCounters(
+      {
+        workerId,
+        clearFailures: !!opts.clearFailures,
+        clearWarnings: !!opts.clearWarnings,
+      },
+      await callOptionsUserToken()
+    );
+  } catch (error) {
+    console.error("Reset Worker Counters error:", error);
+    throw error;
+  }
+}
+
+/**
  * Retrieves available flavors.
  * @returns A promise resolving to an array of available flavors.
  */

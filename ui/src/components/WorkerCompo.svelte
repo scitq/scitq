@@ -3,7 +3,7 @@
 
   const bubble = createBubbler();
   import { onMount, onDestroy } from 'svelte';
-  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, listWorkerEvents} from '../lib/api';
+  import {getWorkerStatusClass,delWorker, getWorkerStatusText, getStats, formatBytesPair, getTasksCount, getStatus, updateWorkerStatus, getAllTaskStats, updateWorkerConfig, requestWorkerUpgrade, listWorkerEvents, resetWorkerCounters} from '../lib/api';
   import { wsClient } from '../lib/wsClient';
   import { Edit, PauseCircle, PlayCircle, Trash, RefreshCw, Eraser, BarChart, FileDigit, ChevronDown, ChevronUp, Star, ArrowUpCircle } from 'lucide-svelte';
   import LineChart from './LineChart.svelte';
@@ -763,6 +763,43 @@
     workerEvents = [];
   }
 
+  async function handleClearWarnings() {
+    if (!eventsWorker) return;
+    const wid = eventsWorker.workerId;
+    try {
+      await resetWorkerCounters(wid, { clearWarnings: true });
+      // Optimistic local update so the badge clears immediately —
+      // the SQL count would agree on the next listWorkers fetch.
+      eventsWorker = { ...eventsWorker, pendingWarnings: 0 };
+      internalWorkers = internalWorkers.map(w =>
+        w.workerId === wid ? { ...w, pendingWarnings: 0 } : w
+      );
+      // Refresh the events list — acknowledged_at is now set, but the
+      // events themselves still show (they remain in the audit trail).
+      try {
+        workerEvents = await listWorkerEvents(wid, 100);
+      } catch (err) {
+        console.error('Failed to refresh worker events after ack', wid, err);
+      }
+    } catch (err) {
+      console.error('Failed to clear warnings for worker', wid, err);
+    }
+  }
+
+  async function handleResetFailures() {
+    if (!eventsWorker) return;
+    const wid = eventsWorker.workerId;
+    try {
+      await resetWorkerCounters(wid, { clearFailures: true });
+      eventsWorker = { ...eventsWorker, recentFailures: 0 };
+      internalWorkers = internalWorkers.map(w =>
+        w.workerId === wid ? { ...w, recentFailures: 0 } : w
+      );
+    } catch (err) {
+      console.error('Failed to reset failures for worker', wid, err);
+    }
+  }
+
   /**
    * Loads initial workflows lazily (first page only)
    */
@@ -954,14 +991,15 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                     title="Emergency upgrade pending — worker is draining in-flight tasks, then will swap binaries (30 min hard cap)."
                   >upg drain</span>
                 {/if}
-                <!-- Worker-events badge: ℹ︎ normally, ⚠ when this worker has
-                     been failing tasks (>=2 since its last success). Click to
-                     view the worker's recent events. -->
-                {#if (worker.recentFailures ?? 0) >= 2}
+                <!-- Worker-events badge: ⓘ normally, ⚠ when this worker
+                     has been failing tasks (>=2 since last success) OR has
+                     unread warning-level events (e.g. no-fit). Click to
+                     open the events panel; the operator can ack from there. -->
+                {#if (worker.recentFailures ?? 0) >= 2 || (worker.pendingWarnings ?? 0) > 0}
                   <button
                     type="button"
                     class="worker-events-badge worker-events-warn"
-                    title="{worker.recentFailures} task failure(s) since this worker's last success — it may be broken for this step. Click for events."
+                    title="{worker.recentFailures ?? 0} failure(s) since last success, {worker.pendingWarnings ?? 0} unread warning(s). Click to view & acknowledge."
                     onclick={stopPropagation(() => openWorkerEvents(worker))}
                   >⚠</button>
                 {:else}
@@ -1442,8 +1480,29 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
           {#if (eventsWorker.recentFailures ?? 0) >= 2}
             <span class="worker-events-warn-text">⚠ {eventsWorker.recentFailures} failures since last success</span>
           {/if}
+          {#if (eventsWorker.pendingWarnings ?? 0) > 0}
+            <span class="worker-events-warn-text">⚠ {eventsWorker.pendingWarnings} unread warning{(eventsWorker.pendingWarnings ?? 0) > 1 ? 's' : ''}</span>
+          {/if}
         </span>
-        <button type="button" class="worker-events-close" onclick={closeWorkerEvents} title="Close">✕</button>
+        <span class="worker-events-actions">
+          {#if (eventsWorker.pendingWarnings ?? 0) > 0}
+            <button
+              type="button"
+              class="worker-events-ack"
+              title="Acknowledge all unread warnings on this worker"
+              onclick={() => handleClearWarnings()}
+            >Clear warnings</button>
+          {/if}
+          {#if (eventsWorker.recentFailures ?? 0) > 0}
+            <button
+              type="button"
+              class="worker-events-ack"
+              title="Reset the failure counter (older failed tasks stop being counted; rows are kept for history)"
+              onclick={() => handleResetFailures()}
+            >Reset failures</button>
+          {/if}
+          <button type="button" class="worker-events-close" onclick={closeWorkerEvents} title="Close">✕</button>
+        </span>
       </div>
       <div class="worker-events-body">
         {#if eventsLoading}

@@ -65,6 +65,7 @@
 .wf-dot-red    { background-color: #f44336; }
 .wf-dot-gray   { background-color: #9e9e9e; }
 .wf-dot-yellow { background-color: #f5c211; }
+.wf-dot-amber  { background-color: #ff9800; }
 
 .wf-name {
   font-size: 0.7rem;

@@ -3587,6 +3587,61 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 	return &pb.Ack{Success: true}, nil
 }
 
+// ResetWorkerCounters lets the operator dismiss persistent
+// "needs attention" signal on a worker without writing SQL. Two
+// orthogonal flags:
+//   - clear_failures: bumps worker.failures_cleared_at; ListWorkers'
+//     recent_failures subquery uses GREATEST(last_S_modified_at,
+//     failures_cleared_at) as the lower bound, so older F-tasks drop
+//     out of the count without being deleted.
+//   - clear_warnings: marks every unread W-level worker_event for this
+//     worker as acknowledged. The UI's pending_warnings (count of
+//     unacked W events) falls to 0 and the warn badge reverts to ⓘ.
+//
+// Either or both may be set in a single call; both no-ops if neither
+// is true. Auth: any signed-in user — same level as UserUpdateWorker.
+func (s *taskQueueServer) ResetWorkerCounters(ctx context.Context, req *pb.ResetWorkerCountersRequest) (*pb.Ack, error) {
+	if GetUserFromContext(ctx) == nil {
+		return nil, status.Error(codes.PermissionDenied, "user authentication required")
+	}
+	if req.WorkerId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "worker_id is required")
+	}
+	if !req.ClearFailures && !req.ClearWarnings {
+		return &pb.Ack{Success: true}, nil
+	}
+
+	if req.ClearFailures {
+		if _, err := s.db.Exec(`
+			UPDATE worker SET failures_cleared_at = NOW()
+			WHERE worker_id = $1 AND deleted_at IS NULL
+		`, req.WorkerId); err != nil {
+			return nil, fmt.Errorf("failed to clear failures: %w", err)
+		}
+	}
+	if req.ClearWarnings {
+		if _, err := s.db.Exec(`
+			UPDATE worker_event
+			   SET acknowledged_at = NOW()
+			 WHERE worker_id = $1
+			   AND level = 'W'
+			   AND acknowledged_at IS NULL
+		`, req.WorkerId); err != nil {
+			return nil, fmt.Errorf("failed to clear warnings: %w", err)
+		}
+	}
+
+	// Nudge any open UI: re-broadcast the worker so its counters refresh
+	// without waiting for the next list-poll. The payload is intentionally
+	// thin — the UI's WS handler does a full re-fetch on 'reset' events.
+	ws.EmitWS("worker", req.WorkerId, "reset", map[string]any{
+		"workerId":       req.WorkerId,
+		"clearFailures":  req.ClearFailures,
+		"clearWarnings":  req.ClearWarnings,
+	})
+	return &pb.Ack{Success: true}, nil
+}
+
 func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeletion) (*pb.JobId, error) {
 	if err := s.refuseIfGating("DeleteWorker"); err != nil {
 		return nil, err
@@ -4553,16 +4608,29 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			w.commit_sha,
 			w.build_arch,
 			w.upgrade_requested,
-			-- Failures since this worker's most recent success. Counts hidden
-			-- retry-parents (they retain worker_id), so a worker that crashes
-			-- every task it takes shows this climbing with no successes.
+			-- Failures since this worker's most recent success (or since
+			-- the last operator reset via ResetWorkerCounters, whichever is
+			-- newer). Counts hidden retry-parents (they retain worker_id),
+			-- so a worker that crashes every task it takes shows this
+			-- climbing with no successes.
 			(SELECT count(*) FROM task ft
 			 WHERE ft.worker_id = w.worker_id AND ft.status = 'F'
-			   AND ft.modified_at > COALESCE(
-			       (SELECT max(st.modified_at) FROM task st
-			        WHERE st.worker_id = w.worker_id AND st.status = 'S'),
-			       '-infinity'::timestamptz)
-			) AS recent_failures
+			   AND ft.modified_at > GREATEST(
+			       COALESCE(
+			           (SELECT max(st.modified_at) FROM task st
+			            WHERE st.worker_id = w.worker_id AND st.status = 'S'),
+			           '-infinity'::timestamptz),
+			       COALESCE(w.failures_cleared_at, '-infinity'::timestamptz)
+			   )
+			) AS recent_failures,
+			-- Unread warning-level events. Drives the UI's warn badge
+			-- (⚠) alongside recent_failures; cleared by acking the
+			-- events via ResetWorkerCounters(clear_warnings=true).
+			(SELECT count(*) FROM worker_event we
+			 WHERE we.worker_id = w.worker_id
+			   AND we.level = 'W'
+			   AND we.acknowledged_at IS NULL
+			) AS pending_warnings
 		FROM worker w
 		LEFT JOIN region r ON r.region_id = w.region_id
 		LEFT JOIN provider p ON r.provider_id = p.provider_id
@@ -4600,14 +4668,14 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		var flavorMem, flavorDisk sql.NullFloat64
 		var stepName, workflowName sql.NullString
 		var workerVersion, workerCommit, workerArch, upgradeReq sql.NullString
-		var recentFailures int32
+		var recentFailures, pendingWarnings int32
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
 			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor,
 			&flavorCpu, &flavorMem, &flavorDisk,
 			&stepId, &stepName,
 			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName,
-			&workerVersion, &workerCommit, &workerArch, &upgradeReq, &recentFailures)
+			&workerVersion, &workerCommit, &workerArch, &upgradeReq, &recentFailures, &pendingWarnings)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan worker: %v", err)
 			continue
@@ -4652,6 +4720,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			worker.UpgradeRequested = &upgradeReq.String
 		}
 		worker.RecentFailures = &recentFailures
+		worker.PendingWarnings = &pendingWarnings
 
 		workers = append(workers, &worker)
 	}
@@ -5545,7 +5614,18 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
         SELECT w.workflow_id, w.workflow_name, w.status, w.run_strategy, w.maximum_workers, w.live,
                tr.template_run_id, wt.name, wt.version,
                tr.script_name, tr.script_sha256,
-               w.parent_workflow_id
+               w.parent_workflow_id,
+               -- R-status workers attached to any step of this workflow.
+               -- The UI distinguishes "idle (no eligible worker)" from
+               -- "running" via this — a workflow can be R with pending
+               -- tasks but no worker on its steps, in which case the
+               -- assignment loop can't make progress until a recruiter
+               -- spawns one or an operator attaches one.
+               (SELECT count(*) FROM worker wkr
+                JOIN step st ON st.step_id = wkr.step_id
+                WHERE st.workflow_id = w.workflow_id
+                  AND wkr.status = 'R'
+                  AND wkr.deleted_at IS NULL) AS eligible_worker_count
         FROM workflow w
         LEFT JOIN LATERAL (
             SELECT template_run_id, workflow_template_id, script_name, script_sha256
@@ -5627,7 +5707,8 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 		var templateRunID, parentWorkflowID sql.NullInt32
 		var templateName, templateVersion, scriptName, scriptSha sql.NullString
 		if err := rows.Scan(&wf.WorkflowId, &wf.Name, &wf.Status, &wf.RunStrategy, &wf.MaximumWorkers, &wf.Live,
-			&templateRunID, &templateName, &templateVersion, &scriptName, &scriptSha, &parentWorkflowID); err != nil {
+			&templateRunID, &templateName, &templateVersion, &scriptName, &scriptSha, &parentWorkflowID,
+			&wf.EligibleWorkerCount); err != nil {
 			return nil, fmt.Errorf("failed to scan workflow: %w", err)
 		}
 		if templateRunID.Valid {
