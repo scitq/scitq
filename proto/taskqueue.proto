@@ -355,6 +355,16 @@ message EditTaskRequest {
     optional string output = 9;
     optional string publish = 10;
     optional int32 retry = 11;
+    // Per-task resource floors used by the assignment fit check
+    // (fitsWorker compares these against worker.flavor.cpu/mem/disk).
+    // Exposing them on EditTask lets an operator nudge a stuck task
+    // onto a smaller worker for a one-off "try"; the change applies
+    // to the current attempt AND to future retries (the retry clone
+    // SELECTs t.min_* unless a mem_curve overrides it). See
+    // server.fitsWorker + assigntask.go for the fit predicate.
+    optional float min_cpu = 12;
+    optional float min_mem = 13;
+    optional float min_disk = 14;
 }
 
 message EditStepCommandRequest {

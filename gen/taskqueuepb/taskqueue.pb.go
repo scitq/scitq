@@ -1280,8 +1280,18 @@ type EditTaskRequest struct {
 	Output           *string                `protobuf:"bytes,9,opt,name=output,proto3,oneof" json:"output,omitempty"`
 	Publish          *string                `protobuf:"bytes,10,opt,name=publish,proto3,oneof" json:"publish,omitempty"`
 	Retry            *int32                 `protobuf:"varint,11,opt,name=retry,proto3,oneof" json:"retry,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Per-task resource floors used by the assignment fit check
+	// (fitsWorker compares these against worker.flavor.cpu/mem/disk).
+	// Exposing them on EditTask lets an operator nudge a stuck task
+	// onto a smaller worker for a one-off "try"; the change applies
+	// to the current attempt AND to future retries (the retry clone
+	// SELECTs t.min_* unless a mem_curve overrides it). See
+	// server.fitsWorker + assigntask.go for the fit predicate.
+	MinCpu        *float32 `protobuf:"fixed32,12,opt,name=min_cpu,json=minCpu,proto3,oneof" json:"min_cpu,omitempty"`
+	MinMem        *float32 `protobuf:"fixed32,13,opt,name=min_mem,json=minMem,proto3,oneof" json:"min_mem,omitempty"`
+	MinDisk       *float32 `protobuf:"fixed32,14,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EditTaskRequest) Reset() {
@@ -1387,6 +1397,27 @@ func (x *EditTaskRequest) GetPublish() string {
 func (x *EditTaskRequest) GetRetry() int32 {
 	if x != nil && x.Retry != nil {
 		return *x.Retry
+	}
+	return 0
+}
+
+func (x *EditTaskRequest) GetMinCpu() float32 {
+	if x != nil && x.MinCpu != nil {
+		return *x.MinCpu
+	}
+	return 0
+}
+
+func (x *EditTaskRequest) GetMinMem() float32 {
+	if x != nil && x.MinMem != nil {
+		return *x.MinMem
+	}
+	return 0
+}
+
+func (x *EditTaskRequest) GetMinDisk() float32 {
+	if x != nil && x.MinDisk != nil {
+		return *x.MinDisk
 	}
 	return 0
 }
@@ -11295,7 +11326,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"StringList\x12\x16\n" +
 	"\x06values\x18\x01 \x03(\tR\x06values\"#\n" +
 	"\tInt32List\x12\x16\n" +
-	"\x06values\x18\x01 \x03(\x05R\x06values\"\x94\x04\n" +
+	"\x06values\x18\x01 \x03(\x05R\x06values\"\x95\x05\n" +
 	"\x0fEditTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\acommand\x18\x02 \x01(\tH\x00R\acommand\x88\x01\x01\x12!\n" +
@@ -11308,7 +11339,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x06output\x18\t \x01(\tH\aR\x06output\x88\x01\x01\x12\x1d\n" +
 	"\apublish\x18\n" +
 	" \x01(\tH\bR\apublish\x88\x01\x01\x12\x19\n" +
-	"\x05retry\x18\v \x01(\x05H\tR\x05retry\x88\x01\x01B\n" +
+	"\x05retry\x18\v \x01(\x05H\tR\x05retry\x88\x01\x01\x12\x1c\n" +
+	"\amin_cpu\x18\f \x01(\x02H\n" +
+	"R\x06minCpu\x88\x01\x01\x12\x1c\n" +
+	"\amin_mem\x18\r \x01(\x02H\vR\x06minMem\x88\x01\x01\x12\x1e\n" +
+	"\bmin_disk\x18\x0e \x01(\x02H\fR\aminDisk\x88\x01\x01B\n" +
 	"\n" +
 	"\b_commandB\f\n" +
 	"\n" +
@@ -11321,7 +11356,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\a_outputB\n" +
 	"\n" +
 	"\b_publishB\b\n" +
-	"\x06_retry\"|\n" +
+	"\x06_retryB\n" +
+	"\n" +
+	"\b_min_cpuB\n" +
+	"\n" +
+	"\b_min_memB\v\n" +
+	"\t_min_disk\"|\n" +
 	"\x16EditStepCommandRequest\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04find\x18\x02 \x01(\tR\x04find\x12\x18\n" +

@@ -102,6 +102,9 @@ type Attr struct {
 			Resource         []string `arg:"--resource,separate" help:"Replace the resources (repeat the flag once per URI). Use --clear-resource to set empty."`
 			ClearInput       bool    `arg:"--clear-input" help:"Set inputs to empty (overrides --input)"`
 			ClearResource    bool    `arg:"--clear-resource" help:"Set resources to empty (overrides --resource)"`
+			MinCpu           *float32 `arg:"--min-cpu" help:"Per-task minimum CPU cores (drives the worker-fit predicate). Lower it to make a stuck task eligible for smaller workers."`
+			MinMem           *float32 `arg:"--min-mem" help:"Per-task minimum memory in GB (worker-fit predicate). Risky — may cause OOM if you go below the workload's real footprint."`
+			MinDisk          *float32 `arg:"--min-disk" help:"Per-task minimum disk in GB (worker-fit predicate)."`
 		} `arg:"subcommand:update" help:"Update fields on a task in place (no retry; for fixing wrong submissions or unsticking state)"`
 
 		Kill *struct {
@@ -643,6 +646,21 @@ func (c *CLI) TaskList() error {
 			if task.Weight != nil {
 				fmt.Printf("   Weight:    %.2f\n", *task.Weight)
 			}
+			// Per-task resource floors. Compared against the worker's
+			// flavor caps by assigntask.fitsWorker: if any min_* is
+			// above the corresponding flavor field the task won't be
+			// assigned to that worker (the cause of "worker R, attached
+			// to step, but never picks up tasks" debugging sessions —
+			// the no-fit diagnostic we built logs this in worker_event).
+			if task.MinCpu != nil {
+				fmt.Printf("   min_cpu:   %g\n", *task.MinCpu)
+			}
+			if task.MinMem != nil {
+				fmt.Printf("   min_mem:   %g GB\n", *task.MinMem)
+			}
+			if task.MinDisk != nil {
+				fmt.Printf("   min_disk:  %g GB\n", *task.MinDisk)
+			}
 			if task.RetryCount > 0 {
 				fmt.Printf("   Retries:   %d\n", task.RetryCount)
 			}
@@ -871,6 +889,15 @@ func (c *CLI) TaskUpdate() error {
 		req.Resource = &pb.StringList{Values: []string{}}
 	} else if len(u.Resource) > 0 {
 		req.Resource = &pb.StringList{Values: u.Resource}
+	}
+	if u.MinCpu != nil {
+		req.MinCpu = u.MinCpu
+	}
+	if u.MinMem != nil {
+		req.MinMem = u.MinMem
+	}
+	if u.MinDisk != nil {
+		req.MinDisk = u.MinDisk
 	}
 
 	if _, err := c.QC.Client.EditTask(ctx, req); err != nil {

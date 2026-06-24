@@ -593,6 +593,26 @@ export interface EditTaskRequest {
      * @generated from protobuf field: optional int32 retry = 11
      */
     retry?: number;
+    /**
+     * Per-task resource floors used by the assignment fit check
+     * (fitsWorker compares these against worker.flavor.cpu/mem/disk).
+     * Exposing them on EditTask lets an operator nudge a stuck task
+     * onto a smaller worker for a one-off "try"; the change applies
+     * to the current attempt AND to future retries (the retry clone
+     * SELECTs t.min_* unless a mem_curve overrides it). See
+     * server.fitsWorker + assigntask.go for the fit predicate.
+     *
+     * @generated from protobuf field: optional float min_cpu = 12
+     */
+    minCpu?: number;
+    /**
+     * @generated from protobuf field: optional float min_mem = 13
+     */
+    minMem?: number;
+    /**
+     * @generated from protobuf field: optional float min_disk = 14
+     */
+    minDisk?: number;
 }
 /**
  * @generated from protobuf message taskqueue.EditStepCommandRequest
@@ -4974,7 +4994,10 @@ class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
             { no: 8, name: "resource", kind: "message", T: () => StringList },
             { no: 9, name: "output", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 10, name: "publish", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 11, name: "retry", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 11, name: "retry", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 12, name: "min_cpu", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 13, name: "min_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 14, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<EditTaskRequest>): EditTaskRequest {
@@ -5022,6 +5045,15 @@ class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
                 case /* optional int32 retry */ 11:
                     message.retry = reader.int32();
                     break;
+                case /* optional float min_cpu */ 12:
+                    message.minCpu = reader.float();
+                    break;
+                case /* optional float min_mem */ 13:
+                    message.minMem = reader.float();
+                    break;
+                case /* optional float min_disk */ 14:
+                    message.minDisk = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5067,6 +5099,15 @@ class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
         /* optional int32 retry = 11; */
         if (message.retry !== undefined)
             writer.tag(11, WireType.Varint).int32(message.retry);
+        /* optional float min_cpu = 12; */
+        if (message.minCpu !== undefined)
+            writer.tag(12, WireType.Bit32).float(message.minCpu);
+        /* optional float min_mem = 13; */
+        if (message.minMem !== undefined)
+            writer.tag(13, WireType.Bit32).float(message.minMem);
+        /* optional float min_disk = 14; */
+        if (message.minDisk !== undefined)
+            writer.tag(14, WireType.Bit32).float(message.minDisk);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

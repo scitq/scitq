@@ -2328,6 +2328,19 @@ func (s *taskQueueServer) EditTask(ctx context.Context, req *pb.EditTaskRequest)
 	if req.Resource != nil {
 		addSet("resource", pq.StringArray(req.Resource.Values))
 	}
+	// Per-task resource floors. Used by the assignment fit predicate
+	// (see assigntask.go's fitsWorker). Letting operators edit these
+	// makes one-off "try this task on a smaller worker" experiments
+	// possible without going to psql.
+	if req.MinCpu != nil {
+		addSet("min_cpu", *req.MinCpu)
+	}
+	if req.MinMem != nil {
+		addSet("min_mem", *req.MinMem)
+	}
+	if req.MinDisk != nil {
+		addSet("min_disk", *req.MinDisk)
+	}
 
 	if len(sets) == 0 {
 		return nil, fmt.Errorf("no fields to update")
@@ -4053,7 +4066,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			EXTRACT(EPOCH FROM t.run_started_at)::bigint AS run_started_epoch,
 			t.publish,
 			t.download_duration, t.run_duration, t.upload_duration,
-			t.quality_score, t.quality_vars::text
+			t.quality_score, t.quality_vars::text,
+			t.min_cpu, t.min_mem, t.min_disk
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -4101,6 +4115,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			downloadDur, runDur, uploadDur                                    sql.NullInt32
 			qualityScore                                                      sql.NullFloat64
 			qualityVars                                                       sql.NullString
+			minCpu, minMem, minDisk                                           sql.NullFloat64
 			retryCount                                                        int32
 			hidden                                                            bool
 		)
@@ -4131,6 +4146,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&uploadDur,
 			&qualityScore,
 			&qualityVars,
+			&minCpu,
+			&minMem,
+			&minDisk,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -4157,6 +4175,21 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			task.QualityScore = &qualityScore.Float64
 		}
 		task.QualityVars = utils.NullStringToPtr(qualityVars)
+		// Per-task fit floors (proto Task.min_cpu/min_mem/min_disk are
+		// float32 — sql.NullFloat64 narrows on read so a NULL column
+		// surfaces as nil, not 0).
+		if minCpu.Valid {
+			v := float32(minCpu.Float64)
+			task.MinCpu = &v
+		}
+		if minMem.Valid {
+			v := float32(minMem.Float64)
+			task.MinMem = &v
+		}
+		if minDisk.Valid {
+			v := float32(minDisk.Float64)
+			task.MinDisk = &v
+		}
 
 		tasks = append(tasks, &task)
 	}
@@ -6300,6 +6333,18 @@ func (s *taskQueueServer) DeleteTask(ctx context.Context, req *pb.TaskId) (*pb.A
 		payload.WorkerId = workerID.Int32
 	}
 	ws.EmitWS("task", req.TaskId, "deleted", payload)
+
+	// Nudge the assignment loop. The cascade on task_dependencies
+	// (FK ON DELETE CASCADE — see 000001_init_schema.up.sql) drops every
+	// edge that referenced this task as a prerequisite. Downstream tasks
+	// in W may now have all their remaining edges satisfied; without
+	// this trigger, promoteWaitingTasks won't re-evaluate them until
+	// the next unrelated assignment cycle and a fan-in task can sit in
+	// W forever (compile task 1010703 case: operator deleted 3 failed
+	// hermes prereqs and the compile stayed stuck because nothing
+	// re-checked its dependency state). triggerAssign also covers the
+	// rarer "delete unblocked recruitment" angle.
+	s.triggerAssign()
 
 	return &pb.Ack{Success: true}, nil
 }
