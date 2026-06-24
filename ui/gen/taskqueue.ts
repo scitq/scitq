@@ -1412,21 +1412,31 @@ export interface ResetWorkerCountersRequest {
      */
     workerId: number;
     /**
-     * Bump worker.failures_cleared_at so recent_failures (counted from
-     * F-tasks since last success) starts fresh. Does not delete any
-     * task rows — they remain visible in task history.
+     * Bump worker.failures_cleared_at. Affects two surfaces:
+     *   (a) the badge counter (recent_failures, F-tasks since last
+     *       success), which drops to 0
+     *   (b) the worker dashboard's "Failed" column, which drops to 0
+     * Task rows are NOT deleted; the timestamp just shifts the lower
+     * bound of what's counted.
      *
      * @generated from protobuf field: bool clear_failures = 2
      */
     clearFailures: boolean;
     /**
-     * Mark all unread W-level worker_events for this worker as
-     * acknowledged. Drops pending_warnings to 0 and lets the badge
-     * revert from ⚠ to ⓘ.
+     * Mark all unread W-level worker_events as acknowledged. Drops
+     * pending_warnings to 0 and reverts the badge from ⚠ to ⓘ.
      *
      * @generated from protobuf field: bool clear_warnings = 3
      */
     clearWarnings: boolean;
+    /**
+     * Bump worker.successes_cleared_at. Drops the dashboard's
+     * "Success" column to 0. Same audit-preserving semantics as
+     * clear_failures (rows stay; lower bound shifts).
+     *
+     * @generated from protobuf field: bool clear_successes = 4
+     */
+    clearSuccesses: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.ListFlavorsRequest
@@ -7549,7 +7559,8 @@ class ResetWorkerCountersRequest$Type extends MessageType<ResetWorkerCountersReq
         super("taskqueue.ResetWorkerCountersRequest", [
             { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "clear_failures", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "clear_warnings", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 3, name: "clear_warnings", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "clear_successes", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<ResetWorkerCountersRequest>): ResetWorkerCountersRequest {
@@ -7557,6 +7568,7 @@ class ResetWorkerCountersRequest$Type extends MessageType<ResetWorkerCountersReq
         message.workerId = 0;
         message.clearFailures = false;
         message.clearWarnings = false;
+        message.clearSuccesses = false;
         if (value !== undefined)
             reflectionMergePartial<ResetWorkerCountersRequest>(this, message, value);
         return message;
@@ -7574,6 +7586,9 @@ class ResetWorkerCountersRequest$Type extends MessageType<ResetWorkerCountersReq
                     break;
                 case /* bool clear_warnings */ 3:
                     message.clearWarnings = reader.bool();
+                    break;
+                case /* bool clear_successes */ 4:
+                    message.clearSuccesses = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -7596,6 +7611,9 @@ class ResetWorkerCountersRequest$Type extends MessageType<ResetWorkerCountersReq
         /* bool clear_warnings = 3; */
         if (message.clearWarnings !== false)
             writer.tag(3, WireType.Varint).bool(message.clearWarnings);
+        /* bool clear_successes = 4; */
+        if (message.clearSuccesses !== false)
+            writer.tag(4, WireType.Varint).bool(message.clearSuccesses);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

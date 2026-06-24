@@ -302,7 +302,7 @@ export async function updateWorkerConfig(
  */
 export async function resetWorkerCounters(
   workerId: number,
-  opts: { clearFailures?: boolean; clearWarnings?: boolean }
+  opts: { clearFailures?: boolean; clearWarnings?: boolean; clearSuccesses?: boolean }
 ) {
   try {
     await client.resetWorkerCounters(
@@ -310,6 +310,7 @@ export async function resetWorkerCounters(
         workerId,
         clearFailures: !!opts.clearFailures,
         clearWarnings: !!opts.clearWarnings,
+        clearSuccesses: !!opts.clearSuccesses,
       },
       await callOptionsUserToken()
     );

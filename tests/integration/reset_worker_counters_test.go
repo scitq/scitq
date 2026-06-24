@@ -106,11 +106,43 @@ func TestResetWorkerCounters(t *testing.T) {
 	require.EqualValues(t, 2, *listResp.Workers[0].RecentFailures,
 		"two F-tasks pinned to the worker since no S-task should yield recent_failures=2")
 
-	// --- ResetWorkerCounters(both) ---------------------------------
+	// Also submit + pin two S-tasks so we have a non-zero dashboard
+	// success column to clear later.
+	for i := 0; i < 2; i++ {
+		sub, err := qc.SubmitTask(ctx, &pb.TaskRequest{
+			Command:   "true",
+			Container: "bare",
+			Status:    "S",
+			StepId:    &stepID,
+			TaskName:  strPtr(fmt.Sprintf("ok-%d", i)),
+		})
+		require.NoError(t, err)
+		_, err = db.Exec(`UPDATE task SET worker_id = $1 WHERE task_id = $2`, workerID, sub.TaskId)
+		require.NoError(t, err)
+	}
+
+	// Dashboard counts: per-worker S + F via GetTaskStatusCounts.
+	getCount := func(t *testing.T, status string) int32 {
+		t.Helper()
+		hidden := true
+		stats, err := qc.GetTaskStatusCounts(ctx, &pb.TaskStatusCountsRequest{ShowHidden: &hidden})
+		require.NoError(t, err)
+		for _, e := range stats.PerWorkerCounts {
+			if e.WorkerId != nil && *e.WorkerId == workerID && e.Status == status {
+				return e.Count
+			}
+		}
+		return 0
+	}
+	require.EqualValues(t, 2, getCount(t, "F"), "dashboard Failed column must show 2 before any reset")
+	require.EqualValues(t, 2, getCount(t, "S"), "dashboard Success column must show 2 before any reset")
+
+	// --- ResetWorkerCounters(all three) ----------------------------
 	_, err = qc.ResetWorkerCounters(ctx, &pb.ResetWorkerCountersRequest{
-		WorkerId:       workerID,
-		ClearFailures:  true,
-		ClearWarnings:  true,
+		WorkerId:        workerID,
+		ClearFailures:   true,
+		ClearWarnings:   true,
+		ClearSuccesses:  true,
 	})
 	require.NoError(t, err)
 
@@ -121,10 +153,18 @@ func TestResetWorkerCounters(t *testing.T) {
 	require.NotNil(t, listResp.Workers[0].RecentFailures)
 	require.EqualValues(t, 0, *listResp.Workers[0].RecentFailures, "after clear_failures, recent_failures must be 0")
 
+	// Dashboard columns: both F and S drop to 0 after the per-status
+	// cleared_at gating kicks in. Non-terminal statuses (P/A/...) are
+	// unaffected by the reset — only F and S have a clear timestamp.
+	require.EqualValues(t, 0, getCount(t, "F"), "dashboard Failed column must drop to 0 after clear_failures")
+	require.EqualValues(t, 0, getCount(t, "S"), "dashboard Success column must drop to 0 after clear_successes")
+
 	// Audit rows must persist (the design: ack, don't delete).
-	var weCount, fCount int
+	var weCount, fCount, sCount int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM worker_event WHERE worker_id = $1 AND level = 'W'`, workerID).Scan(&weCount))
 	require.Equal(t, 2, weCount, "ack must NOT delete the worker_event rows")
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM task WHERE worker_id = $1 AND status = 'F'`, workerID).Scan(&fCount))
 	require.Equal(t, 2, fCount, "reset must NOT delete the failed tasks")
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM task WHERE worker_id = $1 AND status = 'S'`, workerID).Scan(&sCount))
+	require.Equal(t, 2, sCount, "reset must NOT delete the succeeded tasks")
 }

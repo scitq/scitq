@@ -3607,7 +3607,7 @@ func (s *taskQueueServer) ResetWorkerCounters(ctx context.Context, req *pb.Reset
 	if req.WorkerId == 0 {
 		return nil, status.Error(codes.InvalidArgument, "worker_id is required")
 	}
-	if !req.ClearFailures && !req.ClearWarnings {
+	if !req.ClearFailures && !req.ClearWarnings && !req.ClearSuccesses {
 		return &pb.Ack{Success: true}, nil
 	}
 
@@ -3617,6 +3617,14 @@ func (s *taskQueueServer) ResetWorkerCounters(ctx context.Context, req *pb.Reset
 			WHERE worker_id = $1 AND deleted_at IS NULL
 		`, req.WorkerId); err != nil {
 			return nil, fmt.Errorf("failed to clear failures: %w", err)
+		}
+	}
+	if req.ClearSuccesses {
+		if _, err := s.db.Exec(`
+			UPDATE worker SET successes_cleared_at = NOW()
+			WHERE worker_id = $1 AND deleted_at IS NULL
+		`, req.WorkerId); err != nil {
+			return nil, fmt.Errorf("failed to clear successes: %w", err)
 		}
 	}
 	if req.ClearWarnings {
@@ -3637,6 +3645,7 @@ func (s *taskQueueServer) ResetWorkerCounters(ctx context.Context, req *pb.Reset
 	ws.EmitWS("worker", req.WorkerId, "reset", map[string]any{
 		"workerId":       req.WorkerId,
 		"clearFailures":  req.ClearFailures,
+		"clearSuccesses": req.ClearSuccesses,
 		"clearWarnings":  req.ClearWarnings,
 	})
 	return &pb.Ack{Success: true}, nil
@@ -4297,16 +4306,30 @@ func (s *taskQueueServer) GetTaskStatusCounts(ctx context.Context, req *pb.TaskS
 		return nil, fmt.Errorf("error reading global counts: %w", err)
 	}
 
-	// Per-worker counts: same policy as global — when showHidden=true,
-	// only F-hidden rows are surfaced; other hidden statuses are filtered
-	// out. This is what the worker page's per-status columns read.
-	perWorkerQuery := `SELECT status, worker_id, COUNT(*)::int FROM task WHERE worker_id IS NOT NULL`
+	// Per-worker counts: same hidden policy as global, plus per-worker
+	// "ack" timestamps for F and S so the operator can dismiss
+	// historical task tallies on a single worker without losing the
+	// underlying rows. ResetWorkerCounters bumps failures_cleared_at /
+	// successes_cleared_at; this query treats those as the count lower
+	// bound for the matching status only.
+	perWorkerQuery := `
+		SELECT t.status, t.worker_id, COUNT(*)::int
+		FROM task t
+		JOIN worker w ON w.worker_id = t.worker_id
+		WHERE t.worker_id IS NOT NULL
+	`
 	if !showHidden {
-		perWorkerQuery += ` AND hidden = FALSE`
+		perWorkerQuery += ` AND t.hidden = FALSE`
 	} else {
-		perWorkerQuery += ` AND (NOT hidden OR status = 'F')`
+		perWorkerQuery += ` AND (NOT t.hidden OR t.status = 'F')`
 	}
-	perWorkerQuery += ` GROUP BY status, worker_id`
+	perWorkerQuery += `
+		  AND (
+		      (t.status = 'F' AND (w.failures_cleared_at IS NULL OR t.modified_at > w.failures_cleared_at))
+		   OR (t.status = 'S' AND (w.successes_cleared_at IS NULL OR t.modified_at > w.successes_cleared_at))
+		   OR (t.status NOT IN ('F', 'S'))
+		  )
+		GROUP BY t.status, t.worker_id`
 	rows2, err := s.db.QueryContext(ctx, perWorkerQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query per-worker task status counts: %w", err)

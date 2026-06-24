@@ -748,6 +748,11 @@
   // events list. Cleared on next panel open / on success refresh.
   let eventsStatus: string = $state('');
   let eventsBusy: boolean = $state(false);
+  // Transient "flash" feedback for the inline Success/Fail reset
+  // buttons. Map workerId -> 'S' | 'F' | null while the cell briefly
+  // pulses pale yellow after a successful reset; cleared by a
+  // setTimeout. Pure UI state; no server impact.
+  let cellFlash: Record<number, 'S' | 'F' | null> = $state({});
 
   async function openWorkerEvents(worker: any) {
     eventsWorker = worker;
@@ -823,27 +828,44 @@
     eventsBusy = false;
   }
 
-  async function handleResetFailures() {
-    if (!eventsWorker || eventsBusy) return;
-    const wid = eventsWorker.workerId;
-    eventsBusy = true;
-    eventsStatus = 'Resetting failure counter…';
-    let rpcErr: unknown = null;
+  // Re-fetches per-worker task counts from the server. Used after a
+  // reset that targets the dashboard F / S columns — those numbers
+  // live in tasksCount[][], populated by getAllTaskStats, not on the
+  // worker row itself.
+  async function refreshTaskCountsFromServer() {
     try {
-      await resetWorkerCounters(wid, { clearFailures: true });
+      const { perWorkerStatusCounts, globalStatusCounts, totalCount: t } = await getAllTaskStats();
+      tasksCount = perWorkerStatusCounts;
+      allCount = globalStatusCounts;
+      totalCount = t;
     } catch (err) {
-      rpcErr = err;
-      console.error('resetWorkerCounters(clearFailures) RPC error for worker', wid, err);
+      console.error('Failed to re-fetch task stats after reset', err);
     }
-    const fresh = await refreshWorkerFromServer(wid);
-    if (fresh && fresh.recentFailures === 0) {
-      eventsStatus = 'Failure counter reset.';
-    } else if (rpcErr) {
-      eventsStatus = 'Could not reset failures — the server did not acknowledge. Check server logs.';
-    } else {
-      eventsStatus = '';
+  }
+
+  // Inline cell reset for Success / Fail columns. Called by the tiny
+  // grey button anchored to the bottom-right of each cell.  Defensive
+  // re-fetch after the RPC, same as the warnings ack: the server may
+  // have applied the write even if the reply gets mangled in transit
+  // (alpha2-style proxy quirk).
+  async function resetCellCounter(workerId: number, kind: 'S' | 'F') {
+    if (cellFlash[workerId] === kind) return; // debounce double-click
+    try {
+      await resetWorkerCounters(workerId, kind === 'F'
+        ? { clearFailures: true }
+        : { clearSuccesses: true });
+    } catch (err) {
+      console.error(`resetWorkerCounters(${kind}) RPC error for worker`, workerId, err);
     }
-    eventsBusy = false;
+    // Refresh dashboard counts and the worker row (badge counter for F).
+    await refreshTaskCountsFromServer();
+    if (kind === 'F') await refreshWorkerFromServer(workerId);
+    // Pale-yellow flash so the operator sees the click landed even
+    // when the count was already 0.
+    cellFlash = { ...cellFlash, [workerId]: kind };
+    setTimeout(() => {
+      cellFlash = { ...cellFlash, [workerId]: null };
+    }, 700);
   }
 
   /**
@@ -1230,17 +1252,37 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
               </td>
 
               <td
+                class="counter-cell {cellFlash[worker.workerId] === 'S' ? 'counter-cell-flash' : ''}"
                 data-testid={`successful-tasks-${worker.workerId}`}
                 title={`UploadingSuccess: ${tasksCount[worker.workerId]?.uploadingSuccess}, Succeeded: ${tasksCount[worker.workerId]?.succeeded}`}
               >
                 {displayTasksCount(worker.workerId,'S')}
+                {#if (tasksCount[worker.workerId]?.['S'] ?? 0) > 0}
+                  <button
+                    type="button"
+                    class="counter-reset"
+                    title="reset count"
+                    aria-label="Reset success count"
+                    onclick={stopPropagation(() => resetCellCounter(worker.workerId, 'S'))}
+                  ></button>
+                {/if}
               </td>
 
               <td
+                class="counter-cell {cellFlash[worker.workerId] === 'F' ? 'counter-cell-flash' : ''}"
                 data-testid={`failed-tasks-${worker.workerId}`}
                 title={`UploadingFailure: ${tasksCount[worker.workerId]?.uploadingFailure}, Failed: ${tasksCount[worker.workerId]?.failed}`}
               >
                 {displayTasksCount(worker.workerId,'F')}
+                {#if (tasksCount[worker.workerId]?.['F'] ?? 0) > 0}
+                  <button
+                    type="button"
+                    class="counter-reset"
+                    title="reset count"
+                    aria-label="Reset failure count"
+                    onclick={stopPropagation(() => resetCellCounter(worker.workerId, 'F'))}
+                  ></button>
+                {/if}
               </td>
 
               <td
@@ -1539,15 +1581,6 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
               title="Acknowledge all unread warnings on this worker"
               onclick={() => handleClearWarnings()}
             >Clear warnings</button>
-          {/if}
-          {#if (eventsWorker.recentFailures ?? 0) > 0}
-            <button
-              type="button"
-              class="worker-events-ack"
-              disabled={eventsBusy}
-              title="Reset the failure counter (older failed tasks stop being counted; rows are kept for history)"
-              onclick={() => handleResetFailures()}
-            >Reset failures</button>
           {/if}
           <button type="button" class="worker-events-close" onclick={closeWorkerEvents} title="Close">✕</button>
         </span>

@@ -3753,16 +3753,24 @@ func (x *WorkerUpdateRequest) GetClearStep() bool {
 type ResetWorkerCountersRequest struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	WorkerId int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
-	// Bump worker.failures_cleared_at so recent_failures (counted from
-	// F-tasks since last success) starts fresh. Does not delete any
-	// task rows — they remain visible in task history.
+	// Bump worker.failures_cleared_at. Affects two surfaces:
+	//
+	//	(a) the badge counter (recent_failures, F-tasks since last
+	//	    success), which drops to 0
+	//	(b) the worker dashboard's "Failed" column, which drops to 0
+	//
+	// Task rows are NOT deleted; the timestamp just shifts the lower
+	// bound of what's counted.
 	ClearFailures bool `protobuf:"varint,2,opt,name=clear_failures,json=clearFailures,proto3" json:"clear_failures,omitempty"`
-	// Mark all unread W-level worker_events for this worker as
-	// acknowledged. Drops pending_warnings to 0 and lets the badge
-	// revert from ⚠ to ⓘ.
+	// Mark all unread W-level worker_events as acknowledged. Drops
+	// pending_warnings to 0 and reverts the badge from ⚠ to ⓘ.
 	ClearWarnings bool `protobuf:"varint,3,opt,name=clear_warnings,json=clearWarnings,proto3" json:"clear_warnings,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Bump worker.successes_cleared_at. Drops the dashboard's
+	// "Success" column to 0. Same audit-preserving semantics as
+	// clear_failures (rows stay; lower bound shifts).
+	ClearSuccesses bool `protobuf:"varint,4,opt,name=clear_successes,json=clearSuccesses,proto3" json:"clear_successes,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ResetWorkerCountersRequest) Reset() {
@@ -3812,6 +3820,13 @@ func (x *ResetWorkerCountersRequest) GetClearFailures() bool {
 func (x *ResetWorkerCountersRequest) GetClearWarnings() bool {
 	if x != nil {
 		return x.ClearWarnings
+	}
+	return false
+}
+
+func (x *ResetWorkerCountersRequest) GetClearSuccesses() bool {
+	if x != nil {
+		return x.ClearSuccesses
 	}
 	return false
 }
@@ -11710,11 +11725,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_max_cpuB\n" +
 	"\n" +
 	"\b_max_memB\r\n" +
-	"\v_clear_step\"\x87\x01\n" +
+	"\v_clear_step\"\xb0\x01\n" +
 	"\x1aResetWorkerCountersRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12%\n" +
 	"\x0eclear_failures\x18\x02 \x01(\bR\rclearFailures\x12%\n" +
-	"\x0eclear_warnings\x18\x03 \x01(\bR\rclearWarnings\"B\n" +
+	"\x0eclear_warnings\x18\x03 \x01(\bR\rclearWarnings\x12'\n" +
+	"\x0fclear_successes\x18\x04 \x01(\bR\x0eclearSuccesses\"B\n" +
 	"\x12ListFlavorsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xa9\x03\n" +

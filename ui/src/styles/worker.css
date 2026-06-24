@@ -807,6 +807,48 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
 }
+
+/* In-cell reset for the Success / Fail counter columns.
+ * The button is a tiny grey square anchored to the bottom-right of
+ * the cell — visually inspired by a car kilometer-counter reset
+ * stem. Only visible when the counter > 0 (we render conditionally
+ * in the template). The cell is given position:relative so the
+ * absolute button can ride along.
+ */
+.counter-cell {
+  position: relative;
+}
+.counter-reset {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 1px solid rgba(160, 160, 160, 0.6);
+  border-radius: 2px;
+  background: #6b6b6b;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.counter-reset:hover {
+  opacity: 1;
+  background: #8a8a8a;
+}
+.counter-reset:active {
+  background: #aaaaaa;
+}
+/* Pale-yellow pulse driven by the cellFlash $state — applied to the
+ * <td> so the whole cell briefly highlights. The 700ms duration
+ * matches the setTimeout that clears the flash state. */
+.counter-cell-flash {
+  animation: counter-cell-pulse 700ms ease-out;
+}
+@keyframes counter-cell-pulse {
+  0%   { background-color: rgba(255, 240, 140, 0.55); }
+  100% { background-color: transparent; }
+}
 .worker-events-body {
   overflow-y: auto;
   padding: 6px 10px;
