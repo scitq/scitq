@@ -169,8 +169,8 @@
         <!-- Workflow information section -->
         <div class="wf-info">
           <span class="wf-id">#{wf.workflowId}</span>
-          <span class="wf-status-dot {wf.status === 'P' ? 'wf-dot-yellow' : wf.status === 'S' ? 'wf-dot-green' : runningTasks > 0 ? 'wf-dot-blue' : failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
-                title={wf.status === 'P' ? 'Paused' : wf.status === 'S' ? 'Completed' : runningTasks > 0 ? `${runningTasks} active` : wf.status === 'F' ? `Stuck: ${failedTasks} failed` : failedTasks > 0 ? `${failedTasks} failed, no active tasks` : 'Idle'}></span>
+          <span class="wf-status-dot {wf.status === 'P' ? 'wf-dot-yellow' : wf.status === 'S' ? 'wf-dot-green' : wf.status === 'F' ? 'wf-dot-red' : runningTasks > 0 ? 'wf-dot-blue' : failedTasks > 0 ? 'wf-dot-red' : 'wf-dot-gray'}"
+                title={wf.status === 'P' ? 'Paused' : wf.status === 'S' ? 'Completed' : wf.status === 'F' ? (failedTasks > 0 ? `Stuck: ${failedTasks} failed` : 'Stuck (no path to completion — needs operator unblock)') : runningTasks > 0 ? `${runningTasks} active` : failedTasks > 0 ? `${failedTasks} failed, no active tasks` : 'Idle'}></span>
           <a href={`#/tasks?workflowId=${wf.workflowId}`}
              class="wf-name"
              title={launchSummary(wf) ? `Launched by: ${launchSummary(wf)}` : undefined}>{wf.name}</a>
