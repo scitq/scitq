@@ -1789,12 +1789,25 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 				})
 
 				if len(stale) > 0 {
+					// Kept as a local diagnostic log so ops can still grep
+					// for it when investigating a real stall. The W-level
+					// worker_event was removed because the predicate
+					// (activeSince present without executingTasks) is
+					// structurally false-positive whenever prefetch > 0
+					// AND per-task runtime > the 10m threshold:
+					// prefetched tasks finish their download quickly and
+					// then BLOCK at sem.AcquireWithWeight for the whole
+					// duration of an in-flight task. On bioit
+					// (concurrency=3, prefetch=1) running skani_search
+					// against UHGG (15–60 min tasks) the 4th slot is
+					// always in this state, so the warning re-fired every
+					// poll and produced 257 false positives in a single
+					// day (2026-06-25) for a worker that was actually
+					// healthy. A phase-aware version that triggers only
+					// when executingTasks is populated but container
+					// progress is stuck would be a meaningful signal —
+					// future work, not this loop.
 					log.Printf("🟥 STALE-O? active=%d executing=%d stale>=10m=%d (examples: %v)", activeCount, executingCount, len(stale), stale)
-					reporter.Event("W", "diagnostics", "tasks active for >10m but not executing (possible O-stall)", map[string]any{
-						"active_count":    activeCount,
-						"executing_count": executingCount,
-						"task_ids":        stale,
-					})
 				} else {
 					log.Printf("📊 heartbeat: active=%d executing=%d (examples: %v)", activeCount, executingCount, activeIDs)
 				}
