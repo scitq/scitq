@@ -383,6 +383,7 @@ class Scitq2Client:
         min_cpu: Optional[float] = None,
         min_mem: Optional[float] = None,
         min_disk: Optional[float] = None,
+        min_gpu: Optional[int] = None,
         cpu_curve: Optional[List[float]] = None,
         mem_curve: Optional[List[float]] = None,
         disk_curve: Optional[List[float]] = None,
@@ -448,6 +449,8 @@ class Scitq2Client:
             request.min_mem = min_mem
         if min_disk is not None:
             request.min_disk = min_disk
+        if min_gpu is not None:
+            request.min_gpu = min_gpu
         # Curves: only send when there's more than one element. A
         # singleton curve adds no information beyond min_* and would
         # waste a bit of bandwidth (plus muddy the "is there a curve?"

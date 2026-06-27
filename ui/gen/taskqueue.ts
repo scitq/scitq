@@ -216,6 +216,15 @@ export interface TaskRequest {
      */
     minDisk?: number; // minimum GB of disk per task
     /**
+     * Per-task GPU requirement (count). 0 = no GPU needed. When > 0,
+     * the assignment fit predicate requires worker.flavor.has_gpu and
+     * the client auto-appends `--gpus all` to docker argv plus an
+     * SCITQ_GPU env var the command can branch on.
+     *
+     * @generated from protobuf field: optional int32 min_gpu = 38
+     */
+    minGpu?: number;
+    /**
      * Per-attempt resource curve. The full list the workflow author declared
      * in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
      * The server keeps it on the task so the retry-decision path can look up
@@ -388,8 +397,8 @@ export interface Task {
      */
     numa?: number;
     /**
-     * See TaskRequest.min_cpu / min_mem / min_disk (per-task resource
-     * requirements; spec: addition_from_nextflow.md A).
+     * See TaskRequest.min_cpu / min_mem / min_disk / min_gpu (per-task
+     * resource requirements; spec: addition_from_nextflow.md A).
      *
      * @generated from protobuf field: optional float min_cpu = 35
      */
@@ -416,6 +425,10 @@ export interface Task {
      * @generated from protobuf field: repeated float disk_curve = 40
      */
     diskCurve: number[];
+    /**
+     * @generated from protobuf field: optional int32 min_gpu = 43
+     */
+    minGpu?: number;
     /**
      * failure_class set by the worker on terminal failures (oom / timeout /
      * network / other) and propagated to the next TaskStatusUpdate. Server
@@ -613,6 +626,13 @@ export interface EditTaskRequest {
      * @generated from protobuf field: optional float min_disk = 14
      */
     minDisk?: number;
+    /**
+     * Count of GPUs the task requires (0 = no GPU). When > 0, worker
+     * must have flavor.has_gpu and the client appends --gpus all.
+     *
+     * @generated from protobuf field: optional int32 min_gpu = 15
+     */
+    minGpu?: number;
 }
 /**
  * @generated from protobuf message taskqueue.EditStepCommandRequest
@@ -4062,6 +4082,7 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 25, name: "min_cpu", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 26, name: "min_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 27, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 38, name: "min_gpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 28, name: "cpu_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 29, name: "mem_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 30, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
@@ -4174,6 +4195,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                     break;
                 case /* optional float min_disk */ 27:
                     message.minDisk = reader.float();
+                    break;
+                case /* optional int32 min_gpu */ 38:
+                    message.minGpu = reader.int32();
                     break;
                 case /* repeated float cpu_curve */ 28:
                     if (wireType === WireType.LengthDelimited)
@@ -4320,6 +4344,9 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         /* optional string publish_mode = 31; */
         if (message.publishMode !== undefined)
             writer.tag(31, WireType.LengthDelimited).string(message.publishMode);
+        /* optional int32 min_gpu = 38; */
+        if (message.minGpu !== undefined)
+            writer.tag(38, WireType.Varint).int32(message.minGpu);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4374,6 +4401,7 @@ class Task$Type extends MessageType<Task> {
             { no: 38, name: "cpu_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 39, name: "mem_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 40, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 43, name: "min_gpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 41, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 42, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
@@ -4533,6 +4561,9 @@ class Task$Type extends MessageType<Task> {
                     else
                         message.diskCurve.push(reader.float());
                     break;
+                case /* optional int32 min_gpu */ 43:
+                    message.minGpu = reader.int32();
+                    break;
                 case /* optional string failure_class */ 41:
                     message.failureClass = reader.string();
                     break;
@@ -4689,6 +4720,9 @@ class Task$Type extends MessageType<Task> {
         /* optional string publish_mode = 42; */
         if (message.publishMode !== undefined)
             writer.tag(42, WireType.LengthDelimited).string(message.publishMode);
+        /* optional int32 min_gpu = 43; */
+        if (message.minGpu !== undefined)
+            writer.tag(43, WireType.Varint).int32(message.minGpu);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5049,7 +5083,8 @@ class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
             { no: 11, name: "retry", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 12, name: "min_cpu", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 13, name: "min_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 14, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 14, name: "min_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 15, name: "min_gpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<EditTaskRequest>): EditTaskRequest {
@@ -5106,6 +5141,9 @@ class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
                 case /* optional float min_disk */ 14:
                     message.minDisk = reader.float();
                     break;
+                case /* optional int32 min_gpu */ 15:
+                    message.minGpu = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5160,6 +5198,9 @@ class EditTaskRequest$Type extends MessageType<EditTaskRequest> {
         /* optional float min_disk = 14; */
         if (message.minDisk !== undefined)
             writer.tag(14, WireType.Bit32).float(message.minDisk);
+        /* optional int32 min_gpu = 15; */
+        if (message.minGpu !== undefined)
+            writer.tag(15, WireType.Varint).int32(message.minGpu);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

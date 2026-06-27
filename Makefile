@@ -15,9 +15,43 @@ BINARY_CLI=$(BINARY_DIR)/scitq$(EXE)
 PLATFORMS=linux/amd64 darwin/amd64 windows/amd64
 OUTDIR=bin
 
-.PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install install-server install-client install-cli server-upgrade add-py-version tgz-python-src
+.PHONY: all build-server build-client build-cli static-all static-server static-client static-cli cross-build docs install install-server install-client install-cli server-upgrade add-py-version tgz-python-src check-stubs-fresh
 
-all: tgz-python-src build-server build-client build-cli
+# check-stubs-fresh guards against the "proto edited, stubs forgotten"
+# trap that breaks operators silently — the alpha2 incident 2026-06-25
+# was exactly this: task_spec.gpu was wired through the Python source
+# and the Go server, but the Python pb stubs in the tgz still had the
+# old schema, so submit_task no-op'd `request.min_gpu = …` and tasks
+# shipped with min_gpu=null. We don't auto-regenerate (most .py / .go
+# edits don't touch proto and shouldn't trigger a stub rebuild) — we
+# just fail loudly with a clear "run make proto-all" message.
+#
+# Compares proto/taskqueue.proto's mtime against one representative
+# stub per target language. If any stub is older than the proto, the
+# whole stub set is presumed stale; one `make proto-all` regenerates
+# them all atomically. Removing a stub file also trips the check
+# (-nt returns true when the second arg doesn't exist).
+PROTO_FILE := proto/taskqueue.proto
+PROTO_STUBS := gen/taskqueuepb/taskqueue.pb.go \
+               python/src/scitq2/pb/taskqueue_pb2.py \
+               ui/gen/taskqueue.ts
+
+check-stubs-fresh:
+	@stale=0; \
+	for stub in $(PROTO_STUBS); do \
+		if [ "$(PROTO_FILE)" -nt "$$stub" ] || [ ! -f "$$stub" ]; then \
+			echo "⚠️  Stale or missing stub: $$stub ($(PROTO_FILE) is newer)"; \
+			stale=1; \
+		fi; \
+	done; \
+	if [ $$stale -ne 0 ]; then \
+		echo ""; \
+		echo "❌ Proto stubs are out of date. Run 'make proto-all' to regenerate."; \
+		echo "   ('make proto' / 'make proto-python' / 'make proto-ui' regenerate one language at a time.)"; \
+		exit 1; \
+	fi
+
+all: check-stubs-fresh tgz-python-src build-server build-client build-cli
 
 GIT_TAG    := $(shell git describe --tags --always --dirty)
 GIT_SHA    := $(shell git rev-parse --short HEAD)
@@ -113,6 +147,7 @@ proto-python:
 	  -I ../proto \
 	  --python_out=src/scitq2/pb \
 	  --grpc_python_out=src/scitq2/pb \
+	  --pyi_out=src/scitq2/pb \
 	  --proto_path=../proto \
 	  --experimental_allow_proto3_optional \
 	  ../proto/taskqueue.proto && \

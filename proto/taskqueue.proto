@@ -218,6 +218,11 @@ message TaskRequest {
     optional float min_cpu = 25;   // minimum cpu cores per task (also drives weight)
     optional float min_mem = 26;   // minimum GB of memory per task
     optional float min_disk = 27;  // minimum GB of disk per task
+    // Per-task GPU requirement (count). 0 = no GPU needed. When > 0,
+    // the assignment fit predicate requires worker.flavor.has_gpu and
+    // the client auto-appends `--gpus all` to docker argv plus an
+    // SCITQ_GPU env var the command can branch on.
+    optional int32 min_gpu = 38;
     // Per-attempt resource curve. The full list the workflow author declared
     // in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
     // The server keeps it on the task so the retry-decision path can look up
@@ -270,8 +275,8 @@ message Task {
     optional bool scitq_auth = 33;
     // See TaskRequest.numa.
     optional int32 numa = 34;
-    // See TaskRequest.min_cpu / min_mem / min_disk (per-task resource
-    // requirements; spec: addition_from_nextflow.md A).
+    // See TaskRequest.min_cpu / min_mem / min_disk / min_gpu (per-task
+    // resource requirements; spec: addition_from_nextflow.md A).
     optional float min_cpu = 35;
     optional float min_mem = 36;
     optional float min_disk = 37;
@@ -279,6 +284,7 @@ message Task {
     repeated float cpu_curve = 38;
     repeated float mem_curve = 39;
     repeated float disk_curve = 40;
+    optional int32 min_gpu = 43;
     // failure_class set by the worker on terminal failures (oom / timeout /
     // network / other) and propagated to the next TaskStatusUpdate. Server
     // also writes this column directly when reaping orphaned tasks
@@ -370,6 +376,9 @@ message EditTaskRequest {
     optional float min_cpu = 12;
     optional float min_mem = 13;
     optional float min_disk = 14;
+    // Count of GPUs the task requires (0 = no GPU). When > 0, worker
+    // must have flavor.has_gpu and the client appends --gpus all.
+    optional int32 min_gpu = 15;
 }
 
 message EditStepCommandRequest {

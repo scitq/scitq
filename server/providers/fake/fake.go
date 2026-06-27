@@ -62,7 +62,9 @@ func NewFromConfig(name string, cfg config.Config, config config.FakeProviderCon
 }
 
 // Create records a new worker in the specified region and returns a fake IP address.
-func (f *FakeProvider) Create(workerName, flavor, location string, jobId int32) (string, error) {
+// hasGPU is part of the Provider interface contract but the fake backend has no
+// VM image concept, so it's accepted and ignored.
+func (f *FakeProvider) Create(workerName, flavor, location string, hasGPU bool, jobId int32) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

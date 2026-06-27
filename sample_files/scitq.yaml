@@ -31,6 +31,17 @@ providers:
         offer: "ubuntu-24_04-lts"
         sku: "server"
         version: "latest"
+      # gpu_image is the image booted for has_gpu=true flavors (Standard_N*).
+      # The defaults below come from config.AzureGPUImage —
+      #   microsoft-dsvm/ubuntu-hpc/2204/latest (Microsoft's HPC image,
+      #   free, ships NVIDIA drivers + CUDA + nvidia-container-toolkit +
+      #   docker preconfigured for `--gpus all`).
+      # Uncomment only to override (e.g. NVIDIA's own GPU-Optimized VMI).
+      # gpu_image:
+      #   publisher: "microsoft-dsvm"
+      #   offer:     "ubuntu-hpc"
+      #   sku:       "2204"
+      #   version:   "latest"
       quotas:
         swedencentral:
           cpu: 340
@@ -50,6 +61,12 @@ providers:
       project_domain_id: default
       network_id: Ext-Net
       image_id: "Ubuntu 24.04"
+      # gpu_image_id is used for has_gpu=true flavors. Defaults to
+      # "NVIDIA GPU Cloud (NGC)" (OVH's Ubuntu 22.04 with NVIDIA
+      # drivers + nvidia-container-toolkit + docker preconfigured for
+      # `--gpus all`). Override only if your catalog uses a different
+      # name — `openstack image list --tag gpu` lists candidates.
+      # gpu_image_id: "NVIDIA GPU Cloud (NGC)"
       keypair: mykeyname
       identity_api_version: 3
       update_periodicity: 10m

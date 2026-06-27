@@ -435,6 +435,21 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		// SIGKILL the cmd. The defer below is responsible for cleanup so
 		// the daemon doesn't accumulate stopped containers.
 		command := []string{"run", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
+		// GPU plumbing. min_gpu > 0 means the YAML/DSL author declared
+		// the task needs GPUs; the assignment fit predicate has already
+		// vetted the worker has flavor.has_gpu, so we can safely append
+		// `--gpus all` (skipped if the operator already supplied an
+		// explicit --gpus flag via container_options — they'd presumably
+		// want device-pinning like `--gpus device=0,1` and shouldn't be
+		// overridden silently). SCITQ_GPU env mirrors CPU/MEM so the
+		// task script can branch on `${SCITQ_GPU:-0}`.
+		if task.MinGpu != nil && *task.MinGpu > 0 {
+			command = append(command, "-e", fmt.Sprintf("SCITQ_GPU=%d", *task.MinGpu))
+			explicitGpus := task.ContainerOptions != nil && strings.Contains(*task.ContainerOptions, "--gpus")
+			if !explicitGpus {
+				command = append(command, "--gpus", "all")
+			}
+		}
 		// NUMA binding: when the allocator handed us a slot, pin both
 		// CPUs and memory through docker's cpuset interface. Both flags
 		// matter — `--cpuset-cpus` alone pins threads but leaves

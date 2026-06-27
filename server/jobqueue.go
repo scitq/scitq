@@ -25,6 +25,11 @@ type Job struct {
 	ProviderName  string
 	Region        string
 	Flavor        string
+	// HasGPU is the recruited flavor's has_gpu signal (looked up from
+	// the flavor catalog at job-creation time). The provider's Create
+	// uses it to swap to the operator's `gpu_image` config when set.
+	// false for CPU-only flavors and when the catalog row is missing.
+	HasGPU        bool
 	Action        rune // "C", "D", "R"
 	Retry         int
 	Timeout       time.Duration
@@ -262,7 +267,7 @@ func (s *taskQueueServer) processJob(job Job) error {
 	switch job.Action {
 	case 'C': // Create
 		// Create the worker
-		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region, job.JobID)
+		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region, job.HasGPU, job.JobID)
 		if err != nil {
 			return fmt.Errorf("failed to create worker %s: %w", job.WorkerName, err)
 		}

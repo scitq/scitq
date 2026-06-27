@@ -20,15 +20,21 @@ const DefaultAssignTrigger int32 = 500 // 5 sec
 
 // workerCaps holds the per-worker flavor caps used by fitsWorker. NaN
 // on any dimension means "unset — bypass the check" (legacy workers
-// without a flavor row trivially accept any task). Hoisted to
-// package scope so the no-fit diagnostic helpers (whyDoesNotFit,
-// maybeWarnNoFit) below can share the type with assignPendingTasks.
-type workerCaps struct{ cpu, mem, disk float64 }
+// without a flavor row trivially accept any task). gpu is the binary
+// has_gpu signal coerced into the same NaN-bypass shape: NaN for
+// "no flavor / unknown", 0 for has_gpu=false, 1+ for has_gpu=true
+// (when a flavor.gpu_count column lands, the loader can fill it
+// in). Hoisted to package scope so the no-fit diagnostic helpers
+// (whyDoesNotFit, maybeWarnNoFit) below can share the type with
+// assignPendingTasks.
+type workerCaps struct{ cpu, mem, disk, gpu float64 }
 
 // taskMins holds the per-task minimum resource requirements. NaN
 // means "unset — task always fits" (legacy tasks without min_*).
-// Same hoist rationale as workerCaps.
-type taskMins struct{ cpu, mem, disk float64 }
+// gpu is integer-valued in the proto (count of GPUs); we carry it as
+// float64 here only so the NaN-bypass logic in fitsWorker is uniform
+// with cpu/mem/disk. Same hoist rationale as workerCaps.
+type taskMins struct{ cpu, mem, disk, gpu float64 }
 
 func (s *taskQueueServer) waitForAssignEvents(context context.Context) {
 	for {
@@ -109,12 +115,12 @@ func (s *taskQueueServer) assignPendingTasks() {
 	workerCapacityRows, err := tx.Query(`
 		SELECT w.worker_id, COALESCE(w.step_id,0),
 		       w.concurrency+w.prefetch-COALESCE(SUM(t.weight),0) AS capacity,
-		       f.cpu, f.mem, f.disk
+		       f.cpu, f.mem, f.disk, f.has_gpu
 		FROM worker w
 		LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
 		LEFT JOIN task t ON (t.worker_id=w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden)
 		WHERE w.status='R' AND w.deleted_at IS NULL
-		GROUP BY w.worker_id, w.step_id, w.concurrency, w.prefetch, f.cpu, f.mem, f.disk
+		GROUP BY w.worker_id, w.step_id, w.concurrency, w.prefetch, f.cpu, f.mem, f.disk, f.has_gpu
 		HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
 	`)
 	if err != nil {
@@ -134,7 +140,8 @@ func (s *taskQueueServer) assignPendingTasks() {
 		var workerID, stepID int32
 		var capacity float64
 		var fCPU, fMem, fDisk sql.NullFloat64
-		if err := workerCapacityRows.Scan(&workerID, &stepID, &capacity, &fCPU, &fMem, &fDisk); err != nil {
+		var fHasGPU sql.NullBool
+		if err := workerCapacityRows.Scan(&workerID, &stepID, &capacity, &fCPU, &fMem, &fDisk, &fHasGPU); err != nil {
 			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
 		}
@@ -150,6 +157,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 			cpu:  math.NaN(),
 			mem:  math.NaN(),
 			disk: math.NaN(),
+			gpu:  math.NaN(),
 		}
 		if fCPU.Valid {
 			caps.cpu = fCPU.Float64
@@ -159,6 +167,19 @@ func (s *taskQueueServer) assignPendingTasks() {
 		}
 		if fDisk.Valid {
 			caps.disk = fDisk.Float64
+		}
+		// Coerce has_gpu into the same NaN-bypass shape as cpu/mem/disk.
+		// flavor table today has no gpu_count column, so we model
+		// has_gpu=true as "1+ GPUs" (effectively unbounded for the
+		// current min_gpu values of 0 or 1); when a real count lands,
+		// swap this for f.gpu_count and the rest of the fit machinery
+		// keeps working unchanged.
+		if fHasGPU.Valid {
+			if fHasGPU.Bool {
+				caps.gpu = 1
+			} else {
+				caps.gpu = 0
+			}
 		}
 		workerFlavorCaps[workerID] = caps
 		stepWorkerMap[stepID] = append(stepWorkerMap[stepID], workerID)
@@ -203,6 +224,9 @@ func (s *taskQueueServer) assignPendingTasks() {
 			return false
 		}
 		if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk > caps.disk {
+			return false
+		}
+		if !math.IsNaN(req.gpu) && !math.IsNaN(caps.gpu) && req.gpu > caps.gpu {
 			return false
 		}
 		return true
@@ -290,6 +314,11 @@ func (s *taskQueueServer) assignPendingTasks() {
 				fetchArgs = append(fetchArgs, caps.disk)
 				argIdx++
 			}
+			if !math.IsNaN(caps.gpu) {
+				conds = append(conds, fmt.Sprintf("(COALESCE(t.min_gpu,0) <= $%d)", argIdx))
+				fetchArgs = append(fetchArgs, caps.gpu)
+				argIdx++
+			}
 			whereExtra := ""
 			if len(conds) > 0 {
 				whereExtra = "AND " + strings.Join(conds, " AND ")
@@ -329,8 +358,9 @@ func (s *taskQueueServer) assignPendingTasks() {
 				// (e.g. a smaller worker just drained them in this
 				// same tick), skip the warning entirely.
 				var sampleCpu, sampleMem, sampleDisk sql.NullFloat64
+				var sampleGPU sql.NullInt32
 				err := tx.QueryRow(`
-					SELECT t.min_cpu, t.min_mem, t.min_disk
+					SELECT t.min_cpu, t.min_mem, t.min_disk, t.min_gpu
 					FROM task t
 					LEFT JOIN step s ON s.step_id = t.step_id
 					LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
@@ -339,9 +369,9 @@ func (s *taskQueueServer) assignPendingTasks() {
 					  AND (t.step_id IS NULL OR t.step_id = 0 OR w.status = 'R')
 					ORDER BY t.created_at
 					LIMIT 1
-				`, stepID).Scan(&sampleCpu, &sampleMem, &sampleDisk)
+				`, stepID).Scan(&sampleCpu, &sampleMem, &sampleDisk, &sampleGPU)
 				if err == nil {
-					req := taskMins{cpu: math.NaN(), mem: math.NaN(), disk: math.NaN()}
+					req := taskMins{cpu: math.NaN(), mem: math.NaN(), disk: math.NaN(), gpu: math.NaN()}
 					if sampleCpu.Valid {
 						req.cpu = sampleCpu.Float64
 					}
@@ -350,6 +380,9 @@ func (s *taskQueueServer) assignPendingTasks() {
 					}
 					if sampleDisk.Valid {
 						req.disk = sampleDisk.Float64
+					}
+					if sampleGPU.Valid && sampleGPU.Int32 > 0 {
+						req.gpu = float64(sampleGPU.Int32)
 					}
 					if !fitsWorker(req, caps) {
 						s.maybeWarnNoFit(workerID, stepID, whyDoesNotFit(req, caps))
@@ -1078,6 +1111,15 @@ func whyDoesNotFit(req taskMins, caps workerCaps) string {
 	}
 	if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk > caps.disk {
 		return fmt.Sprintf("task needs disk=%g GB, worker has disk=%g GB", req.disk, caps.disk)
+	}
+	if !math.IsNaN(req.gpu) && !math.IsNaN(caps.gpu) && req.gpu > caps.gpu {
+		// caps.gpu==0 is the common case ("worker has no GPU"); report
+		// it explicitly rather than "0 < N" so the operator sees the
+		// missing-GPU diagnosis at a glance.
+		if caps.gpu == 0 {
+			return fmt.Sprintf("task needs gpu=%g, worker has no GPU (flavor.has_gpu=false)", req.gpu)
+		}
+		return fmt.Sprintf("task needs gpu=%g, worker has gpu=%g", req.gpu, caps.gpu)
 	}
 	return "no fitting task for this worker (resource curves don't intersect)"
 }

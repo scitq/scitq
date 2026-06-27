@@ -105,6 +105,7 @@ type Attr struct {
 			MinCpu           *float32 `arg:"--min-cpu" help:"Per-task minimum CPU cores (drives the worker-fit predicate). Lower it to make a stuck task eligible for smaller workers."`
 			MinMem           *float32 `arg:"--min-mem" help:"Per-task minimum memory in GB (worker-fit predicate). Risky — may cause OOM if you go below the workload's real footprint."`
 			MinDisk          *float32 `arg:"--min-disk" help:"Per-task minimum disk in GB (worker-fit predicate)."`
+			MinGpu           *int32   `arg:"--min-gpu" help:"Per-task GPU count. >0 makes the task GPU-only (fit requires worker.flavor.has_gpu) and the client adds --gpus all + SCITQ_GPU env."`
 		} `arg:"subcommand:update" help:"Update fields on a task in place (no retry; for fixing wrong submissions or unsticking state)"`
 
 		Kill *struct {
@@ -661,6 +662,9 @@ func (c *CLI) TaskList() error {
 			if task.MinDisk != nil {
 				fmt.Printf("   min_disk:  %g GB\n", *task.MinDisk)
 			}
+			if task.MinGpu != nil && *task.MinGpu > 0 {
+				fmt.Printf("   min_gpu:   %d\n", *task.MinGpu)
+			}
 			if task.RetryCount > 0 {
 				fmt.Printf("   Retries:   %d\n", task.RetryCount)
 			}
@@ -898,6 +902,9 @@ func (c *CLI) TaskUpdate() error {
 	}
 	if u.MinDisk != nil {
 		req.MinDisk = u.MinDisk
+	}
+	if u.MinGpu != nil {
+		req.MinGpu = u.MinGpu
 	}
 
 	if _, err := c.QC.Client.EditTask(ctx, req); err != nil {

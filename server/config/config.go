@@ -230,6 +230,14 @@ type AzureConfig struct {
 	Username            string            `yaml:"username" default:"ubuntu"` // Default username for the VM, using OVH default
 	SSHPublicKey        string            `yaml:"ssh_public_key" default:"~/.ssh/id_rsa.pub"`
 	Image               AzureImage        `yaml:"image"`
+	// Image booted for workers recruited on a has_gpu=true flavor
+	// (Standard_N* on Azure). Default: Microsoft's "Ubuntu HPC 22.04"
+	// image — free on the marketplace, ships NVIDIA drivers + CUDA
+	// runtime + nvidia-container-toolkit + docker preconfigured for
+	// `--gpus all`. cloud-init then just installs scitq-client as
+	// usual. Override per-field to point at a different image
+	// (e.g. NVIDIA's own GPU-Optimized VMI or a custom baked one).
+	GPUImage            AzureGPUImage     `yaml:"gpu_image"`
 	Quotas              map[string]Quota  `yaml:"quotas"` // key: region
 	Regions             []string          `yaml:"regions"`
 	UpdatePeriodicity   string            `yaml:"update_periodicity"` // Update periodicity in minutes
@@ -250,6 +258,18 @@ type AzureImage struct {
 	Publisher string `yaml:"publisher" default:"Canonical"`
 	Offer     string `yaml:"offer" default:"UbuntuServer"`
 	Sku       string `yaml:"sku" default:"24.04-LTS"`
+	Version   string `yaml:"version" default:"latest"`
+}
+
+// AzureGPUImage is the image booted for has_gpu=true recruits.
+// Same shape as AzureImage but with GPU-appropriate defaults
+// (Microsoft's "Ubuntu HPC 22.04" — free, NVIDIA drivers +
+// nvidia-container-toolkit preinstalled). Operators can override
+// any field via `gpu_image:` in scitq.yaml.
+type AzureGPUImage struct {
+	Publisher string `yaml:"publisher" default:"microsoft-dsvm"`
+	Offer     string `yaml:"offer" default:"ubuntu-hpc"`
+	Sku       string `yaml:"sku" default:"2204"`
 	Version   string `yaml:"version" default:"latest"`
 }
 
@@ -282,6 +302,13 @@ type OpenstackConfig struct {
 
 	DefaultRegion       string                 `yaml:"region"`
 	ImageID             string                 `yaml:"image_id"`
+	// Image (name or UUID) booted for workers recruited on a
+	// has_gpu=true flavor. Default: OVH's "NVIDIA GPU Cloud (NGC)"
+	// — Ubuntu 22.04 with NVIDIA drivers + nvidia-container-toolkit
+	// + docker preconfigured for `--gpus all`. Override per
+	// environment if your OpenStack catalog uses a different name;
+	// `openstack image list --tag gpu` lists candidates.
+	GPUImageID          string                 `yaml:"gpu_image_id" default:"NVIDIA GPU Cloud (NGC)"`
 	FlavorID            string                 `yaml:"flavor_id"`
 	NetworkID           string                 `yaml:"network_id"`
 	ExtNetworkID        string                 `yaml:"ext_network_id"`

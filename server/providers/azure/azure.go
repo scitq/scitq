@@ -221,7 +221,7 @@ func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidenti
 }
 
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
-func (ap *AzureProvider) Create(workerName, flavor, location string, jobId int32) (string, error) {
+func (ap *AzureProvider) Create(workerName, flavor, location string, hasGPU bool, jobId int32) (string, error) {
 	var ipAddress string
 	var pubIPID string
 
@@ -234,14 +234,43 @@ func (ap *AzureProvider) Create(workerName, flavor, location string, jobId int32
 		// Prepare the cloud-init script. The scitq CLI is downloaded
 		// alongside scitq-client so tasks opting into `scitq_auth` can
 		// use it without extra setup on the worker.
+		//
+		// GPU recruits get a `modprobe nvidia` first. The Microsoft
+		// Ubuntu HPC image ships NVIDIA drivers but doesn't always
+		// auto-load the kernel module on first boot; without an
+		// explicit modprobe, the first task hits
+		// `nvml error: driver not loaded` inside the NVIDIA Container
+		// Toolkit prestart hook (alpha2 incident 2026-06-25 worker
+		// 6113). Idempotent: a no-op if the module is already loaded.
+		// `|| true` so a missing-driver image doesn't abort cloud-init
+		// (the smoke test will then surface the failure with a clearer
+		// signal than a stuck VM).
+		gpuPrep := ""
+		if hasGPU {
+			// IMPORTANT: do NOT put a `: ` (colon-space) inside any
+			// runcmd entry — cloud-init's YAML loader parses it as a
+			// map key and the whole runcmd block fails schema
+			// validation, so cloud-init silently drops every command
+			// and scitq-client never installs (alpha2 incident
+			// 2026-06-27 worker 6124: ~30 min loop of "VM up → no
+			// scitq ping → watchdog deletes after 15m → recruit
+			// again"). The bash single-quotes around the WARN
+			// message look like they should be enough but YAML
+			// doesn't see them because the line starts with `- `.
+			// Wrap as a YAML-folded scalar (`- >-`) so any later
+			// punctuation we add is unambiguously part of a single
+			// string node.
+			gpuPrep = "\n  - modprobe nvidia || true\n  - >-\n      nvidia-smi -L || echo WARN nvidia-smi failed after modprobe -- GPU driver missing on host image"
+		}
 		cloudInit := fmt.Sprintf(`#cloud-config
-runcmd:
+runcmd:%s
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
   - curl -ksSL https://%s/scitq-cli?token=%s -o /usr/local/bin/scitq || true
   - chmod a+x /usr/local/bin/scitq || true
   - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d -provider "%s" -region "%s"
   - systemctl start scitq-client`,
+			gpuPrep,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
@@ -300,12 +329,30 @@ runcmd:
 					VMSize: to.Ptr(armcompute.VirtualMachineSizeTypes(flavor)),
 				},
 				StorageProfile: &armcompute.StorageProfile{
-					ImageReference: &armcompute.ImageReference{
-						Publisher: to.Ptr(ap.az.Image.Publisher),
-						Offer:     to.Ptr(ap.az.Image.Offer),
-						SKU:       to.Ptr(ap.az.Image.Sku),
-						Version:   to.Ptr(ap.az.Image.Version),
-					},
+					ImageReference: func() *armcompute.ImageReference {
+						// has_gpu=true recruits boot the GPU image
+						// (defaults to Microsoft's "Ubuntu HPC 22.04",
+						// see config.AzureGPUImage). The image must
+						// ship NVIDIA drivers + nvidia-container-toolkit
+						// + docker preconfigured for `--gpus all`; the
+						// Ubuntu HPC image checks all three boxes for
+						// free. Operators can override any field via
+						// `gpu_image:` in scitq.yaml.
+						if hasGPU {
+							return &armcompute.ImageReference{
+								Publisher: to.Ptr(ap.az.GPUImage.Publisher),
+								Offer:     to.Ptr(ap.az.GPUImage.Offer),
+								SKU:       to.Ptr(ap.az.GPUImage.Sku),
+								Version:   to.Ptr(ap.az.GPUImage.Version),
+							}
+						}
+						return &armcompute.ImageReference{
+							Publisher: to.Ptr(ap.az.Image.Publisher),
+							Offer:     to.Ptr(ap.az.Image.Offer),
+							SKU:       to.Ptr(ap.az.Image.Sku),
+							Version:   to.Ptr(ap.az.Image.Version),
+						}
+					}(),
 				},
 				OSProfile: &armcompute.OSProfile{
 					ComputerName:  to.Ptr(vmName),

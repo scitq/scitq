@@ -234,7 +234,7 @@ func (p *Provider) networkClient(region string) (*gophercloud.ServiceClient, err
 
 // Create boots a VM and attaches a floating IP when an external network is available.
 // Returns the chosen public IP, or a private IP if no FIP could be allocated.
-func (p *Provider) Create(workerName, flavorName, location string, jobId int32) (string, error) {
+func (p *Provider) Create(workerName, flavorName, location string, hasGPU bool, jobId int32) (string, error) {
 	region := firstNonEmpty(location, p.DefaultRegion)
 	if region == "" {
 		return "", errors.New("region is required (pass location or set DefaultRegion in OpenstackConfig)")
@@ -255,8 +255,15 @@ func (p *Provider) Create(workerName, flavorName, location string, jobId int32) 
 		return "", err
 	}
 
-	// Resolve image ID
-	imgID, err := p.findImageID(cc, p.Image)
+	// Resolve image ID. has_gpu=true recruits boot the GPU image
+	// (defaults to "NVIDIA GPU Cloud (NGC)" on OVH — Ubuntu 22.04
+	// with NVIDIA drivers + nvidia-container-toolkit + docker
+	// preconfigured). Operators can override via gpu_image_id.
+	imageRef := p.Image
+	if hasGPU {
+		imageRef = p.C.GPUImageID
+	}
+	imgID, err := p.findImageID(cc, imageRef)
 	if err != nil {
 		return "", err
 	}

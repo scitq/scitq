@@ -878,7 +878,7 @@ CHAIN_ENTRY_KEYS = {
 # Native step (inline command/container). Module steps (import: / module:)
 # forward arbitrary kwargs and are intentionally exempt from this list.
 STEP_NATIVE_KEYS = {
-    'name', 'container', 'tag', 'inputs', 'resource', 'command',
+    'name', 'container', 'container_options', 'tag', 'inputs', 'resource', 'command',
     'outputs', 'publish', 'publish_mode', 'task_spec', 'vars', 'depends', 'when',
     'worker_pool', 'skip_if_exists', 'accept_failure', 'language',
     'quality', 'retry', 'grouped', 'grouped_by', 'per_sample',
@@ -893,8 +893,8 @@ STEP_NATIVE_KEYS = {
 }
 
 WORKER_POOL_KEYS = {
-    'provider', 'region', 'cpu', 'mem', 'disk', 'gpumem',
-    'max_recruited', 'task_batches',
+    'provider', 'region', 'cpu', 'mem', 'disk', 'gpu', 'gpumem',
+    'flavor', 'max_recruited', 'task_batches',
 }
 
 PARAM_ENTRY_KEYS = {
@@ -1403,6 +1403,52 @@ def _build_worker_pool(wp_def: dict, params, extra_vars: Optional[Dict] = None) 
                     elif op == '==': filters.append(w_field == num)
             else:
                 filters.append(getattr(W, field) >= val)
+    # GPU is a count (proto int32) but flavor.gpu_count doesn't exist
+    # yet, so we collapse `gpu: true | 1 | ">= 1"` to `W.has_gpu == True`
+    # and treat `gpu: false | 0` as no constraint (mirrors task_spec.gpu
+    # semantics on the task side). When flavor.gpu_count lands, this
+    # block grows the same operator-regex branch as cpu/mem/disk for
+    # `gpu: ">= 2"`-style filters.
+    if 'gpu' in wp_def:
+        val = _resolve_field(wp_def['gpu'], params, extra_vars=extra_vars)
+        want_gpu = False
+        if isinstance(val, bool):
+            want_gpu = val
+        elif isinstance(val, (int, float)):
+            want_gpu = val > 0
+        elif isinstance(val, str):
+            s = val.strip().lower()
+            if s in ('true', 'yes'):
+                want_gpu = True
+            elif s in ('false', 'no', ''):
+                want_gpu = False
+            else:
+                m = re.match(r'(>=|<=|>|<|==)\s*(\d+)', s)
+                if m and int(m.group(2)) > 0 and m.group(1) in ('>=', '>', '=='):
+                    want_gpu = True
+                else:
+                    try:
+                        want_gpu = int(s) > 0
+                    except ValueError:
+                        raise ValueError(f"worker_pool.gpu: cannot parse {val!r} (expected bool, count, or '>= N')")
+        if want_gpu:
+            filters.append(W.has_gpu == True)
+
+    # Flavor pattern / exact-match filter. Lets a workflow constrain
+    # recruitment to a specific VM family (e.g. NC for full-passthrough
+    # GPUs vs NV/NVads which need a vGPU/Grid driver the default
+    # gpu_image doesn't ship — alpha2 incident 2026-06-25 wasted a
+    # recruit on Standard_NV6ads_A10_v5 with the HPC image and hit
+    # `nvml error: driver not loaded` because the datacenter driver
+    # can't bind to a partitioned vGPU). `%` triggers SQL LIKE; bare
+    # strings get an `==` match.
+    if 'flavor' in wp_def:
+        val = _resolve_field(wp_def['flavor'], params, extra_vars=extra_vars)
+        if isinstance(val, str) and val:
+            if '%' in val:
+                filters.append(W.flavor.like(val))
+            else:
+                filters.append(W.flavor == val)
 
     kwargs = {}
     if 'max_recruited' in wp_def:
@@ -2207,6 +2253,18 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     )
     if container:
         step_kwargs['container'] = container
+    # container_options: free-form docker-run flags appended verbatim.
+    # Use for things task_spec doesn't model: --shm-size, --ipc=host,
+    # --privileged, custom --mount, --device, etc. Note: when
+    # task_spec.gpu > 0 the client already auto-appends `--gpus all`,
+    # so don't put --gpus here unless you need device-pinning (the
+    # client respects an explicit --gpus in container_options and
+    # skips the auto-append).
+    if 'container_options' in step_def:
+        co = _resolve_field(step_def['container_options'], params, itervar,
+                            step_fields=step_def, extra_vars=extra_vars)
+        if co is not None and str(co) != '':
+            step_kwargs['container_options'] = str(co)
 
     # Tag: an explicit `tag:` on the step wins; otherwise derive from the
     # iterator context. The explicit form supports `{params.x}` / `{ITER}`

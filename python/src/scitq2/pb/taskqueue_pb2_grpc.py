@@ -150,6 +150,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.WorkerUpdateRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
+        self.ResetWorkerCounters = channel.unary_unary(
+                '/taskqueue.TaskQueue/ResetWorkerCounters',
+                request_serializer=taskqueue__pb2.ResetWorkerCountersRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
         self.GetWorkerStatuses = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetWorkerStatuses',
                 request_serializer=taskqueue__pb2.WorkerStatusRequest.SerializeToString,
@@ -676,6 +681,16 @@ class TaskQueueServicer(object):
 
     def UserUpdateWorker(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ResetWorkerCounters(self, request, context):
+        """Reset operator-visible counters on a worker. clear_failures bumps
+        worker.failures_cleared_at so the recent_failures subquery skips
+        older F-tasks. clear_warnings acks all unread W-level
+        worker_events for the worker. Either or both flags can be set.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -1280,6 +1295,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
             'UserUpdateWorker': grpc.unary_unary_rpc_method_handler(
                     servicer.UserUpdateWorker,
                     request_deserializer=taskqueue__pb2.WorkerUpdateRequest.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'ResetWorkerCounters': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResetWorkerCounters,
+                    request_deserializer=taskqueue__pb2.ResetWorkerCountersRequest.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
             'GetWorkerStatuses': grpc.unary_unary_rpc_method_handler(
@@ -2283,6 +2303,33 @@ class TaskQueue(object):
             target,
             '/taskqueue.TaskQueue/UserUpdateWorker',
             taskqueue__pb2.WorkerUpdateRequest.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResetWorkerCounters(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ResetWorkerCounters',
+            taskqueue__pb2.ResetWorkerCountersRequest.SerializeToString,
             taskqueue__pb2.Ack.FromString,
             options,
             channel_credentials,

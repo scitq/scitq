@@ -247,10 +247,17 @@ class Task:
                  publish_mode: Optional[str]=None,
                  skip_if_exists: bool = False,
                  retry: Optional[int]=None,
-                 accept_failure: bool = False):
+                 accept_failure: bool = False,
+                 container_options: Optional[str] = None):
         self.tag = tag
         self.command = command
         self.container = container
+        # Free-form docker-run flags appended verbatim by the client.
+        # task_spec.gpu>0 already handles `--gpus all`; use this for
+        # everything else (--shm-size, --ipc=host, --privileged, custom
+        # --device, etc.). When set AND task_spec.gpu>0, the client
+        # respects an explicit `--gpus` here and skips its auto-append.
+        self.container_options = container_options
         self.step = step  # backref to the Step this task belongs to
         self.full_name = self.step.naming_strategy(self.step.name, self.tag) if self.tag else self.step.name
         self.depends = depends
@@ -456,9 +463,11 @@ class Task:
             cpu_curve = ts.cpu_curve
             mem_curve = ts.mem_curve
             disk_curve = ts.disk_curve
+            min_gpu = ts.gpu
         else:
             min_cpu = min_mem = min_disk = None
             cpu_curve = mem_curve = disk_curve = None
+            min_gpu = None
 
         ext = self.step.workflow._extend
         existing = None
@@ -472,6 +481,7 @@ class Task:
                     command=resolved_command,
                     shell=resolved_shell,
                     container=self.container,
+                    container_options=self.container_options,
                     depends=resolved_depends,
                     inputs=resolved_inputs,
                     output=resolved_output,
@@ -489,6 +499,7 @@ class Task:
                     min_cpu=min_cpu,
                     min_mem=min_mem,
                     min_disk=min_disk,
+                    min_gpu=min_gpu,
                     cpu_curve=cpu_curve,
                     mem_curve=mem_curve,
                     disk_curve=disk_curve,
@@ -606,7 +617,7 @@ class Task:
 
 
 class TaskSpec:
-    def __init__(self, *, cpu=None, mem=None, disk=None,
+    def __init__(self, *, cpu=None, mem=None, disk=None, gpu=None,
                  concurrency: Optional[int]=None, prefetch: Optional[Union[str,int]]=None,
                  scitq_auth: bool=False, numa: Optional[int]=None):
         # cpu / mem / disk: either a scalar or a non-empty monotonically
@@ -660,6 +671,34 @@ class TaskSpec:
         # express (multiple destinations per file, asymmetric paths).
         self.scitq_auth = bool(scitq_auth)
         self.numa = numa
+        # GPU is integer-valued (count of devices) and has no per-attempt
+        # curve — a workload either needs GPUs or it doesn't, the
+        # number doesn't escalate on retry. Accept int, bool (True→1),
+        # numeric strings ("1" from YAML interpolation), or None.
+        self.gpu = self._parse_gpu(gpu)
+
+    @staticmethod
+    def _parse_gpu(value):
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if isinstance(value, int):
+            return value if value >= 0 else (_ for _ in ()).throw(ValueError(f"TaskSpec(gpu=...) must be >= 0; got {value!r}"))
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ('true', 'yes'):
+                return 1
+            if s in ('false', 'no', ''):
+                return 0
+            try:
+                n = int(s)
+            except ValueError:
+                raise ValueError(f"TaskSpec(gpu=...) must be an integer count (or bool); got {value!r}")
+            if n < 0:
+                raise ValueError(f"TaskSpec(gpu=...) must be >= 0; got {value!r}")
+            return n
+        raise ValueError(f"TaskSpec(gpu=...) must be an integer count (or bool); got {type(value).__name__}")
 
     @staticmethod
     def _normalize_curve(field: str, value):
@@ -821,6 +860,7 @@ class Step:
         skip_if_exists: bool = False,
         retry: Optional[int]=None,
         accept_failure: bool = False,
+        container_options: Optional[str] = None,
     ):
         """Complete an existing Step object with a new Task."""
         if outputs:
@@ -863,7 +903,8 @@ class Step:
                     inputs=inputs, resources=resources_list, language=language,
                     depends=resolved_depends, publish=publish, publish_mode=publish_mode,
                     skip_if_exists=skip_if_exists, retry=retry,
-                    accept_failure=accept_failure)
+                    accept_failure=accept_failure,
+                    container_options=container_options)
         self.tasks.append(task)
 
     def _resolve_publish(self, raw_publish, tag: Optional[str]) -> Optional[str]:
@@ -1056,6 +1097,7 @@ class Workflow:
         name: str,
         command: str,
         container: Optional[str] = None,
+        container_options: Optional[str] = None,
         tag: Optional[str] = None,
         inputs: Optional[Union[str, OutputBase, List[str], List[OutputBase]]] = None,
         outputs: Optional[Outputs] = None,
@@ -1113,7 +1155,8 @@ class Workflow:
         effective_language = language or self.language
         if tag is None and step.tasks:
             raise RuntimeError(f"Step '{name}' has no tag specified and has several iterations which is forbidden")
-        step.add_task(tag=tag, command=command, container=container, outputs=outputs, inputs=inputs, resources=resources,
+        step.add_task(tag=tag, command=command, container=container, container_options=container_options,
+                      outputs=outputs, inputs=inputs, resources=resources,
                       language=effective_language, depends=depends, skip_if_exists=skip_if_exists, retry=retry,
                       accept_failure=accept_failure)
         return step

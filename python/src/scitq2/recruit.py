@@ -74,6 +74,13 @@ class W:
     provider = StringFieldBuilder("provider")
     flavor = StringFieldBuilder("flavor")
     disk = NumberFieldBuilder("disk")
+    # GPU-related flavor columns (server protofilter has known about
+    # these for a while; the Python W proxy was the missing piece).
+    # gpumem = per-card VRAM in GB; has_gpu = boolean — combine for
+    # "gpu workload at all" + "needs at least N GB VRAM". A future
+    # `gpu_count` column would slot in here as another NumberField.
+    gpumem = NumberFieldBuilder("gpumem")
+    has_gpu = FieldBuilder("has_gpu")
 
 
 class WorkerPool:

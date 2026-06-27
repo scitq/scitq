@@ -65,6 +65,25 @@ func isPackageInstalled(packageName string) (bool, error) {
 	return count >= 1, nil
 }
 
+// isServiceActive checks whether a systemd unit is currently active.
+// `systemctl is-active <name>` exits 0 when active, non-zero otherwise;
+// we read stdout because that's what `is-active` reports independent
+// of exit code (some Microsoft HPC images have systemd quirks where
+// exit-code parsing alone gives false negatives).
+func isServiceActive(name string) (bool, error) {
+	out, err := executeShellCommand(fmt.Sprintf("systemctl is-active %s 2>/dev/null || true", name))
+	if err != nil {
+		return false, err
+	}
+	active := strings.TrimSpace(out) == "active"
+	if active {
+		log.Printf("Service %s is active", name)
+	} else {
+		log.Printf("Service %s is NOT active (state=%q)", name, strings.TrimSpace(out))
+	}
+	return active, nil
+}
+
 // executeCommands executes a series of commands with retries and stops on the first error.
 func executeCommands(retryCount int, commands ...string) error {
 	for _, command := range commands {

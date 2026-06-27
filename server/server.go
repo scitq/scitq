@@ -616,7 +616,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              input, resource, output, retry, is_final, uses_cache,
              download_timeout, running_timeout, upload_timeout,
              status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, numa,
-             min_cpu, min_mem, min_disk,
+             min_cpu, min_mem, min_disk, min_gpu,
              cpu_curve, mem_curve, disk_curve, publish_mode, created_at
            )
            VALUES (
@@ -624,8 +624,8 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              $6, $7, $8, $9, $10, $11,
              $12, $13, $14,
              $15, $16, $17, $18, $19, $20, $21, $22,
-             $23, $24, $25,
-             $26, $27, $28, $29, NOW()
+             $23, $24, $25, $26,
+             $27, $28, $29, $30, NOW()
            )
            RETURNING task_id, step_id
          )
@@ -636,7 +636,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(), req.Numa,
-		req.MinCpu, req.MinMem, req.MinDisk,
+		req.MinCpu, req.MinMem, req.MinDisk, req.MinGpu,
 		cpuCurveArg, memCurveArg, diskCurveArg, req.PublishMode,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
@@ -1376,7 +1376,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					download_timeout, running_timeout, upload_timeout,
 					input_hash, previous_task_id, retry_count,
 					task_name, publish, reuse_key, consume_reuse, scitq_auth,
-					min_cpu, min_mem, min_disk,
+					min_cpu, min_mem, min_disk, min_gpu,
 					cpu_curve, mem_curve, disk_curve, weight, publish_mode
 				)
 				SELECT
@@ -1393,6 +1393,10 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					     ELSE COALESCE(mem_curve[LEAST(retry_count + 2, array_length(mem_curve, 1))], min_mem) END,
 					CASE WHEN failure_class = 'eviction' THEN min_disk
 					     ELSE COALESCE(disk_curve[LEAST(retry_count + 2, array_length(disk_curve, 1))], min_disk) END,
+					-- GPU has no per-attempt curve (a workload either needs a
+					-- GPU or it doesn't), so the retry inherits min_gpu
+					-- verbatim regardless of failure_class.
+					min_gpu,
 					cpu_curve, mem_curve, disk_curve,
 					-- Capacity bookkeeping: the heavier retry consumes a
 					-- proportionally larger fraction of the worker. weight =
@@ -1928,7 +1932,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				download_timeout, running_timeout, upload_timeout,
 				input_hash, previous_task_id, retry_count, task_name, scitq_auth,
 				publish, skip_if_exists, skip_checked, reuse_key, consume_reuse, numa,
-				min_cpu, min_mem, min_disk,
+				min_cpu, min_mem, min_disk, min_gpu,
 				cpu_curve, mem_curve, disk_curve, weight, publish_mode
 			)
 			SELECT
@@ -1964,6 +1968,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				     ELSE COALESCE(t.mem_curve[1], t.min_mem) END,
 				CASE WHEN t.failure_class = 'eviction' THEN t.min_disk
 				     ELSE COALESCE(t.disk_curve[1], t.min_disk) END,
+				-- GPU has no per-attempt curve; retry inherits min_gpu as-is.
+				t.min_gpu,
 				t.cpu_curve, t.mem_curve, t.disk_curve,
 				-- Fresh attempt chain → weight resets to 1.0 (= curve[0]/curve[0])
 				-- unless the previous failure was eviction (preserve parent weight).
@@ -2340,6 +2346,9 @@ func (s *taskQueueServer) EditTask(ctx context.Context, req *pb.EditTaskRequest)
 	}
 	if req.MinDisk != nil {
 		addSet("min_disk", *req.MinDisk)
+	}
+	if req.MinGpu != nil {
+		addSet("min_gpu", *req.MinGpu)
 	}
 
 	if len(sets) == 0 {
@@ -3132,6 +3141,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var provider string
 		var cpu int32
 		var memory float32
+		var hasGPU sql.NullBool
 		var stepName sql.NullString
 
 		err = tx.QueryRow(`WITH insertquery AS (
@@ -3139,14 +3149,14 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			VALUES (NULLIF($1,0), $6 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, $5, FALSE, 'I')
 			RETURNING worker_id, worker_name, region_id, flavor_id, step_id
 		)
-		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name||'.'||p.config_name, r.region_name, f.flavor_name, f.cpu, f.mem, s.step_name
+		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name||'.'||p.config_name, r.region_name, f.flavor_name, f.cpu, f.mem, f.has_gpu, s.step_name
 		FROM insertquery iq
 		JOIN region r ON iq.region_id = r.region_id
 		JOIN flavor f ON iq.flavor_id = f.flavor_id
 		JOIN provider p ON r.provider_id = p.provider_id
 		LEFT JOIN step s ON s.step_id = iq.step_id`,
 			req.StepId, req.Concurrency, req.Prefetch, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
-			&workerID, &workerName, &providerID, &provider, &regionName, &flavorName, &cpu, &memory, &stepName)
+			&workerID, &workerName, &providerID, &provider, &regionName, &flavorName, &cpu, &memory, &hasGPU, &stepName)
 		if err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf(
@@ -3171,6 +3181,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			ProviderName: provider,
 			Region:       regionName,
 			Flavor:       flavorName,
+			HasGPU:       hasGPU.Valid && hasGPU.Bool,
 			Action:       'C',
 			Retry:        defaultJobRetry,
 			Timeout:      defaultJobTimeout,
@@ -4131,7 +4142,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			t.publish,
 			t.download_duration, t.run_duration, t.upload_duration,
 			t.quality_score, t.quality_vars::text,
-			t.min_cpu, t.min_mem, t.min_disk
+			t.min_cpu, t.min_mem, t.min_disk, t.min_gpu
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -4180,6 +4191,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			qualityScore                                                      sql.NullFloat64
 			qualityVars                                                       sql.NullString
 			minCpu, minMem, minDisk                                           sql.NullFloat64
+			minGpu                                                            sql.NullInt32
 			retryCount                                                        int32
 			hidden                                                            bool
 		)
@@ -4213,6 +4225,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&minCpu,
 			&minMem,
 			&minDisk,
+			&minGpu,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -4253,6 +4266,10 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		if minDisk.Valid {
 			v := float32(minDisk.Float64)
 			task.MinDisk = &v
+		}
+		if minGpu.Valid {
+			v := minGpu.Int32
+			task.MinGpu = &v
 		}
 
 		tasks = append(tasks, &task)
@@ -4402,7 +4419,8 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		SELECT task_id, command, shell, container, container_options,
 			input, resource, output, retry, is_final, uses_cache,
 			download_timeout, running_timeout, upload_timeout,
-			status, weight, publish, scitq_auth, numa, step_id, publish_mode
+			status, weight, publish, scitq_auth, numa, step_id, publish_mode,
+			min_gpu
 		FROM task
 		WHERE worker_id = $1
 		  AND NOT hidden
@@ -4430,11 +4448,25 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		var stepID sql.NullInt32
 
 		var publishNull, publishModeNull sql.NullString
+		// min_gpu reaches the client because the docker-run wrapper
+		// needs it to decide `--gpus all` + SCITQ_GPU env injection
+		// (client/client.go:445). min_cpu/min_mem/min_disk are NOT
+		// included here — the worker doesn't act on them locally; the
+		// fit predicate is enforced server-side at assignment time, so
+		// shipping them would only bloat the ping response. Spec:
+		// addition_from_nextflow.md A (the GPU dimension extends the
+		// per-task resource floors to a fourth axis).
+		var minGpu sql.NullInt32
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
-			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa, &stepID, &publishModeNull); err != nil {
+			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa, &stepID, &publishModeNull,
+			&minGpu); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
+		}
+		if minGpu.Valid && minGpu.Int32 > 0 {
+			v := minGpu.Int32
+			task.MinGpu = &v
 		}
 		task.PublishMode = utils.NullStringToPtr(publishModeNull)
 		if scitqAuth {

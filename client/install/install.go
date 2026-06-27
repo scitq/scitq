@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 )
@@ -115,13 +116,37 @@ func checkDocker() error {
 		return err
 	}
 
-	log.Printf("Checking docker package")
-	hasDocker, err := isPackageInstalled("docker")
+	// Two orthogonal signals:
+	//   serviceActive — is the docker daemon currently running? Drives
+	//     the stop/start dance around the bind-mount. The previous
+	//     `isPackageInstalled("docker")` was wrong on the Microsoft
+	//     Ubuntu HPC 22.04 image (default for has_gpu recruits): the
+	//     package shipped under a name dpkg's grep didn't match the
+	//     way we expected, so hasDocker came back false, we SKIPPED
+	//     the stop+start, bind-mounted on top of a running daemon's
+	//     data-root, and the daemon then failed to keep serving the
+	//     socket — first `docker pull` failed with "Cannot connect
+	//     to the Docker daemon" (alpha2 incident 2026-06-25, worker
+	//     6111). The service check is the right gate.
+	//   pkgInstalled — only matters for fresh CPU images where the
+	//     `apt install docker.io` branch needs to know the package is
+	//     missing. A running service implies the package exists, so
+	//     pkgInstalled is only consulted in the not-active branch.
+	log.Printf("Checking docker service")
+	serviceActive, err := isServiceActive("docker")
 	if err != nil {
 		return err
 	}
+	pkgInstalled := serviceActive
+	if !serviceActive {
+		pkgInstalled, err = isPackageInstalled("docker")
+		if err != nil {
+			return err
+		}
+	}
+
 	if scratchDockerIsMounted == 0 {
-		if hasDocker {
+		if serviceActive {
 			_, err = executeShellCommand("systemctl stop docker")
 			if err != nil {
 				return err
@@ -132,24 +157,60 @@ func checkDocker() error {
 		if err != nil {
 			return err
 		}
-		if hasDocker {
+		if serviceActive {
+			// Restart docker after the bind-mount swapped its
+			// data-root. The previous version returned as soon as
+			// systemctl reported the start submission accepted —
+			// good enough on idle workers, but the first
+			// download-phase `docker pull` on a fast-scheduled
+			// task can land before the daemon socket exists. Poll
+			// for readiness before declaring "docker: ok".
 			_, err = executeShellCommand("systemctl start docker")
 			if err != nil {
 				return err
 			}
+			if err := waitForDockerReady(30 * time.Second); err != nil {
+				return fmt.Errorf("docker restart after bind-mount: %w", err)
+			}
 		}
 	}
 
-	if !hasDocker {
+	if !pkgInstalled {
 		log.Printf("Installing docker")
 		err = executeCommands(5,
 			"apt update && apt install -y docker.io")
 		if err != nil {
 			return err
 		}
+		// apt install starts the service via the package's
+		// post-install hook; same readiness probe as above so we
+		// don't report "docker: ok" before the socket exists.
+		if err := waitForDockerReady(30 * time.Second); err != nil {
+			return fmt.Errorf("docker install: %w", err)
+		}
 	}
 
 	return nil
+}
+
+// waitForDockerReady polls `docker info` until it succeeds or the
+// timeout elapses. Used after systemctl start / apt install to confirm
+// the daemon socket is actually serving — `systemctl start` returns as
+// soon as systemd accepts the start request, which can be seconds
+// ahead of the daemon being reachable on /var/run/docker.sock.
+func waitForDockerReady(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		_, err := executeShellCommand("docker info >/dev/null 2>&1")
+		if err == nil {
+			log.Printf("docker daemon is reachable")
+			return nil
+		}
+		lastErr = err
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("docker info failed for %s: %w", timeout, lastErr)
 }
 
 func checkSwap(swapProportion float32) error {
