@@ -3056,6 +3056,44 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 
 	s.watchdog.WorkerRegistered(workerID, isPermanent)
 
+	// GPU count cross-check. The worker reports its host-measured
+	// nvidia-smi count; the flavor catalog carries the theoretical
+	// count from the per-SKU table. Mismatch usually means catalog
+	// drift (operator hasn't refreshed gpu.tsv since Azure published
+	// a new GPU SKU, or a permanent worker's GPU was swapped
+	// out-of-band). Emit a W-level worker_event so the operator
+	// sees it on the worker's badge without us silently
+	// overriding the catalog — auto-override on a single worker's
+	// report would mis-correct a per-VM hardware fault (broken
+	// GPU on one host of an otherwise healthy flavor) into a
+	// fleet-wide downgrade. Skip when the worker reported nothing
+	// (legacy client, or nvidia-smi missing on a host we believed
+	// had no GPU).
+	if req.GpuCount != nil {
+		var theoretical sql.NullInt32
+		_ = s.db.QueryRow(`
+			SELECT f.gpu_count
+			FROM worker w
+			LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
+			WHERE w.worker_id = $1
+		`, workerID).Scan(&theoretical)
+		measured := *req.GpuCount
+		if theoretical.Valid && theoretical.Int32 != measured {
+			msg := fmt.Sprintf(
+				"flavor catalog reports gpu_count=%d but host nvidia-smi reports %d",
+				theoretical.Int32, measured)
+			details := fmt.Sprintf(
+				`{"theoretical": %d, "measured": %d}`,
+				theoretical.Int32, measured)
+			if _, werr := s.db.Exec(`
+				INSERT INTO worker_event (worker_id, event_class, level, message, details_json)
+				VALUES ($1, 'gpu_count_mismatch', 'W', $2, $3::jsonb)
+			`, workerID, msg, details); werr != nil {
+				log.Printf("⚠️ Failed to record gpu_count mismatch event for worker %d: %v", workerID, werr)
+			}
+		}
+	}
+
 	// **Trigger task assignment**
 	s.triggerAssign()
 

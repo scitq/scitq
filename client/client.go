@@ -212,6 +212,12 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 	}
 	buildArch := runtime.GOOS + "/" + runtime.GOARCH
 
+	// Host-measured GPU count. The server compares against
+	// flavor.gpu_count (from the catalog) and emits a W-level
+	// worker_event on mismatch — catches catalog drift on permanent
+	// workers (bioit / bigbrother / …) without operator polling.
+	// 0 on CPU-only hosts where nvidia-smi is missing.
+	gpuCount := int32(DiscoverGPUCount())
 	res, err := client.RegisterWorker(ctx,
 		&pb.WorkerInfo{
 			Name:        w.Name,
@@ -222,6 +228,7 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 			Version:     &workerVersion,
 			Commit:      &workerCommit,
 			BuildArch:   &buildArch,
+			GpuCount:    &gpuCount,
 		})
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)

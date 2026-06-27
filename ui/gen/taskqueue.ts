@@ -61,6 +61,16 @@ export interface WorkerInfo {
      * @generated from protobuf field: optional string build_arch = 8
      */
     buildArch?: string; // GOOS/GOARCH, e.g. "linux/amd64"
+    /**
+     * Host-measured GPU count from nvidia-smi -L at worker startup.
+     * The server compares this against the worker's flavor.gpu_count
+     * (set by the catalog sync) and emits a W-level worker_event on
+     * mismatch — operators see catalog drift without polling. 0 when
+     * nvidia-smi is missing or fails (CPU-only flavors, mostly).
+     *
+     * @generated from protobuf field: optional int32 gpu_count = 9
+     */
+    gpuCount?: number;
 }
 /**
  * @generated from protobuf message taskqueue.ServerVersionResponse
@@ -3921,7 +3931,8 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
             { no: 5, name: "region", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 7, name: "commit", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 8, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 8, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "gpu_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerInfo>): WorkerInfo {
@@ -3960,6 +3971,9 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
                 case /* optional string build_arch */ 8:
                     message.buildArch = reader.string();
                     break;
+                case /* optional int32 gpu_count */ 9:
+                    message.gpuCount = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3996,6 +4010,9 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
         /* optional string build_arch = 8; */
         if (message.buildArch !== undefined)
             writer.tag(8, WireType.LengthDelimited).string(message.buildArch);
+        /* optional int32 gpu_count = 9; */
+        if (message.gpuCount !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.gpuCount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

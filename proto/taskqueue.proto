@@ -157,6 +157,12 @@ message WorkerInfo {
     optional string version = 6;     // semver+suffix, e.g. "v0.7.7-dev"
     optional string commit = 7;      // full git SHA
     optional string build_arch = 8;  // GOOS/GOARCH, e.g. "linux/amd64"
+    // Host-measured GPU count from nvidia-smi -L at worker startup.
+    // The server compares this against the worker's flavor.gpu_count
+    // (set by the catalog sync) and emits a W-level worker_event on
+    // mismatch — operators see catalog drift without polling. 0 when
+    // nvidia-smi is missing or fails (CPU-only flavors, mostly).
+    optional int32 gpu_count = 9;
 }
 
 message ServerVersionResponse {

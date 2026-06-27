@@ -76,9 +76,15 @@ type WorkerInfo struct {
 	// Build identity, reported on registration so the server can flag
 	// out-of-date workers. Phase I (visibility-only). See
 	// specs/worker_autoupgrade.md.
-	Version       *string `protobuf:"bytes,6,opt,name=version,proto3,oneof" json:"version,omitempty"`                      // semver+suffix, e.g. "v0.7.7-dev"
-	Commit        *string `protobuf:"bytes,7,opt,name=commit,proto3,oneof" json:"commit,omitempty"`                        // full git SHA
-	BuildArch     *string `protobuf:"bytes,8,opt,name=build_arch,json=buildArch,proto3,oneof" json:"build_arch,omitempty"` // GOOS/GOARCH, e.g. "linux/amd64"
+	Version   *string `protobuf:"bytes,6,opt,name=version,proto3,oneof" json:"version,omitempty"`                      // semver+suffix, e.g. "v0.7.7-dev"
+	Commit    *string `protobuf:"bytes,7,opt,name=commit,proto3,oneof" json:"commit,omitempty"`                        // full git SHA
+	BuildArch *string `protobuf:"bytes,8,opt,name=build_arch,json=buildArch,proto3,oneof" json:"build_arch,omitempty"` // GOOS/GOARCH, e.g. "linux/amd64"
+	// Host-measured GPU count from nvidia-smi -L at worker startup.
+	// The server compares this against the worker's flavor.gpu_count
+	// (set by the catalog sync) and emits a W-level worker_event on
+	// mismatch — operators see catalog drift without polling. 0 when
+	// nvidia-smi is missing or fails (CPU-only flavors, mostly).
+	GpuCount      *int32 `protobuf:"varint,9,opt,name=gpu_count,json=gpuCount,proto3,oneof" json:"gpu_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -167,6 +173,13 @@ func (x *WorkerInfo) GetBuildArch() string {
 		return *x.BuildArch
 	}
 	return ""
+}
+
+func (x *WorkerInfo) GetGpuCount() int32 {
+	if x != nil && x.GpuCount != nil {
+		return *x.GpuCount
+	}
+	return 0
 }
 
 type ServerVersionResponse struct {
@@ -11280,7 +11293,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\x0ftaskqueue.proto\x12\ttaskqueue\x1a\x1bgoogle/protobuf/empty.proto\"'\n" +
 	"\fTaskResponse\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\xec\x02\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\x9c\x03\n" +
 	"\n" +
 	"WorkerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
@@ -11291,7 +11304,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x06 \x01(\tH\x04R\aversion\x88\x01\x01\x12\x1b\n" +
 	"\x06commit\x18\a \x01(\tH\x05R\x06commit\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"build_arch\x18\b \x01(\tH\x06R\tbuildArch\x88\x01\x01B\x0e\n" +
+	"build_arch\x18\b \x01(\tH\x06R\tbuildArch\x88\x01\x01\x12 \n" +
+	"\tgpu_count\x18\t \x01(\x05H\aR\bgpuCount\x88\x01\x01B\x0e\n" +
 	"\f_concurrencyB\x0f\n" +
 	"\r_is_permanentB\v\n" +
 	"\t_providerB\t\n" +
@@ -11299,7 +11313,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_versionB\t\n" +
 	"\a_commitB\r\n" +
-	"\v_build_arch\"v\n" +
+	"\v_build_archB\f\n" +
+	"\n" +
+	"_gpu_count\"v\n" +
 	"\x15ServerVersionResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +

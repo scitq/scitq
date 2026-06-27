@@ -14,7 +14,7 @@ class TaskResponse(_message.Message):
     def __init__(self, task_id: _Optional[int] = ...) -> None: ...
 
 class WorkerInfo(_message.Message):
-    __slots__ = ("name", "concurrency", "is_permanent", "provider", "region", "version", "commit", "build_arch")
+    __slots__ = ("name", "concurrency", "is_permanent", "provider", "region", "version", "commit", "build_arch", "gpu_count")
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     IS_PERMANENT_FIELD_NUMBER: _ClassVar[int]
@@ -23,6 +23,7 @@ class WorkerInfo(_message.Message):
     VERSION_FIELD_NUMBER: _ClassVar[int]
     COMMIT_FIELD_NUMBER: _ClassVar[int]
     BUILD_ARCH_FIELD_NUMBER: _ClassVar[int]
+    GPU_COUNT_FIELD_NUMBER: _ClassVar[int]
     name: str
     concurrency: int
     is_permanent: bool
@@ -31,7 +32,8 @@ class WorkerInfo(_message.Message):
     version: str
     commit: str
     build_arch: str
-    def __init__(self, name: _Optional[str] = ..., concurrency: _Optional[int] = ..., is_permanent: bool = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ...) -> None: ...
+    gpu_count: int
+    def __init__(self, name: _Optional[str] = ..., concurrency: _Optional[int] = ..., is_permanent: bool = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ..., gpu_count: _Optional[int] = ...) -> None: ...
 
 class ServerVersionResponse(_message.Message):
     __slots__ = ("version", "commit", "build_arch")
