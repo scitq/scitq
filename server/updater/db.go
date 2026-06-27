@@ -56,7 +56,7 @@ func (ps *PostgresSession) GetProviderID(provider string) (int32, error) {
 // QueryFlavors returns all flavors for a given provider.
 func (ps *PostgresSession) QueryFlavors(providerID int32) ([]*Flavor, error) {
 	query := `
-	SELECT f.flavor_name, p.provider_name||'.'||p.config_name, f.cpu, f.mem, f.disk, f.bandwidth, f.gpu, f.gpumem, f.has_gpu, f.has_quick_disks
+	SELECT f.flavor_name, p.provider_name||'.'||p.config_name, f.cpu, f.mem, f.disk, f.bandwidth, f.gpu, f.gpumem, f.has_gpu, f.gpu_count, f.has_quick_disks
 	FROM flavor f
 	JOIN provider p ON f.provider_id = p.provider_id
 	WHERE f.provider_id = $1`
@@ -69,10 +69,10 @@ func (ps *PostgresSession) QueryFlavors(providerID int32) ([]*Flavor, error) {
 	var flavors []*Flavor
 	for rows.Next() {
 		var name, prov, gpu sql.NullString
-		var cpu, bandwidth, gpumem sql.NullInt64
+		var cpu, bandwidth, gpumem, gpuCount sql.NullInt64
 		var mem, disk sql.NullFloat64
 		var has_gpu, has_quick_disks bool
-		if err := rows.Scan(&name, &prov, &cpu, &mem, &disk, &bandwidth, &gpu, &gpumem, &has_gpu, &has_quick_disks); err != nil {
+		if err := rows.Scan(&name, &prov, &cpu, &mem, &disk, &bandwidth, &gpu, &gpumem, &has_gpu, &gpuCount, &has_quick_disks); err != nil {
 			return nil, fmt.Errorf("scan flavor: %w", err)
 		}
 		flavors = append(flavors, &Flavor{
@@ -85,6 +85,7 @@ func (ps *PostgresSession) QueryFlavors(providerID int32) ([]*Flavor, error) {
 			Bandwidth:    int(bandwidth.Int64),
 			GPU:          gpu.String,
 			GPUMem:       int(gpumem.Int64),
+			GPUCount:     int(gpuCount.Int64),
 			HasGPU:       has_gpu,
 			HasQuickDisk: has_quick_disks,
 		})
@@ -111,11 +112,11 @@ func (ps *PostgresSession) DeleteFlavor(f *Flavor) error {
 // AddFlavor inserts a new flavor into the database.
 func (ps *PostgresSession) AddFlavor(f *Flavor) error {
 	query := `
-	INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, bandwidth, gpu, gpumem)
+	INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, bandwidth, gpu, gpumem, has_gpu, gpu_count, has_quick_disks)
 	VALUES (
-	  $1, $2, $3, $4, $5, $6, $7, $8
+	  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 	)`
-	_, err := ps.tx.Exec(query, f.ProviderID, f.Name, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem)
+	_, err := ps.tx.Exec(query, f.ProviderID, f.Name, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem, f.HasGPU, f.GPUCount, f.HasQuickDisk)
 	if err != nil {
 		return fmt.Errorf("add flavor: %w", err)
 	}
@@ -126,10 +127,10 @@ func (ps *PostgresSession) AddFlavor(f *Flavor) error {
 func (ps *PostgresSession) UpdateFlavor(f *Flavor) error {
 	query := `
 	UPDATE flavor
-	SET cpu = $3, mem = $4, disk = $5, bandwidth = $6, gpu = $7, gpumem = $8, has_gpu = $9, has_quick_disks = $10
+	SET cpu = $3, mem = $4, disk = $5, bandwidth = $6, gpu = $7, gpumem = $8, has_gpu = $9, gpu_count = $10, has_quick_disks = $11
 	WHERE flavor_name = $1
 	  AND provider_id = $2`
-	_, err := ps.tx.Exec(query, f.Name, f.ProviderID, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem, f.HasGPU, f.HasQuickDisk)
+	_, err := ps.tx.Exec(query, f.Name, f.ProviderID, f.CPU, f.Mem, f.Disk, f.Bandwidth, f.GPU, f.GPUMem, f.HasGPU, f.GPUCount, f.HasQuickDisk)
 	if err != nil {
 		return fmt.Errorf("update flavor: %w", err)
 	}

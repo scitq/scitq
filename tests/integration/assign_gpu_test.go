@@ -56,16 +56,18 @@ func TestAssignTask_GPURequiredRoutedToHasGPUWorker(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	// Two flavors with IDENTICAL cpu/mem/disk; only has_gpu differs.
-	// That isolates the gpu dimension as the discriminator.
+	// Two flavors with IDENTICAL cpu/mem/disk; only gpu_count differs
+	// (and has_gpu mirrors it for the binary back-compat consumers).
+	// gpu_count is the predicate driver post-migration 41 — the fit
+	// check is `min_gpu <= gpu_count`, not `has_gpu`.
 	var cpuFlavorID, gpuFlavorID int32
 	require.NoError(t, db.QueryRow(`
-		INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, has_gpu)
-		VALUES (NULL, $1, 8, 32, 100, FALSE) RETURNING flavor_id
+		INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, has_gpu, gpu_count)
+		VALUES (NULL, $1, 8, 32, 100, FALSE, 0) RETURNING flavor_id
 	`, fmt.Sprintf("cpu-%s", wfName)).Scan(&cpuFlavorID))
 	require.NoError(t, db.QueryRow(`
-		INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, has_gpu)
-		VALUES (NULL, $1, 8, 32, 100, TRUE)  RETURNING flavor_id
+		INSERT INTO flavor (provider_id, flavor_name, cpu, mem, disk, has_gpu, gpu_count)
+		VALUES (NULL, $1, 8, 32, 100, TRUE,  1) RETURNING flavor_id
 	`, fmt.Sprintf("gpu-%s", wfName)).Scan(&gpuFlavorID))
 
 	// Two workers on the step. concurrency=2 so each can host both

@@ -3141,7 +3141,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var provider string
 		var cpu int32
 		var memory float32
-		var hasGPU sql.NullBool
+		var gpuCount sql.NullInt32
 		var stepName sql.NullString
 
 		err = tx.QueryRow(`WITH insertquery AS (
@@ -3149,14 +3149,14 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			VALUES (NULLIF($1,0), $6 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, $5, FALSE, 'I')
 			RETURNING worker_id, worker_name, region_id, flavor_id, step_id
 		)
-		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name||'.'||p.config_name, r.region_name, f.flavor_name, f.cpu, f.mem, f.has_gpu, s.step_name
+		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name||'.'||p.config_name, r.region_name, f.flavor_name, f.cpu, f.mem, f.gpu_count, s.step_name
 		FROM insertquery iq
 		JOIN region r ON iq.region_id = r.region_id
 		JOIN flavor f ON iq.flavor_id = f.flavor_id
 		JOIN provider p ON r.provider_id = p.provider_id
 		LEFT JOIN step s ON s.step_id = iq.step_id`,
 			req.StepId, req.Concurrency, req.Prefetch, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
-			&workerID, &workerName, &providerID, &provider, &regionName, &flavorName, &cpu, &memory, &hasGPU, &stepName)
+			&workerID, &workerName, &providerID, &provider, &regionName, &flavorName, &cpu, &memory, &gpuCount, &stepName)
 		if err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf(
@@ -3181,7 +3181,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			ProviderName: provider,
 			Region:       regionName,
 			Flavor:       flavorName,
-			HasGPU:       hasGPU.Valid && hasGPU.Bool,
+			HasGPU:       gpuCount.Valid && gpuCount.Int32 > 0,
 			Action:       'C',
 			Retry:        defaultJobRetry,
 			Timeout:      defaultJobTimeout,
@@ -4652,7 +4652,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			COALESCE(r.region_name, '') AS region_name,
 			COALESCE(p.provider_name || '.' || p.config_name, '') AS provider,
 			COALESCE(f.flavor_name, '') AS flavor,
-			f.cpu, f.mem, f.disk,
+			f.cpu, f.mem, f.disk, f.gpu_count,
 			w.step_id,
 			s.step_name,
 			w.is_permanent,
@@ -4719,7 +4719,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 	for rows.Next() {
 		var worker pb.Worker
 		var stepId, workflowId sql.NullInt32
-		var flavorCpu sql.NullInt32
+		var flavorCpu, flavorGpuCount sql.NullInt32
 		var flavorMem, flavorDisk sql.NullFloat64
 		var stepName, workflowName sql.NullString
 		var workerVersion, workerCommit, workerArch, upgradeReq sql.NullString
@@ -4727,7 +4727,7 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
 			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor,
-			&flavorCpu, &flavorMem, &flavorDisk,
+			&flavorCpu, &flavorMem, &flavorDisk, &flavorGpuCount,
 			&stepId, &stepName,
 			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName,
 			&workerVersion, &workerCommit, &workerArch, &upgradeReq, &recentFailures, &pendingWarnings)
@@ -4745,6 +4745,9 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		if flavorDisk.Valid {
 			v := float32(flavorDisk.Float64)
 			worker.FlavorDisk = &v
+		}
+		if flavorGpuCount.Valid {
+			worker.FlavorGpuCount = &flavorGpuCount.Int32
 		}
 		if stepId.Valid {
 			worker.StepId = &stepId.Int32
@@ -4815,6 +4818,7 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 		f.gpu,
 		f.gpumem,
 		f.has_gpu,
+		f.gpu_count,
 		f.has_quick_disks,
 		r.region_id,
 		r.region_name,
@@ -4860,6 +4864,7 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 			&flavor.Gpu,
 			&flavor.Gpumem,
 			&flavor.HasGpu,
+			&flavor.GpuCount,
 			&flavor.HasQuickDisks,
 			&flavor.RegionId,
 			&flavor.Region,

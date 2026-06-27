@@ -38,6 +38,12 @@ type Flavor struct {
 	Bandwidth    int
 	GPU          string
 	GPUMem       int
+	// GPUCount is the number of GPU devices the flavor exposes
+	// (parsed from the "NxModel" prefix of GPU, e.g. "4xTesla K80"
+	// → 4). 0 for CPU-only flavors. HasGPU == (GPUCount >= 1) is
+	// maintained alongside for back-compat with the binary fit
+	// predicate; new code reads GPUCount.
+	GPUCount     int
 	HasGPU       bool
 	HasQuickDisk bool
 }
@@ -207,6 +213,11 @@ func (gp *GenericProvider) UpdateFlavors(newFlavors []*Flavor) error {
 			if existing.HasGPU != newFlavor.HasGPU {
 				log.Printf("Flavor %s update GPU status: %t->%t\n", key, existing.HasGPU, newFlavor.HasGPU)
 				existing.HasGPU = newFlavor.HasGPU
+				changed = true
+			}
+			if existing.GPUCount != newFlavor.GPUCount {
+				log.Printf("Flavor %s update GPUCount: %d->%d\n", key, existing.GPUCount, newFlavor.GPUCount)
+				existing.GPUCount = newFlavor.GPUCount
 				changed = true
 			}
 			if existing.HasQuickDisk != newFlavor.HasQuickDisk {

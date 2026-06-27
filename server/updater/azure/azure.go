@@ -270,6 +270,26 @@ func (az *Azure) GetFlavors() error {
 					if gpumem, err := strconv.Atoi(gpuEntry["gpumem"]); err == nil {
 						f.GPUMem = gpumem
 					}
+					// gpu.tsv "gpu" column is "<N>x<Model>" (e.g.
+					// "4xTesla K80", "2xH100"). Pull N out of the
+					// prefix to populate GPUCount; the per-task fit
+					// predicate and the worker-side device allocator
+					// both depend on it. Default to 1 when the
+					// substring is malformed but HasGPU is true —
+					// safe lower bound that preserves the binary
+					// behaviour for unknown SKUs.
+					if idx := strings.Index(gpuEntry["gpu"], "x"); idx > 0 {
+						if n, err := strconv.Atoi(gpuEntry["gpu"][:idx]); err == nil && n > 0 {
+							f.GPUCount = n
+						}
+					}
+					if f.GPUCount == 0 && f.HasGPU {
+						f.GPUCount = 1
+					}
+				} else if f.HasGPU {
+					// HasGPU=true but no gpu.tsv entry — fall back to
+					// the binary "at least one" semantic.
+					f.GPUCount = 1
 				}
 				flavors = append(flavors, f)
 				seenFlavors[vm.Name] = true

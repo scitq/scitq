@@ -1593,6 +1593,11 @@ type Worker struct {
 	FlavorCpu       *int32                 `protobuf:"varint,17,opt,name=flavor_cpu,json=flavorCpu,proto3,oneof" json:"flavor_cpu,omitempty"`
 	FlavorMem       *float32               `protobuf:"fixed32,18,opt,name=flavor_mem,json=flavorMem,proto3,oneof" json:"flavor_mem,omitempty"`
 	FlavorDisk      *float32               `protobuf:"fixed32,19,opt,name=flavor_disk,json=flavorDisk,proto3,oneof" json:"flavor_disk,omitempty"`
+	// Count of GPU devices the worker's flavor exposes. The
+	// per-worker GPU allocator partitions these into slots of
+	// task_spec.gpu each; concurrency for GPU steps is bounded by
+	// flavor_gpu_count / task_spec.gpu.
+	FlavorGpuCount *int32 `protobuf:"varint,27,opt,name=flavor_gpu_count,json=flavorGpuCount,proto3,oneof" json:"flavor_gpu_count,omitempty"`
 	// Build identity (reported by the worker on registration; persisted
 	// by the server). See specs/worker_autoupgrade.md.
 	Version   *string `protobuf:"bytes,20,opt,name=version,proto3,oneof" json:"version,omitempty"`                      // worker's semver+suffix
@@ -1780,6 +1785,13 @@ func (x *Worker) GetFlavorMem() float32 {
 func (x *Worker) GetFlavorDisk() float32 {
 	if x != nil && x.FlavorDisk != nil {
 		return *x.FlavorDisk
+	}
+	return 0
+}
+
+func (x *Worker) GetFlavorGpuCount() int32 {
+	if x != nil && x.FlavorGpuCount != nil {
+		return *x.FlavorGpuCount
 	}
 	return 0
 }
@@ -3924,10 +3936,15 @@ type Flavor struct {
 	Mem           float32 `protobuf:"fixed32,6,opt,name=mem,proto3" json:"mem,omitempty"`                                            // Memory in GB (or as needed)
 	Disk          float32 `protobuf:"fixed32,7,opt,name=disk,proto3" json:"disk,omitempty"`                                          // Disk size in GB (or as needed)
 	Bandwidth     int32   `protobuf:"varint,8,opt,name=bandwidth,proto3" json:"bandwidth,omitempty"`                                 // Bandwidth (if applicable)
-	Gpu           string  `protobuf:"bytes,9,opt,name=gpu,proto3" json:"gpu,omitempty"`                                              // GPU description
+	Gpu           string  `protobuf:"bytes,9,opt,name=gpu,proto3" json:"gpu,omitempty"`                                              // GPU description (e.g. "4xTesla K80")
 	Gpumem        int32   `protobuf:"varint,10,opt,name=gpumem,proto3" json:"gpumem,omitempty"`                                      // GPU memory (in GB, for example)
-	HasGpu        bool    `protobuf:"varint,11,opt,name=has_gpu,json=hasGpu,proto3" json:"has_gpu,omitempty"`                        // Whether a GPU is present
+	HasGpu        bool    `protobuf:"varint,11,opt,name=has_gpu,json=hasGpu,proto3" json:"has_gpu,omitempty"`                        // Whether a GPU is present (gpu_count >= 1)
 	HasQuickDisks bool    `protobuf:"varint,12,opt,name=has_quick_disks,json=hasQuickDisks,proto3" json:"has_quick_disks,omitempty"` // Whether quick disks are supported
+	// Number of GPU devices the flavor exposes. Drives the per-task
+	// fit predicate (task.min_gpu vs worker.gpu_count) and the
+	// worker-side device allocator that injects CUDA_VISIBLE_DEVICES.
+	// 0 for CPU-only flavors; >=1 implies has_gpu=true.
+	GpuCount int32 `protobuf:"varint,17,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`
 	// Fields from the "flavor_region" table
 	RegionId      int32   `protobuf:"varint,13,opt,name=region_id,json=regionId,proto3" json:"region_id,omitempty"` // Foreign key to region table
 	Region        string  `protobuf:"bytes,14,opt,name=region,proto3" json:"region,omitempty"`                      // (Optional) Region name
@@ -4049,6 +4066,13 @@ func (x *Flavor) GetHasQuickDisks() bool {
 		return x.HasQuickDisks
 	}
 	return false
+}
+
+func (x *Flavor) GetGpuCount() int32 {
+	if x != nil {
+		return x.GpuCount
+	}
+	return 0
 }
 
 func (x *Flavor) GetRegionId() int32 {
@@ -11513,7 +11537,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x17EditStepCommandResponse\x12!\n" +
 	"\fedited_count\x18\x01 \x01(\x05R\veditedCount\x12 \n" +
 	"\fnew_task_ids\x18\x02 \x03(\x05R\n" +
-	"newTaskIds\"\xcd\b\n" +
+	"newTaskIds\"\x91\t\n" +
 	"\x06Worker\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -11538,16 +11562,17 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"flavor_mem\x18\x12 \x01(\x02H\x05R\tflavorMem\x88\x01\x01\x12$\n" +
 	"\vflavor_disk\x18\x13 \x01(\x02H\x06R\n" +
-	"flavorDisk\x88\x01\x01\x12\x1d\n" +
-	"\aversion\x18\x14 \x01(\tH\aR\aversion\x88\x01\x01\x12\x1b\n" +
-	"\x06commit\x18\x15 \x01(\tH\bR\x06commit\x88\x01\x01\x12\"\n" +
+	"flavorDisk\x88\x01\x01\x12-\n" +
+	"\x10flavor_gpu_count\x18\x1b \x01(\x05H\aR\x0eflavorGpuCount\x88\x01\x01\x12\x1d\n" +
+	"\aversion\x18\x14 \x01(\tH\bR\aversion\x88\x01\x01\x12\x1b\n" +
+	"\x06commit\x18\x15 \x01(\tH\tR\x06commit\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"build_arch\x18\x16 \x01(\tH\tR\tbuildArch\x88\x01\x01\x12*\n" +
-	"\x0eupgrade_status\x18\x17 \x01(\tH\n" +
-	"R\rupgradeStatus\x88\x01\x01\x120\n" +
-	"\x11upgrade_requested\x18\x18 \x01(\tH\vR\x10upgradeRequested\x88\x01\x01\x12,\n" +
-	"\x0frecent_failures\x18\x19 \x01(\x05H\fR\x0erecentFailures\x88\x01\x01\x12.\n" +
-	"\x10pending_warnings\x18\x1a \x01(\x05H\rR\x0fpendingWarnings\x88\x01\x01B\n" +
+	"build_arch\x18\x16 \x01(\tH\n" +
+	"R\tbuildArch\x88\x01\x01\x12*\n" +
+	"\x0eupgrade_status\x18\x17 \x01(\tH\vR\rupgradeStatus\x88\x01\x01\x120\n" +
+	"\x11upgrade_requested\x18\x18 \x01(\tH\fR\x10upgradeRequested\x88\x01\x01\x12,\n" +
+	"\x0frecent_failures\x18\x19 \x01(\x05H\rR\x0erecentFailures\x88\x01\x01\x12.\n" +
+	"\x10pending_warnings\x18\x1a \x01(\x05H\x0eR\x0fpendingWarnings\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_idB\f\n" +
 	"\n" +
@@ -11556,7 +11581,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0e_workflow_nameB\r\n" +
 	"\v_flavor_cpuB\r\n" +
 	"\v_flavor_memB\x0e\n" +
-	"\f_flavor_diskB\n" +
+	"\f_flavor_diskB\x13\n" +
+	"\x11_flavor_gpu_countB\n" +
 	"\n" +
 	"\b_versionB\t\n" +
 	"\a_commitB\r\n" +
@@ -11772,7 +11798,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0fclear_successes\x18\x04 \x01(\bR\x0eclearSuccesses\"B\n" +
 	"\x12ListFlavorsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xa9\x03\n" +
+	"\x06filter\x18\x02 \x01(\tR\x06filter\"\xc6\x03\n" +
 	"\x06Flavor\x12\x1b\n" +
 	"\tflavor_id\x18\x01 \x01(\x05R\bflavorId\x12\x1f\n" +
 	"\vflavor_name\x18\x02 \x01(\tR\n" +
@@ -11789,6 +11815,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	" \x01(\x05R\x06gpumem\x12\x17\n" +
 	"\ahas_gpu\x18\v \x01(\bR\x06hasGpu\x12&\n" +
 	"\x0fhas_quick_disks\x18\f \x01(\bR\rhasQuickDisks\x12\x1b\n" +
+	"\tgpu_count\x18\x11 \x01(\x05R\bgpuCount\x12\x1b\n" +
 	"\tregion_id\x18\r \x01(\x05R\bregionId\x12\x16\n" +
 	"\x06region\x18\x0e \x01(\tR\x06region\x12\x1a\n" +
 	"\beviction\x18\x0f \x01(\x02R\beviction\x12\x12\n" +

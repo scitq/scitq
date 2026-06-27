@@ -296,7 +296,7 @@ func getScriptExtension(shell string) string {
 }
 
 // executeTask runs the Docker command and streams logs.
-func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string, noBare bool, serverAddr string, workerToken string, numaAlloc Allocation, numaBound bool) {
+func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.Task, wg *sync.WaitGroup, store string, dm *DownloadManager, cpu int32, memGB int32, workerName string, noBare bool, serverAddr string, workerToken string, numaAlloc Allocation, numaBound bool, gpuDevs []int) {
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
@@ -436,15 +436,33 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		// the daemon doesn't accumulate stopped containers.
 		command := []string{"run", "--name", containerName, "-e", fmt.Sprintf("CPU=%d", cpu), "-e", fmt.Sprintf("THREADS=%d", cpu), "-e", fmt.Sprintf("MEM=%d", memGB)}
 		// GPU plumbing. min_gpu > 0 means the YAML/DSL author declared
-		// the task needs GPUs; the assignment fit predicate has already
-		// vetted the worker has flavor.has_gpu, so we can safely append
-		// `--gpus all` (skipped if the operator already supplied an
-		// explicit --gpus flag via container_options — they'd presumably
-		// want device-pinning like `--gpus device=0,1` and shouldn't be
-		// overridden silently). SCITQ_GPU env mirrors CPU/MEM so the
-		// task script can branch on `${SCITQ_GPU:-0}`.
+		// the task needs N GPUs; the assignment fit predicate has
+		// already vetted worker.flavor.gpu_count >= N, and the
+		// per-worker GPU allocator handed us specific device indices
+		// in gpuDevs. We inject:
+		//   --gpus all                  → docker wires the NVIDIA
+		//                                  Container Toolkit prestart
+		//                                  hook so the host driver +
+		//                                  CUDA libs are visible
+		//   CUDA_VISIBLE_DEVICES=N1,N2 → CUDA libraries (PyTorch,
+		//                                  TensorFlow, nvidia-smi, …)
+		//                                  see ONLY the allocated
+		//                                  devices, with relative
+		//                                  indices cuda:0, cuda:1
+		//   SCITQ_GPU=N                → script-friendly count
+		//   SCITQ_GPU_DEVICES=N1,N2    → script-friendly absolute IDs
+		// If container_options already pins --gpus device=… (operator
+		// override), we skip the auto --gpus all so their pinning
+		// stands.
 		if task.MinGpu != nil && *task.MinGpu > 0 {
 			command = append(command, "-e", fmt.Sprintf("SCITQ_GPU=%d", *task.MinGpu))
+			if len(gpuDevs) > 0 {
+				devsStr := VisibleDevicesEnv(gpuDevs)
+				command = append(command,
+					"-e", "CUDA_VISIBLE_DEVICES="+devsStr,
+					"-e", "SCITQ_GPU_DEVICES="+devsStr,
+				)
+			}
 			explicitGpus := task.ContainerOptions != nil && strings.Contains(*task.ContainerOptions, "--gpus")
 			if !explicitGpus {
 				command = append(command, "--gpus", "all")
@@ -1540,6 +1558,7 @@ func excuterThread(
 	workerToken string,
 	caps *LiveCaps, // shared cap state; 0 = autodetect from runtime.NumCPU / host mem
 	numaAllocator *NumaAllocator, // NUMA slot manager; nil-safe on non-NUMA hosts
+	gpuAllocator *GPUAllocator, // GPU device slot manager; nil-safe on CPU-only hosts
 ) {
 	var wg sync.WaitGroup
 
@@ -1638,12 +1657,45 @@ func excuterThread(
 				}
 			}
 
+			// GPU device allocation. When task_spec.gpu > 0 the
+			// fit predicate has already verified the worker has
+			// enough devices; here we pick which specific ones this
+			// task gets and inject CUDA_VISIBLE_DEVICES so the task
+			// only sees those. Allocation failure here is a logic
+			// bug (fit said yes, allocator said no — possible only
+			// during concurrent allocate-while-shrinking races we
+			// don't have today) — log loudly but proceed without
+			// pinning, so the task still runs with --gpus all and
+			// shares whatever the worker has.
+			var gpuDevs []int
+			if t.MinGpu != nil && *t.MinGpu > 0 && gpuAllocator != nil {
+				if devs, ok := gpuAllocator.Allocate(t.TaskId, int(*t.MinGpu)); ok {
+					gpuDevs = devs
+					reporter.Event("I", "runtime", "gpu bound", map[string]any{
+						"task_id":    t.TaskId,
+						"gpu_devices": gpuDevs,
+					})
+				} else {
+					log.Printf("⚠️ GPU request for task %d (gpu=%d) could not be honoured — running with --gpus all, no pinning",
+						t.TaskId, *t.MinGpu)
+					reporter.Event("W", "runtime", "gpu allocation failed", map[string]any{
+						"task_id":          t.TaskId,
+						"gpu_requested":    *t.MinGpu,
+						"host_gpu_count":   gpuAllocator.DeviceCount(),
+						"host_gpu_free":    gpuAllocator.FreeCount(),
+					})
+				}
+			}
+
 			log.Printf("Available CPU threads estimated to %d, memory to %d GB", cpu, memGB)
 			reporter.Event("I", "runtime", "cpu threads estimated", map[string]any{"task_id": t.TaskId, "cpu": cpu, "mem_gb": memGB})
-			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName, noBare, serverAddr, workerToken, numaAlloc, numaOK)
+			executeTask(client, reporter, t, &wg, store, dm, cpu, memGB, workerName, noBare, serverAddr, workerToken, numaAlloc, numaOK, gpuDevs)
 
 			if numaOK {
 				numaAllocator.Release(t.TaskId)
+			}
+			if len(gpuDevs) > 0 {
+				gpuAllocator.Release(t.TaskId)
 			}
 			sem.ReleaseTask(t.TaskId) // always release same weight
 			um.EnqueueTaskOutput(t)
@@ -1735,6 +1787,18 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 		// inherit their NUMA assignments so we don't double-book a node.
 		numaAlloc.RebuildFromDocker(ctx, config.Name)
 	}
+
+	// GPU device allocator. Runs nvidia-smi once at startup to count
+	// devices; the allocator partitions them per-task at execution
+	// time via CUDA_VISIBLE_DEVICES injection. On CPU-only flavors
+	// the count is 0 and Allocate() always fails — the executor's
+	// guard skips the inject path entirely. No equivalent of NUMA's
+	// RebuildFromDocker because a restart can't easily learn which
+	// CUDA_VISIBLE_DEVICES value an in-flight container received
+	// (it's an env var inside the container, not a docker label);
+	// drained tasks finishing under the new allocator will release
+	// no slots and finished naturally — same orphan risk as NUMA.
+	gpuAlloc := NewGPUAllocator(DiscoverGPUCount())
 	// Per-step memory for the numa→concurrency auto-derivation in
 	// fetchTasks. Stores the step_id we last derived for; the auto-
 	// derive fires whenever the worker arrives on a *new* step
@@ -1756,7 +1820,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	um := RunUploader(store, qclient.Client, activeTasks, reporter, rcloneRemotes)
 
 	// Launching execution thread
-	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc)
+	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc, gpuAlloc)
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &lastDerivedStep)

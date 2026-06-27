@@ -1,0 +1,1 @@
+ALTER TABLE flavor DROP COLUMN IF EXISTS gpu_count;

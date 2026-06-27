@@ -749,6 +749,15 @@ export interface Worker {
      */
     flavorDisk?: number;
     /**
+     * Count of GPU devices the worker's flavor exposes. The
+     * per-worker GPU allocator partitions these into slots of
+     * task_spec.gpu each; concurrency for GPU steps is bounded by
+     * flavor_gpu_count / task_spec.gpu.
+     *
+     * @generated from protobuf field: optional int32 flavor_gpu_count = 27
+     */
+    flavorGpuCount?: number;
+    /**
      * Build identity (reported by the worker on registration; persisted
      * by the server). See specs/worker_autoupgrade.md.
      *
@@ -1512,7 +1521,7 @@ export interface Flavor {
     /**
      * @generated from protobuf field: string gpu = 9
      */
-    gpu: string; // GPU description
+    gpu: string; // GPU description (e.g. "4xTesla K80")
     /**
      * @generated from protobuf field: int32 gpumem = 10
      */
@@ -1520,11 +1529,20 @@ export interface Flavor {
     /**
      * @generated from protobuf field: bool has_gpu = 11
      */
-    hasGpu: boolean; // Whether a GPU is present
+    hasGpu: boolean; // Whether a GPU is present (gpu_count >= 1)
     /**
      * @generated from protobuf field: bool has_quick_disks = 12
      */
     hasQuickDisks: boolean; // Whether quick disks are supported
+    /**
+     * Number of GPU devices the flavor exposes. Drives the per-task
+     * fit predicate (task.min_gpu vs worker.gpu_count) and the
+     * worker-side device allocator that injects CUDA_VISIBLE_DEVICES.
+     * 0 for CPU-only flavors; >=1 implies has_gpu=true.
+     *
+     * @generated from protobuf field: int32 gpu_count = 17
+     */
+    gpuCount: number;
     /**
      * Fields from the "flavor_region" table
      *
@@ -5368,6 +5386,7 @@ class Worker$Type extends MessageType<Worker> {
             { no: 17, name: "flavor_cpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 18, name: "flavor_mem", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 19, name: "flavor_disk", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 27, name: "flavor_gpu_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 20, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 21, name: "commit", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 22, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
@@ -5456,6 +5475,9 @@ class Worker$Type extends MessageType<Worker> {
                     break;
                 case /* optional float flavor_disk */ 19:
                     message.flavorDisk = reader.float();
+                    break;
+                case /* optional int32 flavor_gpu_count */ 27:
+                    message.flavorGpuCount = reader.int32();
                     break;
                 case /* optional string version */ 20:
                     message.version = reader.string();
@@ -5568,6 +5590,9 @@ class Worker$Type extends MessageType<Worker> {
         /* optional int32 pending_warnings = 26; */
         if (message.pendingWarnings !== undefined)
             writer.tag(26, WireType.Varint).int32(message.pendingWarnings);
+        /* optional int32 flavor_gpu_count = 27; */
+        if (message.flavorGpuCount !== undefined)
+            writer.tag(27, WireType.Varint).int32(message.flavorGpuCount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7736,6 +7761,7 @@ class Flavor$Type extends MessageType<Flavor> {
             { no: 10, name: "gpumem", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 11, name: "has_gpu", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 12, name: "has_quick_disks", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 17, name: "gpu_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 13, name: "region_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 14, name: "region", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 15, name: "eviction", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
@@ -7756,6 +7782,7 @@ class Flavor$Type extends MessageType<Flavor> {
         message.gpumem = 0;
         message.hasGpu = false;
         message.hasQuickDisks = false;
+        message.gpuCount = 0;
         message.regionId = 0;
         message.region = "";
         message.eviction = 0;
@@ -7804,6 +7831,9 @@ class Flavor$Type extends MessageType<Flavor> {
                     break;
                 case /* bool has_quick_disks */ 12:
                     message.hasQuickDisks = reader.bool();
+                    break;
+                case /* int32 gpu_count */ 17:
+                    message.gpuCount = reader.int32();
                     break;
                 case /* int32 region_id */ 13:
                     message.regionId = reader.int32();
@@ -7877,6 +7907,9 @@ class Flavor$Type extends MessageType<Flavor> {
         /* float cost = 16; */
         if (message.cost !== 0)
             writer.tag(16, WireType.Bit32).float(message.cost);
+        /* int32 gpu_count = 17; */
+        if (message.gpuCount !== 0)
+            writer.tag(17, WireType.Varint).int32(message.gpuCount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

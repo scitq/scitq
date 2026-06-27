@@ -413,6 +413,11 @@ message Worker {
     optional int32 flavor_cpu = 17;
     optional float flavor_mem = 18;
     optional float flavor_disk = 19;
+    // Count of GPU devices the worker's flavor exposes. The
+    // per-worker GPU allocator partitions these into slots of
+    // task_spec.gpu each; concurrency for GPU steps is bounded by
+    // flavor_gpu_count / task_spec.gpu.
+    optional int32 flavor_gpu_count = 27;
     // Build identity (reported by the worker on registration; persisted
     // by the server). See specs/worker_autoupgrade.md.
     optional string version = 20;        // worker's semver+suffix
@@ -722,10 +727,15 @@ message Flavor {
   float mem             = 6;  // Memory in GB (or as needed)
   float disk            = 7;  // Disk size in GB (or as needed)
   int32  bandwidth      = 8;  // Bandwidth (if applicable)
-  string gpu            = 9;  // GPU description
+  string gpu            = 9;  // GPU description (e.g. "4xTesla K80")
   int32  gpumem         = 10;  // GPU memory (in GB, for example)
-  bool   has_gpu        = 11; // Whether a GPU is present
+  bool   has_gpu        = 11; // Whether a GPU is present (gpu_count >= 1)
   bool   has_quick_disks = 12; // Whether quick disks are supported
+  // Number of GPU devices the flavor exposes. Drives the per-task
+  // fit predicate (task.min_gpu vs worker.gpu_count) and the
+  // worker-side device allocator that injects CUDA_VISIBLE_DEVICES.
+  // 0 for CPU-only flavors; >=1 implies has_gpu=true.
+  int32  gpu_count       = 17;
 
   // Fields from the "flavor_region" table
   int32 region_id      = 13; // Foreign key to region table

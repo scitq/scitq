@@ -304,7 +304,7 @@ class EditStepCommandResponse(_message.Message):
     def __init__(self, edited_count: _Optional[int] = ..., new_task_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class Worker(_message.Message):
-    __slots__ = ("worker_id", "name", "concurrency", "prefetch", "status", "ipv4", "ipv6", "flavor", "provider", "region", "step_id", "step_name", "is_permanent", "recyclable_scope", "workflow_id", "workflow_name", "flavor_cpu", "flavor_mem", "flavor_disk", "version", "commit", "build_arch", "upgrade_status", "upgrade_requested", "recent_failures", "pending_warnings")
+    __slots__ = ("worker_id", "name", "concurrency", "prefetch", "status", "ipv4", "ipv6", "flavor", "provider", "region", "step_id", "step_name", "is_permanent", "recyclable_scope", "workflow_id", "workflow_name", "flavor_cpu", "flavor_mem", "flavor_disk", "flavor_gpu_count", "version", "commit", "build_arch", "upgrade_status", "upgrade_requested", "recent_failures", "pending_warnings")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
@@ -324,6 +324,7 @@ class Worker(_message.Message):
     FLAVOR_CPU_FIELD_NUMBER: _ClassVar[int]
     FLAVOR_MEM_FIELD_NUMBER: _ClassVar[int]
     FLAVOR_DISK_FIELD_NUMBER: _ClassVar[int]
+    FLAVOR_GPU_COUNT_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     COMMIT_FIELD_NUMBER: _ClassVar[int]
     BUILD_ARCH_FIELD_NUMBER: _ClassVar[int]
@@ -350,6 +351,7 @@ class Worker(_message.Message):
     flavor_cpu: int
     flavor_mem: float
     flavor_disk: float
+    flavor_gpu_count: int
     version: str
     commit: str
     build_arch: str
@@ -357,7 +359,7 @@ class Worker(_message.Message):
     upgrade_requested: str
     recent_failures: int
     pending_warnings: int
-    def __init__(self, worker_id: _Optional[int] = ..., name: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., status: _Optional[str] = ..., ipv4: _Optional[str] = ..., ipv6: _Optional[str] = ..., flavor: _Optional[str] = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., step_id: _Optional[int] = ..., step_name: _Optional[str] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_id: _Optional[int] = ..., workflow_name: _Optional[str] = ..., flavor_cpu: _Optional[int] = ..., flavor_mem: _Optional[float] = ..., flavor_disk: _Optional[float] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ..., upgrade_status: _Optional[str] = ..., upgrade_requested: _Optional[str] = ..., recent_failures: _Optional[int] = ..., pending_warnings: _Optional[int] = ...) -> None: ...
+    def __init__(self, worker_id: _Optional[int] = ..., name: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., status: _Optional[str] = ..., ipv4: _Optional[str] = ..., ipv6: _Optional[str] = ..., flavor: _Optional[str] = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., step_id: _Optional[int] = ..., step_name: _Optional[str] = ..., is_permanent: bool = ..., recyclable_scope: _Optional[str] = ..., workflow_id: _Optional[int] = ..., workflow_name: _Optional[str] = ..., flavor_cpu: _Optional[int] = ..., flavor_mem: _Optional[float] = ..., flavor_disk: _Optional[float] = ..., flavor_gpu_count: _Optional[int] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ..., upgrade_status: _Optional[str] = ..., upgrade_requested: _Optional[str] = ..., recent_failures: _Optional[int] = ..., pending_warnings: _Optional[int] = ...) -> None: ...
 
 class WorkersList(_message.Message):
     __slots__ = ("workers",)
@@ -709,7 +711,7 @@ class ListFlavorsRequest(_message.Message):
     def __init__(self, limit: _Optional[int] = ..., filter: _Optional[str] = ...) -> None: ...
 
 class Flavor(_message.Message):
-    __slots__ = ("flavor_id", "flavor_name", "provider_id", "provider", "cpu", "mem", "disk", "bandwidth", "gpu", "gpumem", "has_gpu", "has_quick_disks", "region_id", "region", "eviction", "cost")
+    __slots__ = ("flavor_id", "flavor_name", "provider_id", "provider", "cpu", "mem", "disk", "bandwidth", "gpu", "gpumem", "has_gpu", "has_quick_disks", "gpu_count", "region_id", "region", "eviction", "cost")
     FLAVOR_ID_FIELD_NUMBER: _ClassVar[int]
     FLAVOR_NAME_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_ID_FIELD_NUMBER: _ClassVar[int]
@@ -722,6 +724,7 @@ class Flavor(_message.Message):
     GPUMEM_FIELD_NUMBER: _ClassVar[int]
     HAS_GPU_FIELD_NUMBER: _ClassVar[int]
     HAS_QUICK_DISKS_FIELD_NUMBER: _ClassVar[int]
+    GPU_COUNT_FIELD_NUMBER: _ClassVar[int]
     REGION_ID_FIELD_NUMBER: _ClassVar[int]
     REGION_FIELD_NUMBER: _ClassVar[int]
     EVICTION_FIELD_NUMBER: _ClassVar[int]
@@ -738,11 +741,12 @@ class Flavor(_message.Message):
     gpumem: int
     has_gpu: bool
     has_quick_disks: bool
+    gpu_count: int
     region_id: int
     region: str
     eviction: float
     cost: float
-    def __init__(self, flavor_id: _Optional[int] = ..., flavor_name: _Optional[str] = ..., provider_id: _Optional[int] = ..., provider: _Optional[str] = ..., cpu: _Optional[int] = ..., mem: _Optional[float] = ..., disk: _Optional[float] = ..., bandwidth: _Optional[int] = ..., gpu: _Optional[str] = ..., gpumem: _Optional[int] = ..., has_gpu: bool = ..., has_quick_disks: bool = ..., region_id: _Optional[int] = ..., region: _Optional[str] = ..., eviction: _Optional[float] = ..., cost: _Optional[float] = ...) -> None: ...
+    def __init__(self, flavor_id: _Optional[int] = ..., flavor_name: _Optional[str] = ..., provider_id: _Optional[int] = ..., provider: _Optional[str] = ..., cpu: _Optional[int] = ..., mem: _Optional[float] = ..., disk: _Optional[float] = ..., bandwidth: _Optional[int] = ..., gpu: _Optional[str] = ..., gpumem: _Optional[int] = ..., has_gpu: bool = ..., has_quick_disks: bool = ..., gpu_count: _Optional[int] = ..., region_id: _Optional[int] = ..., region: _Optional[str] = ..., eviction: _Optional[float] = ..., cost: _Optional[float] = ...) -> None: ...
 
 class FlavorsList(_message.Message):
     __slots__ = ("flavors",)
