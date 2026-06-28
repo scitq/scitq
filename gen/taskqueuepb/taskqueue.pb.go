@@ -297,6 +297,13 @@ type TaskRequest struct {
 	// the client auto-appends `--gpus all` to docker argv plus an
 	// SCITQ_GPU env var the command can branch on.
 	MinGpu *int32 `protobuf:"varint,38,opt,name=min_gpu,json=minGpu,proto3,oneof" json:"min_gpu,omitempty"`
+	// task_spec.gpu: "all" sentinel. When TRUE, the assignment loop
+	// resolves min_gpu to the chosen worker's flavor.gpu_count
+	// — letting one task grab every device on the host without the
+	// workflow author having to hardcode that count. Mutually
+	// exclusive with min_gpu (workflow compiler sends one or the
+	// other, never both). Spec: gpu_all_sentinel.md.
+	GpuAll *bool `protobuf:"varint,39,opt,name=gpu_all,json=gpuAll,proto3,oneof" json:"gpu_all,omitempty"`
 	// Per-attempt resource curve. The full list the workflow author declared
 	// in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
 	// The server keeps it on the task so the retry-decision path can look up
@@ -540,6 +547,13 @@ func (x *TaskRequest) GetMinGpu() int32 {
 	return 0
 }
 
+func (x *TaskRequest) GetGpuAll() bool {
+	if x != nil && x.GpuAll != nil {
+		return *x.GpuAll
+	}
+	return false
+}
+
 func (x *TaskRequest) GetCpuCurve() []float32 {
 	if x != nil {
 		return x.CpuCurve
@@ -616,6 +630,11 @@ type Task struct {
 	MemCurve  []float32 `protobuf:"fixed32,39,rep,packed,name=mem_curve,json=memCurve,proto3" json:"mem_curve,omitempty"`
 	DiskCurve []float32 `protobuf:"fixed32,40,rep,packed,name=disk_curve,json=diskCurve,proto3" json:"disk_curve,omitempty"`
 	MinGpu    *int32    `protobuf:"varint,43,opt,name=min_gpu,json=minGpu,proto3,oneof" json:"min_gpu,omitempty"`
+	// See TaskRequest.gpu_all. Server writes this column from the
+	// submission and clears it (sets gpu_all=FALSE, min_gpu=resolved)
+	// at assignment so downstream consumers (client, retry path) see
+	// a concrete count.
+	GpuAll *bool `protobuf:"varint,44,opt,name=gpu_all,json=gpuAll,proto3,oneof" json:"gpu_all,omitempty"`
 	// failure_class set by the worker on terminal failures (oom / timeout /
 	// network / other) and propagated to the next TaskStatusUpdate. Server
 	// also writes this column directly when reaping orphaned tasks
@@ -943,6 +962,13 @@ func (x *Task) GetMinGpu() int32 {
 		return *x.MinGpu
 	}
 	return 0
+}
+
+func (x *Task) GetGpuAll() bool {
+	if x != nil && x.GpuAll != nil {
+		return *x.GpuAll
+	}
+	return false
 }
 
 func (x *Task) GetFailureClass() string {
@@ -1325,7 +1351,12 @@ type EditTaskRequest struct {
 	MinDisk *float32 `protobuf:"fixed32,14,opt,name=min_disk,json=minDisk,proto3,oneof" json:"min_disk,omitempty"`
 	// Count of GPUs the task requires (0 = no GPU). When > 0, worker
 	// must have flavor.has_gpu and the client appends --gpus all.
-	MinGpu        *int32 `protobuf:"varint,15,opt,name=min_gpu,json=minGpu,proto3,oneof" json:"min_gpu,omitempty"`
+	MinGpu *int32 `protobuf:"varint,15,opt,name=min_gpu,json=minGpu,proto3,oneof" json:"min_gpu,omitempty"`
+	// See TaskRequest.gpu_all. Setting gpu_all=TRUE here clears
+	// min_gpu (the assignment loop re-resolves it at retry pick);
+	// setting min_gpu>0 clears gpu_all. The server enforces this
+	// exclusion server-side so the row never holds both.
+	GpuAll        *bool `protobuf:"varint,16,opt,name=gpu_all,json=gpuAll,proto3,oneof" json:"gpu_all,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1463,6 +1494,13 @@ func (x *EditTaskRequest) GetMinGpu() int32 {
 		return *x.MinGpu
 	}
 	return 0
+}
+
+func (x *EditTaskRequest) GetGpuAll() bool {
+	if x != nil && x.GpuAll != nil {
+		return *x.GpuAll
+	}
+	return false
 }
 
 type EditStepCommandRequest struct {
@@ -11340,8 +11378,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xdf\n" +
-	"\n" +
+	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\x89\v\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -11376,12 +11413,13 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\amin_cpu\x18\x19 \x01(\x02H\x10R\x06minCpu\x88\x01\x01\x12\x1c\n" +
 	"\amin_mem\x18\x1a \x01(\x02H\x11R\x06minMem\x88\x01\x01\x12\x1e\n" +
 	"\bmin_disk\x18\x1b \x01(\x02H\x12R\aminDisk\x88\x01\x01\x12\x1c\n" +
-	"\amin_gpu\x18& \x01(\x05H\x13R\x06minGpu\x88\x01\x01\x12\x1b\n" +
+	"\amin_gpu\x18& \x01(\x05H\x13R\x06minGpu\x88\x01\x01\x12\x1c\n" +
+	"\agpu_all\x18' \x01(\bH\x14R\x06gpuAll\x88\x01\x01\x12\x1b\n" +
 	"\tcpu_curve\x18\x1c \x03(\x02R\bcpuCurve\x12\x1b\n" +
 	"\tmem_curve\x18\x1d \x03(\x02R\bmemCurve\x12\x1d\n" +
 	"\n" +
 	"disk_curve\x18\x1e \x03(\x02R\tdiskCurve\x12&\n" +
-	"\fpublish_mode\x18\x1f \x01(\tH\x14R\vpublishMode\x88\x01\x01B\b\n" +
+	"\fpublish_mode\x18\x1f \x01(\tH\x15R\vpublishMode\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -11408,8 +11446,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_min_memB\v\n" +
 	"\t_min_diskB\n" +
 	"\n" +
-	"\b_min_gpuB\x0f\n" +
-	"\r_publish_mode\"\xab\x0f\n" +
+	"\b_min_gpuB\n" +
+	"\n" +
+	"\b_gpu_allB\x0f\n" +
+	"\r_publish_mode\"\xd5\x0f\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -11458,9 +11498,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tmem_curve\x18' \x03(\x02R\bmemCurve\x12\x1d\n" +
 	"\n" +
 	"disk_curve\x18( \x03(\x02R\tdiskCurve\x12\x1c\n" +
-	"\amin_gpu\x18+ \x01(\x05H\x1cR\x06minGpu\x88\x01\x01\x12(\n" +
-	"\rfailure_class\x18) \x01(\tH\x1dR\ffailureClass\x88\x01\x01\x12&\n" +
-	"\fpublish_mode\x18* \x01(\tH\x1eR\vpublishMode\x88\x01\x01B\b\n" +
+	"\amin_gpu\x18+ \x01(\x05H\x1cR\x06minGpu\x88\x01\x01\x12\x1c\n" +
+	"\agpu_all\x18, \x01(\bH\x1dR\x06gpuAll\x88\x01\x01\x12(\n" +
+	"\rfailure_class\x18) \x01(\tH\x1eR\ffailureClass\x88\x01\x01\x12&\n" +
+	"\fpublish_mode\x18* \x01(\tH\x1fR\vpublishMode\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -11497,7 +11538,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_min_memB\v\n" +
 	"\t_min_diskB\n" +
 	"\n" +
-	"\b_min_gpuB\x10\n" +
+	"\b_min_gpuB\n" +
+	"\n" +
+	"\b_gpu_allB\x10\n" +
 	"\x0e_failure_classB\x0f\n" +
 	"\r_publish_mode\"1\n" +
 	"\bTaskList\x12%\n" +
@@ -11526,7 +11569,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"StringList\x12\x16\n" +
 	"\x06values\x18\x01 \x03(\tR\x06values\"#\n" +
 	"\tInt32List\x12\x16\n" +
-	"\x06values\x18\x01 \x03(\x05R\x06values\"\xbf\x05\n" +
+	"\x06values\x18\x01 \x03(\x05R\x06values\"\xe9\x05\n" +
 	"\x0fEditTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\acommand\x18\x02 \x01(\tH\x00R\acommand\x88\x01\x01\x12!\n" +
@@ -11544,7 +11587,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"R\x06minCpu\x88\x01\x01\x12\x1c\n" +
 	"\amin_mem\x18\r \x01(\x02H\vR\x06minMem\x88\x01\x01\x12\x1e\n" +
 	"\bmin_disk\x18\x0e \x01(\x02H\fR\aminDisk\x88\x01\x01\x12\x1c\n" +
-	"\amin_gpu\x18\x0f \x01(\x05H\rR\x06minGpu\x88\x01\x01B\n" +
+	"\amin_gpu\x18\x0f \x01(\x05H\rR\x06minGpu\x88\x01\x01\x12\x1c\n" +
+	"\agpu_all\x18\x10 \x01(\bH\x0eR\x06gpuAll\x88\x01\x01B\n" +
 	"\n" +
 	"\b_commandB\f\n" +
 	"\n" +
@@ -11564,7 +11608,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_min_memB\v\n" +
 	"\t_min_diskB\n" +
 	"\n" +
-	"\b_min_gpu\"|\n" +
+	"\b_min_gpuB\n" +
+	"\n" +
+	"\b_gpu_all\"|\n" +
 	"\x16EditStepCommandRequest\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04find\x18\x02 \x01(\tR\x04find\x12\x18\n" +

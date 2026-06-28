@@ -194,7 +194,17 @@ class WorkerPool:
             # task — see client/client.go). The recruiter still needs a
             # placeholder so server-side validation passes; concurrency=1
             # is the right floor (a single-NUMA-node host runs one task).
-            if getattr(task_spec, 'numa', None) and task_spec.concurrency is None \
+            if getattr(task_spec, 'gpu', None) == 'all':
+                # task_spec.gpu="all" pins one task per worker so the
+                # lone task gets every device on the host. The
+                # recruiter goes static (concurrency=1); gpu_per_task
+                # would be meaningless here — at assignment the
+                # server resolves task.min_gpu = flavor.gpu_count
+                # and the allocator hands the task every index.
+                # See spec: gpu_all_sentinel.md.
+                options["concurrency"] = 1
+                options["prefetch_percent"] = int(task_spec.prefetch * 100)
+            elif getattr(task_spec, 'numa', None) and task_spec.concurrency is None \
                     and task_spec.cpu is None and task_spec.mem is None:
                 options["concurrency"] = 1
                 options["prefetch_percent"] = int(task_spec.prefetch * 100)

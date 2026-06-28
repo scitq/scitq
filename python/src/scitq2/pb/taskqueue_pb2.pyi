@@ -46,7 +46,7 @@ class ServerVersionResponse(_message.Message):
     def __init__(self, version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ...) -> None: ...
 
 class TaskRequest(_message.Message):
-    __slots__ = ("command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "dependency", "task_name", "skip_if_exists", "accept_failure", "publish", "reuse_key", "consume_reuse", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "min_gpu", "cpu_curve", "mem_curve", "disk_curve", "publish_mode")
+    __slots__ = ("command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "dependency", "task_name", "skip_if_exists", "accept_failure", "publish", "reuse_key", "consume_reuse", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "min_gpu", "gpu_all", "cpu_curve", "mem_curve", "disk_curve", "publish_mode")
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     SHELL_FIELD_NUMBER: _ClassVar[int]
     CONTAINER_FIELD_NUMBER: _ClassVar[int]
@@ -75,6 +75,7 @@ class TaskRequest(_message.Message):
     MIN_MEM_FIELD_NUMBER: _ClassVar[int]
     MIN_DISK_FIELD_NUMBER: _ClassVar[int]
     MIN_GPU_FIELD_NUMBER: _ClassVar[int]
+    GPU_ALL_FIELD_NUMBER: _ClassVar[int]
     CPU_CURVE_FIELD_NUMBER: _ClassVar[int]
     MEM_CURVE_FIELD_NUMBER: _ClassVar[int]
     DISK_CURVE_FIELD_NUMBER: _ClassVar[int]
@@ -107,14 +108,15 @@ class TaskRequest(_message.Message):
     min_mem: float
     min_disk: float
     min_gpu: int
+    gpu_all: bool
     cpu_curve: _containers.RepeatedScalarFieldContainer[float]
     mem_curve: _containers.RepeatedScalarFieldContainer[float]
     disk_curve: _containers.RepeatedScalarFieldContainer[float]
     publish_mode: str
-    def __init__(self, command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., dependency: _Optional[_Iterable[int]] = ..., task_name: _Optional[str] = ..., skip_if_exists: bool = ..., accept_failure: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., consume_reuse: bool = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., min_gpu: _Optional[int] = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., publish_mode: _Optional[str] = ...) -> None: ...
+    def __init__(self, command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., dependency: _Optional[_Iterable[int]] = ..., task_name: _Optional[str] = ..., skip_if_exists: bool = ..., accept_failure: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., consume_reuse: bool = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., min_gpu: _Optional[int] = ..., gpu_all: bool = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., publish_mode: _Optional[str] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "worker_id", "workflow_id", "task_name", "retry_count", "hidden", "previous_task_id", "weight", "run_start_time", "skip_if_exists", "publish", "reuse_key", "download_duration", "run_duration", "upload_duration", "quality_score", "quality_vars", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "cpu_curve", "mem_curve", "disk_curve", "min_gpu", "failure_class", "publish_mode")
+    __slots__ = ("task_id", "command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "worker_id", "workflow_id", "task_name", "retry_count", "hidden", "previous_task_id", "weight", "run_start_time", "skip_if_exists", "publish", "reuse_key", "download_duration", "run_duration", "upload_duration", "quality_score", "quality_vars", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "cpu_curve", "mem_curve", "disk_curve", "min_gpu", "gpu_all", "failure_class", "publish_mode")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     SHELL_FIELD_NUMBER: _ClassVar[int]
@@ -156,6 +158,7 @@ class Task(_message.Message):
     MEM_CURVE_FIELD_NUMBER: _ClassVar[int]
     DISK_CURVE_FIELD_NUMBER: _ClassVar[int]
     MIN_GPU_FIELD_NUMBER: _ClassVar[int]
+    GPU_ALL_FIELD_NUMBER: _ClassVar[int]
     FAILURE_CLASS_FIELD_NUMBER: _ClassVar[int]
     PUBLISH_MODE_FIELD_NUMBER: _ClassVar[int]
     task_id: int
@@ -199,9 +202,10 @@ class Task(_message.Message):
     mem_curve: _containers.RepeatedScalarFieldContainer[float]
     disk_curve: _containers.RepeatedScalarFieldContainer[float]
     min_gpu: int
+    gpu_all: bool
     failure_class: str
     publish_mode: str
-    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., worker_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., task_name: _Optional[str] = ..., retry_count: _Optional[int] = ..., hidden: bool = ..., previous_task_id: _Optional[int] = ..., weight: _Optional[float] = ..., run_start_time: _Optional[int] = ..., skip_if_exists: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., download_duration: _Optional[int] = ..., run_duration: _Optional[int] = ..., upload_duration: _Optional[int] = ..., quality_score: _Optional[float] = ..., quality_vars: _Optional[str] = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., min_gpu: _Optional[int] = ..., failure_class: _Optional[str] = ..., publish_mode: _Optional[str] = ...) -> None: ...
+    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., worker_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., task_name: _Optional[str] = ..., retry_count: _Optional[int] = ..., hidden: bool = ..., previous_task_id: _Optional[int] = ..., weight: _Optional[float] = ..., run_start_time: _Optional[int] = ..., skip_if_exists: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., download_duration: _Optional[int] = ..., run_duration: _Optional[int] = ..., upload_duration: _Optional[int] = ..., quality_score: _Optional[float] = ..., quality_vars: _Optional[str] = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., min_gpu: _Optional[int] = ..., gpu_all: bool = ..., failure_class: _Optional[str] = ..., publish_mode: _Optional[str] = ...) -> None: ...
 
 class TaskList(_message.Message):
     __slots__ = ("tasks",)
@@ -252,7 +256,7 @@ class Int32List(_message.Message):
     def __init__(self, values: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class EditTaskRequest(_message.Message):
-    __slots__ = ("task_id", "command", "container", "container_options", "shell", "status", "input", "resource", "output", "publish", "retry", "min_cpu", "min_mem", "min_disk", "min_gpu")
+    __slots__ = ("task_id", "command", "container", "container_options", "shell", "status", "input", "resource", "output", "publish", "retry", "min_cpu", "min_mem", "min_disk", "min_gpu", "gpu_all")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     CONTAINER_FIELD_NUMBER: _ClassVar[int]
@@ -268,6 +272,7 @@ class EditTaskRequest(_message.Message):
     MIN_MEM_FIELD_NUMBER: _ClassVar[int]
     MIN_DISK_FIELD_NUMBER: _ClassVar[int]
     MIN_GPU_FIELD_NUMBER: _ClassVar[int]
+    GPU_ALL_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     command: str
     container: str
@@ -283,7 +288,8 @@ class EditTaskRequest(_message.Message):
     min_mem: float
     min_disk: float
     min_gpu: int
-    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., shell: _Optional[str] = ..., status: _Optional[str] = ..., input: _Optional[_Union[StringList, _Mapping]] = ..., resource: _Optional[_Union[StringList, _Mapping]] = ..., output: _Optional[str] = ..., publish: _Optional[str] = ..., retry: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., min_gpu: _Optional[int] = ...) -> None: ...
+    gpu_all: bool
+    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., shell: _Optional[str] = ..., status: _Optional[str] = ..., input: _Optional[_Union[StringList, _Mapping]] = ..., resource: _Optional[_Union[StringList, _Mapping]] = ..., output: _Optional[str] = ..., publish: _Optional[str] = ..., retry: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., min_gpu: _Optional[int] = ..., gpu_all: bool = ...) -> None: ...
 
 class EditStepCommandRequest(_message.Message):
     __slots__ = ("step_id", "find", "replace", "is_regexp")

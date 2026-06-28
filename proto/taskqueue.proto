@@ -229,6 +229,13 @@ message TaskRequest {
     // the client auto-appends `--gpus all` to docker argv plus an
     // SCITQ_GPU env var the command can branch on.
     optional int32 min_gpu = 38;
+    // task_spec.gpu: "all" sentinel. When TRUE, the assignment loop
+    // resolves min_gpu to the chosen worker's flavor.gpu_count
+    // — letting one task grab every device on the host without the
+    // workflow author having to hardcode that count. Mutually
+    // exclusive with min_gpu (workflow compiler sends one or the
+    // other, never both). Spec: gpu_all_sentinel.md.
+    optional bool gpu_all = 39;
     // Per-attempt resource curve. The full list the workflow author declared
     // in `task_spec.cpu/mem/disk: [...]`. Empty = no curve (scalar resource).
     // The server keeps it on the task so the retry-decision path can look up
@@ -291,6 +298,11 @@ message Task {
     repeated float mem_curve = 39;
     repeated float disk_curve = 40;
     optional int32 min_gpu = 43;
+    // See TaskRequest.gpu_all. Server writes this column from the
+    // submission and clears it (sets gpu_all=FALSE, min_gpu=resolved)
+    // at assignment so downstream consumers (client, retry path) see
+    // a concrete count.
+    optional bool gpu_all = 44;
     // failure_class set by the worker on terminal failures (oom / timeout /
     // network / other) and propagated to the next TaskStatusUpdate. Server
     // also writes this column directly when reaping orphaned tasks
@@ -385,6 +397,11 @@ message EditTaskRequest {
     // Count of GPUs the task requires (0 = no GPU). When > 0, worker
     // must have flavor.has_gpu and the client appends --gpus all.
     optional int32 min_gpu = 15;
+    // See TaskRequest.gpu_all. Setting gpu_all=TRUE here clears
+    // min_gpu (the assignment loop re-resolves it at retry pick);
+    // setting min_gpu>0 clears gpu_all. The server enforces this
+    // exclusion server-side so the row never holds both.
+    optional bool gpu_all = 16;
 }
 
 message EditStepCommandRequest {

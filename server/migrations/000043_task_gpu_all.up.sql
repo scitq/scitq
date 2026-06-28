@@ -1,0 +1,21 @@
+-- task_spec.gpu: "all" sentinel from the workflow side.
+--
+-- Every task stores its own GPU intent. min_gpu is the resolved
+-- integer count; gpu_all is the "give the lone task on this worker
+-- every device the host has" sentinel. The two are independent at
+-- submission time:
+--
+--   * non-sentinel:   min_gpu = N,    gpu_all = FALSE
+--   * sentinel:       min_gpu = NULL, gpu_all = TRUE
+--
+-- At assignment, gpu_all=TRUE causes the assignment UPDATE to
+-- materialize min_gpu = worker.flavor.gpu_count atomically with
+-- the worker pick — the task then looks identical to any other
+-- multi-GPU task from that point on. Storing the sentinel (not
+-- the resolved integer) keeps the task portable across retries
+-- onto a different-sized flavor: each assignment re-resolves.
+--
+-- NOT NULL with DEFAULT FALSE because every existing task is
+-- non-sentinel by definition; no backfill needed.
+ALTER TABLE task
+  ADD COLUMN gpu_all BOOLEAN NOT NULL DEFAULT FALSE;

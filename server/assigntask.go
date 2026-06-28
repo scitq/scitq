@@ -29,6 +29,20 @@ const DefaultAssignTrigger int32 = 500 // 5 sec
 // assignPendingTasks.
 type workerCaps struct{ cpu, mem, disk, gpu float64 }
 
+// workerGpuCountForResolve coerces caps.gpu into the int32 the
+// assignment UPDATE expects to materialize task.min_gpu for
+// gpu_all=TRUE rows. NaN → 0 (defensive; the gpu_count column is
+// NOT NULL DEFAULT 0 since migration 41, so this branch should
+// never fire — but a 0 is still a valid no-op write for any task
+// that DOESN'T have gpu_all=TRUE, which is the only branch the
+// UPDATE's CASE actually reads).
+func workerGpuCountForResolve(caps workerCaps) int32 {
+	if math.IsNaN(caps.gpu) {
+		return 0
+	}
+	return int32(caps.gpu)
+}
+
 // taskMins holds the per-task minimum resource requirements. NaN
 // means "unset — task always fits" (legacy tasks without min_*).
 // gpu is integer-valued in the proto (count of GPUs); we carry it as
@@ -310,7 +324,13 @@ func (s *taskQueueServer) assignPendingTasks() {
 				argIdx++
 			}
 			if !math.IsNaN(caps.gpu) {
-				conds = append(conds, fmt.Sprintf("(COALESCE(t.min_gpu,0) <= $%d)", argIdx))
+				// gpu_all=TRUE means "the task is GPU-bound but the
+				// integer count is resolved at this assignment".
+				// COALESCE to a 1 in that case so the task fits any
+				// worker with gpu_count>=1 (any GPU-bearing flavor).
+				// Materialization to caps.gpu happens in the
+				// assignment UPDATE below.
+				conds = append(conds, fmt.Sprintf("(COALESCE(t.min_gpu, CASE WHEN t.gpu_all THEN 1 ELSE 0 END) <= $%d)", argIdx))
 				fetchArgs = append(fetchArgs, caps.gpu)
 				argIdx++
 			}
@@ -389,15 +409,25 @@ func (s *taskQueueServer) assignPendingTasks() {
 			// AND status = 'P' guard: without it, a task that another
 			// goroutine already moved to A would still appear in RETURNING,
 			// and we'd wrongly decrement Pending again.
+			//
+			// gpu_all resolution: when t.gpu_all is TRUE, the task
+			// committed to "every GPU on the chosen host" at submission
+			// time but the integer count was deferred to this exact
+			// moment. We materialize it to the worker's flavor.gpu_count
+			// here (passed in as $3) so the client sees a concrete min_gpu
+			// and the GPU allocator hands the lone task every device.
+			// gpu_all stays TRUE on the row so a future retry onto a
+			// differently-sized flavor re-resolves cleanly.
 			upRows, err := tx.Query(`
 				UPDATE task t
-				SET status = 'A', worker_id = $1
+				SET status = 'A', worker_id = $1,
+				    min_gpu = CASE WHEN t.gpu_all THEN $3::int ELSE t.min_gpu END
 				WHERE task_id = ANY($2)
 				  AND status = 'P'
 				RETURNING task_id, step_id, (
 				SELECT workflow_id FROM step s WHERE s.step_id = t.step_id
 				)
-			`, workerID, pq.Array(fittingTasks))
+			`, workerID, pq.Array(fittingTasks), workerGpuCountForResolve(caps))
 			if err != nil {
 				log.Printf("\u26a0\ufe0f Failed to assign tasks to worker %d: %v", workerID, err)
 				continue

@@ -463,11 +463,21 @@ class Task:
             cpu_curve = ts.cpu_curve
             mem_curve = ts.mem_curve
             disk_curve = ts.disk_curve
-            min_gpu = ts.gpu
+            # gpu == "all" is the sentinel — wire it as gpu_all=True
+            # and leave min_gpu unset; the server resolves the count
+            # at assignment from worker.flavor.gpu_count. Numeric
+            # gpu>=0 stays on min_gpu as before.
+            if ts.gpu == 'all':
+                min_gpu = None
+                gpu_all = True
+            else:
+                min_gpu = ts.gpu
+                gpu_all = False
         else:
             min_cpu = min_mem = min_disk = None
             cpu_curve = mem_curve = disk_curve = None
             min_gpu = None
+            gpu_all = False
 
         ext = self.step.workflow._extend
         existing = None
@@ -500,6 +510,7 @@ class Task:
                     min_mem=min_mem,
                     min_disk=min_disk,
                     min_gpu=min_gpu,
+                    gpu_all=gpu_all,
                     cpu_curve=cpu_curve,
                     mem_curve=mem_curve,
                     disk_curve=disk_curve,
@@ -648,8 +659,17 @@ class TaskSpec:
                 raise ValueError(f"TaskSpec(numa=...) must be a positive integer; got {numa!r}")
             if cpu_curve is not None or mem_curve is not None:
                 raise ValueError("TaskSpec: `numa` is mutually exclusive with `cpu` and `mem` — concurrency and per-task budget are derived from the host NUMA topology")
-        if concurrency is None and cpu_curve is None and mem_curve is None and numa is None:
-            raise ValueError("TaskSpec must define at least one of concurrency, cpu, mem or numa")
+        # gpu="all" inherently pins one task per worker, so it
+        # satisfies the "must define a concurrency driver" rule on its
+        # own. Numeric gpu>=1 alone still raises today — it would
+        # leave concurrency unbounded since the gpu_per_task ratio is
+        # not enough to commit to a single value without the recruiter
+        # also picking a flavor. "all" sidesteps that by committing to
+        # concurrency=1.
+        parsed_gpu_preview = self._parse_gpu(gpu)
+        gpu_is_all = parsed_gpu_preview == 'all'
+        if concurrency is None and cpu_curve is None and mem_curve is None and numa is None and not gpu_is_all:
+            raise ValueError("TaskSpec must define at least one of concurrency, cpu, mem, numa, or gpu='all'")
         # Canonical curve form (always a list when set) for the curve-aware
         # consumers (workflow.compile, server-side retry-decision).
         self.cpu_curve = cpu_curve
@@ -674,11 +694,26 @@ class TaskSpec:
         # GPU is integer-valued (count of devices) and has no per-attempt
         # curve — a workload either needs GPUs or it doesn't, the
         # number doesn't escalate on retry. Accept int, bool (True→1),
-        # numeric strings ("1" from YAML interpolation), or None.
+        # numeric strings ("1" from YAML interpolation), the sentinel
+        # string "all" (exclusive multi-GPU access), or None.
         self.gpu = self._parse_gpu(gpu)
+        # gpu="all" commits to one task per worker — concurrency=N>1
+        # would mean "every task gets every device", which the GPU
+        # allocator cannot honour. Reject at parse time so the
+        # mistake never reaches the server. Concurrency is allowed to
+        # be None (the recruiter forces it to 1 in this branch).
+        if self.gpu == 'all' and self.concurrency is not None and self.concurrency != 1:
+            raise ValueError("TaskSpec(gpu='all') is exclusive — concurrency must be 1 or unset, got "
+                             f"{self.concurrency!r}")
 
     @staticmethod
     def _parse_gpu(value):
+        # Sentinel string "all" means "grab every GPU the host has".
+        # Stored verbatim on the TaskSpec so downstream callers
+        # (recruit.build_recruiter, workflow.compile) can branch on
+        # it without losing intent; the actual integer count is
+        # materialized server-side at task assignment from
+        # worker.flavor.gpu_count. See spec: gpu_all_sentinel.md.
         if value is None:
             return None
         if isinstance(value, bool):
@@ -687,6 +722,8 @@ class TaskSpec:
             return value if value >= 0 else (_ for _ in ()).throw(ValueError(f"TaskSpec(gpu=...) must be >= 0; got {value!r}"))
         if isinstance(value, str):
             s = value.strip().lower()
+            if s == 'all':
+                return 'all'
             if s in ('true', 'yes'):
                 return 1
             if s in ('false', 'no', ''):
@@ -694,11 +731,11 @@ class TaskSpec:
             try:
                 n = int(s)
             except ValueError:
-                raise ValueError(f"TaskSpec(gpu=...) must be an integer count (or bool); got {value!r}")
+                raise ValueError(f"TaskSpec(gpu=...) must be an integer count, bool, or 'all'; got {value!r}")
             if n < 0:
                 raise ValueError(f"TaskSpec(gpu=...) must be >= 0; got {value!r}")
             return n
-        raise ValueError(f"TaskSpec(gpu=...) must be an integer count (or bool); got {type(value).__name__}")
+        raise ValueError(f"TaskSpec(gpu=...) must be an integer count, bool, or 'all'; got {type(value).__name__}")
 
     @staticmethod
     def _normalize_curve(field: str, value):
