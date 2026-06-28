@@ -568,6 +568,8 @@ def _recruiter_hint(client: Scitq2Client, step_id: int) -> str:
         parts.append(f"mem>{r.memory_per_task}")
     if getattr(r, "disk_per_task", None) is not None:
         parts.append(f"disk>{r.disk_per_task}")
+    if getattr(r, "gpu_per_task", None) is not None:
+        parts.append(f"GPU>{r.gpu_per_task}")
     hint = ", ".join(parts) if parts else "recruiter configured"
     suffix = " - and other options" if len(recruiters) > 1 else ""
     return f" ({hint}{suffix})"

@@ -917,6 +917,11 @@ message Recruiter {
     optional int32 prefetch_percent = 12;
     optional int32 concurrency_min = 13;
     optional int32 concurrency_max = 14;
+    // Per-task GPU declaration. When set together with a multi-GPU
+    // flavor (gpu_count >= gpu_per_task), the recruiter sizes the
+    // worker's concurrency to floor(gpu_count / gpu_per_task) —
+    // bounding in-flight GPU tasks to host device count.
+    optional int32 gpu_per_task = 15;
 }
 
 message RecruiterUpdate {
@@ -934,6 +939,7 @@ message RecruiterUpdate {
   optional int32 prefetch_percent = 12;
   optional int32 concurrency_min = 13;
   optional int32 concurrency_max = 14;
+  optional int32 gpu_per_task = 15;
 }
 
 message RecruiterList {

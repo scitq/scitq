@@ -5401,7 +5401,7 @@ func (s *taskQueueServer) AdminResetPassword(ctx context.Context, req *pb.AdminR
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
 	query := `SELECT step_id, rank, protofilter,
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
-		cpu_per_task, memory_per_task, disk_per_task, prefetch_percent, concurrency_min, concurrency_max
+		cpu_per_task, memory_per_task, disk_per_task, gpu_per_task, prefetch_percent, concurrency_min, concurrency_max
 		FROM recruiter`
 
 	args := []interface{}{}
@@ -5423,7 +5423,7 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 		if err := rows.Scan(
 			&recruiter.StepId, &recruiter.Rank, &recruiter.Protofilter,
 			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Rounds, &recruiter.Timeout,
-			&recruiter.CpuPerTask, &recruiter.MemoryPerTask, &recruiter.DiskPerTask, &recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
+			&recruiter.CpuPerTask, &recruiter.MemoryPerTask, &recruiter.DiskPerTask, &recruiter.GpuPerTask, &recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
@@ -5443,8 +5443,8 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			return &pb.Ack{Success: false}, fmt.Errorf("invalid protofilter: %w", err)
 		}
 	}
-	if req.Concurrency == nil && req.CpuPerTask == nil && req.MemoryPerTask == nil && req.DiskPerTask == nil {
-		return &pb.Ack{Success: false}, fmt.Errorf("either worker_concurrency or at least one of cpu_per_task/memory_per_task/disk_per_task must be set")
+	if req.Concurrency == nil && req.CpuPerTask == nil && req.MemoryPerTask == nil && req.DiskPerTask == nil && req.GpuPerTask == nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("either worker_concurrency or at least one of cpu_per_task/memory_per_task/disk_per_task/gpu_per_task must be set")
 	}
 	if req.Prefetch == nil && req.PrefetchPercent == nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("either worker_prefetch or prefetch_percent must be set")
@@ -5460,32 +5460,32 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			INSERT INTO recruiter (
 				step_id, rank, protofilter,
 				worker_concurrency, worker_prefetch, rounds, timeout,
-				cpu_per_task, memory_per_task, disk_per_task, prefetch_percent, concurrency_min, concurrency_max
+				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task, prefetch_percent, concurrency_min, concurrency_max
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7,
-				$8, $9, $10, $11, $12, $13
+				$8, $9, $10, $11, $12, $13, $14
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
 			req.Concurrency, req.Prefetch, req.Rounds, req.Timeout,
-			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
+			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 		)
 	} else {
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO recruiter (
 				step_id, rank, protofilter,
 				worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
-				cpu_per_task, memory_per_task, disk_per_task, prefetch_percent, concurrency_min, concurrency_max
+				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task, prefetch_percent, concurrency_min, concurrency_max
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7, $8,
-				$9, $10, $11, $12, $13, $14
+				$9, $10, $11, $12, $13, $14, $15
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
 			req.Concurrency, req.Prefetch, *req.MaxWorkers, req.Rounds, req.Timeout,
-			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
+			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 		)
 	}
 
@@ -5595,6 +5595,10 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 		clauses = append(clauses, fmt.Sprintf("disk_per_task = $%d", len(args)+1))
 		args = append(args, *req.DiskPerTask)
 	}
+	if req.GpuPerTask != nil {
+		clauses = append(clauses, fmt.Sprintf("gpu_per_task = $%d", len(args)+1))
+		args = append(args, *req.GpuPerTask)
+	}
 	if req.PrefetchPercent != nil {
 		clauses = append(clauses, fmt.Sprintf("prefetch_percent = $%d", len(args)+1))
 		args = append(args, *req.PrefetchPercent)
@@ -5619,7 +5623,7 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
             SET %s
             WHERE step_id = $%d AND rank = $%d
             RETURNING worker_concurrency, worker_prefetch,
-                      cpu_per_task, memory_per_task, disk_per_task,
+                      cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
                       prefetch_percent
         ),
         verdict AS (
@@ -5627,7 +5631,8 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
                 WHEN (worker_concurrency IS NULL
                       AND cpu_per_task IS NULL
                       AND memory_per_task IS NULL
-                      AND disk_per_task IS NULL)
+                      AND disk_per_task IS NULL
+                      AND gpu_per_task IS NULL)
                      THEN 'missing_concurrency'
                 WHEN (worker_prefetch IS NULL
                       AND prefetch_percent IS NULL)

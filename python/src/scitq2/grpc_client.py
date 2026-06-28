@@ -468,9 +468,10 @@ class Scitq2Client:
         response = self.stub.SubmitTask(request)
         return response.task_id
 
-    def create_recruiter(self, *, step_id: int, protofilter: str, rank: int=1, 
-                         concurrency: Optional[int]=None, prefetch: Optional[int]=None, 
-                         cpu_per_task: Optional[int]=None, memory_per_task: Optional[float]=None, disk_per_task: Optional[float]=None, 
+    def create_recruiter(self, *, step_id: int, protofilter: str, rank: int=1,
+                         concurrency: Optional[int]=None, prefetch: Optional[int]=None,
+                         cpu_per_task: Optional[int]=None, memory_per_task: Optional[float]=None, disk_per_task: Optional[float]=None,
+                         gpu_per_task: Optional[int]=None,
                          concurrency_max: Optional[int]=None, concurrency_min: Optional[int]=None,
                          prefetch_percent: Optional[int]=None,
                          max_recruited: Optional[int]=None, rounds: int=1, timeout: int=DEFAULT_RECRUITER_TIMEOUT) -> int:
@@ -486,10 +487,11 @@ class Scitq2Client:
         - concurrency (int): (optional) Concurrency settings for workers recruited here
         - prefetch (int): (optional) Prefetch settings for workers recruited here
 
-        or dynamic concurrency (if concurrency is omitted, one of cpu_per_task, memory_per_task or disk_per_task must be specified):
+        or dynamic concurrency (if concurrency is omitted, one of cpu_per_task, memory_per_task, disk_per_task or gpu_per_task must be specified):
         - cpu_per_task (int): (optional) Number of CPU required for 1 task,
-        - memory_per_task (float): (optional) Memory (Gb) required for 1 task, 
+        - memory_per_task (float): (optional) Memory (Gb) required for 1 task,
         - disk_per_task (float): (optional) Disk space (Gb) required for 1 task,
+        - gpu_per_task (int): (optional) Number of GPU devices required for 1 task,
         - prefetch_percent (int): (optional) prefetch expressed as a % of concurrency, 100 => prefetch = concurrency
         - concurrency_min (int): (optional) Minimal concurrency (only used with dynamic concurrency)
         - concurrency_max (int): (optional) Maximal concurrency (only used with dynamic concurrency)
@@ -520,6 +522,7 @@ class Scitq2Client:
             cpu_per_task=_i(cpu_per_task),
             memory_per_task=memory_per_task,
             disk_per_task=disk_per_task,
+            gpu_per_task=_i(gpu_per_task),
             prefetch_percent=_i(prefetch_percent),
             concurrency_min=_i(concurrency_min),
             concurrency_max=_i(concurrency_max),

@@ -80,6 +80,13 @@ type Recruiter struct {
 	CpuPerTask            *int
 	MemoryPerTask         *float32
 	DiskPerTask           *float32
+	// GPU devices the step's task_spec asked for, per task. When
+	// set, computeConcurrencyForRecruiterWorker adds
+	// flavor.gpu_count / gpu_per_task to the min-of-ratios
+	// formula — bounding in-flight GPU tasks to what the host
+	// actually has devices for instead of letting cpu/mem
+	// oversubscribe a multi-GPU SKU.
+	GpuPerTask            *int
 	ConcurrencyMax        *int
 	ConcurrencyMin        *int
 	PrefetchPercent       *int
@@ -141,6 +148,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.cpu_per_task,
             r.memory_per_task,
             r.disk_per_task,
+            r.gpu_per_task,
             r.prefetch_percent,
             r.concurrency_min,
             r.concurrency_max,
@@ -167,7 +175,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.step_id, r.rank, r.timeout, r.protofilter,
             r.worker_concurrency, r.worker_prefetch,
             r.maximum_workers, r.rounds,
-            r.cpu_per_task, r.memory_per_task, r.disk_per_task,
+            r.cpu_per_task, r.memory_per_task, r.disk_per_task, r.gpu_per_task,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
@@ -201,6 +209,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.CpuPerTask,
 			&r.MemoryPerTask,
 			&r.DiskPerTask,
+			&r.GpuPerTask,
 			&r.PrefetchPercent,
 			&r.ConcurrencyMin,
 			&r.ConcurrencyMax,
@@ -301,6 +310,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.cpu_per_task,
             r.memory_per_task,
             r.disk_per_task,
+            r.gpu_per_task,
             r.prefetch_percent,
             r.concurrency_min,
             r.concurrency_max,
@@ -329,7 +339,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.step_id, r.rank, r.timeout, r.protofilter,
             r.worker_concurrency, r.worker_prefetch,
             r.maximum_workers, r.rounds,
-            r.cpu_per_task, r.memory_per_task, r.disk_per_task,
+            r.cpu_per_task, r.memory_per_task, r.disk_per_task, r.gpu_per_task,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
@@ -358,6 +368,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
 			&r.CpuPerTask,
 			&r.MemoryPerTask,
 			&r.DiskPerTask,
+			&r.GpuPerTask,
 			&r.PrefetchPercent,
 			&r.ConcurrencyMin,
 			&r.ConcurrencyMax,
@@ -505,6 +516,10 @@ type RecyclableWorker struct {
 	Cpu         *int32
 	Memory      *float64
 	Disk        *float64
+	// GPU device count from the worker's flavor.gpu_count. Drives
+	// the gpu-per-task ratio in computeConcurrencyForRecruiterWorker
+	// alongside Cpu/Memory/Disk.
+	GpuCount    *int32
 	Occupation  float64
 }
 
@@ -537,7 +552,8 @@ func findRecyclableWorkers(
 			s.workflow_id,
 			f.cpu,
 			f.mem,
-			f.disk
+			f.disk,
+			f.gpu_count
 		FROM
 			worker w
 		LEFT JOIN
@@ -554,7 +570,7 @@ func findRecyclableWorkers(
 			AND w.recyclable_scope IN ('G','W')
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id,
-    		f.cpu, f.mem, f.disk
+    		f.cpu, f.mem, f.disk, f.gpu_count
 		HAVING
 			-- Free capacity on the current step, OR genuinely idle. The
 			-- idle branch covers operator-parked workers (concurrency=0,
@@ -574,7 +590,7 @@ func findRecyclableWorkers(
 	var stepFreeSlots = make(map[int32]int) // step_id -> free slots
 	for rows.Next() {
 		var w RecyclableWorker
-		var stepIDproxy, workflowIDProxy, cpu sql.NullInt32
+		var stepIDproxy, workflowIDProxy, cpu, gpuCount sql.NullInt32
 		var memory, disk sql.NullFloat64
 		if err := rows.Scan(
 			&w.WorkerID,
@@ -588,6 +604,7 @@ func findRecyclableWorkers(
 			&cpu,
 			&memory,
 			&disk,
+			&gpuCount,
 		); err != nil {
 			rows.Close()
 			return nil, err
@@ -601,6 +618,7 @@ func findRecyclableWorkers(
 		w.Cpu = utils.NullInt32ToPtr(cpu)
 		w.Memory = utils.NullFloat64ToPtr(memory)
 		w.Disk = utils.NullFloat64ToPtr(disk)
+		w.GpuCount = utils.NullInt32ToPtr(gpuCount)
 
 		// Compute occupation
 		log.Printf("[DEBUG] Worker %d: occupation %.2f", w.WorkerID, w.Occupation)
@@ -860,6 +878,19 @@ func computeConcurrencyForRecruiterWorker(r Recruiter, w RecyclableWorker) int {
 	}
 	if r.DiskPerTask != nil && w.Disk != nil && *r.DiskPerTask > 0 {
 		ratios = append(ratios, float64(*w.Disk)/float64(*r.DiskPerTask))
+	}
+	if r.GpuPerTask != nil && w.GpuCount != nil && *r.GpuPerTask > 0 {
+		// gpu_count == 0 on a CPU-only flavor → ratio 0 → min
+		// collapses to 0 → concurrency clamps to 1 (the floor
+		// below). That's correct only if the fit predicate ALSO
+		// rejected the worker; in practice the recruiter never
+		// reaches here for a CPU-only flavor on a GPU step because
+		// the W.has_gpu / W.gpu filter excludes it upstream. But the
+		// ratio still belongs here for symmetry with cpu/mem/disk
+		// and to bound multi-GPU SKUs to (gpu_count / gpu_per_task)
+		// concurrent tasks regardless of how much spare cpu/mem the
+		// flavor advertises.
+		ratios = append(ratios, float64(*w.GpuCount)/float64(*r.GpuPerTask))
 	}
 
 	// If nothing defined (unlikely), fallback to 1

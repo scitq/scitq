@@ -212,6 +212,13 @@ class WorkerPool:
                 options["cpu_per_task"]=task_spec.max_cpu if task_spec.max_cpu is not None else task_spec.cpu
                 options["memory_per_task"]=task_spec.max_mem if task_spec.max_mem is not None else task_spec.mem
                 options["disk_per_task"]=task_spec.max_disk if task_spec.max_disk is not None else task_spec.disk
+                # task_spec.gpu>0 makes GPU the 4th dimension of dynamic
+                # concurrency: at recruit time the server picks
+                # floor(flavor.gpu_count / gpu_per_task) and the minimum
+                # of all per-task ratios wins. Mirrors what cpu/mem/disk
+                # have done since day one.
+                if getattr(task_spec, 'gpu', None) is not None and task_spec.gpu > 0:
+                    options["gpu_per_task"] = task_spec.gpu
                 options["prefetch_percent"]=int(task_spec.prefetch*100)
             else:
                 concurrency = task_spec.concurrency

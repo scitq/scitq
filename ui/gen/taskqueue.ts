@@ -2026,6 +2026,15 @@ export interface Recruiter {
      * @generated from protobuf field: optional int32 concurrency_max = 14
      */
     concurrencyMax?: number;
+    /**
+     * Per-task GPU declaration. When set together with a multi-GPU
+     * flavor (gpu_count >= gpu_per_task), the recruiter sizes the
+     * worker's concurrency to floor(gpu_count / gpu_per_task) —
+     * bounding in-flight GPU tasks to host device count.
+     *
+     * @generated from protobuf field: optional int32 gpu_per_task = 15
+     */
+    gpuPerTask?: number;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterUpdate
@@ -2087,6 +2096,10 @@ export interface RecruiterUpdate {
      * @generated from protobuf field: optional int32 concurrency_max = 14
      */
     concurrencyMax?: number;
+    /**
+     * @generated from protobuf field: optional int32 gpu_per_task = 15
+     */
+    gpuPerTask?: number;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterList
@@ -9525,7 +9538,8 @@ class Recruiter$Type extends MessageType<Recruiter> {
             { no: 11, name: "disk_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 12, name: "prefetch_percent", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 13, name: "concurrency_min", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Recruiter>): Recruiter {
@@ -9586,6 +9600,9 @@ class Recruiter$Type extends MessageType<Recruiter> {
                 case /* optional int32 concurrency_max */ 14:
                     message.concurrencyMax = reader.int32();
                     break;
+                case /* optional int32 gpu_per_task */ 15:
+                    message.gpuPerTask = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9640,6 +9657,9 @@ class Recruiter$Type extends MessageType<Recruiter> {
         /* optional int32 concurrency_max = 14; */
         if (message.concurrencyMax !== undefined)
             writer.tag(14, WireType.Varint).int32(message.concurrencyMax);
+        /* optional int32 gpu_per_task = 15; */
+        if (message.gpuPerTask !== undefined)
+            writer.tag(15, WireType.Varint).int32(message.gpuPerTask);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9667,7 +9687,8 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
             { no: 11, name: "disk_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 12, name: "prefetch_percent", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 13, name: "concurrency_min", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<RecruiterUpdate>): RecruiterUpdate {
@@ -9725,6 +9746,9 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
                 case /* optional int32 concurrency_max */ 14:
                     message.concurrencyMax = reader.int32();
                     break;
+                case /* optional int32 gpu_per_task */ 15:
+                    message.gpuPerTask = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9779,6 +9803,9 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
         /* optional int32 concurrency_max = 14; */
         if (message.concurrencyMax !== undefined)
             writer.tag(14, WireType.Varint).int32(message.concurrencyMax);
+        /* optional int32 gpu_per_task = 15; */
+        if (message.gpuPerTask !== undefined)
+            writer.tag(15, WireType.Varint).int32(message.gpuPerTask);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

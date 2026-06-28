@@ -995,7 +995,7 @@ class RecruiterId(_message.Message):
     def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ...) -> None: ...
 
 class Recruiter(_message.Message):
-    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max")
+    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max", "gpu_per_task")
     STEP_ID_FIELD_NUMBER: _ClassVar[int]
     RANK_FIELD_NUMBER: _ClassVar[int]
     PROTOFILTER_FIELD_NUMBER: _ClassVar[int]
@@ -1010,6 +1010,7 @@ class Recruiter(_message.Message):
     PREFETCH_PERCENT_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_MIN_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_MAX_FIELD_NUMBER: _ClassVar[int]
+    GPU_PER_TASK_FIELD_NUMBER: _ClassVar[int]
     step_id: int
     rank: int
     protofilter: str
@@ -1024,10 +1025,11 @@ class Recruiter(_message.Message):
     prefetch_percent: int
     concurrency_min: int
     concurrency_max: int
-    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ...) -> None: ...
+    gpu_per_task: int
+    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ..., gpu_per_task: _Optional[int] = ...) -> None: ...
 
 class RecruiterUpdate(_message.Message):
-    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max")
+    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max", "gpu_per_task")
     STEP_ID_FIELD_NUMBER: _ClassVar[int]
     RANK_FIELD_NUMBER: _ClassVar[int]
     PROTOFILTER_FIELD_NUMBER: _ClassVar[int]
@@ -1042,6 +1044,7 @@ class RecruiterUpdate(_message.Message):
     PREFETCH_PERCENT_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_MIN_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_MAX_FIELD_NUMBER: _ClassVar[int]
+    GPU_PER_TASK_FIELD_NUMBER: _ClassVar[int]
     step_id: int
     rank: int
     protofilter: str
@@ -1056,7 +1059,8 @@ class RecruiterUpdate(_message.Message):
     prefetch_percent: int
     concurrency_min: int
     concurrency_max: int
-    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ...) -> None: ...
+    gpu_per_task: int
+    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ..., gpu_per_task: _Optional[int] = ...) -> None: ...
 
 class RecruiterList(_message.Message):
     __slots__ = ("recruiters",)
