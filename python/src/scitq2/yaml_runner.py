@@ -1185,33 +1185,64 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
                 "TSV inputs must have a header line with column names."
             )
 
-        # Key column: explicit > first column. Must exist among columns.
-        key_col = iter_def.get('key', fieldnames[0])
-        if key_col not in fieldnames:
+        # Key: explicit > first column. Accepts either a single column
+        # name (string) or a list of column names — list form synthesises
+        # a composite tag = ".".join(row[col] for col in key), which is
+        # how (ref, query)-style mapping files become per-pair iterations
+        # (the genomics binning case: ref column has 237 unique values
+        # repeated 10× each — neither column alone is unique, but the
+        # pair is). Spec: rosetta_binning.mappings.tsv use case.
+        key_raw = iter_def.get('key', fieldnames[0])
+        if isinstance(key_raw, list):
+            if not key_raw:
+                raise ValueError(
+                    f"Iterator '{name}' (source=tsv): key list must be non-empty"
+                )
+            for col in key_raw:
+                if not isinstance(col, str) or col not in fieldnames:
+                    raise ValueError(
+                        f"Iterator '{name}' (source=tsv): key column {col!r} not in "
+                        f"columns {fieldnames!r}."
+                    )
+            key_cols = list(key_raw)
+        elif isinstance(key_raw, str):
+            if key_raw not in fieldnames:
+                raise ValueError(
+                    f"Iterator '{name}' (source=tsv): key column {key_raw!r} not in "
+                    f"columns {fieldnames!r}."
+                )
+            key_cols = [key_raw]
+        else:
             raise ValueError(
-                f"Iterator '{name}' (source=tsv): key column {key_col!r} not in "
-                f"columns {fieldnames!r}."
+                f"Iterator '{name}' (source=tsv): key must be a column name (str) "
+                f"or a list of column names; got {type(key_raw).__name__}"
             )
 
         rows = list(reader)
         if not rows:
             return [], None
 
-        # Enforce key uniqueness so the iter-tag (= step.task_name suffix
+        # Composite tag: dot-join of the listed columns' values. For a
+        # single-column key, that's just the value (unchanged from the
+        # historical single-string-key behaviour).
+        def _row_tag(r):
+            return '.'.join(str(r.get(c, '')) for c in key_cols)
+
+        # Enforce tag uniqueness so the iter-tag (= step.task_name suffix
         # in downstream tasks) is stable across rows.
         seen_keys = set()
         for r in rows:
-            k = r.get(key_col, '')
+            k = _row_tag(r)
             if k in seen_keys:
                 raise ValueError(
-                    f"Iterator '{name}' (source=tsv): duplicate value {k!r} in "
-                    f"key column {key_col!r}."
+                    f"Iterator '{name}' (source=tsv): duplicate composite tag {k!r} "
+                    f"(key columns: {key_cols!r}). Rows must be unique by the chosen key."
                 )
             seen_keys.add(k)
 
         items = []
         for r in rows:
-            tag = r[key_col]
+            tag = _row_tag(r)
             d = {uname: tag}
             for col, val in r.items():
                 if col is None:
@@ -1220,6 +1251,18 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
                 # for the F' expression evaluator's attribute access via
                 # the synthesised namespace.
                 d[f"{name}.{col}"] = '' if val is None else str(val)
+            # Composite-key columns are ALSO exposed as uppercase
+            # top-level aliases (e.g. `REF`, `QUERY`) so `grouped_by:
+            # ref` and `{REF}` substitution work the same way they do
+            # for a uri/list iterator. Without this, the composite-tag
+            # case is the only thing addressable by name and per-column
+            # grouped_by becomes impossible. Limited to key columns to
+            # avoid polluting the namespace with every TSV column.
+            if len(key_cols) > 1:
+                for col in key_cols:
+                    alias = col.upper()
+                    if alias != uname:
+                        d[alias] = '' if r.get(col) is None else str(r.get(col))
             d['_source'] = source
             items.append(d)
         return items, source
@@ -1838,6 +1881,32 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
                         f"grouped_by: no upstream tasks of step '{step_name}' match "
                         f"any iteration in this group (upstream tags: {[t.tag for t in upstream.tasks]})")
                 return [upstream.output(output_name, task=t) for t in matching]
+            # Per-iter downstream referencing a (presumably) grouped_by or
+            # subset-tagged upstream: subset-match on tag components so a
+            # per-pair coverage task (tag "REF.QUERY") finds the single
+            # upstream split_contigs task tagged "REF". Falls back to the
+            # "last task" default when there's no useful match (the
+            # historical behaviour). Only applies when we have an itervar
+            # to match against — one-off resolutions are unchanged.
+            if itervar is not None and upstream.tasks:
+                iter_components = {str(v) for k, v in itervar.items() if not k.startswith('_')}
+                candidates = []
+                for t in upstream.tasks:
+                    tag = getattr(t, 'tag', None) or ''
+                    if not tag:
+                        continue
+                    task_components = set(tag.split('.'))
+                    if task_components and task_components.issubset(iter_components):
+                        candidates.append(t)
+                if len(candidates) == 1:
+                    return upstream.output(output_name, task=candidates[0])
+                if len(candidates) > 1:
+                    # Prefer the most-specific (longest tag) match — a
+                    # per-iter upstream sharing all the same components
+                    # beats a grouped_by upstream that only shares the
+                    # key column.
+                    candidates.sort(key=lambda t: -len(t.tag.split('.')))
+                    return upstream.output(output_name, task=candidates[0])
             return upstream.output(output_name, grouped=grouped)
     elif len(parts) == 1 and parts[0] in step_map:
         return step_map[parts[0]].output(grouped=grouped)
@@ -2671,6 +2740,50 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
         else:
             per_iter_steps.append(step_def)
 
+    # Partition grouped_by steps by whether they depend on step outputs
+    # that aren't built yet at the start of the iteration loop. A
+    # grouped_by step whose `inputs:` only references raw URIs and/or
+    # iterator data (e.g. `{params.input_uri}/{pair.ref}/...`) can —
+    # and MUST — be built BEFORE the per-iter loop, so per-iter steps
+    # can chain off its outputs by group key.
+    #
+    # Concretely: per-pair coverage references per-ref split_contigs
+    # outputs; if split_contigs were built last (the historical
+    # default), it would have zero tasks during the per-iter coverage
+    # build and the resolver would error. See specs/binning_fairy/
+    # multicoverage doc for the (ref, query) pattern this unlocks.
+    later_step_names = {sd.get('name') for sd in (
+        per_iter_steps + fanin_steps + grouped_by_steps
+    ) if sd.get('name')}
+
+    def _refs_unbuilt_step(step_def):
+        inputs = step_def.get('inputs')
+        if inputs is None:
+            return False
+        refs = inputs if isinstance(inputs, list) else [inputs]
+        for r in refs:
+            if not isinstance(r, str):
+                continue
+            if '://' in r:
+                continue  # raw URI — OK
+            if '{' in r:
+                continue  # template — assume iterator data, OK
+            head = r.split('.', 1)[0]
+            if head in later_step_names and head != step_def.get('name'):
+                return True
+        return False
+
+    early_grouped_by_steps = []
+    late_grouped_by_steps = []
+    for sd in grouped_by_steps:
+        if _refs_unbuilt_step(sd):
+            late_grouped_by_steps.append(sd)
+        else:
+            early_grouped_by_steps.append(sd)
+    # Mutate the canonical list so the late-pass at the end of this
+    # function still finds the right step_defs.
+    grouped_by_steps = late_grouped_by_steps
+
     step_map: Dict[str, Step] = {}
     script_root = os.environ.get('SCITQ_SCRIPT_ROOT')
 
@@ -2682,6 +2795,46 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
                            verbose=verbose)
         if step is not None:
             step_map[step.name] = step
+
+    # Early grouped_by steps (those with no step-reference inputs):
+    # built BEFORE the per-iter loop so per-iter steps can chain off
+    # their outputs. Reuses the same builder block as the late pass
+    # below — kept verbatim there so debugging by-step still works.
+    for step_def in early_grouped_by_steps:
+        key_raw = step_def.get('grouped_by')
+        if not isinstance(key_raw, str) or not key_raw:
+            print(f"❌ Step '{step_def.get('name','?')}': grouped_by must be a non-empty string",
+                  file=sys.stderr)
+            sys.exit(1)
+        key = key_raw.upper()
+        groups_e: Dict[str, list] = {}
+        order_e: List[str] = []
+        for iv in (iterations or []):
+            if key not in iv:
+                print(f"❌ Step '{step_def.get('name','?')}': grouped_by '{key_raw}' not found "
+                      f"in iteration vars (available: {sorted(k for k in iv if not k.startswith('_'))})",
+                      file=sys.stderr)
+                sys.exit(1)
+            gv = str(iv[key])
+            if gv not in groups_e:
+                groups_e[gv] = []
+                order_e.append(gv)
+            groups_e[gv].append(iv)
+        if not groups_e:
+            print(f"❌ Step '{step_def.get('name','?')}': grouped_by '{key_raw}' produced 0 groups "
+                  f"(no iterations to group over)", file=sys.stderr)
+            sys.exit(1)
+        for gv in order_e:
+            synthetic_itervar = {key: gv, '_group_iterations': groups_e[gv]}
+            step = _build_step(workflow, step_def, step_map, params,
+                               itervar=synthetic_itervar,
+                               grouped_by_key=key,
+                               default_language=default_language, script_root=script_root,
+                               pipeline_dir=pipeline_dir, workflow_vars=workflow_vars,
+                               iterations=iterations,
+                               verbose=verbose)
+            if step is not None:
+                step_map[step.name] = step
 
     # Mark first per-iteration step (format 1 only: implicit input from iterator)
     if per_iter_steps and yaml_format < 2:

@@ -248,6 +248,66 @@ func parseAzureImageRef(s string) (*armcompute.ImageReference, error) {
 	}, nil
 }
 
+// freePublishers is the allowlist of Azure publishers whose images
+// do NOT require a Plan block on the VM-create payload. Everything
+// outside this set is treated as a commercial marketplace offer:
+// Azure rejects the VM payload with `VMMarketplaceInvalidInput`
+// ("Plan information required") if Plan is missing, AND rejects it
+// with a plan-mismatch error if Plan is set for a non-marketplace
+// image. So the gate has to go one way or the other.
+//
+// Membership matches what Azure docs call "first-party" images —
+// publishers Microsoft owns or distributes for free. Add to this
+// list only after verifying the publisher's images NEVER require
+// a Plan (`az vm image show --urn <urn>` and check for an absent
+// `plan` field across versions).
+var freePublishers = map[string]struct{}{
+	"Canonical":              {},
+	"microsoft-dsvm":         {},
+	"MicrosoftWindowsServer": {},
+	"MicrosoftCblMariner":    {},
+	"RedHat":                 {},
+	"OpenLogic":              {},
+	"Debian":                 {},
+	"SUSE":                   {},
+}
+
+// planForImageRef returns the Plan block to attach to the VM-create
+// payload when the resolved image is a paid marketplace offer.
+// Returns nil for first-party / free publishers (Canonical, microsoft-
+// dsvm, …) — including a Plan there causes its own error
+// (`InvalidParameter: The Plan information is invalid`).
+//
+// For commercial publishers (nvidia, datastax, third-party
+// marketplace), Plan.Publisher/Product/Name equal the image's
+// Publisher/Offer/SKU verbatim — that's the convention for the
+// vast majority of marketplace offers. The few offers where Plan
+// identifiers diverge from image identifiers are not currently
+// supported by this provider; if you hit one, the request fails
+// with a clear plan-mismatch error from Azure and you can add a
+// dedicated path.
+//
+// Prerequisite Azure-side: marketplace terms must have been
+// accepted once per subscription —
+//
+//	az vm image terms accept --urn <publisher>:<offer>:<sku>:<version>
+//
+// — otherwise Azure rejects the VM with "Legal terms have not been
+// accepted." The Plan block doesn't substitute for that step.
+func planForImageRef(ref *armcompute.ImageReference) *armcompute.Plan {
+	if ref == nil || ref.Publisher == nil {
+		return nil
+	}
+	if _, free := freePublishers[*ref.Publisher]; free {
+		return nil
+	}
+	return &armcompute.Plan{
+		Publisher: ref.Publisher,
+		Product:   ref.Offer,
+		Name:      ref.SKU,
+	}
+}
+
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
 func (ap *AzureProvider) Create(workerName, flavor, location string, hasGPU bool, image, gpuImage string, jobId int32) (string, error) {
 	var ipAddress string
@@ -288,6 +348,14 @@ func (ap *AzureProvider) Create(workerName, flavor, location string, hasGPU bool
 			// Wrap as a YAML-folded scalar (`- >-`) so any later
 			// punctuation we add is unambiguously part of a single
 			// string node.
+			//
+			// Per-image installs (nvidia-container-toolkit, Grid
+			// licensing config, ROCm drivers, etc.) are deliberately
+			// NOT hardcoded here — that's the job of the per-image
+			// "extras" mechanism (see specs/image_extras.md). The
+			// generic GPU prep is just "make sure the kernel module
+			// is loaded and tell us if it isn't" — universally useful,
+			// no opinion about which toolchain runs on top.
 			gpuPrep = "\n  - modprobe nvidia || true\n  - >-\n      nvidia-smi -L || echo WARN nvidia-smi failed after modprobe -- GPU driver missing on host image"
 		}
 		cloudInit := fmt.Sprintf(`#cloud-config
@@ -345,6 +413,49 @@ runcmd:%s
 			return err
 		}
 
+		// Resolve the image once so the Plan derivation below sees
+		// the same publisher/offer/sku that the StorageProfile will
+		// ultimately receive.
+		//
+		// Precedence: per-recruiter gpu_image (when hasGPU) >
+		// per-recruiter image > scitq.yaml default (GPU vs CPU per
+		// the same hasGPU flag). Per-recruiter strings are
+		// "publisher/offer/sku/version"; the helper errors on
+		// malformed input and we fall through.
+		var imageRef *armcompute.ImageReference
+		switch {
+		case hasGPU && gpuImage != "":
+			if ref, perr := parseAzureImageRef(gpuImage); perr == nil {
+				imageRef = ref
+			} else {
+				log.Printf("⚠️ recruiter gpu_image=%q unparseable (%v); falling through to default", gpuImage, perr)
+			}
+		}
+		if imageRef == nil && image != "" {
+			if ref, perr := parseAzureImageRef(image); perr == nil {
+				imageRef = ref
+			} else {
+				log.Printf("⚠️ recruiter image=%q unparseable (%v); falling through to default", image, perr)
+			}
+		}
+		if imageRef == nil {
+			if hasGPU {
+				imageRef = &armcompute.ImageReference{
+					Publisher: to.Ptr(ap.az.GPUImage.Publisher),
+					Offer:     to.Ptr(ap.az.GPUImage.Offer),
+					SKU:       to.Ptr(ap.az.GPUImage.Sku),
+					Version:   to.Ptr(ap.az.GPUImage.Version),
+				}
+			} else {
+				imageRef = &armcompute.ImageReference{
+					Publisher: to.Ptr(ap.az.Image.Publisher),
+					Offer:     to.Ptr(ap.az.Image.Offer),
+					SKU:       to.Ptr(ap.az.Image.Sku),
+					Version:   to.Ptr(ap.az.Image.Version),
+				}
+			}
+		}
+
 		// Define VM parameters.
 		vmParameters := armcompute.VirtualMachine{
 			Location: to.Ptr(location),
@@ -352,47 +463,19 @@ runcmd:%s
 				"scitq":      to.Ptr(ap.cfg.Scitq.ServerName),
 				"workerName": to.Ptr(workerName),
 			},
+			// Plan: commercial marketplace images (nvidia, third-party)
+			// require it on the VM-create payload; first-party
+			// publishers (microsoft-dsvm, Canonical, …) reject it.
+			// planForImageRef gates by publisher allowlist — see
+			// freePublishers. Returns nil for free publishers, which
+			// the Go SDK omits from the request (correct behaviour).
+			Plan: planForImageRef(imageRef),
 			Properties: &armcompute.VirtualMachineProperties{
 				HardwareProfile: &armcompute.HardwareProfile{
 					VMSize: to.Ptr(armcompute.VirtualMachineSizeTypes(flavor)),
 				},
 				StorageProfile: &armcompute.StorageProfile{
-					ImageReference: func() *armcompute.ImageReference {
-						// Precedence: per-recruiter gpu_image (when
-						// hasGPU) > per-recruiter image > scitq.yaml
-						// default (GPU vs CPU per the same hasGPU
-						// flag). Per-recruiter strings are
-						// "publisher/offer/sku/version"; the helper
-						// errors at Create time on malformed input.
-						if hasGPU && gpuImage != "" {
-							if ref, perr := parseAzureImageRef(gpuImage); perr == nil {
-								return ref
-							} else {
-								log.Printf("⚠️ recruiter gpu_image=%q unparseable (%v); falling through to default", gpuImage, perr)
-							}
-						}
-						if image != "" {
-							if ref, perr := parseAzureImageRef(image); perr == nil {
-								return ref
-							} else {
-								log.Printf("⚠️ recruiter image=%q unparseable (%v); falling through to default", image, perr)
-							}
-						}
-						if hasGPU {
-							return &armcompute.ImageReference{
-								Publisher: to.Ptr(ap.az.GPUImage.Publisher),
-								Offer:     to.Ptr(ap.az.GPUImage.Offer),
-								SKU:       to.Ptr(ap.az.GPUImage.Sku),
-								Version:   to.Ptr(ap.az.GPUImage.Version),
-							}
-						}
-						return &armcompute.ImageReference{
-							Publisher: to.Ptr(ap.az.Image.Publisher),
-							Offer:     to.Ptr(ap.az.Image.Offer),
-							SKU:       to.Ptr(ap.az.Image.Sku),
-							Version:   to.Ptr(ap.az.Image.Version),
-						}
-					}(),
+					ImageReference: imageRef,
 				},
 				OSProfile: &armcompute.OSProfile{
 					ComputerName:  to.Ptr(vmName),

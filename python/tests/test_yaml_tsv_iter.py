@@ -105,7 +105,7 @@ def test_tsv_duplicate_key_rejected():
         'source': 'tsv',
         'content': "id\tvalue\nA\tx\nA\ty\n",
     }
-    with pytest.raises(ValueError, match="duplicate value 'A'"):
+    with pytest.raises(ValueError, match="duplicate composite tag 'A'"):
         yr._build_single_iterator(iter_def, params=SimpleNamespace())
 
 
