@@ -36,11 +36,11 @@ def test_gpu_all_with_whitespace():
 
 def test_gpu_integer_paths_unchanged():
     # The sentinel string is a separate code path — numeric inputs
-    # must keep producing integers as before. Pair each with a
-    # concurrency driver (cpu=1) since numeric gpu alone still
-    # violates the "at least one of …" rule.
-    assert TaskSpec(cpu=1, gpu=2).gpu == 2
-    assert TaskSpec(cpu=1, gpu=True).gpu == 1
+    # must keep producing integers as before. gpu>=1 now drives
+    # concurrency on its own; gpu=0/None still needs a sibling
+    # driver (we use cpu=1 here).
+    assert TaskSpec(gpu=2).gpu == 2
+    assert TaskSpec(gpu=True).gpu == 1
     assert TaskSpec(cpu=1, gpu=0).gpu == 0
     assert TaskSpec(cpu=1, gpu=None).gpu is None
 
@@ -78,12 +78,15 @@ def test_gpu_all_with_concurrency_gt_1_rejected():
         TaskSpec(gpu="all", concurrency=2)
 
 
-def test_numeric_gpu_alone_still_rejected():
-    # Today gpu=2 alone doesn't satisfy the concurrency-driver rule
-    # — the recruiter has no anchor to size workers (cpu/mem/disk
-    # ratios are all unset). Only "all" sidesteps this.
+def test_numeric_gpu_alone_is_a_valid_driver():
+    # gpu=N>=1 alone satisfies the concurrency-driver rule: the
+    # recruiter sizes concurrency = floor(flavor.gpu_count /
+    # gpu_per_task) just like cpu_per_task does on the CPU axis.
+    ts = TaskSpec(gpu=2)
+    assert ts.gpu == 2
+    # gpu=0 still doesn't qualify — it's "no GPU at all", not a driver.
     with pytest.raises(ValueError, match="at least one of"):
-        TaskSpec(gpu=2)
+        TaskSpec(gpu=0)
 
 
 # ---------------- recruiter sizing ----------------
@@ -127,3 +130,61 @@ def test_recruiter_integer_gpu_unaffected():
     assert "concurrency" not in options
     assert options.get("cpu_per_task") == 1
     assert options.get("gpu_per_task") == 2
+
+
+# ---------------- pool-doesn't-target-gpu warning ----------------
+
+
+def test_warn_when_task_wants_gpu_but_pool_has_no_gpu_filter():
+    import warnings as _w
+
+    pool = WorkerPool(W.cpu >= 8)   # cpu filter only — no W.has_gpu
+    ts = TaskSpec(cpu=1, gpu=1)
+
+    with _w.catch_warnings(record=True) as recorded:
+        _w.simplefilter("always")
+        pool.build_recruiter(ts)
+        assert any("worker_pool has no GPU filter" in str(w.message)
+                   for w in recorded), \
+            f"expected a no-GPU-filter warning, got: {[str(w.message) for w in recorded]}"
+
+
+def test_warn_also_fires_for_gpu_all():
+    import warnings as _w
+
+    pool = WorkerPool(W.cpu >= 8)
+    ts = TaskSpec(gpu="all")
+
+    with _w.catch_warnings(record=True) as recorded:
+        _w.simplefilter("always")
+        pool.build_recruiter(ts)
+        assert any("worker_pool has no GPU filter" in str(w.message)
+                   for w in recorded)
+
+
+def test_no_warning_when_pool_targets_gpu():
+    import warnings as _w
+
+    pool = WorkerPool(W.has_gpu == True)  # noqa: E712
+    ts = TaskSpec(cpu=1, gpu=1)
+
+    with _w.catch_warnings(record=True) as recorded:
+        _w.simplefilter("always")
+        pool.build_recruiter(ts)
+        gpu_warnings = [w for w in recorded
+                        if "worker_pool has no GPU filter" in str(w.message)]
+        assert not gpu_warnings, f"unexpected warning: {gpu_warnings}"
+
+
+def test_no_warning_when_task_doesnt_want_gpu():
+    import warnings as _w
+
+    pool = WorkerPool(W.cpu >= 8)
+    ts = TaskSpec(cpu=1, mem=8)   # no gpu at all
+
+    with _w.catch_warnings(record=True) as recorded:
+        _w.simplefilter("always")
+        pool.build_recruiter(ts)
+        gpu_warnings = [w for w in recorded
+                        if "worker_pool has no GPU filter" in str(w.message)]
+        assert not gpu_warnings

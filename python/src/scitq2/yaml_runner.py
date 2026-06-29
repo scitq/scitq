@@ -895,6 +895,7 @@ STEP_NATIVE_KEYS = {
 WORKER_POOL_KEYS = {
     'provider', 'region', 'cpu', 'mem', 'disk', 'gpu', 'gpumem',
     'flavor', 'max_recruited', 'task_batches',
+    'image', 'gpu_image',
 }
 
 PARAM_ENTRY_KEYS = {
@@ -1457,6 +1458,16 @@ def _build_worker_pool(wp_def: dict, params, extra_vars: Optional[Dict] = None) 
     if 'task_batches' in wp_def:
         val = _resolve_refs(str(wp_def['task_batches']), params)
         kwargs['task_batches'] = int(val)
+    # Per-pool cloud image overrides. Strings flow verbatim to the
+    # recruiter; format validation happens at the provider Create.
+    # gpu_image takes effect when the recruiter picks a has_gpu=TRUE
+    # flavor; image applies regardless. Both fall through to
+    # scitq.yaml defaults when unset.
+    for key in ('image', 'gpu_image'):
+        if key in wp_def:
+            val = _resolve_field(wp_def[key], params, extra_vars=extra_vars)
+            if val is not None and str(val) != '':
+                kwargs[key] = str(val)
     return WorkerPool(*filters, **kwargs)
 
 

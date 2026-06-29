@@ -715,6 +715,23 @@ Named outputs let downstream steps reference specific file patterns:
 
 Without named outputs, the step exposes its entire `/output/` directory.
 
+### Container options
+
+`container_options:` appends free-form flags to the `docker run` argv used for this step's tasks. Use for runtime settings `task_spec` doesn't model — `--shm-size`, `--ipc=host`, `--privileged`, custom `--mount`, `--device`, etc.
+
+```yaml
+  - name: train
+    container: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+    container_options: "--shm-size=16g --ipc=host"
+    task_spec:
+      gpu: 1
+```
+
+Caveats:
+
+- `--gpus` is auto-appended when `task_spec.gpu > 0` (or `gpu: "all"`). Don't repeat it here unless you need explicit device pinning — an explicit `--gpus` in `container_options` suppresses the auto-append.
+- The string is interpolated like other fields (`{params.x}`, `{ITER}`, cond blocks).
+
 ### Task spec
 
 `task_spec:` declares per-task settings — resource budget for the dynamic-concurrency scheduler, and a couple of opt-in worker-side behaviours.
@@ -725,13 +742,16 @@ Without named outputs, the step exposes its entire `/output/` directory.
       cpu: 8           # tasks of this step want 8 cpu each
       mem: 30          # …and 30 GB RAM each
       disk: 100        # …and 100 GB disk each
+      gpu: 1           # …and 1 GPU each (see "GPU" below); or "all" for one task per worker with every device
       concurrency: 4   # OR: static concurrency (mutually exclusive with cpu/mem/disk)
       prefetch: "50%"  # download up to N task inputs in advance (N = concurrency * prefetch)
       scitq_auth: true # see below
       numa: 1          # OR: pin each task to N NUMA nodes (see below; mutually exclusive with cpu/mem)
 ```
 
-At least one of `concurrency`, `cpu`, `mem`, or `numa` is required. `cpu`/`mem`/`disk` drive dynamic concurrency (scitq picks a per-worker concurrency that fits the worker's flavour and these per-task budgets); `concurrency` pins it to a static value; `numa` (see below) derives the per-task CPU and memory budget from the worker's NUMA topology.
+At least one of `concurrency`, `cpu`, `mem`, `numa`, or `gpu ≥ 1` (integer or `"all"`) is required. `cpu`/`mem`/`disk`/`gpu` drive dynamic concurrency (scitq picks a per-worker concurrency that fits the worker's flavour and these per-task budgets); `concurrency` pins it to a static value; `numa` (see below) derives the per-task CPU and memory budget from the worker's NUMA topology.
+
+**Heads-up:** declaring `task_spec.gpu` on a step whose `worker_pool` has no GPU filter (`gpu: true` / `W.has_gpu == True`) emits a `RuntimeWarning` at compile time. The recruiter would otherwise pick a CPU-only flavor and every assignment would then fail the fit predicate, stranding the step.
 
 #### Conditional `task_spec` (data-driven branching)
 
@@ -784,6 +804,52 @@ Rules:
 - **Docker-only in v1.** Bare tasks (no container) run without binding even when `numa` is set; bare-task NUMA binding via `numactl` is a planned follow-up.
 - **Non-NUMA hosts** (single-node, or `/sys/devices/system/node/` absent — e.g. macOS dev boxes) are treated as if they had one NUMA node: `numa: 1` gives concurrency 1, the task runs unbound, and a warning is logged once. `numa: N` with N>1 also runs unbound with concurrency 1 — the YAML still works on small dev boxes, just with reduced parallelism.
 
+#### `gpu` — GPU access for the task
+
+Per-task GPU requirement. Drives the assignment fit predicate (worker must have `flavor.gpu_count >= task.min_gpu`) and, when set, makes the worker auto-append `--gpus all` plus `CUDA_VISIBLE_DEVICES=<indices>` so each in-flight task sees a disjoint slice of the host's GPUs.
+
+```yaml
+  - name: train
+    task_spec:
+      gpu: 1          # one GPU per task — N tasks run in parallel on an N-GPU host
+```
+
+Accepted values:
+
+| value | meaning |
+|---|---|
+| omitted, `0`, `false` | No GPU needed (default). The task fits any flavor; no driver injection. |
+| `N` (integer ≥ 1) | Each task pins `N` device indices. On a 4-GPU host with `gpu: 1`, four tasks run in parallel each seeing one device. With `gpu: 2`, two tasks run in parallel each seeing two devices. |
+| `true` | Sugar for `gpu: 1`. |
+| `"all"` | **Exclusive access.** One task per worker; that task sees every GPU on the host. Resolved at assignment — the workflow stays portable across 1-GPU and 8-GPU SKUs. See "GPU exclusive access" below. |
+
+Notes:
+
+- **Concurrency is auto-derived.** With dynamic `cpu`/`mem`/`disk`, `gpu: N` is the 4th dimension of the per-task ratio. The recruiter picks `min(cpu/cpu_per_task, mem/mem_per_task, disk/disk_per_task, gpu_count/N)` for the worker's concurrency. A 4-GPU host with `gpu: 1` and `cpu: 4` on a 32-vCPU flavor gets `min(8, 4) = 4` concurrent tasks.
+- **The fit predicate is strict.** A task with `gpu: 5` on a 4-GPU flavor stays `P` — no implicit downgrade. Either ask for fewer GPUs or filter for a bigger flavor in `worker_pool`.
+- **Driver injection.** When `gpu > 0`, the worker also exports `SCITQ_GPU=<count>` and `SCITQ_GPU_DEVICES=<comma-separated indices>` so the task command can branch on them.
+
+##### `gpu: "all"` — exclusive multi-GPU access
+
+For workloads that need to see every device on the host (multi-GPU training, in-process model sharding, anything that calls `torch.cuda.device_count()`):
+
+```yaml
+  - name: train-multi-gpu
+    task_spec:
+      gpu: "all"
+    worker_pool:
+      gpu: true
+      flavor: "Standard_NC%"     # filter to a multi-GPU SKU
+```
+
+Semantics:
+
+- **Concurrency is forced to 1.** The recruiter pins one task per worker; per-task `cpu`/`mem`/`disk` ratios are ignored (they'd be meaningless with `concurrency=1`).
+- **The integer count is resolved at assignment.** The task's stored `min_gpu` is `NULL` until a worker is picked, at which point `min_gpu = worker.flavor.gpu_count` and `CUDA_VISIBLE_DEVICES` lists every index.
+- **Portable across SKUs.** The same template works on a 4-GPU NC4 and an 8-GPU NC24 — the per-task count adjusts to whichever flavor the recruiter picked.
+- **Mutually exclusive with `concurrency: N > 1`.** `gpu: "all" + concurrency: 2` is rejected at parse time (incoherent on a fixed-GPU host).
+- **Retries re-resolve.** If an eviction sends a retry onto a differently-sized flavor, the integer is recomputed cleanly — `gpu_all=TRUE` stays on the row, `min_gpu` clears and re-materializes.
+
 #### `scitq_auth: true` — the task can call `scitq file copy`
 
 When `task_spec.scitq_auth: true`, the worker, before launching the task, does two extra things:
@@ -812,6 +878,10 @@ worker_pool:
   cpu: ">= 8"                     # CPU filter
   mem: ">= 30"                    # Memory (GB) filter
   disk: ">= 100"                  # Disk (GB) filter
+  gpu: true                        # GPU filter — see "GPU filters" below
+  flavor: "Standard_NC%"           # Flavor-name filter (exact or LIKE with %)
+  image: "Canonical/UbuntuServer/24.04-LTS/latest"     # Cloud image override (any flavor)
+  gpu_image: "microsoft-dsvm/ubuntu-hpc/2204/latest"   # Cloud image override (GPU flavors only)
   max_recruited: 10                # Maximum workers to recruit
   task_batches: 2                  # How many batches of tasks per worker
   prefetch: 1                      # Tasks to download in advance per worker
@@ -828,6 +898,63 @@ A step can override the workflow-level pool:
       max_recruited: 1
     grouped: true
 ```
+
+#### GPU filters
+
+`worker_pool.gpu` restricts the candidate flavors to GPU-bearing ones:
+
+| value | effect |
+|---|---|
+| `true`, `1`, `">= 1"` | Any GPU flavor (`flavor.has_gpu = TRUE`). |
+| `">= N"` (N > 1) | Currently collapses to "has any GPU" — multi-count filtering on the flavor side is a planned extension. To target a specific multi-GPU SKU today, combine with `flavor:` (below). |
+| `false`, `0`, omitted | No GPU constraint. |
+
+`worker_pool.gpu` is the *flavor* filter (does this SKU have a GPU at all). `task_spec.gpu` is the per-task budget (how many devices each task wants). The two compose: `worker_pool.gpu: true` + `task_spec.gpu: 1` recruits any GPU flavor and runs N tasks per worker where N = flavor's `gpu_count`.
+
+#### `flavor:` — name-based filter
+
+When `worker_pool.gpu: true` isn't selective enough (different GPU families need different drivers — Azure NC = full-passthrough HPC image, NV = vGPU Grid image), narrow further by flavor name:
+
+```yaml
+worker_pool:
+  gpu: true
+  flavor: "Standard_NC%"     # SQL LIKE — every Standard_NC* SKU
+  # flavor: "Standard_NC24ads_A100_v4"   # exact match (no %)
+```
+
+A value containing `%` is matched with SQL `LIKE`; otherwise the filter is exact. Useful for pinning to a known-working image/driver combination on Azure or OVH.
+
+#### `image:` / `gpu_image:` — per-pool cloud image override
+
+The cloud image booted for a recruited worker normally comes from server-wide config (`scitq.yaml`'s `azure.image` / `azure.gpu_image` / `openstack.image_id` / `openstack.gpu_image_id`). When a single workflow needs a different image — a custom-baked image with a baked-in tool, the vGPU Grid image instead of the HPC image, an ARM-native variant — the worker pool can override per-recruiter:
+
+| field | applies to | typical use |
+|---|---|---|
+| `image:` | every flavor the recruiter picks | custom-baked image with a baked-in tool; ARM variant |
+| `gpu_image:` | only flavors with `has_gpu=TRUE` | Grid driver for Azure NV family, alternative CUDA stack |
+
+Precedence at deploy time: `gpu_image` (when the picked flavor has a GPU) → `image` → server-config default. Either field can be omitted; an empty string is treated as "not set".
+
+Format is provider-specific:
+
+| provider | format | example |
+|---|---|---|
+| Azure | `publisher/offer/sku[/version]` | `microsoft-dsvm/ubuntu-hpc/2204/latest` |
+| OpenStack (OVH) | bare image name or UUID | `NVIDIA GPU Cloud (NGC)` |
+
+The provider parses its own value and errors at VM creation time on malformed input (so a typo doesn't silently fall back to a wrong default — you see the failed job).
+
+```yaml
+worker_pool:
+  gpu: true
+  flavor: "Standard_NV%"                                   # NV family — needs Grid driver
+  gpu_image: "nvidia/nvidia-gpu-optimized-vmi/24-02/latest"
+```
+
+Defaults shipped with scitq (when neither field is set):
+
+- **Azure** — `Canonical/UbuntuServer/24.04-LTS/latest` (CPU), `microsoft-dsvm/ubuntu-hpc/2204/latest` (GPU, NC family).
+- **OVH** — config-defined default, `NVIDIA GPU Cloud (NGC)` for GPU flavors.
 
 ### Workspace
 

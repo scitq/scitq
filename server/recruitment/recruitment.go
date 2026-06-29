@@ -87,6 +87,15 @@ type Recruiter struct {
 	// actually has devices for instead of letting cpu/mem
 	// oversubscribe a multi-GPU SKU.
 	GpuPerTask            *int
+	// Per-recruiter cloud image overrides. Format is
+	// provider-specific (Azure: "publisher/offer/sku/version";
+	// OpenStack: image name or UUID). The recruiter forwards both
+	// into the CreateWorker call so the provider Create() can pick
+	// the right image: gpu_image (when chosen flavor has_gpu=TRUE)
+	// beats image; both fall through to scitq.yaml defaults when
+	// NULL on the row.
+	Image                 *string
+	GPUImage              *string
 	ConcurrencyMax        *int
 	ConcurrencyMin        *int
 	PrefetchPercent       *int
@@ -149,6 +158,8 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.memory_per_task,
             r.disk_per_task,
             r.gpu_per_task,
+            r.image,
+            r.gpu_image,
             r.prefetch_percent,
             r.concurrency_min,
             r.concurrency_max,
@@ -176,6 +187,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.worker_concurrency, r.worker_prefetch,
             r.maximum_workers, r.rounds,
             r.cpu_per_task, r.memory_per_task, r.disk_per_task, r.gpu_per_task,
+            r.image, r.gpu_image,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
@@ -210,6 +222,8 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.MemoryPerTask,
 			&r.DiskPerTask,
 			&r.GpuPerTask,
+			&r.Image,
+			&r.GPUImage,
 			&r.PrefetchPercent,
 			&r.ConcurrencyMin,
 			&r.ConcurrencyMax,
@@ -311,6 +325,8 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.memory_per_task,
             r.disk_per_task,
             r.gpu_per_task,
+            r.image,
+            r.gpu_image,
             r.prefetch_percent,
             r.concurrency_min,
             r.concurrency_max,
@@ -340,6 +356,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.worker_concurrency, r.worker_prefetch,
             r.maximum_workers, r.rounds,
             r.cpu_per_task, r.memory_per_task, r.disk_per_task, r.gpu_per_task,
+            r.image, r.gpu_image,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
@@ -369,6 +386,8 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
 			&r.MemoryPerTask,
 			&r.DiskPerTask,
 			&r.GpuPerTask,
+			&r.Image,
+			&r.GPUImage,
 			&r.PrefetchPercent,
 			&r.ConcurrencyMin,
 			&r.ConcurrencyMax,
@@ -1049,6 +1068,8 @@ func deployWorkers(
 			Number:      1,
 			Concurrency: int32(newConcurrency),
 			Prefetch:    int32(newPrefetch),
+			Image:       recruiter.Image,
+			GpuImage:    recruiter.GPUImage,
 		})
 		if err != nil {
 			log.Printf("⚠️ Failed to create worker (flavor %d region %d): %v", selected.FlavorID, selected.RegionID, err)

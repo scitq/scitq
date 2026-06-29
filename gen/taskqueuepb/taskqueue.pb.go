@@ -3505,14 +3505,19 @@ func (x *ListTasksRequest) GetCompactCommandMax() int32 {
 }
 
 type WorkerRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProviderId    int32                  `protobuf:"varint,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	FlavorId      int32                  `protobuf:"varint,2,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
-	RegionId      int32                  `protobuf:"varint,3,opt,name=region_id,json=regionId,proto3" json:"region_id,omitempty"`
-	Number        int32                  `protobuf:"varint,4,opt,name=number,proto3" json:"number,omitempty"`
-	Concurrency   int32                  `protobuf:"varint,5,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
-	Prefetch      int32                  `protobuf:"varint,6,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
-	StepId        *int32                 `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ProviderId  int32                  `protobuf:"varint,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	FlavorId    int32                  `protobuf:"varint,2,opt,name=flavor_id,json=flavorId,proto3" json:"flavor_id,omitempty"`
+	RegionId    int32                  `protobuf:"varint,3,opt,name=region_id,json=regionId,proto3" json:"region_id,omitempty"`
+	Number      int32                  `protobuf:"varint,4,opt,name=number,proto3" json:"number,omitempty"`
+	Concurrency int32                  `protobuf:"varint,5,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	Prefetch    int32                  `protobuf:"varint,6,opt,name=prefetch,proto3" json:"prefetch,omitempty"`
+	StepId      *int32                 `protobuf:"varint,7,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
+	// Per-recruiter cloud image overrides. See Recruiter.image /
+	// Recruiter.gpu_image. The recruiter forwards them here so
+	// CreateWorker can stamp them on the job row.
+	Image         *string `protobuf:"bytes,8,opt,name=image,proto3,oneof" json:"image,omitempty"`
+	GpuImage      *string `protobuf:"bytes,9,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3594,6 +3599,20 @@ func (x *WorkerRequest) GetStepId() int32 {
 		return *x.StepId
 	}
 	return 0
+}
+
+func (x *WorkerRequest) GetImage() string {
+	if x != nil && x.Image != nil {
+		return *x.Image
+	}
+	return ""
+}
+
+func (x *WorkerRequest) GetGpuImage() string {
+	if x != nil && x.GpuImage != nil {
+		return *x.GpuImage
+	}
+	return ""
 }
 
 type CreateWorkerByNameRequest struct {
@@ -5643,7 +5662,13 @@ type Recruiter struct {
 	// flavor (gpu_count >= gpu_per_task), the recruiter sizes the
 	// worker's concurrency to floor(gpu_count / gpu_per_task) —
 	// bounding in-flight GPU tasks to host device count.
-	GpuPerTask    *int32 `protobuf:"varint,15,opt,name=gpu_per_task,json=gpuPerTask,proto3,oneof" json:"gpu_per_task,omitempty"`
+	GpuPerTask *int32 `protobuf:"varint,15,opt,name=gpu_per_task,json=gpuPerTask,proto3,oneof" json:"gpu_per_task,omitempty"`
+	// Per-recruiter cloud image overrides. Format is provider-specific
+	// (Azure: "publisher/offer/sku/version"; OpenStack: image name or
+	// UUID). Precedence: gpu_image (when chosen flavor has_gpu=TRUE)
+	// beats image; both fall through to scitq.yaml defaults when unset.
+	Image         *string `protobuf:"bytes,16,opt,name=image,proto3,oneof" json:"image,omitempty"`
+	GpuImage      *string `protobuf:"bytes,17,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5783,6 +5808,20 @@ func (x *Recruiter) GetGpuPerTask() int32 {
 	return 0
 }
 
+func (x *Recruiter) GetImage() string {
+	if x != nil && x.Image != nil {
+		return *x.Image
+	}
+	return ""
+}
+
+func (x *Recruiter) GetGpuImage() string {
+	if x != nil && x.GpuImage != nil {
+		return *x.GpuImage
+	}
+	return ""
+}
+
 type RecruiterUpdate struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	StepId          int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
@@ -5800,6 +5839,8 @@ type RecruiterUpdate struct {
 	ConcurrencyMin  *int32                 `protobuf:"varint,13,opt,name=concurrency_min,json=concurrencyMin,proto3,oneof" json:"concurrency_min,omitempty"`
 	ConcurrencyMax  *int32                 `protobuf:"varint,14,opt,name=concurrency_max,json=concurrencyMax,proto3,oneof" json:"concurrency_max,omitempty"`
 	GpuPerTask      *int32                 `protobuf:"varint,15,opt,name=gpu_per_task,json=gpuPerTask,proto3,oneof" json:"gpu_per_task,omitempty"`
+	Image           *string                `protobuf:"bytes,16,opt,name=image,proto3,oneof" json:"image,omitempty"`
+	GpuImage        *string                `protobuf:"bytes,17,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -5937,6 +5978,20 @@ func (x *RecruiterUpdate) GetGpuPerTask() int32 {
 		return *x.GpuPerTask
 	}
 	return 0
+}
+
+func (x *RecruiterUpdate) GetImage() string {
+	if x != nil && x.Image != nil {
+		return *x.Image
+	}
+	return ""
+}
+
+func (x *RecruiterUpdate) GetGpuImage() string {
+	if x != nil && x.GpuImage != nil {
+		return *x.GpuImage
+	}
+	return ""
 }
 
 type RecruiterList struct {
@@ -11813,7 +11868,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\a_offsetB\x0e\n" +
 	"\f_show_hiddenB\x12\n" +
 	"\x10_compact_commandB\x16\n" +
-	"\x14_compact_command_max\"\xea\x01\n" +
+	"\x14_compact_command_max\"\xbf\x02\n" +
 	"\rWorkerRequest\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\x05R\n" +
 	"providerId\x12\x1b\n" +
@@ -11822,9 +11877,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x06number\x18\x04 \x01(\x05R\x06number\x12 \n" +
 	"\vconcurrency\x18\x05 \x01(\x05R\vconcurrency\x12\x1a\n" +
 	"\bprefetch\x18\x06 \x01(\x05R\bprefetch\x12\x1c\n" +
-	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01B\n" +
+	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01\x12\x19\n" +
+	"\x05image\x18\b \x01(\tH\x01R\x05image\x88\x01\x01\x12 \n" +
+	"\tgpu_image\x18\t \x01(\tH\x02R\bgpuImage\x88\x01\x01B\n" +
 	"\n" +
-	"\b_step_id\"\xe5\x01\n" +
+	"\b_step_idB\b\n" +
+	"\x06_imageB\f\n" +
+	"\n" +
+	"_gpu_image\"\xe5\x01\n" +
 	"\x19CreateWorkerByNameRequest\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x16\n" +
@@ -12018,7 +12078,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_step_id\":\n" +
 	"\vRecruiterId\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xdc\x05\n" +
+	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xb1\x06\n" +
 	"\tRecruiter\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12 \n" +
@@ -12038,7 +12098,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0fconcurrency_min\x18\r \x01(\x05H\aR\x0econcurrencyMin\x88\x01\x01\x12,\n" +
 	"\x0fconcurrency_max\x18\x0e \x01(\x05H\bR\x0econcurrencyMax\x88\x01\x01\x12%\n" +
 	"\fgpu_per_task\x18\x0f \x01(\x05H\tR\n" +
-	"gpuPerTask\x88\x01\x01B\x0e\n" +
+	"gpuPerTask\x88\x01\x01\x12\x19\n" +
+	"\x05image\x18\x10 \x01(\tH\n" +
+	"R\x05image\x88\x01\x01\x12 \n" +
+	"\tgpu_image\x18\x11 \x01(\tH\vR\bgpuImage\x88\x01\x01B\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
 	"\f_max_workersB\x0f\n" +
@@ -12048,7 +12111,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x11_prefetch_percentB\x12\n" +
 	"\x10_concurrency_minB\x12\n" +
 	"\x10_concurrency_maxB\x0f\n" +
-	"\r_gpu_per_task\"\x98\x06\n" +
+	"\r_gpu_per_taskB\b\n" +
+	"\x06_imageB\f\n" +
+	"\n" +
+	"_gpu_image\"\xed\x06\n" +
 	"\x0fRecruiterUpdate\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12%\n" +
@@ -12069,7 +12135,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"R\x0econcurrencyMin\x88\x01\x01\x12,\n" +
 	"\x0fconcurrency_max\x18\x0e \x01(\x05H\vR\x0econcurrencyMax\x88\x01\x01\x12%\n" +
 	"\fgpu_per_task\x18\x0f \x01(\x05H\fR\n" +
-	"gpuPerTask\x88\x01\x01B\x0e\n" +
+	"gpuPerTask\x88\x01\x01\x12\x19\n" +
+	"\x05image\x18\x10 \x01(\tH\rR\x05image\x88\x01\x01\x12 \n" +
+	"\tgpu_image\x18\x11 \x01(\tH\x0eR\bgpuImage\x88\x01\x01B\x0e\n" +
 	"\f_protofilterB\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
@@ -12083,7 +12151,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x11_prefetch_percentB\x12\n" +
 	"\x10_concurrency_minB\x12\n" +
 	"\x10_concurrency_maxB\x0f\n" +
-	"\r_gpu_per_task\"E\n" +
+	"\r_gpu_per_taskB\b\n" +
+	"\x06_imageB\f\n" +
+	"\n" +
+	"_gpu_image\"E\n" +
 	"\rRecruiterList\x124\n" +
 	"\n" +
 	"recruiters\x18\x01 \x03(\v2\x14.taskqueue.RecruiterR\n" +

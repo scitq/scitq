@@ -681,6 +681,11 @@ message WorkerRequest {
     int32 concurrency = 5;
     int32 prefetch = 6;
     optional int32 step_id = 7;
+    // Per-recruiter cloud image overrides. See Recruiter.image /
+    // Recruiter.gpu_image. The recruiter forwards them here so
+    // CreateWorker can stamp them on the job row.
+    optional string image = 8;
+    optional string gpu_image = 9;
 }
 
 message CreateWorkerByNameRequest {
@@ -939,6 +944,12 @@ message Recruiter {
     // worker's concurrency to floor(gpu_count / gpu_per_task) —
     // bounding in-flight GPU tasks to host device count.
     optional int32 gpu_per_task = 15;
+    // Per-recruiter cloud image overrides. Format is provider-specific
+    // (Azure: "publisher/offer/sku/version"; OpenStack: image name or
+    // UUID). Precedence: gpu_image (when chosen flavor has_gpu=TRUE)
+    // beats image; both fall through to scitq.yaml defaults when unset.
+    optional string image = 16;
+    optional string gpu_image = 17;
 }
 
 message RecruiterUpdate {
@@ -957,6 +968,8 @@ message RecruiterUpdate {
   optional int32 concurrency_min = 13;
   optional int32 concurrency_max = 14;
   optional int32 gpu_per_task = 15;
+  optional string image = 16;
+  optional string gpu_image = 17;
 }
 
 message RecruiterList {

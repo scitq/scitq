@@ -220,8 +220,36 @@ func (ap *AzureProvider) createVNetAndSubnet(ctx context.Context, cred *azidenti
 	return subnetID, err
 }
 
+// parseAzureImageRef parses the per-recruiter image string format
+// "publisher/offer/sku/version" into an Azure ImageReference. The
+// version is optional and defaults to "latest" — `microsoft-dsvm/ubuntu-hpc/2204`
+// is equivalent to `microsoft-dsvm/ubuntu-hpc/2204/latest`. Returns an
+// error on malformed input so the caller can fall through to defaults
+// rather than booting the wrong image silently.
+func parseAzureImageRef(s string) (*armcompute.ImageReference, error) {
+	parts := strings.Split(s, "/")
+	if len(parts) != 3 && len(parts) != 4 {
+		return nil, fmt.Errorf("expected publisher/offer/sku[/version], got %q", s)
+	}
+	for i, p := range parts {
+		if strings.TrimSpace(p) == "" {
+			return nil, fmt.Errorf("part %d is empty in %q", i, s)
+		}
+	}
+	version := "latest"
+	if len(parts) == 4 {
+		version = parts[3]
+	}
+	return &armcompute.ImageReference{
+		Publisher: to.Ptr(parts[0]),
+		Offer:     to.Ptr(parts[1]),
+		SKU:       to.Ptr(parts[2]),
+		Version:   to.Ptr(version),
+	}, nil
+}
+
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
-func (ap *AzureProvider) Create(workerName, flavor, location string, hasGPU bool, jobId int32) (string, error) {
+func (ap *AzureProvider) Create(workerName, flavor, location string, hasGPU bool, image, gpuImage string, jobId int32) (string, error) {
 	var ipAddress string
 	var pubIPID string
 
@@ -330,14 +358,26 @@ runcmd:%s
 				},
 				StorageProfile: &armcompute.StorageProfile{
 					ImageReference: func() *armcompute.ImageReference {
-						// has_gpu=true recruits boot the GPU image
-						// (defaults to Microsoft's "Ubuntu HPC 22.04",
-						// see config.AzureGPUImage). The image must
-						// ship NVIDIA drivers + nvidia-container-toolkit
-						// + docker preconfigured for `--gpus all`; the
-						// Ubuntu HPC image checks all three boxes for
-						// free. Operators can override any field via
-						// `gpu_image:` in scitq.yaml.
+						// Precedence: per-recruiter gpu_image (when
+						// hasGPU) > per-recruiter image > scitq.yaml
+						// default (GPU vs CPU per the same hasGPU
+						// flag). Per-recruiter strings are
+						// "publisher/offer/sku/version"; the helper
+						// errors at Create time on malformed input.
+						if hasGPU && gpuImage != "" {
+							if ref, perr := parseAzureImageRef(gpuImage); perr == nil {
+								return ref
+							} else {
+								log.Printf("⚠️ recruiter gpu_image=%q unparseable (%v); falling through to default", gpuImage, perr)
+							}
+						}
+						if image != "" {
+							if ref, perr := parseAzureImageRef(image); perr == nil {
+								return ref
+							} else {
+								log.Printf("⚠️ recruiter image=%q unparseable (%v); falling through to default", image, perr)
+							}
+						}
 						if hasGPU {
 							return &armcompute.ImageReference{
 								Publisher: to.Ptr(ap.az.GPUImage.Publisher),

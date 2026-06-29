@@ -1,0 +1,3 @@
+ALTER TABLE recruiter
+  DROP COLUMN IF EXISTS image,
+  DROP COLUMN IF EXISTS gpu_image;

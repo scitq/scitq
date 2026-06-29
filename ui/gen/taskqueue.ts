@@ -1367,6 +1367,18 @@ export interface WorkerRequest {
      * @generated from protobuf field: optional int32 step_id = 7
      */
     stepId?: number;
+    /**
+     * Per-recruiter cloud image overrides. See Recruiter.image /
+     * Recruiter.gpu_image. The recruiter forwards them here so
+     * CreateWorker can stamp them on the job row.
+     *
+     * @generated from protobuf field: optional string image = 8
+     */
+    image?: string;
+    /**
+     * @generated from protobuf field: optional string gpu_image = 9
+     */
+    gpuImage?: string;
 }
 /**
  * @generated from protobuf message taskqueue.CreateWorkerByNameRequest
@@ -2064,6 +2076,19 @@ export interface Recruiter {
      * @generated from protobuf field: optional int32 gpu_per_task = 15
      */
     gpuPerTask?: number;
+    /**
+     * Per-recruiter cloud image overrides. Format is provider-specific
+     * (Azure: "publisher/offer/sku/version"; OpenStack: image name or
+     * UUID). Precedence: gpu_image (when chosen flavor has_gpu=TRUE)
+     * beats image; both fall through to scitq.yaml defaults when unset.
+     *
+     * @generated from protobuf field: optional string image = 16
+     */
+    image?: string;
+    /**
+     * @generated from protobuf field: optional string gpu_image = 17
+     */
+    gpuImage?: string;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterUpdate
@@ -2129,6 +2154,14 @@ export interface RecruiterUpdate {
      * @generated from protobuf field: optional int32 gpu_per_task = 15
      */
     gpuPerTask?: number;
+    /**
+     * @generated from protobuf field: optional string image = 16
+     */
+    image?: string;
+    /**
+     * @generated from protobuf field: optional string gpu_image = 17
+     */
+    gpuImage?: string;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterList
@@ -7383,7 +7416,9 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
             { no: 4, name: "number", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "concurrency", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "prefetch", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 7, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 7, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerRequest>): WorkerRequest {
@@ -7424,6 +7459,12 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
                 case /* optional int32 step_id */ 7:
                     message.stepId = reader.int32();
                     break;
+                case /* optional string image */ 8:
+                    message.image = reader.string();
+                    break;
+                case /* optional string gpu_image */ 9:
+                    message.gpuImage = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7457,6 +7498,12 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
         /* optional int32 step_id = 7; */
         if (message.stepId !== undefined)
             writer.tag(7, WireType.Varint).int32(message.stepId);
+        /* optional string image = 8; */
+        if (message.image !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.image);
+        /* optional string gpu_image = 9; */
+        if (message.gpuImage !== undefined)
+            writer.tag(9, WireType.LengthDelimited).string(message.gpuImage);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9589,7 +9636,9 @@ class Recruiter$Type extends MessageType<Recruiter> {
             { no: 12, name: "prefetch_percent", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 13, name: "concurrency_min", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 16, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Recruiter>): Recruiter {
@@ -9653,6 +9702,12 @@ class Recruiter$Type extends MessageType<Recruiter> {
                 case /* optional int32 gpu_per_task */ 15:
                     message.gpuPerTask = reader.int32();
                     break;
+                case /* optional string image */ 16:
+                    message.image = reader.string();
+                    break;
+                case /* optional string gpu_image */ 17:
+                    message.gpuImage = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9710,6 +9765,12 @@ class Recruiter$Type extends MessageType<Recruiter> {
         /* optional int32 gpu_per_task = 15; */
         if (message.gpuPerTask !== undefined)
             writer.tag(15, WireType.Varint).int32(message.gpuPerTask);
+        /* optional string image = 16; */
+        if (message.image !== undefined)
+            writer.tag(16, WireType.LengthDelimited).string(message.image);
+        /* optional string gpu_image = 17; */
+        if (message.gpuImage !== undefined)
+            writer.tag(17, WireType.LengthDelimited).string(message.gpuImage);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9738,7 +9799,9 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
             { no: 12, name: "prefetch_percent", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 13, name: "concurrency_min", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 16, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<RecruiterUpdate>): RecruiterUpdate {
@@ -9799,6 +9862,12 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
                 case /* optional int32 gpu_per_task */ 15:
                     message.gpuPerTask = reader.int32();
                     break;
+                case /* optional string image */ 16:
+                    message.image = reader.string();
+                    break;
+                case /* optional string gpu_image */ 17:
+                    message.gpuImage = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9856,6 +9925,12 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
         /* optional int32 gpu_per_task = 15; */
         if (message.gpuPerTask !== undefined)
             writer.tag(15, WireType.Varint).int32(message.gpuPerTask);
+        /* optional string image = 16; */
+        if (message.image !== undefined)
+            writer.tag(16, WireType.LengthDelimited).string(message.image);
+        /* optional string gpu_image = 17; */
+        if (message.gpuImage !== undefined)
+            writer.tag(17, WireType.LengthDelimited).string(message.gpuImage);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

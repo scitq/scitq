@@ -659,17 +659,16 @@ class TaskSpec:
                 raise ValueError(f"TaskSpec(numa=...) must be a positive integer; got {numa!r}")
             if cpu_curve is not None or mem_curve is not None:
                 raise ValueError("TaskSpec: `numa` is mutually exclusive with `cpu` and `mem` — concurrency and per-task budget are derived from the host NUMA topology")
-        # gpu="all" inherently pins one task per worker, so it
-        # satisfies the "must define a concurrency driver" rule on its
-        # own. Numeric gpu>=1 alone still raises today — it would
-        # leave concurrency unbounded since the gpu_per_task ratio is
-        # not enough to commit to a single value without the recruiter
-        # also picking a flavor. "all" sidesteps that by committing to
-        # concurrency=1.
+        # gpu is a valid concurrency driver on its own: gpu="all" pins
+        # to one task per worker; numeric gpu>=1 lets the recruiter
+        # size concurrency = floor(flavor.gpu_count / gpu_per_task) the
+        # same way cpu_per_task does for the CPU dimension.
         parsed_gpu_preview = self._parse_gpu(gpu)
-        gpu_is_all = parsed_gpu_preview == 'all'
-        if concurrency is None and cpu_curve is None and mem_curve is None and numa is None and not gpu_is_all:
-            raise ValueError("TaskSpec must define at least one of concurrency, cpu, mem, numa, or gpu='all'")
+        gpu_drives_concurrency = parsed_gpu_preview == 'all' or (
+            isinstance(parsed_gpu_preview, int) and parsed_gpu_preview >= 1
+        )
+        if concurrency is None and cpu_curve is None and mem_curve is None and numa is None and not gpu_drives_concurrency:
+            raise ValueError("TaskSpec must define at least one of concurrency, cpu, mem, numa, or gpu>=1")
         # Canonical curve form (always a list when set) for the curve-aware
         # consumers (workflow.compile, server-side retry-decision).
         self.cpu_curve = cpu_curve

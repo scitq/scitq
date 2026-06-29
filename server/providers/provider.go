@@ -4,16 +4,23 @@ import "errors"
 
 // Provider defines the methods that a cloud provider must implement.
 //
-// `hasGPU` on Create lets the provider pick a different VM image for
-// GPU flavors. Today scitq supports a single CPU image plus an
-// optional `gpu_image` override (see AzureConfig.GPUImage,
-// OpenstackConfig.GPUImageID); when has_gpu=true and `gpu_image` is
-// configured, the provider boots that image instead of the default.
-// The flag is passed by the caller (jobqueue) — it was already
-// selected from the flavor catalog at recruit time, so the provider
-// just consumes it.
+// Image selection on Create has three sources, in precedence order:
+//   1. `gpuImage` parameter (when hasGPU=true) — per-recruiter override
+//      from the workflow's worker_pool.gpu_image. Empty string falls
+//      through.
+//   2. `image` parameter (regardless of hasGPU) — per-recruiter
+//      override from worker_pool.image. Empty string falls through.
+//   3. scitq.yaml provider config — AzureConfig.Image /
+//      AzureConfig.GPUImage / OpenstackConfig.ImageID /
+//      OpenstackConfig.GPUImageID. The provider picks GPUImage when
+//      hasGPU=true, else Image.
+//
+// Format of the image strings is provider-specific (Azure:
+// "publisher/offer/sku/version"; OpenStack: image name or UUID). Each
+// provider parses its own value and errors at Create time on malformed
+// input — the recruiter doesn't validate format.
 type Provider interface {
-	Create(workerName, flavor, location string, hasGPU bool, jobId int32) (string, error)
+	Create(workerName, flavor, location string, hasGPU bool, image, gpuImage string, jobId int32) (string, error)
 	List(location string) (map[string]string, error)
 	Restart(workerName, location string) error
 	Delete(workerName, location string) error

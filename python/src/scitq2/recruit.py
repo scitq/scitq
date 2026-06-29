@@ -117,7 +117,8 @@ class WorkerPool:
         )
     """
     
-    def __init__(self, *match: FieldExpr, max_recruited: Optional[int] = None, task_batches: int = 1, timeout: int = DEFAULT_RECRUITER_TIMEOUT):
+    def __init__(self, *match: FieldExpr, max_recruited: Optional[int] = None, task_batches: int = 1, timeout: int = DEFAULT_RECRUITER_TIMEOUT,
+                 image: Optional[str] = None, gpu_image: Optional[str] = None):
         self.match = set(match)
         self.extra_options = {}
         if max_recruited is not None:
@@ -126,6 +127,15 @@ class WorkerPool:
             self.extra_options["max_recruited"]=max_recruited
         self.extra_options["rounds"]=task_batches
         self.extra_options["timeout"]=timeout
+        # Per-pool cloud image overrides. Format is provider-specific
+        # (Azure: "publisher/offer/sku/version"; OpenStack: image name
+        # or UUID). Precedence at deploy time: gpu_image (when the
+        # picked flavor has_gpu) > image > scitq.yaml default. Either
+        # field None → fall through.
+        if image is not None:
+            self.extra_options["image"] = image
+        if gpu_image is not None:
+            self.extra_options["gpu_image"] = gpu_image
 
     @property
     def task_batches(self):
@@ -181,9 +191,48 @@ class WorkerPool:
 
         return compile_protofilter(constraints)
 
+    def _filter_targets_gpu(self) -> bool:
+        """True if any match expression names a GPU-related field
+        (`has_gpu`, `gpumem`). The intent check is conservative:
+        we just want to detect that the workflow author told the
+        recruiter "this pool needs GPU flavors". Other filters
+        (cpu/mem/disk/flavor/region/provider) don't count."""
+        gpu_fields = {'has_gpu', 'gpumem'}
+        for expr in self.match:
+            field = getattr(expr, 'field', None)
+            if field in gpu_fields:
+                return True
+        return False
+
     def build_recruiter(self, task_spec, default_provider: Optional[str] = None, default_region: Optional[str] = None) -> tuple[str, dict]:
         options = dict(self.extra_options)
         options["protofilter"] = self.compile_filter(default_provider=default_provider, default_region=default_region)
+
+        # Safety net: a step asks for a GPU per task but the pool has
+        # no GPU filter → recruitment will pick a CPU-only flavor and
+        # the task's fit predicate will then reject every recruited
+        # worker, stranding the step. Warn loudly here so the workflow
+        # author sees it at compile time, not after debugging a stuck
+        # workflow on the UI. We don't *reject* because a future
+        # workflow author might have a reason (mixed pool, manual
+        # flavor pinning via worker_pool.flavor without W.has_gpu);
+        # the warning is a nudge, not a wall.
+        if task_spec is not None:
+            wants_gpu = (
+                getattr(task_spec, 'gpu', None) == 'all'
+                or (isinstance(getattr(task_spec, 'gpu', None), int) and task_spec.gpu >= 1)
+            )
+            if wants_gpu and not self._filter_targets_gpu():
+                import warnings
+                warnings.warn(
+                    "task_spec.gpu is set but worker_pool has no GPU filter "
+                    "(e.g. W.has_gpu == True). The recruiter may pick a "
+                    "CPU-only flavor and the task's fit predicate will then "
+                    "reject every worker. Add W.has_gpu == True to the pool's "
+                    "match expressions (YAML: `worker_pool.gpu: true`).",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
 
         if task_spec is None:
             options["concurrency"] = 1
@@ -239,17 +288,20 @@ class WorkerPool:
 
         return options
     
-    def clone_with(self, *match: FieldExpr, max_recruited: Optional[int] = None, task_batches: Optional[int] = None, 
-                    timeout: Optional[int] = None) -> "WorkerPool":
+    def clone_with(self, *match: FieldExpr, max_recruited: Optional[int] = None, task_batches: Optional[int] = None,
+                    timeout: Optional[int] = None,
+                    image: Optional[str] = None, gpu_image: Optional[str] = None) -> "WorkerPool":
         """
         Returns a copy of the current WorkerPool with optionally overridden fields.
         Any provided arguments override the corresponding fields in the original pool.
         """
         new_match = list(match) if match else self.match
-        return WorkerPool(*new_match, 
+        return WorkerPool(*new_match,
                           max_recruited=max_recruited if max_recruited is not None else self.max_recruited,
                           task_batches=task_batches if task_batches is not None else self.task_batches,
-                          timeout=timeout if timeout is not None else self.timeout)
+                          timeout=timeout if timeout is not None else self.timeout,
+                          image=image if image is not None else self.extra_options.get("image"),
+                          gpu_image=gpu_image if gpu_image is not None else self.extra_options.get("gpu_image"))
     
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, WorkerPool):

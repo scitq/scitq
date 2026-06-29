@@ -631,7 +631,7 @@ class ListTasksRequest(_message.Message):
     def __init__(self, status_filter: _Optional[str] = ..., worker_id_filter: _Optional[int] = ..., workflow_id_filter: _Optional[int] = ..., step_id_filter: _Optional[int] = ..., command_filter: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., show_hidden: bool = ..., compact_command: bool = ..., compact_command_max: _Optional[int] = ...) -> None: ...
 
 class WorkerRequest(_message.Message):
-    __slots__ = ("provider_id", "flavor_id", "region_id", "number", "concurrency", "prefetch", "step_id")
+    __slots__ = ("provider_id", "flavor_id", "region_id", "number", "concurrency", "prefetch", "step_id", "image", "gpu_image")
     PROVIDER_ID_FIELD_NUMBER: _ClassVar[int]
     FLAVOR_ID_FIELD_NUMBER: _ClassVar[int]
     REGION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -639,6 +639,8 @@ class WorkerRequest(_message.Message):
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     PREFETCH_FIELD_NUMBER: _ClassVar[int]
     STEP_ID_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    GPU_IMAGE_FIELD_NUMBER: _ClassVar[int]
     provider_id: int
     flavor_id: int
     region_id: int
@@ -646,7 +648,9 @@ class WorkerRequest(_message.Message):
     concurrency: int
     prefetch: int
     step_id: int
-    def __init__(self, provider_id: _Optional[int] = ..., flavor_id: _Optional[int] = ..., region_id: _Optional[int] = ..., number: _Optional[int] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., step_id: _Optional[int] = ...) -> None: ...
+    image: str
+    gpu_image: str
+    def __init__(self, provider_id: _Optional[int] = ..., flavor_id: _Optional[int] = ..., region_id: _Optional[int] = ..., number: _Optional[int] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., step_id: _Optional[int] = ..., image: _Optional[str] = ..., gpu_image: _Optional[str] = ...) -> None: ...
 
 class CreateWorkerByNameRequest(_message.Message):
     __slots__ = ("provider", "flavor", "region", "count", "concurrency", "prefetch", "step_id")
@@ -1001,7 +1005,7 @@ class RecruiterId(_message.Message):
     def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ...) -> None: ...
 
 class Recruiter(_message.Message):
-    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max", "gpu_per_task")
+    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max", "gpu_per_task", "image", "gpu_image")
     STEP_ID_FIELD_NUMBER: _ClassVar[int]
     RANK_FIELD_NUMBER: _ClassVar[int]
     PROTOFILTER_FIELD_NUMBER: _ClassVar[int]
@@ -1017,6 +1021,8 @@ class Recruiter(_message.Message):
     CONCURRENCY_MIN_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_MAX_FIELD_NUMBER: _ClassVar[int]
     GPU_PER_TASK_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    GPU_IMAGE_FIELD_NUMBER: _ClassVar[int]
     step_id: int
     rank: int
     protofilter: str
@@ -1032,10 +1038,12 @@ class Recruiter(_message.Message):
     concurrency_min: int
     concurrency_max: int
     gpu_per_task: int
-    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ..., gpu_per_task: _Optional[int] = ...) -> None: ...
+    image: str
+    gpu_image: str
+    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ..., gpu_per_task: _Optional[int] = ..., image: _Optional[str] = ..., gpu_image: _Optional[str] = ...) -> None: ...
 
 class RecruiterUpdate(_message.Message):
-    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max", "gpu_per_task")
+    __slots__ = ("step_id", "rank", "protofilter", "concurrency", "prefetch", "max_workers", "rounds", "timeout", "cpu_per_task", "memory_per_task", "disk_per_task", "prefetch_percent", "concurrency_min", "concurrency_max", "gpu_per_task", "image", "gpu_image")
     STEP_ID_FIELD_NUMBER: _ClassVar[int]
     RANK_FIELD_NUMBER: _ClassVar[int]
     PROTOFILTER_FIELD_NUMBER: _ClassVar[int]
@@ -1051,6 +1059,8 @@ class RecruiterUpdate(_message.Message):
     CONCURRENCY_MIN_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_MAX_FIELD_NUMBER: _ClassVar[int]
     GPU_PER_TASK_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    GPU_IMAGE_FIELD_NUMBER: _ClassVar[int]
     step_id: int
     rank: int
     protofilter: str
@@ -1066,7 +1076,9 @@ class RecruiterUpdate(_message.Message):
     concurrency_min: int
     concurrency_max: int
     gpu_per_task: int
-    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ..., gpu_per_task: _Optional[int] = ...) -> None: ...
+    image: str
+    gpu_image: str
+    def __init__(self, step_id: _Optional[int] = ..., rank: _Optional[int] = ..., protofilter: _Optional[str] = ..., concurrency: _Optional[int] = ..., prefetch: _Optional[int] = ..., max_workers: _Optional[int] = ..., rounds: _Optional[int] = ..., timeout: _Optional[int] = ..., cpu_per_task: _Optional[int] = ..., memory_per_task: _Optional[float] = ..., disk_per_task: _Optional[float] = ..., prefetch_percent: _Optional[int] = ..., concurrency_min: _Optional[int] = ..., concurrency_max: _Optional[int] = ..., gpu_per_task: _Optional[int] = ..., image: _Optional[str] = ..., gpu_image: _Optional[str] = ...) -> None: ...
 
 class RecruiterList(_message.Message):
     __slots__ = ("recruiters",)

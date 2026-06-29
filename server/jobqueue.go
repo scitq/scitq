@@ -30,6 +30,13 @@ type Job struct {
 	// uses it to swap to the operator's `gpu_image` config when set.
 	// false for CPU-only flavors and when the catalog row is missing.
 	HasGPU        bool
+	// Per-recruiter cloud image overrides (NULL when the deploy came
+	// from CreateWorker without a recruiter hint, or when the
+	// recruiter row left both columns NULL). Format is
+	// provider-specific. Precedence at provider Create:
+	// gpu_image (if HasGPU) > image > scitq.yaml default.
+	Image         *string
+	GPUImage      *string
 	Action        rune // "C", "D", "R"
 	Retry         int
 	Timeout       time.Duration
@@ -267,7 +274,14 @@ func (s *taskQueueServer) processJob(job Job) error {
 	switch job.Action {
 	case 'C': // Create
 		// Create the worker
-		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region, job.HasGPU, job.JobID)
+		var image, gpuImage string
+		if job.Image != nil {
+			image = *job.Image
+		}
+		if job.GPUImage != nil {
+			gpuImage = *job.GPUImage
+		}
+		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region, job.HasGPU, image, gpuImage, job.JobID)
 		if err != nil {
 			return fmt.Errorf("failed to create worker %s: %w", job.WorkerName, err)
 		}

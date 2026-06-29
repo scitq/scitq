@@ -3246,6 +3246,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 			Region:       regionName,
 			Flavor:       flavorName,
 			HasGPU:       gpuCount.Valid && gpuCount.Int32 > 0,
+			Image:        req.Image,
+			GPUImage:     req.GpuImage,
 			Action:       'C',
 			Retry:        defaultJobRetry,
 			Timeout:      defaultJobTimeout,
@@ -5432,7 +5434,9 @@ func (s *taskQueueServer) AdminResetPassword(ctx context.Context, req *pb.AdminR
 func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterFilter) (*pb.RecruiterList, error) {
 	query := `SELECT step_id, rank, protofilter,
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
-		cpu_per_task, memory_per_task, disk_per_task, gpu_per_task, prefetch_percent, concurrency_min, concurrency_max
+		cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
+		image, gpu_image,
+		prefetch_percent, concurrency_min, concurrency_max
 		FROM recruiter`
 
 	args := []interface{}{}
@@ -5454,7 +5458,9 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 		if err := rows.Scan(
 			&recruiter.StepId, &recruiter.Rank, &recruiter.Protofilter,
 			&recruiter.Concurrency, &recruiter.Prefetch, &recruiter.MaxWorkers, &recruiter.Rounds, &recruiter.Timeout,
-			&recruiter.CpuPerTask, &recruiter.MemoryPerTask, &recruiter.DiskPerTask, &recruiter.GpuPerTask, &recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
+			&recruiter.CpuPerTask, &recruiter.MemoryPerTask, &recruiter.DiskPerTask, &recruiter.GpuPerTask,
+			&recruiter.Image, &recruiter.GpuImage,
+			&recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
@@ -5491,32 +5497,44 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			INSERT INTO recruiter (
 				step_id, rank, protofilter,
 				worker_concurrency, worker_prefetch, rounds, timeout,
-				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task, prefetch_percent, concurrency_min, concurrency_max
+				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
+				image, gpu_image,
+				prefetch_percent, concurrency_min, concurrency_max
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7,
-				$8, $9, $10, $11, $12, $13, $14
+				$8, $9, $10, $11,
+				$12, $13,
+				$14, $15, $16
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
 			req.Concurrency, req.Prefetch, req.Rounds, req.Timeout,
-			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
+			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask,
+			req.Image, req.GpuImage,
+			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 		)
 	} else {
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO recruiter (
 				step_id, rank, protofilter,
 				worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
-				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task, prefetch_percent, concurrency_min, concurrency_max
+				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
+				image, gpu_image,
+				prefetch_percent, concurrency_min, concurrency_max
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7, $8,
-				$9, $10, $11, $12, $13, $14, $15
+				$9, $10, $11, $12,
+				$13, $14,
+				$15, $16, $17
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
 			req.Concurrency, req.Prefetch, *req.MaxWorkers, req.Rounds, req.Timeout,
-			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask, req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
+			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask,
+			req.Image, req.GpuImage,
+			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 		)
 	}
 
@@ -5629,6 +5647,14 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	if req.GpuPerTask != nil {
 		clauses = append(clauses, fmt.Sprintf("gpu_per_task = $%d", len(args)+1))
 		args = append(args, *req.GpuPerTask)
+	}
+	if req.Image != nil {
+		clauses = append(clauses, fmt.Sprintf("image = $%d", len(args)+1))
+		args = append(args, *req.Image)
+	}
+	if req.GpuImage != nil {
+		clauses = append(clauses, fmt.Sprintf("gpu_image = $%d", len(args)+1))
+		args = append(args, *req.GpuImage)
 	}
 	if req.PrefetchPercent != nil {
 		clauses = append(clauses, fmt.Sprintf("prefetch_percent = $%d", len(args)+1))

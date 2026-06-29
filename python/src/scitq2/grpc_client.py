@@ -475,6 +475,7 @@ class Scitq2Client:
                          concurrency: Optional[int]=None, prefetch: Optional[int]=None,
                          cpu_per_task: Optional[int]=None, memory_per_task: Optional[float]=None, disk_per_task: Optional[float]=None,
                          gpu_per_task: Optional[int]=None,
+                         image: Optional[str]=None, gpu_image: Optional[str]=None,
                          concurrency_max: Optional[int]=None, concurrency_min: Optional[int]=None,
                          prefetch_percent: Optional[int]=None,
                          max_recruited: Optional[int]=None, rounds: int=1, timeout: int=DEFAULT_RECRUITER_TIMEOUT) -> int:
@@ -526,6 +527,8 @@ class Scitq2Client:
             memory_per_task=memory_per_task,
             disk_per_task=disk_per_task,
             gpu_per_task=_i(gpu_per_task),
+            image=image,
+            gpu_image=gpu_image,
             prefetch_percent=_i(prefetch_percent),
             concurrency_min=_i(concurrency_min),
             concurrency_max=_i(concurrency_max),
