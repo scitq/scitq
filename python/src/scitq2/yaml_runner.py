@@ -1259,10 +1259,24 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
             # grouped_by becomes impossible. Limited to key columns to
             # avoid polluting the namespace with every TSV column.
             if len(key_cols) > 1:
+                alias_keys = []
                 for col in key_cols:
                     alias = col.upper()
-                    if alias != uname:
-                        d[alias] = '' if r.get(col) is None else str(r.get(col))
+                    d[alias] = '' if r.get(col) is None else str(r.get(col))
+                    alias_keys.append(alias)
+                # `_iter_keys` lists the keys that ARE the iteration's
+                # identifier components. For a composite TSV that's
+                # the uppercase aliases of the key columns (e.g.
+                # [REF, QUERY] for `key: [ref, query]`) — NOT the
+                # composite `PAIR` (which is just REF.QUERY rejoined)
+                # and NOT arbitrary other columns like
+                # `pair.ref_assembly`. Tag construction joins these
+                # with `.`, producing exactly the composite tag; and
+                # `_tasks_for_group`'s subset-match works because both
+                # sides reduce to the same atomic component values.
+                # Extra columns (URIs etc) stay accessible via
+                # `{pair.col}` substitution but stay out of the tag.
+                d['_iter_keys'] = alias_keys
             d['_source'] = source
             items.append(d)
         return items, source
@@ -1889,7 +1903,11 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
             # historical behaviour). Only applies when we have an itervar
             # to match against — one-off resolutions are unchanged.
             if itervar is not None and upstream.tasks:
-                iter_components = {str(v) for k, v in itervar.items() if not k.startswith('_')}
+                iter_keys = itervar.get('_iter_keys')
+                if iter_keys:
+                    iter_components = {str(itervar[k]) for k in iter_keys if k in itervar}
+                else:
+                    iter_components = {str(v) for k, v in itervar.items() if not k.startswith('_')}
                 candidates = []
                 for t in upstream.tasks:
                     tag = getattr(t, 'tag', None) or ''
@@ -1914,6 +1932,32 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
     raise ValueError(f"Cannot resolve input: {input_ref} (available steps: {available})")
 
 
+def _propagate_constant_cols(synthetic_itervar: dict, group_iterations: List[Dict]):
+    """Mutate `synthetic_itervar` to also expose every iteration-var key
+    whose value is CONSTANT across `group_iterations`.
+
+    Use case: a `grouped_by: ref` step on a TSV iterator that also has
+    other columns (e.g. `ref_assembly`, `ref_metadata`) whose values
+    are determined by `ref` and therefore identical for every row in
+    the ref-group. Without propagation, those columns are accessible
+    only via `_group_iterations[*]` indirection — substitution like
+    `{pair.ref_assembly}` fails because the synthetic itervar only
+    carries the group key.
+
+    Skips keys already present in synthetic_itervar (don't overwrite
+    the grouped key), skips internal keys (`_*`), and skips any key
+    whose value differs across iterations (e.g. `pair.query` in a
+    ref-group)."""
+    if not group_iterations:
+        return
+    first = group_iterations[0]
+    for k, v in first.items():
+        if k.startswith('_') or k in synthetic_itervar:
+            continue
+        if all(iv.get(k) == v for iv in group_iterations):
+            synthetic_itervar[k] = v
+
+
 def _tasks_for_group(upstream_step, group_iterations: List[Dict]):
     """Filter upstream_step.tasks to those whose iteration belonged to one
     of `group_iterations`. Matched by tag-component subset: an iteration's
@@ -1932,7 +1976,14 @@ def _tasks_for_group(upstream_step, group_iterations: List[Dict]):
         return []
     iter_componentsets = []
     for iv in group_iterations:
-        iter_componentsets.append({str(v) for k, v in iv.items() if not k.startswith('_')})
+        # Honour `_iter_keys` the same way tag-construction does so the
+        # downstream component set matches the shape of upstream tags.
+        iter_keys = iv.get('_iter_keys')
+        if iter_keys:
+            components = {str(iv[k]) for k in iter_keys if k in iv}
+        else:
+            components = {str(v) for k, v in iv.items() if not k.startswith('_')}
+        iter_componentsets.append(components)
     matches = []
     for t in upstream_step.tasks:
         if not getattr(t, 'tag', None):
@@ -2362,8 +2413,19 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
         # composite — one task per distinct value of the grouped_by var.
         step_kwargs['tag'] = str(itervar.get(grouped_by_key, ''))
     elif itervar and not is_fan_in:
-        # Build tag from all iterator variables (excluding internal keys)
-        tag_parts = [str(v) for k, v in itervar.items() if not k.startswith('_')]
+        # Build tag from iteration variables. When the iterator sets
+        # `_iter_keys` (currently: composite-key TSV), only those keys
+        # contribute to the tag — extra columns (data the workflow
+        # references via `{pair.col}`, like ref_assembly URIs) stay
+        # out of the tag where their dots would break the subset
+        # match in _tasks_for_group. Falls back to all non-internal
+        # keys for iterators without `_iter_keys` (preserves the
+        # historical behaviour for uri/range/list/single-col-tsv).
+        iter_keys = itervar.get('_iter_keys')
+        if iter_keys:
+            tag_parts = [str(itervar[k]) for k in iter_keys if k in itervar]
+        else:
+            tag_parts = [str(v) for k, v in itervar.items() if not k.startswith('_')]
         step_kwargs['tag'] = '.'.join(tag_parts) if tag_parts else None
 
     # Inputs — resolve cond: if present, then handle string or list
@@ -2826,6 +2888,7 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
             sys.exit(1)
         for gv in order_e:
             synthetic_itervar = {key: gv, '_group_iterations': groups_e[gv]}
+            _propagate_constant_cols(synthetic_itervar, groups_e[gv])
             step = _build_step(workflow, step_def, step_map, params,
                                itervar=synthetic_itervar,
                                grouped_by_key=key,
@@ -2924,6 +2987,7 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
             # Keeps every original iteration's `_sample` accessible via
             # `_group_iterations` for input resolution.
             synthetic_itervar = {key: gv, '_group_iterations': groups[gv]}
+            _propagate_constant_cols(synthetic_itervar, groups[gv])
             step = _build_step(workflow, step_def, step_map, params,
                                itervar=synthetic_itervar,
                                grouped_by_key=key,

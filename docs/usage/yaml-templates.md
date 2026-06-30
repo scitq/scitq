@@ -359,10 +359,76 @@ The two are mutually exclusive — supply exactly one.
 
 Optional fields:
 
-- `key:` — column name to use as the iteration tag. Defaults to the first column. Values in this column must be unique across rows.
+- `key:` — iteration tag, either a single column name (string) or a list of column names (composite key — see below). Defaults to the first column. The synthesized tag must be unique across rows.
 - `sep:` — field separator. Auto-detected from the URI extension (`.tsv` → tab, `.csv` → comma), defaulting to tab.
 
 Missing cells resolve to empty strings; this composes cleanly with `when:` for skip-if-missing patterns (`when: "sample.preqc_done"`).
+
+##### Composite keys (`key: [colA, colB, ...]`)
+
+When the iteration is over **pairs** (or larger tuples) rather than single samples, no single column is unique — but the combination is. Pass `key:` as a **list of column names**, and the runner synthesizes the iter tag as their dot-joined values and exposes each as both `{iter.col}` AND a top-level `{COL}` alias for `grouped_by:` lookup:
+
+```yaml
+iterate:
+  name: pair
+  source: tsv
+  content: |
+    ref     query   ref_assembly                          query_r1                            query_r2
+    A       A       s3://bkt/m/A.contigs.fa               s3://bkt/q/A.1.fastq.gz             s3://bkt/q/A.2.fastq.gz
+    A       B       s3://bkt/m/A.contigs.fa               s3://bkt/q/B.1.fastq.gz             s3://bkt/q/B.2.fastq.gz
+    B       A       s3://bkt/m/B.contigs.fa               s3://bkt/q/A.1.fastq.gz             s3://bkt/q/A.2.fastq.gz
+    B       B       s3://bkt/m/B.contigs.fa               s3://bkt/q/B.1.fastq.gz             s3://bkt/q/B.2.fastq.gz
+  key: [ref, query]
+```
+
+For each row, the iter dict carries:
+
+| Reference | Resolves to |
+|---|---|
+| `{PAIR}` | the composite tag (`"A.A"`, `"A.B"`, …) — the iter name's value |
+| `{REF}`, `{QUERY}` | uppercase aliases of each key column. Use these in `grouped_by:`, `{REF}` substitution, and tag construction. |
+| `{pair.ref}`, `{pair.query}` | lower-case dotted form (data access, same value as the alias) |
+| `{pair.ref_assembly}`, `{pair.query_r1}`, `{pair.query_r2}` | any extra column (data, kept out of the tag) |
+
+The duplicate (composite tag + aliases) is intentional: the composite gives you a one-shot identifier for naming files (`{PAIR}.cov.txt`), the aliases give you per-axis lookup for `grouped_by`. Extra columns (URIs, metadata) stay accessible for `inputs:` and command substitution but **do not pollute the task tag** — important when those values contain dots themselves (URIs do).
+
+###### When to use it: the (ref × query) cross-mapping shape
+
+The canonical case is metagenomic binning with multi-sample differential coverage: each ref's assembly receives coverage signal from N query samples. With `key: [ref, query]` you get 237 refs × 10 queries = 2370 iterations, and the workflow steps decompose cleanly:
+
+```yaml
+steps:
+  - name: split_contigs
+    grouped_by: ref           # 1 task per unique ref (237)
+    inputs: ["{pair.ref_assembly}"]
+    # ...
+
+  - name: sketch
+    grouped_by: query         # 1 task per unique query (237)
+    inputs: ["{pair.query_r1}", "{pair.query_r2}"]
+    # ...
+
+  - name: coverage
+    # per-(ref, query) pair — 2370 tasks; subset-matches the
+    # right split_contigs (by REF) and the right sketch (by QUERY)
+    inputs: [split_contigs.split, sketch.sketch]
+    # ...
+
+  - name: features
+    grouped_by: ref           # 1 task per ref, fanning in 10 aemb tables
+    inputs: [coverage.aemb]
+    # ...
+```
+
+Two runner mechanics make this work:
+
+1. **Build-order.** `grouped_by` steps whose inputs don't reference other steps (here `split_contigs` and `sketch`) are built BEFORE the per-iter loop, so the per-pair `coverage` step can resolve their outputs by subset-match. (Without this, the historical "grouped_by-last" order produced an empty upstream when per-iter tasks tried to chain off a grouped_by upstream.)
+2. **Constant-column propagation.** `grouped_by: ref` runs once per unique ref, with the synthetic iter dict carrying only `REF` plus every column whose value is constant across the ref-group (e.g. `pair.ref_assembly`). Per-key-derived URIs are reachable in the grouped step's `inputs:` and command; per-other-key URIs (`pair.query_r1` for a ref-group) stay out of scope, since they vary.
+
+###### Constraints
+
+- The synthesized tag (the dot-joined values of the listed key columns) must be unique across rows — the runner errors at iteration time with `duplicate composite tag '<tag>'` otherwise. Repetition within a single column is fine (every row sharing a `ref` is exactly the multi-coverage shape).
+- Every row that shares a value in a `grouped_by` key column should also share the data columns derived from that key. E.g. all rows with `ref=A` should have the same `ref_assembly`. The constant-column propagator filters silently — values that vary within the group simply don't get exposed in the grouped task's `{pair.col}` namespace.
 
 #### Named file groups
 
