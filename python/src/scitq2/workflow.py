@@ -1,5 +1,5 @@
 from scitq2.validate import validate_shell
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 from scitq2.grpc_client import Scitq2Client
 from scitq2.language import Language, Raw, Shell
 from scitq2.recruit import WorkerPool
@@ -434,20 +434,30 @@ class Task:
         if wf.workspace_root is not None:
             resolved_output = f"{wf.workspace_root}/{wf.full_name}/{self.full_name}/"
         if self.publish is not None:
-            # Substitute `{workflow_id}` and `{workflow_name}` in publish
-            # paths — server-assigned workflow_id is unique per run and
-            # extend-safe (extends reuse the same id), so publish paths
-            # written as `{output_uri}/{workflow_id}/{SAMPLE}/...` are
-            # collision-free by construction. YAML compile leaves these
-            # placeholders literal (they aren't params/iter vars); we
-            # resolve them here, at Task.compile, because
-            # workflow.compile() creates the workflow row (assigning
-            # workflow_id) BEFORE any task compile runs.
+            # Substitute the three workflow-scope placeholders in publish
+            # paths. All three are opt-in tools for collision-avoidance
+            # across runs — the workflow author picks which one fits:
+            #
+            #   {workflow_id}   always-unique integer, no filesystem cost,
+            #                   changes path shape on every run.
+            #   {workflow_name} workflow name — mostly for readability
+            #                   alongside {workflow_id}.
+            #   {unique_suffix} opt-in "" or "-N" resolved once at
+            #                   workflow.compile() by listing the parent
+            #                   folder. Zero path shape change on first
+            #                   run in a folder; "-N" only on collision.
+            #                   Extend runs INHERIT the suffix from the
+            #                   existing workflow (derived from any
+            #                   existing task's publish URI, no re-list).
+            #
+            # All three are literal until this point — YAML compile
+            # leaves them alone because they aren't params or iter vars.
             resolved_publish = self.publish
             if wf.workflow_id is not None:
                 resolved_publish = resolved_publish.replace('{workflow_id}', str(wf.workflow_id))
             if wf.name:
                 resolved_publish = resolved_publish.replace('{workflow_name}', str(wf.name))
+            resolved_publish = resolved_publish.replace('{unique_suffix}', wf.publish_suffix or '')
             if resolved_output is None:
                 # No workspace — publish path doubles as output (legacy behavior)
                 resolved_output = resolved_publish
@@ -1137,6 +1147,14 @@ class Workflow:
         self.provider = provider
         self.region = region
         self.workflow_id: Optional[int] = None
+        # Publish path collision-avoidance suffix. Resolved once at
+        # workflow.compile() when any Step.publish contains the
+        # `{unique_suffix}` placeholder — value is "" (target folder
+        # is clean) or "-N" for the first N whose target folder is
+        # empty. None when no step uses the placeholder (zero cost).
+        # Not persisted on the workflow row — extends re-derive from
+        # any existing task's publish URI. See resolve_publish_suffix.
+        self.publish_suffix: Optional[str] = None
         self.full_name: Optional[str] = None
         self.workspace_root: Optional[str] = None
         # Set by compile() when extending an existing workflow (see
@@ -1307,6 +1325,13 @@ class Workflow:
                         continue
                     raise  # re-raise non-duplicate errors
 
+        # Resolve `{unique_suffix}` placeholder in step publish paths
+        # BEFORE any task.compile substitutes them into concrete URIs.
+        # Extend inherits from existing tasks (no re-list); new runs
+        # perform one listing per unique parent folder. See
+        # resolve_publish_suffix docstring for the algorithm.
+        self._resolve_publish_suffix(client)
+
         template_run_id = os.environ.get("SCITQ_TEMPLATE_RUN_ID")
         if template_run_id:
             client.update_template_run(template_run_id=int(template_run_id), workflow_id=self.workflow_id)
@@ -1316,7 +1341,170 @@ class Workflow:
         if activate_leading_tasks:
             client.update_workflow_status(workflow_id=self.workflow_id, status="R")
         return self.workflow_id
-    
+
+    def _resolve_publish_suffix(self, client: Scitq2Client) -> None:
+        """Resolve `{unique_suffix}` on `self.publish_suffix`, or leave
+        it None if no step's publish template uses the placeholder.
+
+        Two paths:
+
+          * Extend — derive from any existing task's publish URI.
+            The template's literal prefix up to `{unique_suffix}`
+            (with workflow-scope substitutions applied) tells us
+            what to strip from the existing URI; whatever's between
+            that prefix and the next `/` IS the suffix. Zero
+            filesystem cost, extends stay in the same folder.
+
+          * New workflow — list the target parent folder(s) and pick
+            the first candidate ("" then "-1", "-2", …) whose
+            resolved parent is empty across every step that uses
+            the placeholder. One list per unique parent prefix.
+
+        Constraint: `{unique_suffix}` must appear at a position in
+        the template where every character before it is workflow-
+        scope (params + workflow_name only, no iter vars). This is
+        the natural placement — putting it after an iter var makes
+        it per-task, which isn't what the placeholder means.
+        Violations aren't detected here; they'd surface as
+        derivation failures on extend or as unexpected paths on new
+        runs.
+        """
+        # Collect step publish templates that contain the placeholder.
+        # Each entry: (step_name, template_string, prefix_before_placeholder).
+        # The prefix is with `{workflow_id}` / `{workflow_name}` already
+        # substituted so downstream matching is done against concrete
+        # workflow-scope values.
+        PLACEHOLDER = '{unique_suffix}'
+        users: List[Tuple[str, str, str]] = []
+        for step_name, step in self._steps.items():
+            for task in step.tasks:
+                p = task.publish
+                if not p or PLACEHOLDER not in p:
+                    continue
+                idx = p.find(PLACEHOLDER)
+                prefix = p[:idx]
+                # Substitute the workflow-scope placeholders that could
+                # sit inside the prefix (task-level substitution hasn't
+                # happened yet — params + iter vars were resolved at
+                # YAML compile, but {workflow_id} / {workflow_name} are
+                # still literal).
+                if self.workflow_id is not None:
+                    prefix = prefix.replace('{workflow_id}', str(self.workflow_id))
+                if self.name:
+                    prefix = prefix.replace('{workflow_name}', str(self.name))
+                users.append((step_name, p, prefix))
+                break  # one task per step is enough — publish templates
+                # are step-level, all tasks in a step share the template.
+        if not users:
+            return
+
+        # Extend: derive from existing tasks. The _extend context
+        # already gathered existing task metadata; we need at least
+        # one existing task whose step contains the placeholder.
+        if self._extend is not None:
+            derived = self._derive_publish_suffix_from_extend(users)
+            if derived is not None:
+                self.publish_suffix = derived
+                return
+            # Fall through: extend context is present but no existing
+            # task uses the placeholder (or the derivation failed).
+            # Re-resolve as if new — better than leaving the suffix
+            # None and producing paths that don't match the original.
+
+        # New workflow: probe candidate suffixes against every unique
+        # parent prefix in `users`. First N where all prefixes come
+        # back empty wins.
+        candidates: List[str] = ['']
+        # Bounded probe — 10 collisions in a row means "the operator
+        # is doing something intentional we shouldn't hide behind an
+        # increasingly ugly suffix". Fail loudly instead of climbing
+        # forever.
+        for n in range(1, 11):
+            candidates.append(f'-{n}')
+
+        for candidate in candidates:
+            all_clean = True
+            checked: set = set()
+            for _step_name, _template, prefix in users:
+                # Target folder for this candidate. Template shape
+                # guarantees `{unique_suffix}` is followed by `/` (see
+                # _derive_publish_suffix_from_extend), so appending `/`
+                # gives the folder we actually publish into. Listing it
+                # tells us if a prior run has already used this suffix.
+                target = prefix + candidate + '/'
+                if target in checked:
+                    continue
+                checked.add(target)
+                try:
+                    entries = client.fetch_list(target)
+                except Exception:
+                    # Listing failed (folder doesn't exist, auth error).
+                    # Treat as empty — safe: at worst we submit and the
+                    # first task's upload creates the folder.
+                    entries = []
+                if entries:
+                    all_clean = False
+                    break
+            if all_clean:
+                self.publish_suffix = candidate
+                return
+
+        # Exhausted candidates — fail loudly. The operator is
+        # writing into a folder tree with 10+ prior collisions,
+        # which is a strong signal they should either clean up or
+        # pick a different `{output_uri}` root.
+        raise RuntimeError(
+            f"Cannot resolve {{unique_suffix}}: 10+ candidate suffixes "
+            f"('', '-1', … '-10') all point at non-empty folders. "
+            f"Either clean the parent folder or change `params.output_uri` "
+            f"to a fresh root. Prefixes checked: {sorted({p for _,_,p in users})!r}"
+        )
+
+    def _derive_publish_suffix_from_extend(self, users: List[Tuple[str, str, str]]) -> Optional[str]:
+        """Extend-mode derivation: pull the resolved suffix out of an
+        existing task's publish URI. Returns None when derivation
+        can't proceed (no existing task in a step that uses the
+        placeholder, or the URI doesn't match the expected prefix).
+        The caller falls through to a fresh resolve in that case.
+
+        `_extend.tasks_by_step` is keyed by step_id (server-side
+        assigned) → {task_name: (id, cmd, container, status, publish)}.
+        Since we run before Step.compile has assigned step_ids on
+        the local Step objects, we look up ids via ext.step_ids by
+        step name.
+        """
+        ext = self._extend
+        if ext is None or not ext.tasks_by_step or not ext.step_ids:
+            return None
+        for step_name, template, prefix in users:
+            step_id = ext.step_ids.get(step_name)
+            if step_id is None:
+                continue
+            existing = ext.tasks_by_step.get(step_id)
+            if not existing:
+                continue
+            # existing is a dict of task_name → 5-tuple (id, cmd,
+            # container, status, publish); the publish field is what
+            # we need. Any task from this step will do — every task
+            # in the step used the same publish template, so the
+            # suffix is uniform across them.
+            for _name, tup in existing.items():
+                if len(tup) < 5:
+                    continue
+                existing_publish = tup[4]
+                if not isinstance(existing_publish, str) or not existing_publish:
+                    continue
+                if not existing_publish.startswith(prefix):
+                    continue
+                tail = existing_publish[len(prefix):]
+                # Suffix is everything up to the next `/` — assumes
+                # `{unique_suffix}` is followed by `/` in the
+                # template, which is the documented placement rule.
+                slash = tail.find('/')
+                suffix = tail[:slash] if slash >= 0 else tail
+                return suffix
+        return None
+
     @property
     def steps(self) -> List[Step]:
         return list(self._steps.values())

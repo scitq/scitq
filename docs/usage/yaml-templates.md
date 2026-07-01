@@ -1639,6 +1639,26 @@ Substitution timing: workflow_id is server-assigned, so the placeholder is prese
 
 If `{workflow_id}` doesn't appear in any publish path, no substitution runs — existing templates keep their current behaviour.
 
+### `{unique_suffix}` — keep the path readable, add `-N` only on collision
+
+`{workflow_id}` guarantees uniqueness by putting an opaque integer in the path. When you'd rather keep the path readable and only take a suffix when the folder is already in use, use `{unique_suffix}`:
+
+```yaml
+  - name: bin
+    publish: "{params.results}/{workflow_name}{unique_suffix}/{SAMPLE}/bins/"
+```
+
+On the **first** run into a clean parent folder, `{unique_suffix}` resolves to the empty string — the path is exactly `{params.results}/binning/{SAMPLE}/bins/`. On a **subsequent** run into the same parent, it resolves to `-1`, then `-2`, etc., producing `binning-1/`, `binning-2/`, and so on.
+
+Resolution runs **once per workflow-submit** at `workflow.compile()`:
+
+- **New workflow** — the client lists the parent folder for each step that uses the placeholder, picks the first candidate (`""` then `-1`, `-2`, …) whose target folder is empty. One listing per unique parent prefix; if 10+ candidates all collide, the submit fails loudly rather than silently climbing.
+- **Extending an existing workflow** — the suffix is **derived from any existing task's publish URI** (no listing). Extends stay in the same folder as the original run — the same "extend accumulates into the same collection" semantic as `{workflow_id}`.
+
+Placement rule: `{unique_suffix}` must sit at a workflow-scope position — after `{workflow_name}` or param references, but **before** any iter var like `{SAMPLE}`. The template `.../{SAMPLE}{unique_suffix}/...` would make the suffix per-task, which isn't what the placeholder means.
+
+Compose freely with `{workflow_id}` and `{workflow_name}`; each of the three resolves independently and only when the corresponding placeholder appears in the template. If `{unique_suffix}` isn't used, no listing runs — zero cost for existing templates.
+
 ### `publish_mode: copy` — keep the workspace copy too
 
 By default a successful task uploads to the publish URI **instead of** the workspace, so downstream consumers reading from `workspace:` no longer find the artefacts there. That's the right trade-off for steps whose outputs are only ever read by the published-results bucket.
