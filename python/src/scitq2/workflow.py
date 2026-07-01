@@ -248,7 +248,8 @@ class Task:
                  skip_if_exists: bool = False,
                  retry: Optional[int]=None,
                  accept_failure: bool = False,
-                 container_options: Optional[str] = None):
+                 container_options: Optional[str] = None,
+                 iter_context: Optional[Dict[str, str]] = None):
         self.tag = tag
         self.command = command
         self.container = container
@@ -290,6 +291,14 @@ class Task:
         self.dependency_task_ids: List[int] = []
         self.task_id: Optional[int] = None
         self.reuse_key: Optional[str] = None
+        # Snapshot of the iteration variables (excluding internal `_*`
+        # keys) that produced this task. Used by input resolvers to
+        # match upstream tasks POSITIONALLY when subset-of-values
+        # would be ambiguous (e.g. ref=X query=Y vs ref=Y query=X,
+        # which have identical tag-component sets but different
+        # meanings). None for tasks not created inside an iteration
+        # loop (one-off / fan-in / hand-added tasks).
+        self.iter_context = iter_context
 
     @classmethod
     def as_reference(cls, *, step: "Step", task_name: str, task_id: int, publish: Optional[str]):
@@ -871,7 +880,8 @@ class Step:
     """
 
     def __init__(self, name: str, workflow: "Workflow", worker_pool: Optional[WorkerPool] = None, task_spec: Optional[TaskSpec] = None,
-                 naming_strategy: callable = dot_join, quality: Optional[Quality] = None):
+                 naming_strategy: callable = dot_join, quality: Optional[Quality] = None,
+                 grouped_by_key: Optional[str] = None):
         self.name = name
         self.tasks: List[Task] = []
         self.worker_pool = worker_pool
@@ -881,6 +891,14 @@ class Step:
         self.workflow = workflow
         self.naming_strategy = naming_strategy
         self.quality = quality
+        # The iter-var key this step was grouped by, if any (e.g. "REF"
+        # for a `grouped_by: ref` step). Downstream per-iter resolvers
+        # use this to disambiguate subset-matches: when the current
+        # iteration has both REF and QUERY components, an upstream
+        # step grouped_by REF should be matched by REF value only —
+        # not by whichever component happens to also appear as a
+        # sibling group key.
+        self.grouped_by_key = grouped_by_key
 
     def add_task(
         self,
@@ -897,6 +915,7 @@ class Step:
         retry: Optional[int]=None,
         accept_failure: bool = False,
         container_options: Optional[str] = None,
+        iter_context: Optional[Dict[str, str]] = None,
     ):
         """Complete an existing Step object with a new Task."""
         if outputs:
@@ -940,7 +959,8 @@ class Step:
                     depends=resolved_depends, publish=publish, publish_mode=publish_mode,
                     skip_if_exists=skip_if_exists, retry=retry,
                     accept_failure=accept_failure,
-                    container_options=container_options)
+                    container_options=container_options,
+                    iter_context=iter_context)
         self.tasks.append(task)
 
     def _resolve_publish(self, raw_publish, tag: Optional[str]) -> Optional[str]:
@@ -1147,6 +1167,8 @@ class Workflow:
         retry: Optional[int] = None,
         accept_failure: bool = False,
         quality: Optional[Quality] = None,
+        grouped_by_key: Optional[str] = None,
+        iter_context: Optional[Dict[str, str]] = None,
     ) -> Step:
         """Add a Step to the Workflow with a single Task.
         If the Step already exists with the same name, the Task is added to the existing Step.
@@ -1173,7 +1195,7 @@ class Workflow:
             skip_if_exists = self.skip_if_exists
         if retry is None:
             retry = self.retry
-        new_step = Step(name=name, workflow=self, worker_pool=worker_pool, task_spec=task_spec, naming_strategy=naming_strategy, quality=quality)
+        new_step = Step(name=name, workflow=self, worker_pool=worker_pool, task_spec=task_spec, naming_strategy=naming_strategy, quality=quality, grouped_by_key=grouped_by_key)
         if name in self._steps:
             existing = self._steps[name]
             if (existing.worker_pool != new_step.worker_pool or existing.task_spec != new_step.task_spec):
@@ -1194,7 +1216,7 @@ class Workflow:
         step.add_task(tag=tag, command=command, container=container, container_options=container_options,
                       outputs=outputs, inputs=inputs, resources=resources,
                       language=effective_language, depends=depends, skip_if_exists=skip_if_exists, retry=retry,
-                      accept_failure=accept_failure)
+                      accept_failure=accept_failure, iter_context=iter_context)
         return step
 
     def _build_extend_context(self, client: Scitq2Client, workflow_id: int, retry_failed_only: bool) -> "_ExtendContext":

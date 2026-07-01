@@ -1903,6 +1903,39 @@ def _resolve_inputs(input_ref: str, step_map: Dict[str, Step], grouped: bool = F
             # historical behaviour). Only applies when we have an itervar
             # to match against — one-off resolutions are unchanged.
             if itervar is not None and upstream.tasks:
+                # Preferred path 1: when the upstream is a grouped_by
+                # step and we know which iter-var key it was grouped
+                # by, match EXACTLY on that key's value in the current
+                # iter. This disambiguates the multi-axis case (e.g.
+                # coverage referencing both split_contigs grouped_by
+                # REF and sketch grouped_by QUERY — a naive iter-
+                # component subset check would pick the wrong task
+                # since the per-pair iter has both REF and QUERY
+                # components, and both single-tag upstream tasks are
+                # subsets of that set).
+                gkey = getattr(upstream, 'grouped_by_key', None)
+                if gkey and gkey in itervar:
+                    target = str(itervar[gkey])
+                    for t in upstream.tasks:
+                        if getattr(t, 'tag', None) == target:
+                            return upstream.output(output_name, task=t)
+                    # No match with the group-key path — fall through
+                    # to the subset heuristic rather than error out,
+                    # so cases where the upstream isn't actually keyed
+                    # by that value still work.
+                # Preferred path 2: when upstream tasks carry an
+                # iter_context snapshot, pick the one whose context
+                # matches the current itervar on every shared key.
+                # This is exact (positional) matching, not set-based
+                # — so `ref=X query=Y` never accidentally matches
+                # `ref=Y query=X`.
+                iter_keys = itervar.get('_iter_keys') if itervar else None
+                if iter_keys:
+                    target = {k: str(itervar[k]) for k in iter_keys if k in itervar}
+                    for t in upstream.tasks:
+                        ctx = getattr(t, 'iter_context', None)
+                        if ctx and all(ctx.get(k) == v for k, v in target.items()):
+                            return upstream.output(output_name, task=t)
                 iter_keys = itervar.get('_iter_keys')
                 if iter_keys:
                     iter_components = {str(itervar[k]) for k in iter_keys if k in itervar}
@@ -1984,6 +2017,35 @@ def _tasks_for_group(upstream_step, group_iterations: List[Dict]):
         else:
             components = {str(v) for k, v in iv.items() if not k.startswith('_')}
         iter_componentsets.append(components)
+
+    # Preferred path: when the upstream tasks carry `iter_context`
+    # snapshots AND every downstream iteration has an _iter_keys
+    # list, do POSITION-AWARE matching. This is exact and avoids
+    # the set-based ambiguity where `ref=X query=Y` (upstream task
+    # for the reversed pair) accidentally matches an iset {X, Y} —
+    # sets don't know which value is REF vs QUERY.
+    if group_iterations and group_iterations[0].get('_iter_keys'):
+        iter_keys = group_iterations[0]['_iter_keys']
+        target_ctxs = [
+            {k: str(iv[k]) for k in iter_keys if k in iv}
+            for iv in group_iterations
+        ]
+        matches = []
+        for t in upstream_step.tasks:
+            ctx = getattr(t, 'iter_context', None)
+            if not ctx:
+                continue
+            for tgt in target_ctxs:
+                # Upstream matches this iteration if its context
+                # agrees on EVERY key the upstream has that's also
+                # in the target. Keys the upstream lacks (e.g. a
+                # grouped_by-REF upstream has no QUERY in its ctx)
+                # aren't required.
+                if all(ctx.get(k) == v for k, v in tgt.items() if k in ctx):
+                    matches.append(t)
+                    break
+        if matches:
+            return matches
     matches = []
     for t in upstream_step.tasks:
         if not getattr(t, 'tag', None):
@@ -2550,6 +2612,26 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     # Depends on prep step for adhoc containers
     if prep_step:
         step_kwargs['depends'] = prep_step
+
+    # Record the grouped_by key on the step itself, so downstream
+    # per-iter resolvers can disambiguate subset-matches: a per-pair
+    # step referencing a grouped_by-ref upstream should look up by
+    # REF value only, not any component that happens to also be a
+    # sibling group key (e.g. QUERY of a grouped_by-query step in
+    # the same workflow — both would match a naive iter-component
+    # subset check).
+    if grouped_by_key:
+        step_kwargs['grouped_by_key'] = grouped_by_key
+
+    # Snapshot the iteration vars onto the Task for later position-
+    # aware matching in _resolve_inputs / _tasks_for_group. Skip
+    # internal `_*` keys and the list-valued `_group_iterations`; the
+    # dict is intentionally small (a handful of strings per task).
+    if itervar:
+        step_kwargs['iter_context'] = {
+            k: str(v) for k, v in itervar.items()
+            if not k.startswith('_')
+        }
 
     return workflow.Step(**step_kwargs)
 
