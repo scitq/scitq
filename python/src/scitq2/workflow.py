@@ -434,7 +434,20 @@ class Task:
         if wf.workspace_root is not None:
             resolved_output = f"{wf.workspace_root}/{wf.full_name}/{self.full_name}/"
         if self.publish is not None:
+            # Substitute `{workflow_id}` and `{workflow_name}` in publish
+            # paths — server-assigned workflow_id is unique per run and
+            # extend-safe (extends reuse the same id), so publish paths
+            # written as `{output_uri}/{workflow_id}/{SAMPLE}/...` are
+            # collision-free by construction. YAML compile leaves these
+            # placeholders literal (they aren't params/iter vars); we
+            # resolve them here, at Task.compile, because
+            # workflow.compile() creates the workflow row (assigning
+            # workflow_id) BEFORE any task compile runs.
             resolved_publish = self.publish
+            if wf.workflow_id is not None:
+                resolved_publish = resolved_publish.replace('{workflow_id}', str(wf.workflow_id))
+            if wf.name:
+                resolved_publish = resolved_publish.replace('{workflow_name}', str(wf.name))
             if resolved_output is None:
                 # No workspace — publish path doubles as output (legacy behavior)
                 resolved_output = resolved_publish

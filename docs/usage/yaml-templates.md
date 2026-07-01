@@ -1618,6 +1618,27 @@ steps:
     publish: true    # Publishes to azure://results/my_project/compile/
 ```
 
+### `{workflow_id}` / `{workflow_name}` — collision-free publish by construction
+
+Publish paths can embed the server-assigned `workflow_id` (a monotonic integer, unique across every run in the server's history) and the `workflow_name`:
+
+```yaml
+  - name: bin
+    publish: "{params.results}/{workflow_id}/{SAMPLE}/bins/"
+```
+
+Every run of the same template lands under a distinct `{workflow_id}` sub-folder — two operators (or one operator twice in the same day) can't accidentally overwrite each other's outputs. **Extends preserve the id**, so extending an existing workflow keeps writing to the same folder (which IS the extend user intent: accumulate more results into the same collection).
+
+Compose with `{date}` for a browseable date-first layout that stays collision-free within a day:
+
+```yaml
+publish: "{params.results}/{date}/{workflow_id}/{SAMPLE}/bins/"
+```
+
+Substitution timing: workflow_id is server-assigned, so the placeholder is preserved literally through YAML compile and resolved per-task at submit time. Placing `{workflow_id}` inside `command:` / `resource:` / step-level `vars:` is not supported (those are compiled before the workflow is created); use `publish:` only.
+
+If `{workflow_id}` doesn't appear in any publish path, no substitution runs — existing templates keep their current behaviour.
+
 ### `publish_mode: copy` — keep the workspace copy too
 
 By default a successful task uploads to the publish URI **instead of** the workspace, so downstream consumers reading from `workspace:` no longer find the artefacts there. That's the right trade-off for steps whose outputs are only ever read by the published-results bucket.
