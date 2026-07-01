@@ -1707,6 +1707,81 @@ def _offline_load(path: str, ref: str) -> dict:
     )
 
 
+# Known-renamed public-namespace prefixes from the `genetic/` → ...
+# library reorganisation. When a module lookup fails for `genetic/X`,
+# we suggest the moved location if X exists under any of these
+# targets. The list mirrors docs/install.md's migration table; add
+# new entries there whenever a future release moves modules again.
+_MODULE_RENAME_HINTS: Dict[str, List[str]] = {
+    'genetic/':      ['genomics/', 'metagenomics/'],
+}
+
+
+def _module_did_you_mean(missing_path: str, available_paths: List[str]) -> List[str]:
+    """Return up to 3 sensible suggestions for a missing module path,
+    ordered by decreasing usefulness:
+      1. Exact renames — e.g. `genetic/fastp` → `genomics/fastp` when
+         the target path exists under a known-renamed prefix.
+      2. Fuzzy matches — closest paths by difflib similarity ratio.
+    """
+    suggestions: List[str] = []
+
+    # (1) Namespace-rename hints.
+    for old, new_prefixes in _MODULE_RENAME_HINTS.items():
+        if missing_path.startswith(old):
+            tail = missing_path[len(old):]
+            for new_prefix in new_prefixes:
+                candidate = f"{new_prefix}{tail}"
+                if candidate in available_paths and candidate not in suggestions:
+                    suggestions.append(candidate)
+
+    # (2) Fuzzy nearest neighbours (only if we don't already have
+    # confident rename hits — fuzz can be misleading and we don't want
+    # to bury the exact answer).
+    if len(suggestions) < 3:
+        import difflib
+        for cand, _ratio in sorted(
+            ((p, difflib.SequenceMatcher(None, missing_path, p).ratio())
+             for p in available_paths),
+            key=lambda t: -t[1],
+        )[:3]:
+            if cand not in suggestions and difflib.SequenceMatcher(
+                None, missing_path, cand
+            ).ratio() >= 0.6:
+                suggestions.append(cand)
+                if len(suggestions) >= 3:
+                    break
+
+    return suggestions
+
+
+def _list_server_module_paths() -> List[str]:
+    """Return the sorted list of unique module paths (without @version)
+    from the server library. Empty list on any failure (no server,
+    auth, network) — the caller falls through to a bare error message."""
+    client = _module_server_client()
+    if client is None:
+        return []
+    try:
+        from scitq2.pb import taskqueue_pb2 as pb
+        try:
+            from google.protobuf import empty_pb2
+            resp = client.stub.ListModules(empty_pb2.Empty())
+        except Exception:
+            return []
+    except Exception:
+        return []
+    paths: set = set()
+    for entry in getattr(resp, 'entries', None) or []:
+        if entry.path:
+            paths.add(entry.path)
+    if not paths:
+        # Older servers only populate the flat `modules` list.
+        for ref in getattr(resp, 'modules', None) or []:
+            paths.add(ref.split('@', 1)[0])
+    return sorted(paths)
+
+
 def _load_public_import(import_name: str) -> dict:
     """Load a module by reference from the server library. No fallback to
     the Python package or filesystem in online mode — the library is the
@@ -1723,12 +1798,30 @@ def _load_public_import(import_name: str) -> dict:
     if mod is not None:
         return mod
 
+    # Enrich the error with suggestions from the actual library.
+    # Kept behind a try/except so a listing failure never masks the
+    # underlying "not found" — the user still gets the base message.
+    hint_lines: List[str] = []
+    try:
+        available = _list_server_module_paths()
+        if available:
+            suggestions = _module_did_you_mean(path, available)
+            if suggestions:
+                hint_lines.append("Did you mean: " + ", ".join(suggestions) + " ?")
+    except Exception:
+        pass
+
+    base_msg = (
+        f"Module '{import_name}' not found in library."
+    )
+    tail_msg = (
+        "If this is a bundled module, the server may need seeding: run "
+        "`scitq module upgrade --apply` (admin). "
+        "If it is a private module, upload it first with "
+        "`scitq module upload --path X --as <namespace>/<name>`."
+    )
     raise FileNotFoundError(
-        f"Module '{import_name}' not found in library. "
-        f"If this is a bundled module, the server may need seeding: run "
-        f"`scitq module upgrade --apply` (admin). "
-        f"If it is a private module, upload it first with "
-        f"`scitq module upload --path X --as <namespace>/<name>`."
+        "\n".join([base_msg] + hint_lines + [tail_msg])
     )
 
 

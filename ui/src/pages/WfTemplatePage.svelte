@@ -334,7 +334,10 @@
       if (res.status !== 'S') {
         const msg = res.errorMessage || 'Template run failed (unknown error)';
         errorMessage = msg;
-        showParamModal = false;
+        // KEEP showParamModal open — when the user closes the error
+        // modal they land back on the params form with their inputs
+        // intact, so fixing a typo and re-launching is one click.
+        // Only successful runs auto-close the params form (below).
         showRunErrorModal = true;
         return;
       }
@@ -352,7 +355,9 @@
     } catch (error) {
       console.error("Failed to run template:", error);
       errorMessage = error.message || "Unknown error occurred.";
-      showParamModal = false;
+      // Same rationale as above: keep the params modal open behind
+      // the error so the user's inputs survive the failure ack and
+      // they can adjust + retry without re-typing 8 param values.
       showRunErrorModal = true;
     } finally {
       isRunningTemplate = false;
@@ -493,8 +498,11 @@
 {/if}
 
 <!-- ----------- RUN ERROR MODAL ---------- -->
+<!-- Rendered on top of the params modal via `wfTemp-modal-above`
+     (z-index bumped) so the user can dismiss the error and land
+     back on the params form with their inputs intact. -->
 {#if showRunErrorModal}
-  <div class="wfTemp-modal-backdrop" role="dialog" aria-modal="true" tabindex="0"
+  <div class="wfTemp-modal-backdrop wfTemp-modal-above" role="dialog" aria-modal="true" tabindex="0"
     onkeydown={(e) => { if (e.key === 'Escape') showRunErrorModal = false; }}>
     <div class="wfTemp-modal wfTemp-error-modal">
       <h2 style="color: #ff5555;">Template Error: Workflow Not Created</h2>

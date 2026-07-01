@@ -2072,6 +2072,44 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		return nil, fmt.Errorf("failed to clean up old dependencies: %w", err)
 	}
 
+	// Check-and-demote: the retry clone above was inserted with status
+	// 'P' hardcoded. For a normal retry that's safe — the failed parent
+	// only reached execution because its own deps were 'S', so the
+	// copied deps are still 'S'. For an extend-triggered
+	// edit_and_retry_task with an explicit `Depends` override
+	// (retryOverrides.Depends set), that assumption breaks: the caller
+	// may have repointed the clone at freshly-created prereqs that are
+	// still in 'P' state themselves.
+	//
+	// Without this demotion, the P clone is trivially assignable and
+	// the scheduler ships it to a worker before its prereqs actually
+	// complete — leading to "bin ran while train never succeeded",
+	// alpha2 workflow 3174 (2026-07-01).
+	//
+	// Mirrors the promote-if-all-S logic on the SubmitTask path
+	// (server.go:669-690). Kept inside the same tx as the dep INSERTs
+	// so no assign loop can pick up the P clone in a race window.
+	var demoted bool
+	if err := tx.QueryRowContext(ctx, `
+		UPDATE task
+		   SET status = 'W'
+		 WHERE task_id = $1
+		   AND status = 'P'
+		   AND EXISTS (
+		     SELECT 1
+		     FROM task_dependencies d
+		     JOIN task t ON d.prerequisite_task_id = t.task_id
+		     WHERE d.dependent_task_id = $1
+		       AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+		   )
+		RETURNING TRUE
+	`, newID).Scan(&demoted); err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to check-and-demote retry clone: %w", err)
+	}
+	if demoted {
+		log.Printf("↩️  task %d demoted P→W after retry clone (unmet prerequisites)", newID)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit retry transaction: %w", err)
 	}

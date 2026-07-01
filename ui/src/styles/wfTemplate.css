@@ -143,6 +143,14 @@
   z-index: 1000;
 }
 
+/* Stacks above sibling `.wfTemp-modal-backdrop` when two modals are
+ * open simultaneously — used by the run-error modal so the params
+ * form stays behind, ready for the user to fix & retry after
+ * dismissing the error. */
+.wfTemp-modal-backdrop.wfTemp-modal-above {
+  z-index: 1001;
+}
+
 /* Modal styles */
 .wfTemp-modal {
   background: var(--bg-secondary);
