@@ -1145,7 +1145,15 @@ type EditAndRetryTaskRequest struct {
 	// for a failing step involves both a new command and a new
 	// container — without this the command change ships with the old
 	// container and the retry fails the same way (Vadim's case).
-	Container     *string `protobuf:"bytes,6,opt,name=container,proto3,oneof" json:"container,omitempty"`
+	Container *string `protobuf:"bytes,6,opt,name=container,proto3,oneof" json:"container,omitempty"`
+	// New publish URI for the parent task before retry. Same
+	// clone-from-parent semantic as container: extend re-creates
+	// tasks with freshly-resolved iter-var substitutions in publish
+	// (e.g. `{PAIR.REF}` → the actual ref value); without this the
+	// retry inherits the old literal-placeholder publish and rclone
+	// rejects the URI on upload. Absent = leave parent's publish
+	// alone (operator-driven "Edit & Retry" from UI/CLI).
+	Publish       *string `protobuf:"bytes,7,opt,name=publish,proto3,oneof" json:"publish,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1218,6 +1226,13 @@ func (x *EditAndRetryTaskRequest) GetDepends() *Int32List {
 func (x *EditAndRetryTaskRequest) GetContainer() string {
 	if x != nil && x.Container != nil {
 		return *x.Container
+	}
+	return ""
+}
+
+func (x *EditAndRetryTaskRequest) GetPublish() string {
+	if x != nil && x.Publish != nil {
+		return *x.Publish
 	}
 	return ""
 }
@@ -11605,21 +11620,24 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05retry\x18\x02 \x01(\x05H\x00R\x05retry\x88\x01\x01B\b\n" +
 	"\x06_retry\".\n" +
 	"\x13ForceRunTaskRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\xc5\x02\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\xf0\x02\n" +
 	"\x17EditAndRetryTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x122\n" +
 	"\x06inputs\x18\x03 \x01(\v2\x15.taskqueue.StringListH\x00R\x06inputs\x88\x01\x01\x128\n" +
 	"\tresources\x18\x04 \x01(\v2\x15.taskqueue.StringListH\x01R\tresources\x88\x01\x01\x123\n" +
 	"\adepends\x18\x05 \x01(\v2\x14.taskqueue.Int32ListH\x02R\adepends\x88\x01\x01\x12!\n" +
-	"\tcontainer\x18\x06 \x01(\tH\x03R\tcontainer\x88\x01\x01B\t\n" +
+	"\tcontainer\x18\x06 \x01(\tH\x03R\tcontainer\x88\x01\x01\x12\x1d\n" +
+	"\apublish\x18\a \x01(\tH\x04R\apublish\x88\x01\x01B\t\n" +
 	"\a_inputsB\f\n" +
 	"\n" +
 	"_resourcesB\n" +
 	"\n" +
 	"\b_dependsB\f\n" +
 	"\n" +
-	"_container\"$\n" +
+	"_containerB\n" +
+	"\n" +
+	"\b_publish\"$\n" +
 	"\n" +
 	"StringList\x12\x16\n" +
 	"\x06values\x18\x01 \x03(\tR\x06values\"#\n" +

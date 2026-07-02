@@ -317,7 +317,8 @@ class Scitq2Client:
                             inputs: Optional[List[str]] = None,
                             resources: Optional[List[str]] = None,
                             depends: Optional[List[int]] = None,
-                            container: Optional[str] = None) -> int:
+                            container: Optional[str] = None,
+                            publish: Optional[str] = None) -> int:
         """Edit a task's command and retry it (clone with the new command, hide
         the parent). Returns the new task's id.
 
@@ -332,6 +333,13 @@ class Scitq2Client:
         so the clone picks up the new image. None = leave the parent's
         container alone. Workflow.compile passes this during extend when
         the template's container differs from what's already in the DB.
+
+        Optional `publish` is UPDATED on the parent before the retry,
+        so the clone picks up the freshly-resolved URI (with iter-var
+        substitutions applied — {PAIR.REF} etc.). None = leave the
+        parent's publish alone. Workflow.compile passes this during
+        extend so re-run tasks don't inherit a literal-placeholder
+        publish that rclone rejects on upload.
         """
         req = taskqueue_pb2.EditAndRetryTaskRequest(task_id=task_id, command=command)
         if inputs is not None:
@@ -342,6 +350,8 @@ class Scitq2Client:
             req.depends.CopyFrom(taskqueue_pb2.Int32List(values=list(depends)))
         if container is not None:
             req.container = container
+        if publish is not None:
+            req.publish = publish
         resp = self.stub.EditAndRetryTask(req)
         return resp.task_id
 

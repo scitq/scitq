@@ -228,20 +228,22 @@ class ForceRunTaskRequest(_message.Message):
     def __init__(self, task_id: _Optional[int] = ...) -> None: ...
 
 class EditAndRetryTaskRequest(_message.Message):
-    __slots__ = ("task_id", "command", "inputs", "resources", "depends", "container")
+    __slots__ = ("task_id", "command", "inputs", "resources", "depends", "container", "publish")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     INPUTS_FIELD_NUMBER: _ClassVar[int]
     RESOURCES_FIELD_NUMBER: _ClassVar[int]
     DEPENDS_FIELD_NUMBER: _ClassVar[int]
     CONTAINER_FIELD_NUMBER: _ClassVar[int]
+    PUBLISH_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     command: str
     inputs: StringList
     resources: StringList
     depends: Int32List
     container: str
-    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., inputs: _Optional[_Union[StringList, _Mapping]] = ..., resources: _Optional[_Union[StringList, _Mapping]] = ..., depends: _Optional[_Union[Int32List, _Mapping]] = ..., container: _Optional[str] = ...) -> None: ...
+    publish: str
+    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., inputs: _Optional[_Union[StringList, _Mapping]] = ..., resources: _Optional[_Union[StringList, _Mapping]] = ..., depends: _Optional[_Union[Int32List, _Mapping]] = ..., container: _Optional[str] = ..., publish: _Optional[str] = ...) -> None: ...
 
 class StringList(_message.Message):
     __slots__ = ("values",)

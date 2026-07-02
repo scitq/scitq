@@ -574,6 +574,12 @@ class Task:
             # new container would ship the command change with the old
             # image and fail the same way as before.
             container_override = self.container if self.container != existing_container else None
+            # Publish drift: if the template now resolves to a different
+            # URI (e.g. {PAIR.REF} previously left literal, now substituted
+            # after the composite-key fix), push it through so the retry
+            # clone uploads to the correct path. Absent = inherit parent's
+            # publish. Kept symmetric with container_override.
+            publish_override = resolved_publish if resolved_publish != _existing_publish else None
             if ext.retry_failed_only:
                 # Only re-run failed tasks; leave S/R/P untouched. No cascade —
                 # a failed task's dependents are blocked in W and unblock when
@@ -585,19 +591,22 @@ class Task:
                         resources=override_resources,
                         depends=override_depends,
                         container=container_override,
+                        publish=publish_override,
                     )
                     ext.changed.add(self.task_id)
                 else:
                     self.task_id = existing_id  # reference, untouched
             else:
                 # Default cascade reconcile: re-run if the command drifted,
-                # the container drifted, the task failed, OR any prerequisite
-                # was re-run this pass (its inputs changed). edit_and_retry
-                # rewires dependents to the new clone server-side, so editing
-                # in dependency order keeps the chain consistent.
+                # the container drifted, the publish drifted, the task
+                # failed, OR any prerequisite was re-run this pass (its
+                # inputs changed). edit_and_retry rewires dependents to
+                # the new clone server-side, so editing in dependency
+                # order keeps the chain consistent.
                 dep_changed = any(d in ext.changed for d in resolved_depends)
                 if (existing_cmd != resolved_command
                         or container_override is not None
+                        or publish_override is not None
                         or existing_status == "F"
                         or dep_changed):
                     self.task_id = client.edit_and_retry_task(
@@ -606,6 +615,7 @@ class Task:
                         resources=override_resources,
                         depends=override_depends,
                         container=container_override,
+                        publish=publish_override,
                     )
                     ext.changed.add(self.task_id)
                 else:

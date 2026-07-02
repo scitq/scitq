@@ -828,6 +828,38 @@
     eventsBusy = false;
   }
 
+  // Symmetric with handleClearWarnings, wired to the same
+  // ResetWorkerCounters RPC with clearFailures=true. Bumps
+  // worker.failures_cleared_at so the `recent_failures since last
+  // success` counter (surfaced in the events modal header AND on the
+  // worker-row stale badge) drops to 0. Operators need this after
+  // diagnosing and resolving a failure cause (e.g. the {PAIR.REF}
+  // substitution fix on 2026-07-02) — otherwise the failure count
+  // sticks and keeps flagging the worker as stale.
+  async function handleClearFailures() {
+    if (!eventsWorker || eventsBusy) return;
+    const wid = eventsWorker.workerId;
+    eventsBusy = true;
+    eventsStatus = 'Clearing failures…';
+    let rpcErr: unknown = null;
+    try {
+      await resetWorkerCounters(wid, { clearFailures: true });
+    } catch (err) {
+      rpcErr = err;
+      console.error('resetWorkerCounters(clearFailures) RPC error for worker', wid, err);
+    }
+    const fresh = await refreshWorkerFromServer(wid);
+    if (fresh && (fresh.recentFailures ?? 0) === 0) {
+      eventsStatus = 'Failures cleared.';
+      try { workerEvents = await listWorkerEvents(wid, 100); } catch (e) { console.error(e); }
+    } else if (rpcErr) {
+      eventsStatus = 'Could not clear failures — the server did not acknowledge. Check server logs.';
+    } else {
+      eventsStatus = '';
+    }
+    eventsBusy = false;
+  }
+
   // Re-fetches per-worker task counts from the server. Used after a
   // reset that targets the dashboard F / S columns — those numbers
   // live in tasksCount[][], populated by getAllTaskStats, not on the
@@ -1573,6 +1605,15 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
           {/if}
         </span>
         <span class="worker-events-actions">
+          {#if (eventsWorker.recentFailures ?? 0) > 0}
+            <button
+              type="button"
+              class="worker-events-ack"
+              disabled={eventsBusy}
+              title="Reset the failure counter (bumps failures_cleared_at) so this worker stops being flagged stale"
+              onclick={() => handleClearFailures()}
+            >Clear failures</button>
+          {/if}
           {#if (eventsWorker.pendingWarnings ?? 0) > 0}
             <button
               type="button"

@@ -225,6 +225,58 @@ def test_composite_tsv_sets_iter_keys_to_aliases():
     assert items[1]['_iter_keys'] == ['REF', 'QUERY']
 
 
+def test_composite_tsv_exposes_uppercase_dotted_forms():
+    # Every task command in the multicov shape writes to
+    # `/output/{PAIR.REF}...` — the uppercase composite-dotted form.
+    # If the iterator dict doesn't carry `PAIR.REF` / `PAIR.QUERY`
+    # as top-level keys, `_resolve_refs` will silently leave the
+    # placeholder literal in the emitted command. The failure is
+    # invisible on 1-level outputs (rclone tolerates `{}` in
+    # filenames) and only surfaces on 2-level paths that trip
+    # rclone's URI parser — the bin-step bug that motivated this
+    # test.
+    iter_def = {
+        'name': 'pair',
+        'source': 'tsv',
+        'content': "ref\tquery\textra\nA\tB\turi_a\nC\tD\turi_c\n",
+        'key': ['ref', 'query'],
+    }
+    items, _ = yr._build_single_iterator(iter_def, params=SimpleNamespace())
+    # Row 0 (A,B): composite tag `A.B`, plus atom aliases and
+    # their uppercase-composite-dotted mirrors.
+    assert items[0]['PAIR'] == 'A.B'
+    assert items[0]['REF'] == 'A'
+    assert items[0]['QUERY'] == 'B'
+    assert items[0]['PAIR.REF'] == 'A'
+    assert items[0]['PAIR.QUERY'] == 'B'
+    # Row 1 (C,D) — same shape.
+    assert items[1]['PAIR.REF'] == 'C'
+    assert items[1]['PAIR.QUERY'] == 'D'
+
+
+def test_composite_tsv_resolves_uppercase_dotted_in_command():
+    # End-to-end from the substitution helper: passing an itervar
+    # dict shaped like the composite iterator produces, a template
+    # using `{PAIR.REF}` in a shell string must resolve to the
+    # actual REF value. Regression guard for the silent-literal
+    # failure mode.
+    iter_def = {
+        'name': 'pair',
+        'source': 'tsv',
+        'content': "ref\tquery\nS001\tS002\n",
+        'key': ['ref', 'query'],
+    }
+    items, _ = yr._build_single_iterator(iter_def, params=SimpleNamespace())
+    itervar = items[0]
+    resolved = yr._resolve_refs(
+        "mv model.pt /output/{PAIR.REF}.model.pt && mkdir /output/{PAIR.REF}_bins/",
+        params=SimpleNamespace(), itervar=itervar,
+    )
+    assert '{PAIR.REF}' not in resolved
+    assert '/output/S001.model.pt' in resolved
+    assert '/output/S001_bins/' in resolved
+
+
 def test_single_col_tsv_has_no_iter_keys_marker():
     # Single-column TSV preserves the historical "all columns in tag"
     # behaviour (no `_iter_keys` set). Composite-key is the only case

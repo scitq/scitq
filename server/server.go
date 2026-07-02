@@ -2553,6 +2553,10 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 		args = append(args, *req.Container)
 		setClauses = append(setClauses, fmt.Sprintf("container = $%d", len(args)))
 	}
+	if req.Publish != nil {
+		args = append(args, *req.Publish)
+		setClauses = append(setClauses, fmt.Sprintf("publish = $%d", len(args)))
+	}
 	args = append(args, req.TaskId)
 	query := fmt.Sprintf(
 		`UPDATE task SET %s WHERE task_id = $%d AND NOT hidden`,
@@ -2564,9 +2568,14 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return nil, fmt.Errorf("task %d not found or hidden", req.TaskId)
 	}
-	if req.Container != nil {
+	switch {
+	case req.Container != nil && req.Publish != nil:
+		log.Printf("✏️ Task %d command + container + publish edited, retrying", req.TaskId)
+	case req.Container != nil:
 		log.Printf("✏️ Task %d command + container edited, retrying", req.TaskId)
-	} else {
+	case req.Publish != nil:
+		log.Printf("✏️ Task %d command + publish edited, retrying", req.TaskId)
+	default:
 		log.Printf("✏️ Task %d command edited, retrying", req.TaskId)
 	}
 
@@ -2579,10 +2588,12 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 		TaskId    int32   `json:"taskId"`
 		Command   string  `json:"command"`
 		Container *string `json:"container,omitempty"`
+		Publish   *string `json:"publish,omitempty"`
 	}{
 		TaskId:    req.TaskId,
 		Command:   req.Command,
 		Container: req.Container,
+		Publish:   req.Publish,
 	}
 	ws.EmitWS("task", req.TaskId, "edited", editEvt)
 

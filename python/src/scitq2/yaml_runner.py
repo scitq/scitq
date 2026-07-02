@@ -1263,6 +1263,21 @@ def _build_single_iterator(iter_def: dict, params, workflow_vars: Optional[Dict]
                 for col in key_cols:
                     alias = col.upper()
                     d[alias] = '' if r.get(col) is None else str(r.get(col))
+                    # Composite dotted uppercase form so templates can
+                    # write `{PAIR.REF}` alongside the plain `{REF}` —
+                    # matches the convention YAML authors use to signal
+                    # "this iteration's identifying atom" (uppercase,
+                    # scoped by iter name). Without this, `{PAIR.REF}`
+                    # falls through _resolve_refs unchanged and lands
+                    # in task.command as a literal — silently, since
+                    # `{PAIR.REF}` is a valid filename fragment so
+                    # single-level outputs like
+                    # `mv model.pt /output/{PAIR.REF}.model.pt` still
+                    # "succeed" via `*` globs on downstream inputs,
+                    # while 2-level structures like
+                    # `mkdir /output/{PAIR.REF}_bins/` finally trip
+                    # rclone's URI parser on upload.
+                    d[f"{uname}.{alias}"] = d[alias]
                     alias_keys.append(alias)
                 # `_iter_keys` lists the keys that ARE the iteration's
                 # identifier components. For a composite TSV that's
