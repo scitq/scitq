@@ -467,7 +467,7 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "list_jobs",
-			Description: "List server-internal jobs (worker create/delete/restart). Each entry includes status (P/R/S/F/X) and on failures the provider error_class — one of 'auth' (credentials invalid: rotate the SP secret), 'quota' (regional/family cap), 'capacity' (region/zone stockout), 'unsupported_flavor' (provider rejected the SKU), 'transient' (timeout/5xx — retried), 'unknown'. error_message holds the raw provider error text. THIS IS THE FIRST PLACE TO LOOK when recruitment or deletion is failing — auth errors in particular are silent in worker_events and only surface here.",
+			Description: "List server-internal jobs (worker create/delete/restart). Each entry includes status (P/R/S/F/X) and the provider error_class — one of 'auth' (credentials invalid: rotate the SP secret), 'quota' (regional/family cap), 'capacity' (region/zone stockout), 'unsupported_flavor' (provider rejected the SKU), 'transient' (timeout/5xx — retried), 'unknown'. error_message holds the raw provider error text. error_class + error_message are stamped after EVERY failed attempt — a job in status R that's still burning its retry budget already shows the last attempt's diagnosis, so you don't need to wait for the full retry cycle to conclude. THIS IS THE FIRST PLACE TO LOOK when recruitment or deletion is failing — auth errors in particular are silent in worker_events and only surface here.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{

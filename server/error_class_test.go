@@ -40,6 +40,7 @@ func TestClassifyProviderError(t *testing.T) {
 		{"azure AllocationFailed", errors.New("AllocationFailed: capacity"), ErrClassCapacity},
 		{"azure ZonalAllocationFailed", errors.New("ZonalAllocationFailed in zone 1"), ErrClassCapacity},
 		{"azure SkuNotAvailable", errors.New("SkuNotAvailable in this region"), ErrClassCapacity},
+		{"azure OverconstrainedAllocationRequest", errors.New("ERROR CODE: OverconstrainedAllocationRequest\nAllocation failed. VM(s) with the following constraints cannot be allocated"), ErrClassCapacity},
 		{"openstack out of stock", errors.New("Out of stock"), ErrClassCapacity},
 
 		// Transient.

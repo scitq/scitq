@@ -180,6 +180,11 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.JobUpdate.SerializeToString,
                 response_deserializer=taskqueue__pb2.Ack.FromString,
                 _registered_method=True)
+        self.RetryJob = channel.unary_unary(
+                '/taskqueue.TaskQueue/RetryJob',
+                request_serializer=taskqueue__pb2.JobId.SerializeToString,
+                response_deserializer=taskqueue__pb2.Ack.FromString,
+                _registered_method=True)
         self.ListFlavors = channel.unary_unary(
                 '/taskqueue.TaskQueue/ListFlavors',
                 request_serializer=taskqueue__pb2.ListFlavorsRequest.SerializeToString,
@@ -721,6 +726,18 @@ class TaskQueueServicer(object):
 
     def UpdateJob(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RetryJob(self, request, context):
+        """Retry a terminal job (status F/X). Reconstructs the Job from the
+        DB (worker + flavor + region + provider), resets status→P,
+        retry counter, and clears error_class/error_message, then
+        re-enqueues it. Only works while the worker record still
+        exists — if the failed worker was already cleaned up (D job
+        succeeded), operator must deploy a fresh worker instead.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -1325,6 +1342,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
             'UpdateJob': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdateJob,
                     request_deserializer=taskqueue__pb2.JobUpdate.FromString,
+                    response_serializer=taskqueue__pb2.Ack.SerializeToString,
+            ),
+            'RetryJob': grpc.unary_unary_rpc_method_handler(
+                    servicer.RetryJob,
+                    request_deserializer=taskqueue__pb2.JobId.FromString,
                     response_serializer=taskqueue__pb2.Ack.SerializeToString,
             ),
             'ListFlavors': grpc.unary_unary_rpc_method_handler(
@@ -2465,6 +2487,33 @@ class TaskQueue(object):
             target,
             '/taskqueue.TaskQueue/UpdateJob',
             taskqueue__pb2.JobUpdate.SerializeToString,
+            taskqueue__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RetryJob(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/RetryJob',
+            taskqueue__pb2.JobId.SerializeToString,
             taskqueue__pb2.Ack.FromString,
             options,
             channel_credentials,

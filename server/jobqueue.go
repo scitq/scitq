@@ -131,6 +131,11 @@ func (s *taskQueueServer) processJobWithTimeout(ctx context.Context, job Job) {
 				log.Printf("🚫 Job %d: %s error is non-retryable (%s) — marking F immediately", job.JobID, class, err.Error())
 				s.failJobWithClass(job.JobID, class, err)
 			case job.Retry > 0:
+				// Persist the attempt's error on the job row so the UI
+				// / CLI can show *why* it's retrying, without waiting
+				// for the full retry budget to burn. Same columns as
+				// the final-failure path — status stays R.
+				s.recordJobAttemptError(job.JobID, class, err)
 				job.Retry--
 				s.addJob(job) // Retry job
 			default:
@@ -201,6 +206,50 @@ func nullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// recordJobAttemptError persists the last-attempt error on the job row
+// while retries are still in flight (status stays R). Same columns
+// failJobWithClass writes on final F — reused so the UI/CLI display
+// path is identical: whatever's shown after a full failure is what
+// gets shown mid-retry, with the difference being the status letter.
+// Best-effort: any DB error is logged and swallowed — we'd rather the
+// retry loop keep spinning than have the whole worker deployment die
+// because we couldn't stamp an error message.
+func (s *taskQueueServer) recordJobAttemptError(jobID int32, class string, err error) {
+	const maxLen = 4096
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+		if len(msg) > maxLen {
+			msg = msg[:maxLen] + "...[truncated]"
+		}
+	}
+	if _, dbErr := s.db.Exec(`
+		UPDATE job
+		   SET error_class   = NULLIF($2, ''),
+		       error_message = NULLIF($3, ''),
+		       modified_at   = NOW()
+		 WHERE job_id = $1
+	`, jobID, class, msg); dbErr != nil {
+		log.Printf("⚠️ Failed to record attempt error on job %d (class=%q): %v", jobID, class, dbErr)
+		return
+	}
+	// Mirror the same WS shape failJobWithClass uses so the UI's
+	// job.updated handler picks these up without needing a new event
+	// type. Status is omitted (it stays R); the operator sees the
+	// last-attempt error appear on a row that's still spinning.
+	ws.EmitWS("job", jobID, "updated", struct {
+		JobId        int32     `json:"jobId"`
+		ErrorClass   *string   `json:"errorClass,omitempty"`
+		ErrorMessage *string   `json:"errorMessage,omitempty"`
+		ModifiedAt   time.Time `json:"modifiedAt"`
+	}{
+		JobId:        jobID,
+		ErrorClass:   nullIfEmpty(class),
+		ErrorMessage: nullIfEmpty(msg),
+		ModifiedAt:   time.Now(),
+	})
 }
 
 // persistFlavorBlacklist sets flavor_region.available=false for a

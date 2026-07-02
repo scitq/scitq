@@ -15456,6 +15456,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "GetJobStatuses", options: {}, I: JobStatusRequest, O: JobStatusResponse },
     { name: "DeleteJob", options: {}, I: JobId, O: Ack },
     { name: "UpdateJob", options: {}, I: JobUpdate, O: Ack },
+    { name: "RetryJob", options: {}, I: JobId, O: Ack },
     { name: "ListFlavors", options: {}, I: ListFlavorsRequest, O: FlavorsList },
     { name: "ListProviders", options: {}, I: Empty, O: ProviderList },
     { name: "ListRegions", options: {}, I: Empty, O: RegionList },

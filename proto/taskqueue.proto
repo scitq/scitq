@@ -40,6 +40,13 @@ service TaskQueue {
     rpc GetJobStatuses (JobStatusRequest) returns (JobStatusResponse);
     rpc DeleteJob (JobId) returns (Ack);
     rpc UpdateJob(JobUpdate) returns (Ack);
+    // Retry a terminal job (status F/X). Reconstructs the Job from the
+    // DB (worker + flavor + region + provider), resets status→P,
+    // retry counter, and clears error_class/error_message, then
+    // re-enqueues it. Only works while the worker record still
+    // exists — if the failed worker was already cleaned up (D job
+    // succeeded), operator must deploy a fresh worker instead.
+    rpc RetryJob(JobId) returns (Ack);
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc ListProviders(google.protobuf.Empty) returns (ProviderList);
     rpc ListRegions(google.protobuf.Empty) returns (RegionList);

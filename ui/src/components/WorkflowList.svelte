@@ -73,16 +73,28 @@
   // maximum_workers changes (see server.go:5730 — broadcast is gated
   // on a status change), so a corrected value from the server won't
   // arrive until the next refresh. This Map bridges that gap.
-  let maxWorkersOverrides = $state(new Map<number, number>());
+  //
+  // Each entry carries `serverAtSet` — the value we last observed on
+  // wf.maximumWorkers at the moment we set this override. The reconcile
+  // effect below drops the override only when the server value has
+  // actually *changed* from that snapshot, which distinguishes
+  // "server caught up / recruiter auto-bumped past us" (drop) from
+  // "we just clicked minus and the server hasn't heard yet" (keep).
+  type OverrideEntry = { value: number; serverAtSet: number | null };
+  let maxWorkersOverrides = $state(new Map<number, OverrideEntry>());
+  // Pending debounce timers per workflow — click coalescing so a
+  // rapid --- sequence sends ONE PATCH with the final value instead
+  // of racing multiple PATCHes against stale server state.
+  const pendingRpcTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  const RPC_DEBOUNCE_MS = 300;
 
   function effectiveMax(wf): number | null {
-    if (maxWorkersOverrides.has(wf.workflowId)) {
-      return maxWorkersOverrides.get(wf.workflowId)!;
-    }
+    const entry = maxWorkersOverrides.get(wf.workflowId);
+    if (entry) return entry.value;
     return wf.maximumWorkers ?? null;
   }
 
-  async function bumpMax(wf, delta: number): Promise<void> {
+  function bumpMax(wf, delta: number): void {
     const cur = effectiveMax(wf);
     // null means "no limit". + on null seeds at 1; we don't expose an
     // "unset back to null" path because the proto's `optional int32`
@@ -90,26 +102,54 @@
     // can't easily do — same limitation the CLI has.
     const next = cur === null ? Math.max(1, delta) : Math.max(0, cur + delta);
     if (cur !== null && next === cur) return;
-    maxWorkersOverrides.set(wf.workflowId, next);
+    // Snapshot the server value at the moment we first override — the
+    // reconcile effect uses this to tell "server caught up" from
+    // "server hasn't heard yet".
+    const existing = maxWorkersOverrides.get(wf.workflowId);
+    const serverAtSet = existing ? existing.serverAtSet : (wf.maximumWorkers ?? null);
+    maxWorkersOverrides.set(wf.workflowId, { value: next, serverAtSet });
     maxWorkersOverrides = new Map(maxWorkersOverrides);
-    try {
-      await updateWorkflowMaxWorkers(wf.workflowId, next);
-    } catch (err) {
-      maxWorkersOverrides.delete(wf.workflowId);
-      maxWorkersOverrides = new Map(maxWorkersOverrides);
-    }
+
+    // Coalesce rapid clicks — reset any pending PATCH for this
+    // workflow and re-arm a fresh one. Only the final value fires.
+    const pending = pendingRpcTimers.get(wf.workflowId);
+    if (pending) clearTimeout(pending);
+    const timer = setTimeout(async () => {
+      pendingRpcTimers.delete(wf.workflowId);
+      const entry = maxWorkersOverrides.get(wf.workflowId);
+      if (!entry) return;
+      try {
+        await updateWorkflowMaxWorkers(wf.workflowId, entry.value);
+      } catch (err) {
+        // Roll back the override so the display returns to the
+        // server-truth value and the user knows the click didn't
+        // land. Only drop OUR entry — a subsequent click that raced
+        // us would have overwritten `entry` in the map.
+        const cur = maxWorkersOverrides.get(wf.workflowId);
+        if (cur && cur.value === entry.value) {
+          maxWorkersOverrides.delete(wf.workflowId);
+          maxWorkersOverrides = new Map(maxWorkersOverrides);
+        }
+      }
+    }, RPC_DEBOUNCE_MS);
+    pendingRpcTimers.set(wf.workflowId, timer);
   }
 
-  // When the parent's workflow row updates its maximumWorkers (e.g. via
-  // the new `workflow.max_workers` WS event the server now emits on
-  // recruiter auto-bump), drop any stale local override that's been
-  // superseded by the upstream value. Without this the override would
-  // keep masking the fresh server value via effectiveMax above.
+  // Reconcile local overrides against upstream. Drop an override only
+  // when the server value has *changed* from what we snapshotted at
+  // set-time — that's the signal that the server has now applied
+  // either our update (values match) or a competing update (e.g.
+  // recruiter auto-bump). The earlier `wf.maximumWorkers >= override`
+  // check fired immediately on decrement (server still at old higher
+  // value ≥ our new lower override) and wiped the optimistic UI,
+  // which is what made rapid clicks appear to do nothing.
   $effect(() => {
     let changed = false;
-    for (const [wfId, override] of maxWorkersOverrides) {
+    for (const [wfId, entry] of maxWorkersOverrides) {
       const wf = workflows.find(w => w.workflowId === wfId);
-      if (wf && typeof wf.maximumWorkers === 'number' && wf.maximumWorkers >= override) {
+      if (!wf) continue;
+      const serverNow = wf.maximumWorkers ?? null;
+      if (serverNow !== entry.serverAtSet) {
         maxWorkersOverrides.delete(wfId);
         changed = true;
       }

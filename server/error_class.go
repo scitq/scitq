@@ -79,9 +79,12 @@ func classifyProviderError(err error) string {
 
 	// Capacity / stockout. Distinct from quota: the SKU is allowed but
 	// the region has none free right now. Operator's only fix is wait
-	// or pick a different region/SKU.
+	// or pick a different region/SKU. `overconstrainedallocationrequest`
+	// is Azure's spot-specific variant — "no capacity for this SKU with
+	// these constraints (Low Priority / VM Size / …)".
 	if strings.Contains(msg, "allocationfailed") ||
 		strings.Contains(msg, "zonalallocationfailed") ||
+		strings.Contains(msg, "overconstrainedallocationrequest") ||
 		strings.Contains(msg, "skunotavailable") ||
 		strings.Contains(msg, "out of stock") ||
 		strings.Contains(msg, "no available capacity") {

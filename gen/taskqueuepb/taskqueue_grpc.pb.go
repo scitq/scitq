@@ -49,6 +49,7 @@ const (
 	TaskQueue_GetJobStatuses_FullMethodName            = "/taskqueue.TaskQueue/GetJobStatuses"
 	TaskQueue_DeleteJob_FullMethodName                 = "/taskqueue.TaskQueue/DeleteJob"
 	TaskQueue_UpdateJob_FullMethodName                 = "/taskqueue.TaskQueue/UpdateJob"
+	TaskQueue_RetryJob_FullMethodName                  = "/taskqueue.TaskQueue/RetryJob"
 	TaskQueue_ListFlavors_FullMethodName               = "/taskqueue.TaskQueue/ListFlavors"
 	TaskQueue_ListProviders_FullMethodName             = "/taskqueue.TaskQueue/ListProviders"
 	TaskQueue_ListRegions_FullMethodName               = "/taskqueue.TaskQueue/ListRegions"
@@ -159,6 +160,13 @@ type TaskQueueClient interface {
 	GetJobStatuses(ctx context.Context, in *JobStatusRequest, opts ...grpc.CallOption) (*JobStatusResponse, error)
 	DeleteJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*Ack, error)
 	UpdateJob(ctx context.Context, in *JobUpdate, opts ...grpc.CallOption) (*Ack, error)
+	// Retry a terminal job (status F/X). Reconstructs the Job from the
+	// DB (worker + flavor + region + provider), resets status→P,
+	// retry counter, and clears error_class/error_message, then
+	// re-enqueues it. Only works while the worker record still
+	// exists — if the failed worker was already cleaned up (D job
+	// succeeded), operator must deploy a fresh worker instead.
+	RetryJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*Ack, error)
 	ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error)
 	ListProviders(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ProviderList, error)
 	ListRegions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RegionList, error)
@@ -573,6 +581,16 @@ func (c *taskQueueClient) UpdateJob(ctx context.Context, in *JobUpdate, opts ...
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Ack)
 	err := c.cc.Invoke(ctx, TaskQueue_UpdateJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) RetryJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, TaskQueue_RetryJob_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1326,6 +1344,13 @@ type TaskQueueServer interface {
 	GetJobStatuses(context.Context, *JobStatusRequest) (*JobStatusResponse, error)
 	DeleteJob(context.Context, *JobId) (*Ack, error)
 	UpdateJob(context.Context, *JobUpdate) (*Ack, error)
+	// Retry a terminal job (status F/X). Reconstructs the Job from the
+	// DB (worker + flavor + region + provider), resets status→P,
+	// retry counter, and clears error_class/error_message, then
+	// re-enqueues it. Only works while the worker record still
+	// exists — if the failed worker was already cleaned up (D job
+	// succeeded), operator must deploy a fresh worker instead.
+	RetryJob(context.Context, *JobId) (*Ack, error)
 	ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error)
 	ListProviders(context.Context, *emptypb.Empty) (*ProviderList, error)
 	ListRegions(context.Context, *emptypb.Empty) (*RegionList, error)
@@ -1521,6 +1546,9 @@ func (UnimplementedTaskQueueServer) DeleteJob(context.Context, *JobId) (*Ack, er
 }
 func (UnimplementedTaskQueueServer) UpdateJob(context.Context, *JobUpdate) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateJob not implemented")
+}
+func (UnimplementedTaskQueueServer) RetryJob(context.Context, *JobId) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RetryJob not implemented")
 }
 func (UnimplementedTaskQueueServer) ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFlavors not implemented")
@@ -2249,6 +2277,24 @@ func _TaskQueue_UpdateJob_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).UpdateJob(ctx, req.(*JobUpdate))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_RetryJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JobId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).RetryJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_RetryJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).RetryJob(ctx, req.(*JobId))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3641,6 +3687,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateJob",
 			Handler:    _TaskQueue_UpdateJob_Handler,
+		},
+		{
+			MethodName: "RetryJob",
+			Handler:    _TaskQueue_RetryJob_Handler,
 		},
 		{
 			MethodName: "ListFlavors",

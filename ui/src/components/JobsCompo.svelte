@@ -3,7 +3,7 @@
 
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { Trash, RefreshCw } from 'lucide-svelte';
-  import { getJobs, getJobStatusClass, getJobStatusText, delJob, getJobStatus } from '../lib/api';
+  import { getJobs, getJobStatusClass, getJobStatusText, delJob, getJobStatus, retryJob } from '../lib/api';
   import type { Job } from '../proto/taskqueue_pb';
   import "../styles/worker.css";
   import "../styles/jobsCompo.css";
@@ -237,13 +237,32 @@
   }
 
   /**
-   * Handles job restart functionality
-   * Currently logs to console (implementation pending)
+   * Retry a terminal job (F/X). Optimistically flips the row to P and
+   * clears the error badge; the server's WS `job.updated` event will
+   * reconcile once the RPC lands. On error we surface it via alert so
+   * the operator hears about "worker already cleaned up — deploy fresh"
+   * cases instead of the click being a silent no-op again.
    * @param {number} jobId - The ID of the job to restart
    */
-  function handleRestart(jobId: number): void {
-    console.log('Restarting job:', jobId);
-    // TODO: Implement actual restart logic
+  async function handleRestart(jobId: number): Promise<void> {
+    const prev = jobStatusMap.get(jobId);
+    jobStatusMap.set(jobId, { status: 'P', progression: prev?.progression });
+    jobStatusMap = new Map(jobStatusMap);
+    try {
+      await retryJob(jobId);
+    } catch (err) {
+      // Roll back the optimistic status flip so the row goes back to F
+      // and the operator sees the button re-enable (F is the only
+      // status that renders the retry button).
+      if (prev) {
+        jobStatusMap.set(jobId, prev);
+      } else {
+        jobStatusMap.delete(jobId);
+      }
+      jobStatusMap = new Map(jobStatusMap);
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Retry failed: ${msg}`);
+    }
   }
   /**
    * Reactive statement that updates job data when jobs are initialized

@@ -4171,6 +4171,130 @@ func (s *taskQueueServer) UpdateJob(ctx context.Context, req *pb.JobUpdate) (*pb
 	return &pb.Ack{Success: true}, nil
 }
 
+// RetryJob re-enqueues a terminal job (status F/X). Reads the job row
+// plus the worker/flavor/region/provider it targets, resets the job
+// (status→P, retry→defaultJobRetry, error_class/error_message→NULL),
+// and calls addJob so the queue picks it up. Fails cleanly if the
+// worker record has already been cleaned up — retrying a job whose
+// worker is gone would leak DB rows and mislead the operator.
+func (s *taskQueueServer) RetryJob(ctx context.Context, req *pb.JobId) (*pb.Ack, error) {
+	if req.JobId == 0 {
+		return nil, fmt.Errorf("a non zero JobId is required")
+	}
+
+	// Pull everything we need to rebuild the Job struct in one shot.
+	// LEFT JOIN worker so a job whose worker row was deleted still
+	// returns something we can complain about clearly. flavor_id and
+	// region_id are the job's own FKs (populated at createJob time).
+	var (
+		action                        string
+		status                        string
+		workerID                      int32
+		workerName                    sql.NullString
+		workerDeletedAt               sql.NullTime
+		providerID                    sql.NullInt32
+		providerName                  sql.NullString
+		configName                    sql.NullString
+		regionName                    sql.NullString
+		flavorName                    sql.NullString
+		gpuCount                      sql.NullInt32
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT j.action, j.status, j.worker_id,
+		       w.worker_name, w.deleted_at,
+		       f.provider_id, p.provider_name, p.config_name,
+		       r.region_name,
+		       f.flavor_name, f.gpu
+		  FROM job j
+		  LEFT JOIN worker   w ON w.worker_id   = j.worker_id
+		  LEFT JOIN flavor   f ON f.flavor_id   = j.flavor_id
+		  LEFT JOIN provider p ON p.provider_id = f.provider_id
+		  LEFT JOIN region   r ON r.region_id   = j.region_id
+		 WHERE j.job_id = $1
+	`, req.JobId).Scan(&action, &status, &workerID,
+		&workerName, &workerDeletedAt,
+		&providerID, &providerName, &configName,
+		&regionName,
+		&flavorName, &gpuCount)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("job %d not found", req.JobId)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load job %d: %w", req.JobId, err)
+	}
+
+	// Only terminal statuses can be retried. Re-enqueuing a job that's
+	// still R would double-process it; re-enqueuing a P job is a no-op
+	// with extra WS noise. S is a successful past — no reason to retry.
+	if status != "F" && status != "X" {
+		return nil, fmt.Errorf("job %d has status %q — only terminal jobs (F, X) can be retried", req.JobId, status)
+	}
+	if !workerName.Valid || workerDeletedAt.Valid {
+		return nil, fmt.Errorf("job %d's worker %d is gone (already cleaned up) — deploy a fresh worker instead", req.JobId, workerID)
+	}
+	if action != "C" && action != "D" && action != "R" {
+		return nil, fmt.Errorf("job %d has action %q which isn't retryable", req.JobId, action)
+	}
+	if action == "C" && !flavorName.Valid {
+		return nil, fmt.Errorf("job %d is a Create but the flavor row is missing — deploy fresh", req.JobId)
+	}
+
+	// Reset the row: status→P, retry counter back to default, and
+	// clear the error columns so the UI display resets in lock-step.
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE job
+		   SET status        = 'P',
+		       retry         = $2,
+		       error_class   = NULL,
+		       error_message = NULL,
+		       modified_at   = NOW()
+		 WHERE job_id = $1
+	`, req.JobId, int32(defaultJobRetry)); err != nil {
+		return nil, fmt.Errorf("failed to reset job %d for retry: %w", req.JobId, err)
+	}
+
+	// Mirror the shape of updateJobStatus's event so the UI's job.updated
+	// handler drops the stale error_class/error_message on the row
+	// without needing a new event type. Empty pointers signal "cleared".
+	pending := "P"
+	ws.EmitWS("job", req.JobId, "updated", struct {
+		JobId        int32     `json:"jobId"`
+		Status       *string   `json:"status,omitempty"`
+		ErrorClass   *string   `json:"errorClass,omitempty"`
+		ErrorMessage *string   `json:"errorMessage,omitempty"`
+		ModifiedAt   time.Time `json:"modifiedAt"`
+	}{
+		JobId:      req.JobId,
+		Status:     &pending,
+		ModifiedAt: time.Now(),
+	})
+
+	// Rebuild the Job struct. Image / GPUImage are NOT persisted on
+	// the job or worker rows, so they come back as nil on retry — the
+	// worker will fall back to the scitq.yaml defaults (or the gpu_image
+	// override when has_gpu). This is the same behavior a fresh
+	// CreateWorker without explicit image overrides gets.
+	pName := ""
+	if providerName.Valid && configName.Valid {
+		pName = providerName.String + "." + configName.String
+	}
+	job := Job{
+		JobID:        req.JobId,
+		WorkerID:     workerID,
+		WorkerName:   workerName.String,
+		ProviderID:   providerID.Int32,
+		ProviderName: pName,
+		Region:       regionName.String,
+		Flavor:       flavorName.String,
+		HasGPU:       gpuCount.Valid && gpuCount.Int32 > 0,
+		Action:       rune(action[0]),
+		Retry:        defaultJobRetry,
+		Timeout:      defaultJobTimeout,
+	}
+	s.addJob(job)
+	return &pb.Ack{Success: true}, nil
+}
+
 func (s *taskQueueServer) UpdateWorkerStatus(ctx context.Context, req *pb.WorkerStatus) (*pb.Ack, error) {
 	_, err := s.db.Exec("UPDATE worker SET status = $1 WHERE worker_id = $2 AND deleted_at IS NULL", req.Status, req.WorkerId)
 	if err != nil {

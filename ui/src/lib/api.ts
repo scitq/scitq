@@ -375,7 +375,14 @@ export async function newWorker(
 
     let stepId: number | null = null;
     if (wfStep) {
-      const [workflowName, stepName] = wfStep.split(".");
+      // wfStep is `<workflow_name>.<step_name>` — but workflow names
+      // routinely contain dots (from the DSL's `.tag` feature, e.g.
+      // `binning-fairy-multicov.mc.1`), so a naive `.split(".")` would
+      // grab the wrong prefix and end up looking for step `mc` instead
+      // of step `train`. Peel the step off the RIGHT: last dot wins.
+      const lastDot = wfStep.lastIndexOf(".");
+      const workflowName = lastDot >= 0 ? wfStep.slice(0, lastDot) : wfStep;
+      const stepName = lastDot >= 0 ? wfStep.slice(lastDot + 1) : "";
       const workflows = await getWorkFlow(workflowName);
       const matchedWorkflow = workflows.find(wf => wf.name === workflowName);
 
@@ -665,6 +672,21 @@ export async function delJob(jobId: { jobId: any }) {
         console.log("Job deleted successfully!");
     } catch (error) {
         console.error(`Error while deleting the job: ${jobId.jobId}`, error);
+    }
+}
+
+/**
+ * Retry a terminal job (status F/X). The server re-enqueues the job
+ * with a fresh retry budget and clears any error_class/error_message
+ * on the row. Throws on failure so the caller can surface a toast /
+ * inline error (e.g. "worker already cleaned up — deploy fresh").
+ */
+export async function retryJob(jobId: number): Promise<void> {
+    try {
+        await client.retryJob({ jobId }, await callOptionsUserToken());
+    } catch (error) {
+        console.error(`Error while retrying job ${jobId}:`, error);
+        throw error;
     }
 }
 
