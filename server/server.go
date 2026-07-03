@@ -165,6 +165,11 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 	if err != nil {
 		log.Fatalf("⚠️ Failed to initialize step stats aggregator: %v", err)
 	}
+	// Wire the test seam so integration tests can read this server's
+	// aggregator + DB handle for the property-parity check. Idempotent
+	// overwrite — the last server started this process wins, matching
+	// how the other seams behave. See specs/task_transitions.md.
+	registerTestStats(s.stats, db)
 
 	// Build rcloneRemotes proto struct once here (cfg.Rclone is now a flat map[name]options)
 	remotes := make(map[string]*pb.RcloneRemote)
@@ -240,6 +245,11 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 			}
 		}
 	}()
+
+	// Snapshot dispatch: every 100 ms, if any step's counters have
+	// changed, emit a `step-stats` snapshot for each affected workflow.
+	// Zero traffic when idle. See specs/task_transitions.md.
+	go s.stats.FlushLoop(100*time.Millisecond, s.stopWatchdog)
 
 	// Periodic live quality extraction for running tasks
 	go func() {
@@ -1162,48 +1172,12 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				stepAgg.EndTime = &end
 			}
 		}
-	}
-
-	// 🔔 WS notify: step-stats delta (for client-side incremental aggregation)
-	if wid > 0 && sid > 0 {
-		var (
-			runEpochPtr *int32
-			startPtr    *int32
-			endPtr      *int32
-		)
-		if runStartedEpoch.Valid {
-			v := int32(runStartedEpoch.Int64)
-			runEpochPtr = &v
-		}
-		if startEpoch.Valid {
-			v := int32(startEpoch.Int64)
-			startPtr = &v
-		}
-		if endEpoch.Valid {
-			v := int32(endEpoch.Int64)
-			endPtr = &v
-		}
-		ws.EmitWS("step-stats", wid, "delta", struct {
-			WorkflowId      int32  `json:"workflowId"`
-			StepId          int32  `json:"stepId"`
-			TaskId          int32  `json:"taskId"`
-			OldStatus       string `json:"oldStatus"`
-			NewStatus       string `json:"newStatus"`
-			Duration        *int32 `json:"duration,omitempty"`
-			RunStartedEpoch *int32 `json:"runStartedEpoch,omitempty"`
-			StartEpoch      *int32 `json:"startEpoch,omitempty"`
-			EndEpoch        *int32 `json:"endEpoch,omitempty"`
-		}{
-			WorkflowId:      wid,
-			StepId:          sid,
-			TaskId:          req.TaskId,
-			OldStatus:       oldStatus,
-			NewStatus:       req.NewStatus,
-			Duration:        req.Duration,
-			RunStartedEpoch: runEpochPtr,
-			StartEpoch:      startPtr,
-			EndEpoch:        endPtr,
-		})
+		// Mark the step dirty so the next snapshot flush ships its
+		// fresh counters. Replaces the per-transition WS delta emit
+		// this function used to do inline — the delta path was the
+		// source of the 2026-07-02 counter drift (hardcoded
+		// OldStatus:"F" etc.). See specs/task_transitions.md.
+		s.stats.MarkDirtyLocked(wid, sid)
 	}
 
 	switch req.NewStatus {

@@ -13,6 +13,7 @@ import (
 
 	pq "github.com/lib/pq"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/server/websocket"
 	"github.com/scitq/scitq/utils"
 )
 
@@ -74,10 +75,24 @@ type StepAgg struct {
 	EndTime   *int64
 }
 
+// stepKey identifies a step across the whole cluster. Value type so it
+// works as a map key.
+type stepKey struct {
+	workflowID int32
+	stepID     int32
+}
+
 // StepStatsAgg holds in-memory aggregated statistics for steps in workflows.
 type StepStatsAgg struct {
 	mu   sync.Mutex
 	data map[int32]map[int32]*StepAgg // workflow_id -> step_id -> *StepAgg
+	// dirty is the set of steps whose counters have changed since the
+	// last snapshot flush. FlushLoop reads and clears this set on a
+	// 100 ms tick and emits a snapshot per workflow. Populated by
+	// Adjust and by the direct-manipulation sites (UpdateTaskStatus)
+	// via MarkDirty. See specs/task_transitions.md for the design
+	// (snapshot dispatch replacing per-transition deltas).
+	dirty map[stepKey]struct{}
 }
 
 // NewStepStatsAgg creates a new StepStatsAgg with initialized internal maps.
@@ -262,8 +277,52 @@ func (a *StepStatsAgg) Reconcile(db *sql.DB) {
 	}
 	a.mu.Lock()
 	a.data = fresh.data
+	// Mark every step dirty so the next flush ships the reconciled
+	// state to every subscribed UI. Reconcile and normal operation
+	// converge on the same wire protocol — no special "Reconcile just
+	// happened" event needed. See specs/task_transitions.md.
+	for wfID, steps := range a.data {
+		for stepID := range steps {
+			a.markDirtyLocked(wfID, stepID)
+		}
+	}
 	a.mu.Unlock()
 	log.Printf("♻️ stats reconciled from DB")
+}
+
+// markDirtyLocked adds (workflowID, stepID) to the dirty set. Caller
+// MUST hold a.mu. Lazy-inits the map so the aggregator can be
+// constructed by callers without a dirty-map allocation until the
+// first mutation.
+func (a *StepStatsAgg) markDirtyLocked(workflowID, stepID int32) {
+	if a.dirty == nil {
+		a.dirty = make(map[stepKey]struct{})
+	}
+	a.dirty[stepKey{workflowID, stepID}] = struct{}{}
+}
+
+// MarkDirty is the entry point for callers that mutated the aggregator
+// under a self-held lock (e.g. UpdateTaskStatus, which acquires
+// a.mu.Lock() itself and manipulates a.data[wid][sid].Waiting-- etc.
+// directly). Once every such site is migrated to Adjust or
+// TransitionTask, this can go private again.
+func (a *StepStatsAgg) MarkDirty(workflowID, stepID int32) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.markDirtyLocked(workflowID, stepID)
+	a.mu.Unlock()
+}
+
+// MarkDirtyLocked is the same as MarkDirty but assumes the caller
+// already holds a.mu — used inside UpdateTaskStatus which holds the
+// lock across its aggregator work.
+func (a *StepStatsAgg) MarkDirtyLocked(workflowID, stepID int32) {
+	if a == nil {
+		return
+	}
+	a.markDirtyLocked(workflowID, stepID)
 }
 
 // EnsureStep guarantees an entry exists for (workflowID, stepID).
@@ -303,6 +362,10 @@ func (a *StepStatsAgg) Adjust(workflowID, stepID int32, fn func(*StepAgg)) {
 		a.data[workflowID][stepID] = agg
 	}
 	fn(agg)
+	// Any Adjust caller mutated the aggregator; mark the step dirty
+	// so the next FlushLoop tick emits a snapshot. Callers that go
+	// through Adjust get snapshot dispatch for free.
+	a.markDirtyLocked(workflowID, stepID)
 }
 
 // RemoveStep deletes a step entry by its stepID, scanning all workflows to locate it.
@@ -509,4 +572,182 @@ func (s *taskQueueServer) GetStepStats(ctx context.Context, req *pb.StepStatsReq
 	})
 
 	return &pb.StepStatsResponse{Stats: out}, nil
+}
+
+// --- Snapshot dispatch (see specs/task_transitions.md) --------------
+//
+// The WS `step-stats` topic carries snapshots of step counters, not
+// per-transition deltas. Every write path that mutates the aggregator
+// (Adjust, MarkDirty from UpdateTaskStatus, Reconcile) adds the affected
+// step to the `dirty` set. A background goroutine reads and clears
+// that set every 100 ms, snapshots each dirty step under the mutex,
+// then emits one WS message per workflow (containing every dirty step
+// for that workflow) outside the mutex.
+//
+// Idle workflows produce zero traffic. Reconnect / initial hydration
+// still comes via `GetStepStats` for now — a follow-up will add a
+// welcome-snapshot on subscribe.
+
+// StepCounterSnapshot is the wire shape shipped over WS. Field names
+// match the UI's step-row fields so the client can `Object.assign` and
+// be done. Kept flat (not nested under a `counters:` map) to keep the
+// payload small and the client-side reactivity trivial.
+type StepCounterSnapshot struct {
+	StepId          int32  `json:"stepId"`
+	TotalTasks      int32  `json:"totalTasks"`
+	WaitingTasks    int32  `json:"waitingTasks"`
+	PendingTasks    int32  `json:"pendingTasks"`
+	AcceptedTasks   int32  `json:"acceptedTasks"`
+	RunningTasks    int32  `json:"runningTasks"`
+	UploadingTasks  int32  `json:"uploadingTasks"`
+	SuccessfulTasks int32  `json:"successfulTasks"`
+	FailedTasks     int32  `json:"failedTasks"`      // hidden retried parents
+	ReallyFailedTasks int32 `json:"reallyFailedTasks"` // visible F only
+	RetryingTasks   int32  `json:"retryingTasks"`
+	// Accumulators — sent as flat min/max/avg for the UI's duration
+	// column. UI already renders these; format matches today's
+	// StepStats proto response.
+	SuccessRun stepRunStats `json:"successRun"`
+	FailedRun  stepRunStats `json:"failedRun"`
+	RunningRun stepRunStats `json:"runningRun"`
+	Download   stepRunStats `json:"download"`
+	Upload     stepRunStats `json:"upload"`
+	StartTime  *int64       `json:"startTime,omitempty"`
+	EndTime    *int64       `json:"endTime,omitempty"`
+}
+
+type stepRunStats struct {
+	Count   int32   `json:"count"`
+	Average float32 `json:"average"`
+	Min     float32 `json:"min"`
+	Max     float32 `json:"max"`
+}
+
+func snapshotFromAgg(stepID int32, agg *StepAgg, now time.Time) StepCounterSnapshot {
+	total := agg.Waiting + agg.Pending + agg.Accepted + agg.Running +
+		agg.Uploading + agg.Succeeded + agg.ReallyFailed
+	snap := StepCounterSnapshot{
+		StepId:            stepID,
+		TotalTasks:        total,
+		WaitingTasks:      agg.Waiting,
+		PendingTasks:      agg.Pending,
+		AcceptedTasks:     agg.Accepted,
+		RunningTasks:      agg.Running,
+		UploadingTasks:    agg.Uploading,
+		SuccessfulTasks:   agg.Succeeded,
+		FailedTasks:       agg.Failed,
+		ReallyFailedTasks: agg.ReallyFailed,
+		RetryingTasks:     agg.Retrying,
+		SuccessRun:        toStepRunStats(agg.SuccessRun),
+		FailedRun:         toStepRunStats(agg.FailRun),
+		Download:          toStepRunStats(agg.Download),
+		Upload:            toStepRunStats(agg.Upload),
+		StartTime:         agg.StartTime,
+		EndTime:           agg.EndTime,
+	}
+	// RunningRun is derived from RunningTasks (start times → current
+	// elapsed durations). Matches the existing GetStepStats logic.
+	if len(agg.RunningTasks) > 0 {
+		var sum, minV, maxV float64
+		minV = math.MaxFloat64
+		for _, start := range agg.RunningTasks {
+			d := now.Sub(start).Seconds()
+			if d < 0 {
+				d = 0
+			}
+			sum += d
+			if d < minV {
+				minV = d
+			}
+			if d > maxV {
+				maxV = d
+			}
+		}
+		count := int32(len(agg.RunningTasks))
+		avg := float32(sum / float64(count))
+		snap.RunningRun = stepRunStats{Count: count, Average: avg, Min: float32(minV), Max: float32(maxV)}
+	}
+	return snap
+}
+
+func toStepRunStats(a Accumulator) stepRunStats {
+	if a.Count == 0 {
+		return stepRunStats{}
+	}
+	minV := a.Min
+	if minV == math.MaxFloat64 {
+		minV = 0
+	}
+	return stepRunStats{
+		Count:   a.Count,
+		Average: float32(a.Sum / float64(a.Count)),
+		Min:     float32(minV),
+		Max:     float32(a.Max),
+	}
+}
+
+// FlushOnce collects the current dirty set under the mutex, snapshots
+// each dirty step's counters, clears the set, then emits one WS message
+// per workflow OUTSIDE the mutex. Zero traffic when nothing is dirty.
+func (a *StepStatsAgg) FlushOnce() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	if len(a.dirty) == 0 {
+		a.mu.Unlock()
+		return
+	}
+	now := time.Now().UTC()
+	// Group dirty steps by workflow so we emit one WS message per
+	// workflow topic, matching the existing subscription shape.
+	byWorkflow := make(map[int32][]StepCounterSnapshot)
+	for key := range a.dirty {
+		wf := a.data[key.workflowID]
+		if wf == nil {
+			continue
+		}
+		agg := wf[key.stepID]
+		if agg == nil {
+			continue
+		}
+		byWorkflow[key.workflowID] = append(
+			byWorkflow[key.workflowID],
+			snapshotFromAgg(key.stepID, agg, now),
+		)
+	}
+	// Clear the set atomically with the read so the next tick starts
+	// fresh — any transition arriving between the unlock and the
+	// emit will mark itself dirty and be picked up next tick.
+	a.dirty = nil
+	a.mu.Unlock()
+
+	// Emit outside the mutex — websocket.Broadcast can block if a
+	// client's send buffer is full, and we don't want that to serialize
+	// aggregator updates.
+	for wfID, steps := range byWorkflow {
+		websocket.EmitWS("step-stats", wfID, "snapshot", struct {
+			Steps []StepCounterSnapshot `json:"steps"`
+		}{Steps: steps})
+	}
+}
+
+// FlushLoop drives FlushOnce on a fixed cadence. Caller wires stop.
+func (a *StepStatsAgg) FlushLoop(interval time.Duration, stop <-chan struct{}) {
+	if a == nil {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			a.FlushOnce()
+		case <-stop:
+			// Final flush on shutdown so anything pending gets one
+			// last chance to reach the UI before the WS layer closes.
+			a.FlushOnce()
+			return
+		}
+	}
 }

@@ -399,116 +399,38 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
       }
     }
 
-    // STEP-STATS incremental deltas (id == workflowId)
-    if (message.type === 'step-stats' && message.id === workflowId) {
+    // STEP-STATS snapshots (id == workflowId). Server sends a full
+    // per-step snapshot every 100 ms if anything changed; idle
+    // workflows produce no traffic. UI just replaces the affected
+    // step's counters. See specs/task_transitions.md — this replaces
+    // the per-transition delta handler that shipped the 2026-07-02
+    // counter-drift bugs.
+    if (message.type === 'step-stats' && message.id === workflowId && message.action === 'snapshot') {
       const p = message.payload || {};
-      const stepId: number = p.stepId;
-      const step = steps.find((s) => s.stepId === stepId);
-      if (!step) return;
-
-      const oldS: string | undefined = p.oldStatus;
-      const newS: string | undefined = p.newStatus;
-      const dur: number | undefined = p.duration;
-
-      // Adjust counters: decrement old, increment new
-      if (oldS) {
-        switch (oldS) {
-          case 'W': step.waitingTasks--; break;
-          case 'P':
-          case 'I': step.pendingTasks--; break;
-          case 'A':
-          case 'C':
-          case 'D':
-          case 'O': step.acceptedTasks--; break;
-          case 'R': step.runningTasks--; break;
-          case 'U':
-          case 'V': step.uploadingTasks--; break;
-          case 'S': step.successfulTasks--; break;
-          case 'F': step.reallyFailedTasks--; if (p?.retried) { step.failedTasks++; if (scitqDebug.verbose) console.log(`Failed count increased to ${step.failedTasks}`); } break;
-        }
-      }
-      if (newS) {
-        switch (newS) {
-          case 'W': step.waitingTasks++; break;
-          case 'P':
-          case 'I': step.pendingTasks++; break;
-          case 'A':
-          case 'C':
-          case 'D':
-          case 'O': step.acceptedTasks++; break;
-          case 'R': step.runningTasks++; break;
-          case 'U':
-          case 'V': step.uploadingTasks++; break;
-          case 'S': step.successfulTasks++; break;
-          case 'F': step.reallyFailedTasks++; break;
-        }
-      }
-
-      // Total tasks counter
-      if (message?.payload?.incrementTotal !== undefined) {
-        step.totalTasks = (step.totalTasks || 0) + message.payload.incrementTotal;
-      }
-
-      // Running set maintenance
-      if (newS === 'R') {
-        if (typeof p.runStartedEpoch === 'number') {
-          let m = runningByStep.get(stepId);
-          if (!m) { m = new Map(); runningByStep.set(stepId, m); }
-          m.set(p.taskId, p.runStartedEpoch);
-          // A task just entered R: make sure the 1 Hz timer is running so
-          // its duration ticks visibly. Idempotent — no-op if already on.
-          ensureRunningTimer();
-        } else {
-          console.warn('[StepList] Missing or invalid runStartedEpoch for R task:', {
-            taskId: p.taskId,
-            stepId,
-            runStartedEpoch: p.runStartedEpoch,
-            payload: p,
-          });
-        }
-      }
-      if (oldS === 'R' && newS !== 'R') {
-        const m = runningByStep.get(stepId);
-        if (m) { m.delete(p.taskId); }
-        // The timer is stopped lazily on the next tick by
-        // recomputeRunningStats once hasAnyRunning() returns false — no
-        // need to check on every transition out of R.
-      }
-
-      // Accumulators
-      const bumpMinMax = (acc, v) => {
-        if (v == null) return;
-        acc.sum = (acc.sum || 0) + v;
-        if (!acc.min || v < acc.min) acc.min = v;
-        if (!acc.max || v > acc.max) acc.max = v;
-      };
-
-      if (typeof dur === 'number') {
-        if (newS === 'O') {
-          bumpMinMax(step.download, dur);
-        } else if (newS === 'U') {
-          step.successRun.count = (step.successRun.count || 0) + 1;
-          bumpMinMax(step.successRun, dur);
-          step.successRunStats = toStats(step.successRun);
-        } else if (newS === 'V') {
-          step.failedRun.count = (step.failedRun.count || 0) + 1;
-          bumpMinMax(step.failedRun, dur);
-          step.failedRunStats = toStats(step.failedRun);
-        } else if (newS === 'S' || newS === 'F') {
-          bumpMinMax(step.upload, dur);
-        }
-      }
-
-      // Start/end time bounds
-      if (typeof p.startEpoch === 'number') {
-        if (!step.startTime || p.startEpoch < step.startTime) {
-          step.startTime = p.startEpoch;
-        }
-      }
-      if (typeof p.endEpoch === 'number') {
-        if (!step.endTime || p.endEpoch > step.endTime) {
-          step.endTime = p.endEpoch;
-        }
+      const snaps = Array.isArray(p.steps) ? p.steps : [];
+      for (const snap of snaps) {
+        const step = steps.find((s) => s.stepId === snap.stepId);
+        if (!step) continue;
+        // Counters — direct replacement. No decrement/increment
+        // arithmetic, no `case 'W'` switch, no `retried:true` branch.
+        step.totalTasks        = snap.totalTasks;
+        step.waitingTasks      = snap.waitingTasks;
+        step.pendingTasks      = snap.pendingTasks;
+        step.acceptedTasks     = snap.acceptedTasks;
+        step.runningTasks      = snap.runningTasks;
+        step.uploadingTasks    = snap.uploadingTasks;
+        step.successfulTasks   = snap.successfulTasks;
+        step.failedTasks       = snap.failedTasks;
+        step.reallyFailedTasks = snap.reallyFailedTasks;
+        step.retryingTasks     = snap.retryingTasks;
+        // Duration accumulators — server ships them pre-computed
+        // (count/average/min/max) so the UI's display cells read them
+        // directly instead of maintaining a rolling sum locally.
+        if (snap.successRun) step.successRunStats = { average: snap.successRun.average, min: snap.successRun.min, max: snap.successRun.max };
+        if (snap.failedRun)  step.failedRunStats  = { average: snap.failedRun.average,  min: snap.failedRun.min,  max: snap.failedRun.max };
+        if (snap.runningRun) step.currentRunStats = { average: snap.runningRun.average, min: snap.runningRun.min, max: snap.runningRun.max };
+        if (snap.startTime != null) step.startTime = snap.startTime;
+        if (snap.endTime != null)   step.endTime   = snap.endTime;
       }
       return;
     }
