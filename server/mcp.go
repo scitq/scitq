@@ -690,19 +690,23 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "edit_and_retry_task",
-			Description: "Edit a task's command and retry it. Returns the new task ID.",
+			Description: "Edit a task's command (and optionally container/publish/inputs/resources) and retry it. Returns the new task ID. Absent optional fields inherit from the parent task; present fields replace them on the clone.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"task_id": {Type: "integer", Description: "Task ID to edit"},
-					"command": {Type: "string", Description: "New command"},
+					"task_id":   {Type: "integer", Description: "Task ID to edit"},
+					"command":   {Type: "string", Description: "New command"},
+					"container": {Type: "string", Description: "New container image (optional). Absent = inherit from parent."},
+					"publish":   {Type: "string", Description: "New publish URI (optional). Absent = inherit from parent. Useful when the workflow's publish template was resolved with a literal placeholder (e.g. {PAIR.REF}) before a DSL fix landed."},
+					"resources": {Type: "array", Description: "New resources list (optional). Absent = inherit; present-empty = clear; present-non-empty = replace."},
+					"inputs":    {Type: "array", Description: "New inputs list (optional). Same semantics as resources."},
 				},
 				Required: []string{"task_id", "command"},
 			},
 		},
 		{
 			Name:        "edit_step_command",
-			Description: "Find/replace in all failed tasks of a step and retry them.",
+			Description: "Find/replace in every non-hidden non-succeeded task of a step, in place. Failed tasks (F) additionally get retried after the edit. Optional container/resources/inputs overrides are applied uniformly to every touched task — this is the batch equivalent of the same fields on edit_and_retry_task, used when a fix needs to reach P/W/R tasks that haven't failed yet.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
@@ -710,6 +714,9 @@ func (h *mcpHandler) listTools() []mcpTool {
 					"find":      {Type: "string", Description: "Text or regexp to find"},
 					"replace":   {Type: "string", Description: "Replacement text"},
 					"is_regexp": {Type: "boolean", Description: "Treat find as regexp"},
+					"container": {Type: "string", Description: "New container image (optional) applied to every non-succeeded task."},
+					"resources": {Type: "array", Description: "Replace the resources list on every non-succeeded task (optional). Present-empty = clear; present-non-empty = replace."},
+					"inputs":    {Type: "array", Description: "Replace the inputs list on every non-succeeded task (optional). Same semantics as resources."},
 				},
 				Required: []string{"step_id", "find", "replace"},
 			},
@@ -1617,14 +1624,27 @@ func (h *mcpHandler) toolForkModule(ctx context.Context, args json.RawMessage) (
 
 func (h *mcpHandler) toolEditAndRetryTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
-		TaskID  int32  `json:"task_id"`
-		Command string `json:"command"`
+		TaskID    int32     `json:"task_id"`
+		Command   string    `json:"command"`
+		Container *string   `json:"container"`
+		Publish   *string   `json:"publish"`
+		Resources *[]string `json:"resources"`
+		Inputs    *[]string `json:"inputs"`
 	}
 	json.Unmarshal(args, &p)
-	res, err := h.server.EditAndRetryTask(ctx, &pb.EditAndRetryTaskRequest{
-		TaskId:  p.TaskID,
-		Command: p.Command,
-	})
+	req := &pb.EditAndRetryTaskRequest{
+		TaskId:    p.TaskID,
+		Command:   p.Command,
+		Container: p.Container,
+		Publish:   p.Publish,
+	}
+	if p.Resources != nil {
+		req.Resources = &pb.StringList{Values: *p.Resources}
+	}
+	if p.Inputs != nil {
+		req.Inputs = &pb.StringList{Values: *p.Inputs}
+	}
+	res, err := h.server.EditAndRetryTask(ctx, req)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1633,18 +1653,29 @@ func (h *mcpHandler) toolEditAndRetryTask(ctx context.Context, args json.RawMess
 
 func (h *mcpHandler) toolEditStepCommand(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
-		StepID   int32  `json:"step_id"`
-		Find     string `json:"find"`
-		Replace  string `json:"replace"`
-		IsRegexp bool   `json:"is_regexp"`
+		StepID    int32     `json:"step_id"`
+		Find      string    `json:"find"`
+		Replace   string    `json:"replace"`
+		IsRegexp  bool      `json:"is_regexp"`
+		Container *string   `json:"container"`
+		Resources *[]string `json:"resources"`
+		Inputs    *[]string `json:"inputs"`
 	}
 	json.Unmarshal(args, &p)
-	res, err := h.server.EditStepCommand(ctx, &pb.EditStepCommandRequest{
-		StepId:   p.StepID,
-		Find:     p.Find,
-		Replace:  p.Replace,
-		IsRegexp: p.IsRegexp,
-	})
+	req := &pb.EditStepCommandRequest{
+		StepId:    p.StepID,
+		Find:      p.Find,
+		Replace:   p.Replace,
+		IsRegexp:  p.IsRegexp,
+		Container: p.Container,
+	}
+	if p.Resources != nil {
+		req.Resources = &pb.StringList{Values: *p.Resources}
+	}
+	if p.Inputs != nil {
+		req.Inputs = &pb.StringList{Values: *p.Inputs}
+	}
+	res, err := h.server.EditStepCommand(ctx, req)
 	if err != nil {
 		return errorResult(err), nil
 	}

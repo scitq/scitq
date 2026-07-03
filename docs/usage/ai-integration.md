@@ -108,6 +108,44 @@ scitq step edit --id 456 --find "old_path" --replace "new_path" --server $S --to
 scitq step edit --id 456 --find "bowtie2 -k \d+" --replace "bowtie2 -k 200" --regexp --server $S --token $T --json
 ```
 
+### Fix beyond the command — container, resources, inputs
+
+`edit_step_command` and `edit_and_retry_task` both accept optional overrides for
+`container`, `resources`, and `inputs` (plus `publish` on the per-task variant).
+Absent = keep the current value; present = replace it. Used together they let
+you patch a running step in place without going through a template revision —
+the case where a fix needs a new mount, a bumped image, or both alongside the
+command change.
+
+Two rules to know:
+
+- **Non-`F` tasks are patched in place.** `edit_step_command` updates every
+  non-hidden non-succeeded task in the step (P/W/A/C/D/O/R/F) so tasks that
+  haven't failed yet don't fail the same way when they run. F tasks additionally
+  get retried (unchanged from the pre-2026-07 behavior). This is the batch
+  equivalent of using `edit_and_retry_task` one task at a time on tasks that
+  haven't failed yet — much more efficient during an incident.
+- **Present-empty clears, present-non-empty replaces.** For `resources` and
+  `inputs`, passing `[]` clears the list; passing `["foo", "bar"]` replaces
+  it. Not passing the field at all leaves the current list alone.
+
+Example — a live workflow's checkm2 step needed a new reference DB mount and
+a command tweak, both applied to every non-succeeded task in one call:
+
+```jsonc
+{
+  "step_id": 74313,
+  "find": "--input /input/[^ ]+_bins",
+  "replace": "--input /input",
+  "is_regexp": true,
+  "resources": ["{RESOURCE_ROOT}/checkm2/checkm2_database.tar.gz|untar"]
+}
+```
+
+Use `{RESOURCE_ROOT}` — the scitq template variable resolved to the operator's
+configured `resource_root` — instead of a hardcoded bucket URI. See
+`docs/usage/yaml-templates.md` for the `|untar` / `|rename:` resource actions.
+
 ## Tips for AI agents
 
 - **Always use `--json`** for parseable output. Without it, the CLI outputs human-readable text with emojis.
@@ -166,8 +204,8 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 | `force_run_task` | Force a waiting task to pending (bypass dependencies) |
 | `kill_task` | Send a kill signal (SIGKILL) to a running task |
 | `stop_task` | Send a graceful stop (SIGTERM) to a running task |
-| `edit_and_retry_task` | Edit a task's command and retry it |
-| `edit_step_command` | Find/replace in all failed tasks of a step and retry them |
+| `edit_and_retry_task` | Edit a task's command (+ optional container/publish/resources/inputs) and retry it |
+| `edit_step_command` | Find/replace command across every non-succeeded task of a step (in-place for P/W/R, retry for F); optional container/resources/inputs overrides apply uniformly |
 | **Workers** | |
 | `list_workers` | List deployed workers |
 | `deploy_worker` | Deploy new worker instances (by provider/flavor name) |

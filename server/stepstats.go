@@ -105,7 +105,11 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			COUNT(*) FILTER (WHERE NOT t.hidden) AS total,
 			COUNT(*) FILTER (WHERE t.status = 'W' AND NOT t.hidden) AS waiting,
 			COUNT(*) FILTER (WHERE t.status IN ('P','I') AND NOT t.hidden) AS pending,
-			COUNT(*) FILTER (WHERE t.status IN ('C','D','O') AND NOT t.hidden) AS accepted,
+			-- 'A' (Assigned) belongs to the accepted/"Starting" bucket the
+			-- delta path uses (see UpdateTaskStatus). Previously omitted
+			-- here, which made Reconcile silently un-count A tasks every
+			-- 5 min — Total stayed right, per-status buckets drifted.
+			COUNT(*) FILTER (WHERE t.status IN ('A','C','D','O') AND NOT t.hidden) AS accepted,
 			COUNT(*) FILTER (WHERE t.status = 'R' AND NOT t.hidden) AS running,
 			COUNT(*) FILTER (WHERE t.status IN ('U','V') AND NOT t.hidden) AS uploading,
 			COUNT(*) FILTER (WHERE t.status = 'S' AND NOT t.hidden) AS succeeded,

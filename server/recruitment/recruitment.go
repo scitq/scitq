@@ -417,6 +417,15 @@ type FlavorDetail struct {
 	Cpu      int32
 	Memory   float64
 	Disk     float64
+	// GPU device count on this flavor. Populated from `flavor.gpu_count`
+	// in fetchRecruiterFlavors — needed by the fresh-deploy path in
+	// computeConcurrencyForRecruiterWorker so the GPU ratio
+	// (gpu_count / gpu_per_task) enters the min-of-ratios formula. Without
+	// this, single-GPU flavors would take concurrency from cpu/mem/disk
+	// only and end up at 2+ concurrent tasks despite having 1 GPU
+	// (see specs/recruitment-followups — the bug that produced
+	// concurrency=2 for NC16_T4 workers on step 74312).
+	GpuCount int32
 }
 
 // fetchRecruiterFlavors fetches available flavors (for recruitment) and all flavors (for recycling)
@@ -464,6 +473,7 @@ func fetchRecruiterFlavors(
 				f.cpu,
 				f.mem,
 				f.disk,
+				f.gpu_count,
 				fr.cost,
 				fr.available
 			FROM flavor f
@@ -489,13 +499,13 @@ func fetchRecruiterFlavors(
 	for rows.Next() {
 		var stepID, flavorID, regionID, providerID int32
 		var rank int
-		var cpu int32
+		var cpu, gpuCount int32
 		var mem, cost, disk float64
 		var regionName string
 		var provider string
 		var flavorName string
 		var available bool
-		if err := rows.Scan(&stepID, &rank, &flavorID, &flavorName, &regionID, &regionName, &provider, &providerID, &cpu, &mem, &disk, &cost, &available); err != nil {
+		if err := rows.Scan(&stepID, &rank, &flavorID, &flavorName, &regionID, &regionName, &provider, &providerID, &cpu, &mem, &disk, &gpuCount, &cost, &available); err != nil {
 			return nil, nil, nil, err
 		}
 		key := RecruiterKey{StepID: stepID, Rank: rank}
@@ -506,6 +516,7 @@ func fetchRecruiterFlavors(
 			Cpu:      cpu,
 			Memory:   mem,
 			Disk:     disk,
+			GpuCount: gpuCount,
 		}
 		if available {
 			recruitmentMap[key] = append(recruitmentMap[key], flavorDetail)
@@ -1050,7 +1061,7 @@ func deployWorkers(
 		// ---- END ADDITION ----
 
 		newConcurrency := computeConcurrencyForRecruiterWorker(recruiter,
-			RecyclableWorker{Cpu: &selected.Cpu, Memory: &selected.Memory, Disk: &selected.Disk})
+			RecyclableWorker{Cpu: &selected.Cpu, Memory: &selected.Memory, Disk: &selected.Disk, GpuCount: &selected.GpuCount})
 		var newPrefetch int
 		if recruiter.WorkerPrefetch != nil {
 			newPrefetch = *recruiter.WorkerPrefetch

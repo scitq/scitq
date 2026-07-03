@@ -18,3 +18,20 @@ export function formatDuration(seconds: number): string {
 export function showIfNonZero(n?: number): string {
   return n && n !== 0 ? String(n) : '';
 }
+
+// Compact UTC timestamp for task-row secondary text: `2026-07-02 08:11Z`.
+// Accepts epoch seconds (int64 on the wire arrives as either number or
+// string via protobuf-ts long_type_string). Returns '' for missing/zero
+// so callers can drop the row without a conditional.
+export function formatEpochUTC(epoch?: number | string | bigint | null): string {
+  if (epoch == null) return '';
+  const n = typeof epoch === 'number' ? epoch : Number(epoch);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const d = new Date(n * 1000);
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const min = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}Z`;
+}

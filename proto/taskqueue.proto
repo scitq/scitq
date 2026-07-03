@@ -318,6 +318,14 @@ message Task {
     optional string failure_class = 41;
     // See TaskRequest.publish_mode.
     optional string publish_mode = 42;
+    // Task-row timestamps mirrored from the DB. Both stored on the
+    // server since day 1 (task.created_at / task.modified_at) but only
+    // exposed on the wire from 2026-07-02 so the UI can surface "when
+    // was this task submitted" and "when did it last change" in the
+    // task list. Epoch seconds; 0 means unset. `created_at` is stable
+    // once submitted; `modified_at` bumps on every state transition.
+    int64 created_at = 45;
+    int64 modified_at = 46;
 }
 
 message TaskList {
@@ -424,6 +432,18 @@ message EditStepCommandRequest {
     string find = 2;       // Plain text or regexp pattern to find
     string replace = 3;    // Replacement string
     bool is_regexp = 4;    // If true, find is a regexp pattern
+    // Optional step-wide overrides applied to every non-succeeded task
+    // in the step (P/W/A/C/D/O/R/F) AT THE SAME TIME as the command
+    // find/replace. Absent = leave the field alone; present = replace
+    // the field on every non-hidden task in the step. Existing F tasks
+    // are then retried with the new values, matching the base
+    // find/replace-and-retry semantic. Motivated by the checkm2 case
+    // (2026-07-02) where a fix needed a new `resources` mount as well
+    // as a command change — before this, resources couldn't be added
+    // to existing tasks without a full YAML+extend cycle.
+    optional string container = 5;
+    optional StringList resources = 6;
+    optional StringList inputs = 7;
 }
 
 message EditStepCommandResponse {

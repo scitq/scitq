@@ -2156,7 +2156,17 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 						stepAgg.Pending--
 					}
 				}
-				stepAgg.Pending++
+				// New clone's real state depends on whether the
+				// check-and-demote above flipped it P→W. Route to the
+				// right bucket — otherwise Pending accumulates ghost
+				// count for every retry whose prereqs weren't ready,
+				// which is common in fan-in workflows (bug #10 root
+				// cause on workflow 3190 checkm2, 2026-07-02).
+				if demoted {
+					stepAgg.Waiting++
+				} else {
+					stepAgg.Pending++
+				}
 				// If the old task was itself a retry clone already counted in
 				// Retrying, swap it out for the new one rather than double-
 				// counting. Otherwise this is the first retry in the chain so
@@ -2192,7 +2202,16 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		}
 	}
 
-	// 🔔 Emit WS events
+	// 🔔 Emit WS events. Carry the REAL old status (and the demoted-
+	// aware new status) so the UI's local counter map decrements the
+	// right bucket. Previously this was hardcoded "F"→"P", which broke
+	// the UI's Queued/Starting/Running split for every retry whose
+	// parent wasn't actually F (a common case during extend or
+	// operator-driven mid-run retries — bug #10 root cause on wf 3190).
+	newStatus := "P"
+	if demoted {
+		newStatus = "W"
+	}
 	ws.EmitWS("step-stats", wfID.Int32, "delta", struct {
 		WorkflowId int32  `json:"workflowId"`
 		StepId     int32  `json:"stepId"`
@@ -2204,8 +2223,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		WorkflowId: wfID.Int32,
 		StepId:     stepID.Int32,
 		TaskId:     newID,
-		OldStatus:  "F",
-		NewStatus:  "P",
+		OldStatus:  oldTaskStatus.String,
+		NewStatus:  newStatus,
 		Retried:    true,
 	})
 
@@ -2240,8 +2259,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		TaskId:       newID,
 		ParentTaskId: oldID,
 		WorkerId:     0,
-		OldStatus:    "F",
-		Status:       "P",
+		OldStatus:    oldTaskStatus.String,
+		Status:       newStatus,
 	})
 
 	if wfID.Valid {
@@ -2605,10 +2624,28 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 }
 
 func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepCommandRequest) (*pb.EditStepCommandResponse, error) {
-	// Find all visible failed tasks in the step
+	// Compile the regexp once (if regexp mode) so a bad pattern fails fast
+	// before we touch any DB rows.
+	var re *regexp.Regexp
+	if req.IsRegexp {
+		var err error
+		re, err = regexp.Compile(req.Find)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regexp %q: %w", req.Find, err)
+		}
+	}
+
+	// Scan every non-hidden, non-succeeded task in the step — not just
+	// F. Historically this handler only touched F tasks and retried
+	// them; the 2026-07-02 checkm2 crisis surfaced why that's not
+	// enough. During an incident the operator wants to update the
+	// command (or the container / resources / inputs) on tasks that
+	// haven't failed yet (P/W/A/C/D/O/R) so they don't fail the same
+	// way when they run. F tasks still get the extra retry step;
+	// non-F tasks just get their row rewritten in place.
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT task_id, command FROM task
-		 WHERE step_id = $1 AND status = 'F' AND NOT hidden`,
+		`SELECT task_id, command, status FROM task
+		 WHERE step_id = $1 AND status <> 'S' AND NOT hidden`,
 		req.StepId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tasks for step %d: %w", req.StepId, err)
@@ -2618,51 +2655,113 @@ func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepC
 	type candidate struct {
 		taskID  int32
 		command string
+		status  string
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if rows.Scan(&c.taskID, &c.command) == nil {
+		if rows.Scan(&c.taskID, &c.command, &c.status) == nil {
 			candidates = append(candidates, c)
 		}
 	}
+	rows.Close()
 
 	if len(candidates) == 0 {
 		return &pb.EditStepCommandResponse{}, nil
 	}
 
+	// Marshal the optional overrides once — reused per row.
+	var containerOverride *string
+	if req.Container != nil {
+		containerOverride = req.Container
+	}
+	var resourcesOverride *pb.StringList
+	if req.Resources != nil {
+		resourcesOverride = req.Resources
+	}
+	var inputsOverride *pb.StringList
+	if req.Inputs != nil {
+		inputsOverride = req.Inputs
+	}
+
 	var newTaskIDs []int32
+	var edited int32
 	for _, c := range candidates {
 		var newCmd string
-		if req.IsRegexp {
-			re, err := regexp.Compile(req.Find)
-			if err != nil {
-				return nil, fmt.Errorf("invalid regexp %q: %w", req.Find, err)
-			}
+		if re != nil {
 			newCmd = re.ReplaceAllString(c.command, req.Replace)
 		} else {
 			newCmd = strings.ReplaceAll(c.command, req.Find, req.Replace)
 		}
-
-		if newCmd == c.command {
-			continue // no change
+		commandChanged := newCmd != c.command
+		anyOverride := containerOverride != nil || resourcesOverride != nil || inputsOverride != nil
+		if !commandChanged && !anyOverride {
+			continue // nothing to do for this row
 		}
 
-		// Edit the command and retry
-		resp, err := s.EditAndRetryTask(ctx, &pb.EditAndRetryTaskRequest{
-			TaskId:  c.taskID,
-			Command: newCmd,
-		})
-		if err != nil {
-			log.Printf("⚠️ EditStepCommand: failed to edit task %d: %v", c.taskID, err)
+		if c.status == "F" {
+			// For F tasks, defer to EditAndRetryTask — it UPDATEs the
+			// parent's command/container/publish then retryTaskInternal
+			// clones a fresh row with the parent's updated values +
+			// any additional retry-scope overrides (inputs/resources/
+			// depends). One call handles all three concerns.
+			retryReq := &pb.EditAndRetryTaskRequest{
+				TaskId:    c.taskID,
+				Command:   newCmd,
+				Container: containerOverride,
+				Inputs:    inputsOverride,
+				Resources: resourcesOverride,
+			}
+			resp, err := s.EditAndRetryTask(ctx, retryReq)
+			if err != nil {
+				log.Printf("⚠️ EditStepCommand: failed to edit+retry task %d: %v", c.taskID, err)
+				continue
+			}
+			newTaskIDs = append(newTaskIDs, resp.TaskId)
+			edited++
 			continue
 		}
-		newTaskIDs = append(newTaskIDs, resp.TaskId)
+
+		// Non-F path: UPDATE the task row in place. No clone, no retry.
+		// The task's own worker (if any is holding it) won't see the
+		// change until it next fetches — that's the operator's call.
+		sets := []string{"modified_at = NOW()"}
+		args := []any{}
+		if commandChanged {
+			args = append(args, newCmd)
+			sets = append(sets, fmt.Sprintf("command = $%d", len(args)))
+		}
+		if containerOverride != nil {
+			args = append(args, *containerOverride)
+			sets = append(sets, fmt.Sprintf("container = $%d", len(args)))
+		}
+		if resourcesOverride != nil {
+			args = append(args, pq.Array(resourcesOverride.Values))
+			sets = append(sets, fmt.Sprintf("resources = $%d", len(args)))
+		}
+		if inputsOverride != nil {
+			args = append(args, pq.Array(inputsOverride.Values))
+			sets = append(sets, fmt.Sprintf("input = $%d", len(args)))
+		}
+		if len(sets) == 1 {
+			// Only modified_at would change — skip, otherwise we'd
+			// bump modified_at on rows we're not actually editing.
+			continue
+		}
+		args = append(args, c.taskID)
+		q := fmt.Sprintf(`UPDATE task SET %s WHERE task_id = $%d AND NOT hidden`,
+			strings.Join(sets, ", "), len(args))
+		if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
+			log.Printf("⚠️ EditStepCommand: failed to update task %d in-place: %v", c.taskID, err)
+			continue
+		}
+		edited++
 	}
 
-	log.Printf("✏️ EditStepCommand: step %d — %d tasks edited and retried", req.StepId, len(newTaskIDs))
+	log.Printf("✏️ EditStepCommand: step %d — %d tasks touched (%d F retried, %d in-place)",
+		req.StepId, edited, len(newTaskIDs), int(edited)-len(newTaskIDs))
 	return &pb.EditStepCommandResponse{
-		EditedCount: int32(len(newTaskIDs)),
+		EditedCount: edited,
 		NewTaskIds:  newTaskIDs,
 	}, nil
 }
@@ -4381,7 +4480,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			t.publish,
 			t.download_duration, t.run_duration, t.upload_duration,
 			t.quality_score, t.quality_vars::text,
-			t.min_cpu, t.min_mem, t.min_disk, t.min_gpu, t.gpu_all
+			t.min_cpu, t.min_mem, t.min_disk, t.min_gpu, t.gpu_all,
+			EXTRACT(EPOCH FROM t.created_at)::bigint AS created_epoch,
+			EXTRACT(EPOCH FROM t.modified_at)::bigint AS modified_epoch
         FROM task t
         LEFT JOIN step s ON s.step_id = t.step_id
     `
@@ -4434,6 +4535,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			gpuAll                                                            bool
 			retryCount                                                        int32
 			hidden                                                            bool
+			createdEpoch, modifiedEpoch                                       sql.NullInt64
 		)
 
 		if err := rows.Scan(
@@ -4467,6 +4569,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&minDisk,
 			&minGpu,
 			&gpuAll,
+			&createdEpoch,
+			&modifiedEpoch,
 		); err != nil {
 			log.Printf("⚠️ failed to scan task row: %v", err)
 			continue
@@ -4486,6 +4590,12 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		task.RetryCount = retryCount
 		task.Hidden = hidden
 		task.RunStartTime = utils.NullInt64ToPtr(runStartTimeNull)
+		if createdEpoch.Valid {
+			task.CreatedAt = createdEpoch.Int64
+		}
+		if modifiedEpoch.Valid {
+			task.ModifiedAt = modifiedEpoch.Int64
+		}
 		task.DownloadDuration = utils.NullInt32ToPtr(downloadDur)
 		task.RunDuration = utils.NullInt32ToPtr(runDur)
 		task.UploadDuration = utils.NullInt32ToPtr(uploadDur)

@@ -97,3 +97,41 @@ func TestComputeConcurrency_GpuRatio_RespectsMaxClamp(t *testing.T) {
 		t.Fatalf("expected concurrency clamped to 2, got %d", got)
 	}
 }
+
+// Regression for the fresh-deploy branch: the RecyclableWorker built
+// inline at server/recruitment/recruitment.go:~1053 must include
+// GpuCount, otherwise the GPU ratio silently drops out of the min and
+// single-GPU flavors end up at cpu-derived concurrency (2+ tasks on
+// one GPU, contended). This test simulates the fresh-deploy path by
+// constructing a RecyclableWorker with ONLY the fields the fresh-
+// deploy site populates from a FlavorDetail (Cpu, Memory, Disk,
+// GpuCount) — nothing else set — and asserts the GPU ratio caps the
+// result. If a future refactor drops GpuCount from that struct
+// literal again, this test fails.
+func TestComputeConcurrency_FreshDeploy_GpuRatioApplied(t *testing.T) {
+	// NC16_T4: 16 CPU / 110 GB / 176 GB disk / 1 GPU.
+	// bin-step recruiter used cpu_per_task=4, mem_per_task=24,
+	// gpu_per_task=1 — expected concurrency = min(4, ~4.5, 1) = 1.
+	// With GpuCount missing, the min would collapse to floor(min(4,4.5))
+	// = 4 (then clamped by concurrency_max=2 on the real recruiter,
+	// which is the concurrency=2 bug that hit workflow 3190).
+	r := Recruiter{
+		CpuPerTask:    intPtr(4),
+		MemoryPerTask: f32Ptr(24),
+		DiskPerTask:   f32Ptr(100),
+		GpuPerTask:    intPtr(1),
+	}
+	cpu := int32(16)
+	mem := float64(110)
+	disk := float64(176)
+	gpuCount := int32(1)
+	w := RecyclableWorker{
+		Cpu:      &cpu,
+		Memory:   &mem,
+		Disk:     &disk,
+		GpuCount: &gpuCount,
+	}
+	if got := computeConcurrencyForRecruiterWorker(r, w); got != 1 {
+		t.Fatalf("expected concurrency=1 (single-GPU flavor gated by gpu ratio), got %d — regression: fresh-deploy path dropped GpuCount", got)
+	}
+}

@@ -475,6 +475,21 @@ export interface Task {
      * @generated from protobuf field: optional string publish_mode = 42
      */
     publishMode?: string;
+    /**
+     * Task-row timestamps mirrored from the DB. Both stored on the
+     * server since day 1 (task.created_at / task.modified_at) but only
+     * exposed on the wire from 2026-07-02 so the UI can surface "when
+     * was this task submitted" and "when did it last change" in the
+     * task list. Epoch seconds; 0 means unset. `created_at` is stable
+     * once submitted; `modified_at` bumps on every state transition.
+     *
+     * @generated from protobuf field: int64 created_at = 45
+     */
+    createdAt: string;
+    /**
+     * @generated from protobuf field: int64 modified_at = 46
+     */
+    modifiedAt: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -705,6 +720,28 @@ export interface EditStepCommandRequest {
      * @generated from protobuf field: bool is_regexp = 4
      */
     isRegexp: boolean; // If true, find is a regexp pattern
+    /**
+     * Optional step-wide overrides applied to every non-succeeded task
+     * in the step (P/W/A/C/D/O/R/F) AT THE SAME TIME as the command
+     * find/replace. Absent = leave the field alone; present = replace
+     * the field on every non-hidden task in the step. Existing F tasks
+     * are then retried with the new values, matching the base
+     * find/replace-and-retry semantic. Motivated by the checkm2 case
+     * (2026-07-02) where a fix needed a new `resources` mount as well
+     * as a command change — before this, resources couldn't be added
+     * to existing tasks without a full YAML+extend cycle.
+     *
+     * @generated from protobuf field: optional string container = 5
+     */
+    container?: string;
+    /**
+     * @generated from protobuf field: optional taskqueue.StringList resources = 6
+     */
+    resources?: StringList;
+    /**
+     * @generated from protobuf field: optional taskqueue.StringList inputs = 7
+     */
+    inputs?: StringList;
 }
 /**
  * @generated from protobuf message taskqueue.EditStepCommandResponse
@@ -4533,7 +4570,9 @@ class Task$Type extends MessageType<Task> {
             { no: 43, name: "min_gpu", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 44, name: "gpu_all", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 41, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 42, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 42, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 45, name: "created_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
+            { no: 46, name: "modified_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -4550,6 +4589,8 @@ class Task$Type extends MessageType<Task> {
         message.cpuCurve = [];
         message.memCurve = [];
         message.diskCurve = [];
+        message.createdAt = "0";
+        message.modifiedAt = "0";
         if (value !== undefined)
             reflectionMergePartial<Task>(this, message, value);
         return message;
@@ -4702,6 +4743,12 @@ class Task$Type extends MessageType<Task> {
                     break;
                 case /* optional string publish_mode */ 42:
                     message.publishMode = reader.string();
+                    break;
+                case /* int64 created_at */ 45:
+                    message.createdAt = reader.int64().toString();
+                    break;
+                case /* int64 modified_at */ 46:
+                    message.modifiedAt = reader.int64().toString();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4859,6 +4906,12 @@ class Task$Type extends MessageType<Task> {
         /* optional bool gpu_all = 44; */
         if (message.gpuAll !== undefined)
             writer.tag(44, WireType.Varint).bool(message.gpuAll);
+        /* int64 created_at = 45; */
+        if (message.createdAt !== "0")
+            writer.tag(45, WireType.Varint).int64(message.createdAt);
+        /* int64 modified_at = 46; */
+        if (message.modifiedAt !== "0")
+            writer.tag(46, WireType.Varint).int64(message.modifiedAt);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5368,7 +5421,10 @@ class EditStepCommandRequest$Type extends MessageType<EditStepCommandRequest> {
             { no: 1, name: "step_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "find", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "replace", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "is_regexp", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 4, name: "is_regexp", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "container", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "resources", kind: "message", T: () => StringList },
+            { no: 7, name: "inputs", kind: "message", T: () => StringList }
         ]);
     }
     create(value?: PartialMessage<EditStepCommandRequest>): EditStepCommandRequest {
@@ -5398,6 +5454,15 @@ class EditStepCommandRequest$Type extends MessageType<EditStepCommandRequest> {
                 case /* bool is_regexp */ 4:
                     message.isRegexp = reader.bool();
                     break;
+                case /* optional string container */ 5:
+                    message.container = reader.string();
+                    break;
+                case /* optional taskqueue.StringList resources */ 6:
+                    message.resources = StringList.internalBinaryRead(reader, reader.uint32(), options, message.resources);
+                    break;
+                case /* optional taskqueue.StringList inputs */ 7:
+                    message.inputs = StringList.internalBinaryRead(reader, reader.uint32(), options, message.inputs);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5422,6 +5487,15 @@ class EditStepCommandRequest$Type extends MessageType<EditStepCommandRequest> {
         /* bool is_regexp = 4; */
         if (message.isRegexp !== false)
             writer.tag(4, WireType.Varint).bool(message.isRegexp);
+        /* optional string container = 5; */
+        if (message.container !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.container);
+        /* optional taskqueue.StringList resources = 6; */
+        if (message.resources)
+            StringList.internalBinaryWrite(message.resources, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional taskqueue.StringList inputs = 7; */
+        if (message.inputs)
+            StringList.internalBinaryWrite(message.inputs, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getJobStatusClass, getJobStatusText, retryTask, deleteTask } from '../lib/api';
   import { RefreshCcw, Download, Trash, Eye } from 'lucide-svelte';
+  import { formatEpochUTC } from '../lib/format';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
 
@@ -174,7 +175,12 @@ async function deleteTaskClick(taskId: number, status: string) {
       <tbody>
         {#each displayedTasks as task (task.taskId)}
           <tr data-testid={`task-${task.taskId}`}>
-            <td>{task.taskId}</td>
+            <td>
+              {task.taskId}
+              {#if task.createdAt}
+                <div class="task-ts" title="Task created at (UTC)">{formatEpochUTC(task.createdAt)}</div>
+              {/if}
+            </td>
             <td>{task.taskName}</td>
             <td>
               <div class="tasks-truncate-command" title={task.command}>{task.command}</div>
@@ -239,5 +245,16 @@ async function deleteTaskClick(taskId: number, status: string) {
   .task-publish {
     font-size: 0.85em;
     color: var(--color-accent, #3b82f6);
+  }
+  /* Compact UTC timestamp shown under the task id — italic, smaller,
+     dimmed so it reads as secondary metadata. Rendered from
+     task.created_at (added to the Task proto on 2026-07-02) so tasks in
+     any state (W/P/R/S/F) get a timestamp, not just those that started
+     running. */
+  .task-ts {
+    font-style: italic;
+    font-size: 0.8em;
+    opacity: 0.7;
+    white-space: nowrap;
   }
 </style>
