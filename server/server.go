@@ -692,9 +692,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		if allDone {
 			// Fix inputs from reuse-hit prerequisites before promoting
 			s.redirectReuseInputs(tx, taskID)
-			if _, err := tx.ExecContext(ctx, `UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, taskID); err != nil {
-				return nil, fmt.Errorf("failed to promote task: %w", err)
-			}
+			s.promoteTaskWtoP(ctx, tx, taskID)
 			initialStatus = "P"
 		}
 	}
@@ -1022,8 +1020,13 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		wid = workflowID.Int32
 	}
 	if wid > 0 && sid > 0 && s.stats != nil {
+		// Explicit Unlock at the end of this block (not defer) — the
+		// rest of UpdateTaskStatus (dep-completion cascade below) calls
+		// s.stats.Adjust which acquires the same mutex. With a
+		// function-scope defer, the second Lock would deadlock, hanging
+		// every subsequent status-update RPC. See 2026-07-04 TestRecruitmentCycle
+		// regression for the failure signature.
 		s.stats.mu.Lock()
-		defer s.stats.mu.Unlock()
 		if s.stats.data == nil {
 			s.stats.data = make(map[int32]map[int32]*StepAgg)
 		}
@@ -1178,6 +1181,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		// source of the 2026-07-02 counter drift (hardcoded
 		// OldStatus:"F" etc.). See specs/task_transitions.md.
 		s.stats.MarkDirtyLocked(wid, sid)
+		s.stats.mu.Unlock()
 	}
 
 	switch req.NewStatus {
@@ -1261,29 +1265,21 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					if updated {
 						promotedWaitingTasks = true
 						log.Printf("✅ task %d now pending (dependencies resolved)", depTaskID)
-						// Increment pending count in step stats aggregator
+						// Route the aggregator adjust through Adjust so
+						// the step is marked dirty and the next flush
+						// ships a snapshot. Was previously a direct
+						// field mutation + inline `step-stats` delta
+						// emit — replaced as part of the transitions
+						// pilot migration (specs/task_transitions.md).
 						if workflowID.Valid && stepID.Valid {
-							stepAgg := s.stats.data[workflowID.Int32][stepID.Int32]
-							stepAgg.Waiting--
-							stepAgg.Pending++
-						}
-
-						// Emit step-stats event for dependency promotion
-						if workflowID.Valid && stepID.Valid {
-							ws.EmitWS("step-stats", workflowID.Int32, "delta", struct {
-								WorkflowId int32  `json:"workflowId"`
-								StepId     int32  `json:"stepId"`
-								TaskId     int32  `json:"taskId"`
-								OldStatus  string `json:"oldStatus"`
-								NewStatus  string `json:"newStatus"`
-							}{
-								WorkflowId: workflowID.Int32,
-								StepId:     stepID.Int32,
-								TaskId:     int32(depTaskID),
-								OldStatus:  oldStatus,
-								NewStatus:  newStatus,
+							s.stats.Adjust(workflowID.Int32, stepID.Int32, func(agg *StepAgg) {
+								if agg.Waiting > 0 {
+									agg.Waiting--
+								}
+								agg.Pending++
 							})
 						}
+						_ = newStatus // retained for the per-task WS emit below
 
 						// 🔔 WS notify: task status change (now emits old/new status)
 						ws.EmitWS("task", int32(depTaskID), "status", struct {
@@ -1768,28 +1764,59 @@ func (s *taskQueueServer) checkStaleReuse(ctx context.Context, failedTaskID int3
 		log.Printf("♻️ stale reuse detected: task %d output missing at %s", c.taskID, c.output)
 		s.db.ExecContext(ctx, `DELETE FROM task_reuse WHERE reuse_key = $1`, c.reuseKey)
 
-		// Reset prerequisite: S → P, restore original output
+		// Reset prerequisite: S → P, restore original output. Aggregator
+		// bill: Succeeded-- / Pending++. Scrape step/workflow via
+		// RETURNING so the counter update targets the right bucket.
 		origOutput := ""
 		if c.originalOutput.Valid {
 			origOutput = c.originalOutput.String
 		}
-		_, err = s.db.ExecContext(ctx, `
-			UPDATE task SET status = 'P', output = $2, reuse_hit = false, reuse_original_output = NULL
-			WHERE task_id = $1 AND reuse_hit = true
-		`, c.taskID, origOutput)
-		if err != nil {
+		var preStepID, preWfID sql.NullInt32
+		err = s.db.QueryRowContext(ctx, `
+			WITH upd AS (
+				UPDATE task SET status = 'P', output = $2, reuse_hit = false, reuse_original_output = NULL
+				WHERE task_id = $1 AND reuse_hit = true
+				RETURNING step_id
+			)
+			SELECT u.step_id, st.workflow_id
+			FROM upd u LEFT JOIN step st ON st.step_id = u.step_id
+		`, c.taskID, origOutput).Scan(&preStepID, &preWfID)
+		if err != nil && err != sql.ErrNoRows {
 			log.Printf("⚠️ failed to reset stale reuse-hit task %d: %v", c.taskID, err)
 			continue
 		}
+		if err == nil && preWfID.Valid && preStepID.Valid {
+			s.stats.Adjust(preWfID.Int32, preStepID.Int32, func(agg *StepAgg) {
+				if agg.Succeeded > 0 {
+					agg.Succeeded--
+				}
+				agg.Pending++
+			})
+		}
 		log.Printf("♻️ reset reuse-hit task %d to P (will run for real)", c.taskID)
 
-		// Reset the failed downstream task: F → W (wait for prerequisite to complete)
-		_, err = s.db.ExecContext(ctx, `
-			UPDATE task SET status = 'W' WHERE task_id = $1 AND status = 'F'
-		`, failedTaskID)
-		if err != nil {
+		// Reset the failed downstream task: F → W (wait for prerequisite
+		// to complete). Aggregator bill: Failed-- / Waiting++.
+		var dsStepID, dsWfID sql.NullInt32
+		err = s.db.QueryRowContext(ctx, `
+			WITH upd AS (
+				UPDATE task SET status = 'W' WHERE task_id = $1 AND status = 'F'
+				RETURNING step_id
+			)
+			SELECT u.step_id, st.workflow_id
+			FROM upd u LEFT JOIN step st ON st.step_id = u.step_id
+		`, failedTaskID).Scan(&dsStepID, &dsWfID)
+		if err != nil && err != sql.ErrNoRows {
 			log.Printf("⚠️ failed to reset downstream task %d to W: %v", failedTaskID, err)
 		} else {
+			if err == nil && dsWfID.Valid && dsStepID.Valid {
+				s.stats.Adjust(dsWfID.Int32, dsStepID.Int32, func(agg *StepAgg) {
+					if agg.Failed > 0 {
+						agg.Failed--
+					}
+					agg.Waiting++
+				})
+			}
 			log.Printf("♻️ reset downstream task %d to W (waiting for prerequisite %d)", failedTaskID, c.taskID)
 		}
 
@@ -2096,64 +2123,71 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 	// after the 5-minute Reconcile (since Reconcile historically didn't filter
 	// hidden rows out of Succeeded).
 	if wfID.Valid && stepID.Valid {
-		s.stats.mu.Lock()
-		if wfmap, ok := s.stats.data[wfID.Int32]; ok {
-			if stepAgg, ok := wfmap[stepID.Int32]; ok {
-				switch oldTaskStatus.String {
-				case "F":
-					if stepAgg.ReallyFailed > 0 {
-						stepAgg.ReallyFailed--
-						stepAgg.Failed++
-					}
-				case "S":
-					if stepAgg.Succeeded > 0 {
-						stepAgg.Succeeded--
-					}
-				case "A", "C", "D", "O":
-					if stepAgg.Accepted > 0 {
-						stepAgg.Accepted--
-					}
-				case "R":
-					if stepAgg.Running > 0 {
-						stepAgg.Running--
-					}
-				case "U", "V":
-					if stepAgg.Uploading > 0 {
-						stepAgg.Uploading--
-					}
-				case "W":
-					if stepAgg.Waiting > 0 {
-						stepAgg.Waiting--
-					}
-				case "P", "I":
-					if stepAgg.Pending > 0 {
-						stepAgg.Pending--
-					}
+		// Route the compound retry transition (parent-hide + clone-create
+		// + optional demote) through s.stats.Adjust so the step is
+		// auto-marked dirty and the next snapshot flush emits the truth.
+		// Was previously a direct s.stats.data[wid][sid] manipulation with
+		// its own mu.Lock/mu.Unlock — replaced as part of the transitions
+		// pilot migration (specs/task_transitions.md). No step-stats WS
+		// delta emit either: snapshot dispatch is the wire path now.
+		s.stats.Adjust(wfID.Int32, stepID.Int32, func(agg *StepAgg) {
+			// Decrement the parent's old bucket. The parent is now hidden.
+			// F is special: it moves from ReallyFailed (visible F) to
+			// Failed (hidden F) — both live in the aggregator, so swap.
+			// Every other status's hidden ghost is simply removed from
+			// the live counter.
+			switch oldTaskStatus.String {
+			case "F":
+				if agg.ReallyFailed > 0 {
+					agg.ReallyFailed--
+					agg.Failed++
 				}
-				// New clone's real state depends on whether the
-				// check-and-demote above flipped it P→W. Route to the
-				// right bucket — otherwise Pending accumulates ghost
-				// count for every retry whose prereqs weren't ready,
-				// which is common in fan-in workflows (bug #10 root
-				// cause on workflow 3190 checkm2, 2026-07-02).
-				if demoted {
-					stepAgg.Waiting++
-				} else {
-					stepAgg.Pending++
+			case "S":
+				if agg.Succeeded > 0 {
+					agg.Succeeded--
 				}
-				// If the old task was itself a retry clone already counted in
-				// Retrying, swap it out for the new one rather than double-
-				// counting. Otherwise this is the first retry in the chain so
-				// Retrying grows by one.
-				if stepAgg.RetryingSet[oldID] {
-					delete(stepAgg.RetryingSet, oldID)
-				} else {
-					stepAgg.Retrying++
+			case "A", "C", "D", "O":
+				if agg.Accepted > 0 {
+					agg.Accepted--
 				}
-				stepAgg.RetryingSet[newID] = true
+			case "R":
+				if agg.Running > 0 {
+					agg.Running--
+				}
+			case "U", "V":
+				if agg.Uploading > 0 {
+					agg.Uploading--
+				}
+			case "W":
+				if agg.Waiting > 0 {
+					agg.Waiting--
+				}
+			case "P", "I":
+				if agg.Pending > 0 {
+					agg.Pending--
+				}
 			}
-		}
-		s.stats.mu.Unlock()
+			// New clone's bucket depends on whether the check-and-demote
+			// flipped it P→W. Route to the right one — otherwise Pending
+			// accumulates ghost count for every retry whose prereqs
+			// weren't ready (bug #10 root cause on workflow 3190
+			// checkm2, 2026-07-02).
+			if demoted {
+				agg.Waiting++
+			} else {
+				agg.Pending++
+			}
+			// If the old task was itself a retry clone already counted
+			// in Retrying, swap it out for the new one rather than
+			// double-counting. Otherwise this is the first retry in
+			// the chain so Retrying grows by one.
+			if agg.RetryingSet[oldID] {
+				delete(agg.RetryingSet, oldID)
+			} else {
+				agg.Retrying++
+			}
+			agg.RetryingSet[newID] = true
+		})
 	}
 
 	// Auto-resume a Succeeded workflow when one of its tasks is retried.
@@ -2176,31 +2210,14 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		}
 	}
 
-	// 🔔 Emit WS events. Carry the REAL old status (and the demoted-
-	// aware new status) so the UI's local counter map decrements the
-	// right bucket. Previously this was hardcoded "F"→"P", which broke
-	// the UI's Queued/Starting/Running split for every retry whose
-	// parent wasn't actually F (a common case during extend or
-	// operator-driven mid-run retries — bug #10 root cause on wf 3190).
+	// Step-stats delta emit removed as part of the transitions pilot
+	// migration — snapshot dispatch handles the step counter update
+	// via the dirty flag set by s.stats.Adjust above. Only per-task
+	// events (hidden / status on task/*) remain here.
 	newStatus := "P"
 	if demoted {
 		newStatus = "W"
 	}
-	ws.EmitWS("step-stats", wfID.Int32, "delta", struct {
-		WorkflowId int32  `json:"workflowId"`
-		StepId     int32  `json:"stepId"`
-		TaskId     int32  `json:"taskId"`
-		OldStatus  string `json:"oldStatus"`
-		NewStatus  string `json:"newStatus"`
-		Retried    bool   `json:"retried,omitempty"`
-	}{
-		WorkflowId: wfID.Int32,
-		StepId:     stepID.Int32,
-		TaskId:     newID,
-		OldStatus:  oldTaskStatus.String,
-		NewStatus:  newStatus,
-		Retried:    true,
-	})
 
 	// Tell connected UIs the OLD task is now hidden. Dedicated "hidden"
 	// action (not "status") so the regular status-merge path doesn't try
@@ -2263,14 +2280,7 @@ func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskReques
 }
 
 func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTaskRequest) (*pb.Ack, error) {
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`,
-		req.TaskId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to force-run task %d: %w", req.TaskId, err)
-	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !s.promoteTaskWtoP(ctx, nil, req.TaskId) {
 		return nil, fmt.Errorf("task %d is not in waiting (W) status", req.TaskId)
 	}
 	log.Printf("⚡ Task %d forced from W → P (dependency check bypassed)", req.TaskId)
@@ -7608,9 +7618,23 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		// probe gRPC readiness and may issue HTTP requests before the
 		// goroutine has bound the port, getting ECONNREFUSED on a
 		// loaded CI runner (TestClientSha256Endpoint flake).
-		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", httpPort))
-		if err != nil {
-			return fmt.Errorf("HTTP listen on :%d: %w", httpPort, err)
+		//
+		// The integration harness picks the port with a "listen on :0 →
+		// close → tell the server to reuse that number" dance. Between
+		// close and the server's Listen below, a parallel test can grab
+		// the same port. Retry briefly on EADDRINUSE so one collision
+		// doesn't log.Fatalf and tank the whole test binary.
+		var listener net.Listener
+		var err error
+		for attempt := 1; ; attempt++ {
+			listener, err = net.Listen("tcp", fmt.Sprintf(":%d", httpPort))
+			if err == nil {
+				break
+			}
+			if attempt >= 5 || !strings.Contains(err.Error(), "address already in use") {
+				return fmt.Errorf("HTTP listen on :%d: %w", httpPort, err)
+			}
+			time.Sleep(200 * time.Millisecond)
 		}
 		httpServer := &http.Server{
 			Handler: corsMiddleware(finalHandler),

@@ -116,8 +116,10 @@ func (s *taskQueueServer) assignPendingTasks() {
 	// Opportunistic reuse: check pending tasks with reuse_key against task_reuse store (DB-only, no I/O)
 	reuseEvents := s.reuseCheckTasks(tx)
 
-	// Skip-if-exists: check all pending tasks with the flag before worker assignment
-	s.skipExistingTasks(tx)
+	// Skip-if-exists: check all pending tasks with the flag before worker assignment.
+	// Returns events for the aggregator apply post-commit (was silently
+	// bypassing the aggregator until 2026-07-04 — see specs/task_transitions.md).
+	skipEvents := s.skipExistingTasks(tx)
 
 	// 2️⃣ Fetch workers and their capacities + their flavor caps. The flavor
 	// columns (f.cpu/mem/disk) drive the per-task fit check below: a task
@@ -464,17 +466,15 @@ func (s *taskQueueServer) assignPendingTasks() {
 	}
 
 	// Commit succeeded — now it's safe to adjust in-memory stats and broadcast.
+	// Aggregator adjust via s.stats.Adjust auto-marks the step dirty so the
+	// next 100 ms snapshot flush picks it up. The per-transition `step-stats`
+	// WS delta emits that used to live here are gone — snapshot dispatch
+	// is the wire path now (specs/task_transitions.md). Per-task `task/*`
+	// events remain, they're a different topic.
 	for _, a := range assigned {
 		s.stats.Adjust(a.workflowID, a.stepID, func(agg *StepAgg) {
 			agg.Pending--
 			agg.Accepted++
-		})
-		ws.EmitWS("step-stats", a.workflowID, "delta", map[string]any{
-			"workflowId": a.workflowID,
-			"stepId":     a.stepID,
-			"taskId":     a.taskID,
-			"oldStatus":  "P",
-			"newStatus":  "A",
 		})
 		ws.EmitWS("task", a.taskID, "status", map[string]any{
 			"oldStatus": "P",
@@ -488,17 +488,21 @@ func (s *taskQueueServer) assignPendingTasks() {
 			agg.Pending--
 			agg.Succeeded++
 		})
-		ws.EmitWS("step-stats", e.WorkflowID, "delta", map[string]any{
-			"workflowId": e.WorkflowID,
-			"stepId":     e.StepID,
-			"taskId":     e.TaskID,
-			"oldStatus":  "P",
-			"newStatus":  "S",
-		})
 		ws.EmitWS("task", e.TaskID, "status", struct {
 			TaskId int32  `json:"taskId"`
 			Status string `json:"status"`
 		}{TaskId: e.TaskID, Status: "S"})
+	}
+	// Apply skip-if-exists P→S events post-commit. Previously silent —
+	// no aggregator adjust, no snapshot delta. The per-task WS emit
+	// happens inside skipExistingTasks; here we just wire the counters.
+	for _, e := range skipEvents {
+		s.stats.Adjust(e.WorkflowID, e.StepID, func(agg *StepAgg) {
+			if agg.Pending > 0 {
+				agg.Pending--
+			}
+			agg.Succeeded++
+		})
 	}
 }
 
@@ -510,7 +514,17 @@ func (s *taskQueueServer) assignPendingTasks() {
 // tick doesn't re-list the same remote path. Without this, a workflow
 // with N pending non-skippable tasks generates N rclone listings every
 // ~5 seconds for the entire run.
-func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
+// skipHitEvent mirrors reuseHitEvent but for the skip-if-exists P→S
+// promotion. Returned by skipExistingTasks so the caller can apply the
+// aggregator adjust POST-COMMIT (any earlier and a tx rollback would
+// leave the counter wrong; see specs/task_transitions.md).
+type skipHitEvent struct {
+	TaskID     int32
+	WorkflowID int32
+	StepID     int32
+}
+
+func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) []skipHitEvent {
 	// Find pending tasks that haven't been skip-checked yet and have a
 	// non-empty output/publish path.
 	rows, err := tx.Query(`
@@ -524,7 +538,7 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 	`)
 	if err != nil {
 		log.Printf("⚠️ skip-if-exists: failed to query: %v", err)
-		return
+		return nil
 	}
 	defer rows.Close()
 
@@ -543,8 +557,9 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 	}
 
 	if len(candidates) == 0 {
-		return
+		return nil
 	}
+	var events []skipHitEvent
 
 	// Collect every candidate's ID so we can stamp skip_checked at the end
 	// in one batched UPDATE. Tasks that get skipped will move to S below;
@@ -595,7 +610,23 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 		log.Printf("⏭️ Task %d skipped (output exists at %s)", c.taskID, c.checkPath)
 		skipped[c.taskID] = true
 
-		// Emit WS event
+		// Buffer the aggregator apply for post-commit. Look up workflow_id
+		// via the step; if the step row is missing (bare task without
+		// step), we can't attribute the counter change and just skip the
+		// buffer entry — the per-task WS emit below still fires.
+		if c.stepID.Valid {
+			var wfID int32
+			tx.QueryRow(`SELECT workflow_id FROM step WHERE step_id = $1`, c.stepID.Int32).Scan(&wfID)
+			if wfID != 0 {
+				events = append(events, skipHitEvent{
+					TaskID:     c.taskID,
+					WorkflowID: wfID,
+					StepID:     c.stepID.Int32,
+				})
+			}
+		}
+
+		// Emit WS event (per-task, not step-stats)
 		ws.EmitWS("task", c.taskID, "status", struct {
 			TaskId int32  `json:"taskId"`
 			Status string `json:"status"`
@@ -647,13 +678,14 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) {
 					)
 				`, depID).Scan(&allDone)
 				if allDone {
-					tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, depID)
+					s.promoteTaskWtoP(context.Background(), tx, depID)
 					log.Printf("✅ skip-if-exists: promoted task %d to P (dependencies resolved)", depID)
 				}
 			}
 		}
 		s.triggerAssign()
 	}
+	return events
 }
 
 // promoteWaitingTasks promotes W→P for tasks whose prerequisites are all terminal.
@@ -703,7 +735,7 @@ func (s *taskQueueServer) promoteWaitingTasks(tx *sql.Tx) {
 
 	for _, tid := range toPromote {
 		s.redirectReuseInputs(tx, tid)
-		tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, tid)
+		s.promoteTaskWtoP(context.Background(), tx, tid)
 		log.Printf("✅ promoted task %d W→P (prerequisites resolved)", tid)
 	}
 	if len(toPromote) > 0 {
@@ -893,7 +925,7 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 				if allDone {
 					// Before promoting, fix inputs from reuse-hit prerequisites
 					s.redirectReuseInputs(tx, depID)
-					tx.Exec(`UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`, depID)
+					s.promoteTaskWtoP(context.Background(), tx, depID)
 					log.Printf("♻️ reuse: promoted task %d to P (dependencies resolved)", depID)
 				}
 			}

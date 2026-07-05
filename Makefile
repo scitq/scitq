@@ -36,6 +36,40 @@ PROTO_STUBS := gen/taskqueuepb/taskqueue.pb.go \
                python/src/scitq2/pb/taskqueue_pb2.py \
                ui/gen/taskqueue.ts
 
+# check-task-status-writes — lint invariant from specs/task_transitions.md.
+#
+# Task.status writes are constrained to a small allowlist of files during
+# the pilot migration. The long-term target is
+# server/task_transitions.go only. Adding a NEW file that writes
+# task.status trips this check and forces the author to either (a) route
+# through TransitionTask / an existing helper, or (b) get the file added
+# to the allowlist consciously in the same PR that adds the migration.
+#
+# Rationale: the counter drift bugs of 2026-07-02 stemmed from silent
+# task-status writes that skipped the in-memory aggregator. This check
+# prevents new instances from sneaking in unnoticed.
+ALLOWED_TASK_STATUS_FILES := server/task_transitions.go server/server.go server/assigntask.go
+
+check-task-status-writes:
+	@offenders=$$(grep -rlE '(UPDATE task[[:space:]]+SET|SET[[:space:]]+status[[:space:]]*=)' server/*.go 2>/dev/null \
+		| xargs -I{} grep -lE 'UPDATE task[[:space:]]+SET[[:space:]]+status|task_id.*SET[[:space:]]+status' {} 2>/dev/null \
+		| sort -u); \
+	unexpected=""; \
+	for f in $$offenders; do \
+		case "$$f" in \
+			server/task_transitions.go|server/server.go|server/assigntask.go) ;; \
+			*) unexpected="$$unexpected $$f";; \
+		esac; \
+	done; \
+	if [ -n "$$unexpected" ]; then \
+		echo "❌ task.status is written in files outside the allowlist:"; \
+		for f in $$unexpected; do echo "   $$f"; done; \
+		echo ""; \
+		echo "   Route through server/task_transitions.go (TransitionTask / promoteTaskWtoP / s.stats.Adjust)."; \
+		echo "   See specs/task_transitions.md."; \
+		exit 1; \
+	fi
+
 check-stubs-fresh:
 	@stale=0; \
 	for stub in $(PROTO_STUBS); do \
@@ -51,7 +85,7 @@ check-stubs-fresh:
 		exit 1; \
 	fi
 
-all: check-stubs-fresh tgz-python-src build-server build-client build-cli
+all: check-stubs-fresh check-task-status-writes tgz-python-src build-server build-client build-cli
 
 GIT_TAG    := $(shell git describe --tags --always --dirty)
 GIT_SHA    := $(shell git rev-parse --short HEAD)

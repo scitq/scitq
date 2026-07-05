@@ -16,6 +16,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 )
 
 // TransitionRequest is the input to TransitionTask.
@@ -79,4 +80,59 @@ func (s *taskQueueServer) TransitionTask(ctx context.Context, tx *sql.Tx, req Tr
 	// tracking + snapshot dispatch; migrating call sites onto this
 	// primitive is Step 4+ of the migration plan.
 	return TransitionResult{}, fmt.Errorf("TransitionTask: not implemented yet — pilot lands API only, migrations follow")
+}
+
+// promoteTaskWtoP is the aggregator-aware version of the
+// `UPDATE task SET status = 'P' WHERE task_id = $1 AND status = 'W'`
+// pattern used at every "prerequisites cleared" site. Runs the UPDATE
+// (with RETURNING to scrape workflow_id/step_id) and adjusts the
+// aggregator (Waiting--/Pending++). s.stats.Adjust auto-marks the
+// step dirty so the next snapshot flush ships the change.
+//
+// Caller passes either a *sql.Tx (transactional context) or nil (uses
+// s.db directly). If nil, the aggregator adjust is safe — the UPDATE
+// is auto-committed. If a *sql.Tx is passed AND the caller later rolls
+// back, the aggregator will over-count Pending until Reconcile heals
+// it (within 5 min). This is a known trade-off consistent with
+// UpdateTaskStatus's existing inline pattern; callers that guarantee
+// commit (assign loop, promoteWaitingTasks, force_run) can use tx.
+//
+// Returns applied=true iff the row was actually updated (was in W).
+// Silent-false when the row is not W (racing promoters, manual retry,
+// force-run on a non-W task); callers that need to error on that
+// case check the return and construct their own message.
+func (s *taskQueueServer) promoteTaskWtoP(ctx context.Context, tx *sql.Tx, taskID int32) (applied bool) {
+	const q = `
+		WITH upd AS (
+			UPDATE task SET status = 'P', modified_at = NOW()
+			WHERE task_id = $1 AND status = 'W'
+			RETURNING step_id
+		)
+		SELECT u.step_id, st.workflow_id
+		FROM upd u
+		LEFT JOIN step st ON st.step_id = u.step_id
+	`
+	var wfID, stepID sql.NullInt32
+	var err error
+	if tx != nil {
+		err = tx.QueryRowContext(ctx, q, taskID).Scan(&stepID, &wfID)
+	} else {
+		err = s.db.QueryRowContext(ctx, q, taskID).Scan(&stepID, &wfID)
+	}
+	if err == sql.ErrNoRows {
+		return false // task no longer W — race, caller's discretion
+	}
+	if err != nil {
+		log.Printf("⚠️ promoteTaskWtoP task %d: %v", taskID, err)
+		return false
+	}
+	if wfID.Valid && stepID.Valid {
+		s.stats.Adjust(wfID.Int32, stepID.Int32, func(agg *StepAgg) {
+			if agg.Waiting > 0 {
+				agg.Waiting--
+			}
+			agg.Pending++
+		})
+	}
+	return true
 }
