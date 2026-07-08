@@ -369,6 +369,14 @@ message EditAndRetryTaskRequest {
     // rejects the URI on upload. Absent = leave parent's publish
     // alone (operator-driven "Edit & Retry" from UI/CLI).
     optional string publish = 7;
+    // New shell/language for the parent task before retry. Same
+    // clone-from-parent semantic: an in-place UPDATE on the parent
+    // makes the clone pick it up. Absent = leave parent's shell
+    // alone. Required for the workflow-extend case where the fix
+    // for a step involves switching interpreter (e.g. alpine
+    // has no bash → template edit language: bash → sh; without
+    // this the retry keeps executing under the old shell).
+    optional string shell = 8;
 }
 
 // StringList wraps a `repeated string` so it can be carried as `optional`

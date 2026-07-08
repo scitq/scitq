@@ -171,6 +171,27 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 	// how the other seams behave. See specs/task_transitions.md.
 	registerTestStats(s.stats, db)
 
+	// Clear any stale `auth`-class error records on job restart. The
+	// Dashboard's "Provider authentication failed" banner triggers off
+	// jobs with error_class='auth' modified in the last hour; without
+	// this cleanup, that banner sticks around for up to 60 minutes after
+	// the operator rotates credentials + restarts scitq — precisely the
+	// mitigation flow the banner instructs them to follow. Restart is an
+	// implicit "I've fixed the credentials" signal: if creds are still
+	// bad, the next attempt re-classifies immediately and the banner
+	// reappears with a fresh timestamp. Non-auth error classes (quota,
+	// capacity, unsupported_flavor, transient, unknown) are diagnostic
+	// history and left untouched.
+	if res, err := db.ExecContext(ctx, `
+		UPDATE job
+		   SET error_class = NULL, error_message = NULL
+		 WHERE status = 'F' AND error_class = 'auth'
+	`); err != nil {
+		log.Printf("⚠️ startup auth-alert clear failed: %v", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("🔓 Cleared auth-class error on %d stale F job(s) at startup (banner reset)", n)
+	}
+
 	// Build rcloneRemotes proto struct once here (cfg.Rclone is now a flat map[name]options)
 	remotes := make(map[string]*pb.RcloneRemote)
 	for name, opts := range cfg.Rclone {
@@ -1413,14 +1434,14 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 						   modified_at = NOW()
 					 WHERE task_id = $1
 				`, req.TaskId)
-				// Adjust step stats aggregator: decrement ReallyFailed and increment Failed
-				if workflowID.Valid && stepID.Valid {
-					stepAgg := s.stats.data[workflowID.Int32][stepID.Int32]
-					if stepAgg.ReallyFailed > 0 {
-						stepAgg.ReallyFailed--
-						stepAgg.Failed++
-					}
-				}
+				// Aggregator bookkeeping for the parent-hide moves happens
+				// below in a SINGLE Adjust call together with the clone-
+				// insert bookkeeping — see the block after tx.Commit. Doing
+				// it here (with the tx still open) risked a rollback leaving
+				// the aggregator ahead of the DB; doing it via a direct
+				// s.stats.data[...] write (as the pre-2026-07-08 code did)
+				// was a data race against FlushLoop + every other Adjust
+				// caller, since s.stats.mu was released back at line ~1180.
 			}
 
 			// 3c) Move dependencies from failed parent to new task
@@ -1476,31 +1497,43 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 
 			if txErr == nil {
 				_ = tx.Commit()
-				// After commit, increment Pending + Retrying in StepAgg for new retry task
+				// Compound aggregator adjust for the auto-retry: parent
+				// moves from ReallyFailed → Failed (visible → hidden), the
+				// new clone lands in Pending, and Retrying grows by one
+				// UNLESS the parent was itself already a retry clone (in
+				// which case swap it out of RetryingSet for the new one
+				// so Retrying doesn't double-count). All routed through
+				// Adjust so s.stats.mu is held for the whole compound
+				// change and the step is auto-marked dirty for the next
+				// snapshot flush. The prior code did direct field
+				// manipulation on s.stats.data[...] with no mutex —
+				// racing FlushLoop + every other Adjust caller and
+				// producing the "Starting=50 for a 6-slot pool" drift
+				// (2026-07-08 hello-smoke observation).
 				if workflowID.Valid && stepID.Valid {
-					stepAgg := s.stats.data[workflowID.Int32][stepID.Int32]
-					stepAgg.Pending++
-					stepAgg.Retrying++
-					stepAgg.RetryingSet[int32(newID)] = true
-				}
-				// Emit step-stats event for retry (clone)
-				if workflowID.Valid && stepID.Valid {
-					ws.EmitWS("step-stats", workflowID.Int32, "delta", struct {
-						WorkflowId int32  `json:"workflowId"`
-						StepId     int32  `json:"stepId"`
-						TaskId     int32  `json:"taskId"`
-						OldStatus  string `json:"oldStatus"`
-						NewStatus  string `json:"newStatus"`
-						Retried    bool   `json:"retried,omitempty"`
-					}{
-						WorkflowId: workflowID.Int32,
-						StepId:     stepID.Int32,
-						TaskId:     int32(newID),
-						OldStatus:  "F",
-						NewStatus:  "P",
-						Retried:    true,
+					newIDInt32 := int32(newID)
+					parentID := req.TaskId
+					s.stats.Adjust(workflowID.Int32, stepID.Int32, func(agg *StepAgg) {
+						if agg.ReallyFailed > 0 {
+							agg.ReallyFailed--
+							agg.Failed++
+						}
+						agg.Pending++
+						if agg.RetryingSet == nil {
+							agg.RetryingSet = make(map[int32]bool)
+						}
+						if agg.RetryingSet[parentID] {
+							delete(agg.RetryingSet, parentID)
+						} else {
+							agg.Retrying++
+						}
+						agg.RetryingSet[newIDInt32] = true
 					})
 				}
+				// Step-stats delta emit removed — snapshot dispatch is the
+				// wire path (specs/task_transitions.md). The Adjust above
+				// marks the step dirty; the 100 ms FlushLoop tick ships
+				// the fresh counters to every subscribed UI.
 				// 🔔 WS notify: task status change for retried task (oldStatus="F", newStatus="P")
 				ws.EmitWS("task", int32(newID), "status", struct {
 					TaskId       int32  `json:"taskId"`
@@ -2560,6 +2593,10 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 		args = append(args, *req.Publish)
 		setClauses = append(setClauses, fmt.Sprintf("publish = $%d", len(args)))
 	}
+	if req.Shell != nil {
+		args = append(args, *req.Shell)
+		setClauses = append(setClauses, fmt.Sprintf("shell = $%d", len(args)))
+	}
 	args = append(args, req.TaskId)
 	query := fmt.Sprintf(
 		`UPDATE task SET %s WHERE task_id = $%d AND NOT hidden`,
@@ -2571,15 +2608,20 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return nil, fmt.Errorf("task %d not found or hidden", req.TaskId)
 	}
-	switch {
-	case req.Container != nil && req.Publish != nil:
-		log.Printf("✏️ Task %d command + container + publish edited, retrying", req.TaskId)
-	case req.Container != nil:
-		log.Printf("✏️ Task %d command + container edited, retrying", req.TaskId)
-	case req.Publish != nil:
-		log.Printf("✏️ Task %d command + publish edited, retrying", req.TaskId)
-	default:
+	var edits []string
+	if req.Container != nil {
+		edits = append(edits, "container")
+	}
+	if req.Publish != nil {
+		edits = append(edits, "publish")
+	}
+	if req.Shell != nil {
+		edits = append(edits, "shell")
+	}
+	if len(edits) == 0 {
 		log.Printf("✏️ Task %d command edited, retrying", req.TaskId)
+	} else {
+		log.Printf("✏️ Task %d command + %s edited, retrying", req.TaskId, strings.Join(edits, " + "))
 	}
 
 	// 🔔 Broadcast the edit on the OLD task BEFORE retryTaskInternal
@@ -2592,11 +2634,13 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 		Command   string  `json:"command"`
 		Container *string `json:"container,omitempty"`
 		Publish   *string `json:"publish,omitempty"`
+		Shell     *string `json:"shell,omitempty"`
 	}{
 		TaskId:    req.TaskId,
 		Command:   req.Command,
 		Container: req.Container,
 		Publish:   req.Publish,
+		Shell:     req.Shell,
 	}
 	ws.EmitWS("task", req.TaskId, "edited", editEvt)
 
@@ -4298,7 +4342,7 @@ func (s *taskQueueServer) RetryJob(ctx context.Context, req *pb.JobId) (*pb.Ack,
 		       w.worker_name, w.deleted_at,
 		       f.provider_id, p.provider_name, p.config_name,
 		       r.region_name,
-		       f.flavor_name, f.gpu
+		       f.flavor_name, f.gpu_count
 		  FROM job j
 		  LEFT JOIN worker   w ON w.worker_id   = j.worker_id
 		  LEFT JOIN flavor   f ON f.flavor_id   = j.flavor_id

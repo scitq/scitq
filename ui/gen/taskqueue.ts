@@ -577,6 +577,18 @@ export interface EditAndRetryTaskRequest {
      * @generated from protobuf field: optional string publish = 7
      */
     publish?: string;
+    /**
+     * New shell/language for the parent task before retry. Same
+     * clone-from-parent semantic: an in-place UPDATE on the parent
+     * makes the clone pick it up. Absent = leave parent's shell
+     * alone. Required for the workflow-extend case where the fix
+     * for a step involves switching interpreter (e.g. alpine
+     * has no bash → template edit language: bash → sh; without
+     * this the retry keeps executing under the old shell).
+     *
+     * @generated from protobuf field: optional string shell = 8
+     */
+    shell?: string;
 }
 /**
  * StringList wraps a `repeated string` so it can be carried as `optional`
@@ -5080,7 +5092,8 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
             { no: 4, name: "resources", kind: "message", T: () => StringList },
             { no: 5, name: "depends", kind: "message", T: () => Int32List },
             { no: 6, name: "container", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 7, name: "publish", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 7, name: "publish", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "shell", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<EditAndRetryTaskRequest>): EditAndRetryTaskRequest {
@@ -5117,6 +5130,9 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
                 case /* optional string publish */ 7:
                     message.publish = reader.string();
                     break;
+                case /* optional string shell */ 8:
+                    message.shell = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5150,6 +5166,9 @@ class EditAndRetryTaskRequest$Type extends MessageType<EditAndRetryTaskRequest> 
         /* optional string publish = 7; */
         if (message.publish !== undefined)
             writer.tag(7, WireType.LengthDelimited).string(message.publish);
+        /* optional string shell = 8; */
+        if (message.shell !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.shell);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -318,7 +318,8 @@ class Scitq2Client:
                             resources: Optional[List[str]] = None,
                             depends: Optional[List[int]] = None,
                             container: Optional[str] = None,
-                            publish: Optional[str] = None) -> int:
+                            publish: Optional[str] = None,
+                            shell: Optional[str] = None) -> int:
         """Edit a task's command and retry it (clone with the new command, hide
         the parent). Returns the new task's id.
 
@@ -352,6 +353,8 @@ class Scitq2Client:
             req.container = container
         if publish is not None:
             req.publish = publish
+        if shell is not None:
+            req.shell = shell
         resp = self.stub.EditAndRetryTask(req)
         return resp.task_id
 

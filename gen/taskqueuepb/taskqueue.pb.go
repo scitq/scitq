@@ -1175,7 +1175,15 @@ type EditAndRetryTaskRequest struct {
 	// retry inherits the old literal-placeholder publish and rclone
 	// rejects the URI on upload. Absent = leave parent's publish
 	// alone (operator-driven "Edit & Retry" from UI/CLI).
-	Publish       *string `protobuf:"bytes,7,opt,name=publish,proto3,oneof" json:"publish,omitempty"`
+	Publish *string `protobuf:"bytes,7,opt,name=publish,proto3,oneof" json:"publish,omitempty"`
+	// New shell/language for the parent task before retry. Same
+	// clone-from-parent semantic: an in-place UPDATE on the parent
+	// makes the clone pick it up. Absent = leave parent's shell
+	// alone. Required for the workflow-extend case where the fix
+	// for a step involves switching interpreter (e.g. alpine
+	// has no bash → template edit language: bash → sh; without
+	// this the retry keeps executing under the old shell).
+	Shell         *string `protobuf:"bytes,8,opt,name=shell,proto3,oneof" json:"shell,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1255,6 +1263,13 @@ func (x *EditAndRetryTaskRequest) GetContainer() string {
 func (x *EditAndRetryTaskRequest) GetPublish() string {
 	if x != nil && x.Publish != nil {
 		return *x.Publish
+	}
+	return ""
+}
+
+func (x *EditAndRetryTaskRequest) GetShell() string {
+	if x != nil && x.Shell != nil {
+		return *x.Shell
 	}
 	return ""
 }
@@ -11679,7 +11694,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05retry\x18\x02 \x01(\x05H\x00R\x05retry\x88\x01\x01B\b\n" +
 	"\x06_retry\".\n" +
 	"\x13ForceRunTaskRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\xf0\x02\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\x95\x03\n" +
 	"\x17EditAndRetryTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x122\n" +
@@ -11687,7 +11702,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tresources\x18\x04 \x01(\v2\x15.taskqueue.StringListH\x01R\tresources\x88\x01\x01\x123\n" +
 	"\adepends\x18\x05 \x01(\v2\x14.taskqueue.Int32ListH\x02R\adepends\x88\x01\x01\x12!\n" +
 	"\tcontainer\x18\x06 \x01(\tH\x03R\tcontainer\x88\x01\x01\x12\x1d\n" +
-	"\apublish\x18\a \x01(\tH\x04R\apublish\x88\x01\x01B\t\n" +
+	"\apublish\x18\a \x01(\tH\x04R\apublish\x88\x01\x01\x12\x19\n" +
+	"\x05shell\x18\b \x01(\tH\x05R\x05shell\x88\x01\x01B\t\n" +
 	"\a_inputsB\f\n" +
 	"\n" +
 	"_resourcesB\n" +
@@ -11696,7 +11712,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_containerB\n" +
 	"\n" +
-	"\b_publish\"$\n" +
+	"\b_publishB\b\n" +
+	"\x06_shell\"$\n" +
 	"\n" +
 	"StringList\x12\x16\n" +
 	"\x06values\x18\x01 \x03(\tR\x06values\"#\n" +

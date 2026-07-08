@@ -552,10 +552,10 @@ class Task:
                 ext.changed.add(self.task_id)
         else:
             # Extend reconcile: a task with this (step, tag) already exists.
-            # 5-tuple from _build_extend_context; publish is unused here
+            # 6-tuple from _build_extend_context; publish is unused here
             # but kept symmetric with the prefetch shape used by Step.compile
             # when synthesising reference tasks.
-            existing_id, existing_cmd, existing_container, existing_status, _existing_publish = existing
+            existing_id, existing_cmd, existing_container, existing_status, _existing_publish, existing_shell = existing
             # Inputs / resources / depends overrides for the retry clone.
             # In extend mode these always reflect the current template's
             # view — for fan-in / grouped tasks that means the freshly-
@@ -580,6 +580,12 @@ class Task:
             # clone uploads to the correct path. Absent = inherit parent's
             # publish. Kept symmetric with container_override.
             publish_override = resolved_publish if resolved_publish != _existing_publish else None
+            # Shell drift: template edit changed `language:` (e.g. bash → sh
+            # after discovering alpine ships only sh). Only push through
+            # when the DB actually holds a recorded shell to compare
+            # against — an empty existing_shell means the parent predates
+            # the shell column being populated and we should not thrash it.
+            shell_override = resolved_shell if (existing_shell and resolved_shell and resolved_shell != existing_shell) else None
             if ext.retry_failed_only:
                 # Only re-run failed tasks; leave S/R/P untouched. No cascade —
                 # a failed task's dependents are blocked in W and unblock when
@@ -592,21 +598,23 @@ class Task:
                         depends=override_depends,
                         container=container_override,
                         publish=publish_override,
+                        shell=shell_override,
                     )
                     ext.changed.add(self.task_id)
                 else:
                     self.task_id = existing_id  # reference, untouched
             else:
                 # Default cascade reconcile: re-run if the command drifted,
-                # the container drifted, the publish drifted, the task
-                # failed, OR any prerequisite was re-run this pass (its
-                # inputs changed). edit_and_retry rewires dependents to
-                # the new clone server-side, so editing in dependency
-                # order keeps the chain consistent.
+                # the container drifted, the publish drifted, the shell
+                # drifted, the task failed, OR any prerequisite was
+                # re-run this pass (its inputs changed). edit_and_retry
+                # rewires dependents to the new clone server-side, so
+                # editing in dependency order keeps the chain consistent.
                 dep_changed = any(d in ext.changed for d in resolved_depends)
                 if (existing_cmd != resolved_command
                         or container_override is not None
                         or publish_override is not None
+                        or shell_override is not None
                         or existing_status == "F"
                         or dep_changed):
                     self.task_id = client.edit_and_retry_task(
@@ -616,6 +624,7 @@ class Task:
                         depends=override_depends,
                         container=container_override,
                         publish=publish_override,
+                        shell=shell_override,
                     )
                     ext.changed.add(self.task_id)
                 else:
@@ -1071,7 +1080,7 @@ class Step:
         if ext is not None:
             existing = ext.tasks_by_step.get(self.step_id, {})
             already_covered = {t.full_name for t in self.tasks}
-            for task_name, (task_id, _cmd, _container, _status, publish) in existing.items():
+            for task_name, (task_id, _cmd, _container, _status, publish, _shell) in existing.items():
                 if task_name in already_covered:
                     continue
                 self.tasks.append(Task.as_reference(
@@ -1109,7 +1118,7 @@ class _ExtendContext:
         self.workflow_id = workflow_id
         self.retry_failed_only = retry_failed_only
         self.step_ids = step_ids            # {step_name: step_id}
-        self.tasks_by_step = tasks_by_step  # {step_id: {task_name: (task_id, command, container, status, publish)}}
+        self.tasks_by_step = tasks_by_step  # {step_id: {task_name: (task_id, command, container, status, publish, shell)}}
         self.workflow_name = workflow_name
         # task_ids (re)created or edit-and-retried this pass; drives the
         # default cascade ("re-run a dependent whose prerequisite changed").
@@ -1291,8 +1300,15 @@ class Workflow:
             publish = t.publish if t.HasField("publish") else None
             if publish is None and t.HasField("output"):
                 publish = t.output
+            # shell (aka `language` in YAML) — capture so extend can detect
+            # drift when a template edit changes `language: bash → sh`.
+            # Empty string signals "no explicit shell recorded on the task",
+            # which the drift comparison at Task.compile treats as equal to
+            # any resolved shell to avoid churning tasks that just predate
+            # the shell column being populated.
+            shell = t.shell if t.HasField("shell") else ""
             tasks_by_step.setdefault(t.step_id, {})[t.task_name] = (
-                t.task_id, t.command, t.container, t.status, publish,
+                t.task_id, t.command, t.container, t.status, publish, shell,
             )
         return _ExtendContext(workflow_id, retry_failed_only, step_ids, tasks_by_step, workflow_name)
 
@@ -1493,11 +1509,11 @@ class Workflow:
             existing = ext.tasks_by_step.get(step_id)
             if not existing:
                 continue
-            # existing is a dict of task_name → 5-tuple (id, cmd,
-            # container, status, publish); the publish field is what
-            # we need. Any task from this step will do — every task
-            # in the step used the same publish template, so the
-            # suffix is uniform across them.
+            # existing is a dict of task_name → 6-tuple (id, cmd,
+            # container, status, publish, shell); the publish field
+            # is what we need. Any task from this step will do —
+            # every task in the step used the same publish template,
+            # so the suffix is uniform across them.
             for _name, tup in existing.items():
                 if len(tup) < 5:
                     continue
