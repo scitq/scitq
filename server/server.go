@@ -713,7 +713,24 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		if allDone {
 			// Fix inputs from reuse-hit prerequisites before promoting
 			s.redirectReuseInputs(tx, taskID)
-			s.promoteTaskWtoP(ctx, tx, taskID)
+			// In-tx UPDATE directly rather than via promoteTaskWtoP:
+			// promoteTaskWtoP does its own Adjust (Waiting--/Pending++)
+			// on the assumption that Waiting was already billed by a
+			// prior SubmitTask. That's true for the assign-loop /
+			// dep-completion callers, but NOT for a fresh submit where
+			// the task's own Adjust runs later, post-commit. Using
+			// promoteTaskWtoP here would Pending++ once here AND once
+			// again below when the switch hits case "P" — the compile
+			// task's Queued=2 / Total=1 drift observed on the 2026-07-08
+			// SCAPIS recovery run. Direct SQL keeps the in-tx promotion
+			// silent; the post-commit Adjust below is the single source
+			// of truth for this task's initial billing.
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE task SET status = 'P', modified_at = NOW()
+				 WHERE task_id = $1 AND status = 'W'
+			`, taskID); err != nil {
+				return nil, fmt.Errorf("failed to promote task %d W→P at submit: %w", taskID, err)
+			}
 			initialStatus = "P"
 		}
 	}
