@@ -2581,6 +2581,32 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 	// here is enough to make the new attempt use them. Container is
 	// optional for backward compatibility with operator-driven retries
 	// (UI/CLI "Edit & Retry") that only change the command.
+	//
+	// Retry-chain redirect: if the caller's task_id has since been
+	// hidden (typically because the server's own auto-retry ran after
+	// the caller's list_tasks snapshot and before this RPC), walk the
+	// previous_task_id chain forward to the current visible head and
+	// operate on that. This is the DSL-extend race case
+	// (specs/workflow_extend.md): an extend that prefetches an F task,
+	// then races with UpdateTaskStatus auto-retry hiding it, would
+	// otherwise crash with "task N not found or hidden". Walking to
+	// the head keeps `--extend-workflow` idempotent under concurrency.
+	var chainHead int32
+	if err := s.db.QueryRowContext(ctx, `
+		WITH RECURSIVE chain AS (
+			SELECT task_id, hidden, 0 AS depth
+			  FROM task WHERE task_id = $1
+			UNION ALL
+			SELECT t.task_id, t.hidden, c.depth + 1
+			  FROM task t
+			  JOIN chain c ON t.previous_task_id = c.task_id
+			 WHERE c.depth < 32
+		)
+		SELECT task_id FROM chain WHERE NOT hidden ORDER BY depth LIMIT 1
+	`, req.TaskId).Scan(&chainHead); err == nil && chainHead != 0 && chainHead != req.TaskId {
+		log.Printf("↻ EditAndRetryTask: parent %d already hidden, redirecting to head %d", req.TaskId, chainHead)
+		req.TaskId = chainHead
+	}
 	var (
 		setClauses = []string{"command = $1"}
 		args       = []any{req.Command}

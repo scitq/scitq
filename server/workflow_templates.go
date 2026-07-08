@@ -539,9 +539,24 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 		_, _ = s.db.ExecContext(finalizeCtx, `
 			UPDATE template_run SET error_message = $1, status = 'F' WHERE template_run_id = $2
 		`, errMsg, templateRunId)
-		_, _ = s.db.ExecContext(finalizeCtx, `
-			DELETE FROM workflow WHERE workflow_id = (SELECT workflow_id FROM template_run WHERE template_run_id = $1)
-		`, templateRunId)
+		// Only auto-delete the workflow attached to this template_run if
+		// the DSL created it fresh for this run. In extend mode
+		// (--extend-workflow / --continue) the workflow row already
+		// existed and the DSL is operating on it in-place — deleting it
+		// on a mid-script crash wipes ALL its succeeded tasks and any
+		// pre-existing history. 2026-07-08 incident: an
+		// EditAndRetryTask race on workflow 3331 (SCAPIS) exited the DSL
+		// non-zero and this DELETE removed the whole workflow. The extend
+		// path leaves stale template_run state behind; that's fine —
+		// an orphan template_run with status=F is diagnostic noise, not
+		// data loss.
+		if req.GetExtendWorkflowId() == 0 && req.GetContinueLast() == false {
+			_, _ = s.db.ExecContext(finalizeCtx, `
+				DELETE FROM workflow WHERE workflow_id = (SELECT workflow_id FROM template_run WHERE template_run_id = $1)
+			`, templateRunId)
+		} else {
+			log.Printf("↩︎ extend mode: preserving workflow attached to template_run %d despite script failure", templateRunId)
+		}
 
 		return &pb.TemplateRun{
 			TemplateRunId:      templateRunId,
