@@ -176,7 +176,7 @@ func (qm *QuotaManager) ReconcileFromDB(db *sql.DB) error {
 		       p.provider_name || '.' || p.config_name      AS provider_key,
 		       COUNT(*)::int                                  AS instances,
 		       COALESCE(SUM(f.cpu), 0)::int                   AS cpu,
-		       COALESCE(SUM(f.memory), 0)::float              AS mem_gb
+		       COALESCE(SUM(f.mem), 0)::float                 AS mem_gb
 		FROM worker w
 		JOIN flavor   f  ON f.flavor_id  = w.flavor_id
 		JOIN region   rg ON rg.region_id = w.region_id

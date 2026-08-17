@@ -25,12 +25,16 @@ func TestFetchIntegration(t *testing.T) {
 
 	// --- 1️⃣ Prepare config override with a fake provider ---
 	override := &config.Config{}
+	// Public read-only AWS bucket used as the fetch source. Originally
+	// `s3://nasanex/NEX-DCP30/doi.txt` (us-west-2) but NASA revoked
+	// public read on that bucket, so the test 403'd on every run. Swap
+	// to the NOAA GOES-16 public bucket in us-east-1 which serves a
+	// stable ~32 KB `index.html` for anonymous readers.
 	override.Rclone = map[string]map[string]string{
 		"s3test": {
-			"type":      "s3",
-			"provider":  "AWS",
-			"us-west-2": "false",
-			"region":    "us-west-2",
+			"type":     "s3",
+			"provider": "AWS",
+			"region":   "us-east-1",
 		},
 	}
 	override.Scitq.NewWorkerIdleTimeout = 300 // seconds
@@ -57,8 +61,8 @@ func TestFetchIntegration(t *testing.T) {
 	// 2. Create task that fetches and hashes file
 	three := int32(3)
 	pbTask, err := qc.SubmitTask(ctx, &pb.TaskRequest{
-		Command:   "md5sum /input/doi.txt",
-		Input:     []string{"s3test://nasanex/NEX-DCP30/doi.txt"},
+		Command:   "md5sum /input/index.html",
+		Input:     []string{"s3test://noaa-goes16/index.html"},
 		Container: "alpine",
 		Retry:     &three,
 	})
@@ -89,9 +93,9 @@ func TestFetchIntegration(t *testing.T) {
 
 	// 4. Local CLI copy
 	tmp := t.TempDir()
-	cliPath := filepath.Join(tmp, "doi.txt")
-	_, err = runCLICommand(c, []string{"file", "copy", "s3test://nasanex/NEX-DCP30/doi.txt", cliPath})
-	require.NoError(t, err, "failed to copy file with CLI s3test://nasanex/NEX-DCP30/doi.txt → "+cliPath)
+	cliPath := filepath.Join(tmp, "index.html")
+	_, err = runCLICommand(c, []string{"file", "copy", "s3test://noaa-goes16/index.html", cliPath})
+	require.NoError(t, err, "failed to copy file with CLI s3test://noaa-goes16/index.html → "+cliPath)
 
 	cliMD5 := computeMD5(t, cliPath)
 	require.Equal(t, cliMD5, serverMD5)
