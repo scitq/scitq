@@ -237,6 +237,9 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 			}
 			return count > 0, time.Duration(extraSec) * time.Second
 		},
+		func(workerID int32) error {
+			return s.reclaimOfflineWorkerTasks(context.Background(), workerID)
+		},
 		db,
 	)
 
@@ -2325,6 +2328,111 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 	return &pb.TaskResponse{TaskId: newID}, nil
 }
 
+// reclaimOfflineWorkerTasks is invoked by the watchdog when a worker
+// crosses the OfflineTimeout: any tasks the worker was still supposed
+// to be running (A/C/D/O) get reset to P and detached from the worker
+// so the assignment loop can hand them to a live one. Without this,
+// tasks stay pinned to dead workers until manual intervention and the
+// queue silently stalls (alpha2 2026-06-08 incident).
+//
+// Bookkeeping mirrors what other status transitions do: step aggregator
+// counters are decremented for the old status and incremented for
+// Pending, and one step-stats/delta WS event is emitted per task so
+// live UIs update the progress bars in real time. triggerAssign wakes
+// the assignment loop at the end so live workers pick the tasks up on
+// their next ping.
+func (s *taskQueueServer) reclaimOfflineWorkerTasks(ctx context.Context, workerID int32) error {
+	// Single round-trip: capture the pre-update status inside a CTE so
+	// we can adjust the step aggregator counters correctly per task.
+	rows, err := s.db.QueryContext(ctx, `
+		WITH prev AS (
+			SELECT task_id, step_id, status AS old_status
+			FROM task
+			WHERE worker_id = $1 AND status IN ('A','C','D','O') AND NOT hidden
+			FOR UPDATE SKIP LOCKED
+		),
+		updated AS (
+			UPDATE task t
+			SET status = 'P', worker_id = NULL, modified_at = NOW()
+			FROM prev
+			WHERE t.task_id = prev.task_id
+			RETURNING t.task_id
+		)
+		SELECT prev.task_id, prev.step_id, prev.old_status
+		FROM prev JOIN updated USING (task_id)
+		`, workerID)
+	if err != nil {
+		return fmt.Errorf("reclaim query failed: %w", err)
+	}
+	defer rows.Close()
+
+	type reclaimed struct {
+		taskID    int32
+		stepID    int32
+		oldStatus string
+	}
+	var items []reclaimed
+	for rows.Next() {
+		var r reclaimed
+		if err := rows.Scan(&r.taskID, &r.stepID, &r.oldStatus); err != nil {
+			return fmt.Errorf("reclaim scan failed: %w", err)
+		}
+		items = append(items, r)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reclaim iteration failed: %w", err)
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Step aggregator + WS notifications. Locking once for the whole
+	// batch is fine — reclaim is a single event, not a stream.
+	s.stats.mu.Lock()
+	for _, r := range items {
+		// Find the (workflow, step) aggregator row for this task's step.
+		var wfID int32
+		for wf, wfmap := range s.stats.data {
+			if _, ok := wfmap[r.stepID]; ok {
+				wfID = wf
+				break
+			}
+		}
+		if wfID == 0 {
+			continue
+		}
+		stepAgg := s.stats.data[wfID][r.stepID]
+		switch r.oldStatus {
+		case "A", "C", "D", "O":
+			if stepAgg.Accepted > 0 {
+				stepAgg.Accepted--
+			}
+		}
+		stepAgg.Pending++
+
+		// Emit the delta so live UI progress bars move. Done inside the
+		// lock loop but the emit itself is buffered — fine.
+		ws.EmitWS("step-stats", wfID, "delta", struct {
+			WorkflowId int32  `json:"workflowId"`
+			StepId     int32  `json:"stepId"`
+			TaskId     int32  `json:"taskId"`
+			OldStatus  string `json:"oldStatus"`
+			NewStatus  string `json:"newStatus"`
+		}{
+			WorkflowId: wfID,
+			StepId:     r.stepID,
+			TaskId:     r.taskID,
+			OldStatus:  r.oldStatus,
+			NewStatus:  "P",
+		})
+	}
+	s.stats.mu.Unlock()
+
+	log.Printf("🩹 [watchdog] reclaimed %d task(s) from offline worker %d back to Pending", len(items), workerID)
+	s.triggerAssign()
+	return nil
+}
+
 func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
 	return s.retryTaskInternal(ctx, req, "R", false, retryOverrides{})
 }
@@ -3518,8 +3626,12 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 				StepName:    stepDisplayName,
 				StepId:      req.StepId,
 				Concurrency: req.Concurrency,
-				Prefetch:    req.Concurrency,
-				Status:      "P",
+				// Was `req.Concurrency` — copy-paste bug that made the
+				// worker/created WS payload lie about the prefetch value
+				// (UI showed prefetch=concurrency until refresh). The DB
+				// row was written correctly; only the broadcast was off.
+				Prefetch: req.Prefetch,
+				Status:   "P",
 			},
 			Job: jobPayload{
 				JobId:      jobID,

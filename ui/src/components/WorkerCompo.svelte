@@ -1159,7 +1159,10 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       <!-- SAVE / CANCEL -->
       <button
         class="btn-action"
-        title="Save"
+        title={Number(selectedWorkflowId) !== -1 && selectedWorkflowId !== null && (selectedStepId === null || selectedStepId === undefined)
+          ? 'Pick a step to save (assigning a worker requires an explicit step)'
+          : 'Save'}
+        disabled={Number(selectedWorkflowId) !== -1 && selectedWorkflowId !== null && (selectedStepId === null || selectedStepId === undefined)}
         onclick={async () => {
           if (Number(selectedWorkflowId) === -1) {
             await updateWorkerConfig(worker.workerId, { clearStep: true });

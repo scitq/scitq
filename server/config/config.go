@@ -106,8 +106,17 @@ type Config struct {
 		// NewWorkerIdleTimeout is the timeout in seconds for newly started workers before they are considered idle.
 		NewWorkerIdleTimeout int `yaml:"new_worker_idle_timeout" default:"900"`
 
-		// OfflineTimeout is the timeout in seconds after which offline workers are considered lost.
-		OfflineTimeout int `yaml:"offline_timeout" default:"30"`
+		// OfflineTimeout is the number of seconds without a worker ping
+		// after which the server flips the worker's status to O (offline)
+		// AND reclaims its assigned/accepted/downloading tasks (resets
+		// them to P so other workers can pick them up). 10 minutes is the
+		// default: long enough to tolerate normal network hiccups,
+		// short-lived upgrades, and worker restarts, short enough that a
+		// truly dead worker doesn't strand its share of the queue for
+		// hours. Set lower (e.g. 60) for latency-sensitive fleets where
+		// task reclaim should be aggressive; set higher (e.g. 1800) for
+		// flaky networks where transient ping loss is common.
+		OfflineTimeout int `yaml:"offline_timeout" default:"600"`
 
 		// TaskDownloadTimeout is the timeout in seconds for task data downloads.
 		TaskDownloadTimeout int `yaml:"task_download_timeout" default:"600"`

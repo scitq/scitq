@@ -32,9 +32,10 @@ type Watchdog struct {
 	offlineTimeout        time.Duration
 	consideredLostTimeout time.Duration
 
-	updateWorker func(workerID int32, newStatus string) error
-	deleteWorker func(workerID int32) error
-	warmCheck    func(workerID int32) (bool, time.Duration) // (has A/C/O, extra delay)
+	updateWorker       func(workerID int32, newStatus string) error
+	deleteWorker       func(workerID int32) error
+	warmCheck          func(workerID int32) (bool, time.Duration) // (has A/C/O, extra delay)
+	reclaimWorkerTasks func(workerID int32) error                 // reset A/C/D/O tasks → P when worker goes offline
 
 	db             *sql.DB
 	tickerInterval time.Duration
@@ -45,6 +46,7 @@ func NewWatchdog(
 	updateWorker func(workerID int32, newStatus string) error,
 	deleteWorker func(workerID int32) error,
 	warmCheck func(workerID int32) (bool, time.Duration),
+	reclaimWorkerTasks func(workerID int32) error,
 	db *sql.DB,
 ) *Watchdog {
 	return &Watchdog{
@@ -55,6 +57,7 @@ func NewWatchdog(
 		updateWorker:          updateWorker,
 		deleteWorker:          deleteWorker,
 		warmCheck:             warmCheck,
+		reclaimWorkerTasks:    reclaimWorkerTasks,
 		db:                    db,
 		tickerInterval:        tickerInterval,
 	}
@@ -227,6 +230,22 @@ func (w *Watchdog) checkOffline() {
 			w.lastStatus.Store(workerID, newStatus)
 			w.offlineSince.Store(workerID, now)
 			go w.safeUpdateWorker(workerID, newStatus)
+			// Reclaim any A/C/D/O tasks still marked as belonging to this
+			// worker so the assignment loop can hand them to a live one.
+			// Without this, the tasks stay pinned to a dead worker
+			// forever and the queue silently stalls (exactly the alpha2
+			// incident on 2026-06-08). Only invoked on transitions to
+			// offline states — safeUpdateWorker's callback path is where
+			// the status write happens, so we fire reclaim only when a
+			// live worker becomes newly offline.
+			if w.reclaimWorkerTasks != nil {
+				id := workerID
+				go func() {
+					if err := w.reclaimWorkerTasks(id); err != nil {
+						log.Printf("⚠️ [watchdog] failed to reclaim tasks for offline worker %d: %v", id, err)
+					}
+				}()
+			}
 		}
 		return true
 	})
