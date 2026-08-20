@@ -13,6 +13,7 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/scitq/scitq/fetch"
+	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	ws "github.com/scitq/scitq/server/websocket"
 )
 
@@ -128,9 +129,15 @@ func (s *taskQueueServer) assignPendingTasks() {
 	// stepped past the worker's headroom — see addition_from_nextflow.md A).
 	// Permanent / local workers without a flavor row come back with NULL
 	// caps and bypass the fit check (today's behaviour).
+	// Return w.concurrency alongside the composite capacity so we can
+	// apply the IO-throttle reduction below: a client that has
+	// dynamically restricted its effective concurrency ships that in
+	// its ping stats, and the assignment loop must subtract the
+	// difference from this row's capacity so we don't over-send.
 	workerCapacityRows, err := tx.Query(`
 		SELECT w.worker_id, COALESCE(w.step_id,0),
 		       w.concurrency+w.prefetch-COALESCE(SUM(t.weight),0) AS capacity,
+		       w.concurrency,
 		       f.cpu, f.mem, f.disk, f.gpu_count
 		FROM worker w
 		LEFT JOIN flavor f ON f.flavor_id = w.flavor_id
@@ -153,11 +160,11 @@ func (s *taskQueueServer) assignPendingTasks() {
 	workerFlavorCaps := map[int32]workerCaps{}
 	stepWorkerMap := map[int32][]int32{} // step_id -> list of worker_id
 	for workerCapacityRows.Next() {
-		var workerID, stepID int32
+		var workerID, stepID, configured int32
 		var capacity float64
 		var fCPU, fMem, fDisk sql.NullFloat64
 		var fGPUCount sql.NullInt32
-		if err := workerCapacityRows.Scan(&workerID, &stepID, &capacity, &fCPU, &fMem, &fDisk, &fGPUCount); err != nil {
+		if err := workerCapacityRows.Scan(&workerID, &stepID, &capacity, &configured, &fCPU, &fMem, &fDisk, &fGPUCount); err != nil {
 			log.Printf("⚠️ Failed to scan worker row: %v", err)
 			continue
 		}
@@ -166,6 +173,23 @@ func (s *taskQueueServer) assignPendingTasks() {
 		rounded := int(math.Floor(capacity + 0.01))
 		if rounded <= 0 {
 			continue
+		}
+
+		// Apply the client's adaptive IO throttle. When the client
+		// reports effective_concurrency < configured, subtract the
+		// difference here so we don't hand out slots the worker has
+		// shed. effective=0 means the worker isn't running the
+		// controller (old build, or first ping before the sampler
+		// window is full) — treat that as "no throttle."
+		if v, ok := s.workerStats.Load(workerID); ok {
+			if stats, ok := v.(*pb.WorkerStats); ok {
+				if eff := stats.GetEffectiveConcurrency(); eff > 0 && eff < configured {
+					rounded -= int(configured - eff)
+					if rounded <= 0 {
+						continue
+					}
+				}
+			}
 		}
 
 		workerCapacity[workerID] = rounded

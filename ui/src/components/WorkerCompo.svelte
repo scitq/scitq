@@ -34,6 +34,41 @@
   let workersStatsMap: Record<number, taskqueue.WorkerStats> = $state({});
 
   /**
+   * Ticking clock in unix seconds, used by the IO throttle badge to
+   * make its "last throttle within 30s" check reactive. Updated once
+   * per second; the pulse animation naturally decays as the delta
+   * grows past 30.
+   */
+  let nowSec: number = $state(Math.floor(Date.now() / 1000));
+
+  // Small helpers for the IO throttle badge — kept out of the template
+  // because Svelte 5 requires {@const} to sit inside a control block,
+  // and duplicating the three expressions inline muddies the markup.
+  function ioBadgeVisible(worker: any, stats: any, now: number): boolean {
+    if (!stats) return false;
+    const eff = stats.effectiveConcurrency ?? 0;
+    const last = Number(stats.lastThrottleAt ?? 0);
+    const configured = worker?.concurrency ?? 0;
+    if (eff > 0 && eff < configured) return true;
+    if (last > 0 && (now - last) < 30) return true;
+    return false;
+  }
+  function ioBadgePulse(stats: any, now: number): boolean {
+    if (!stats) return false;
+    const last = Number(stats.lastThrottleAt ?? 0);
+    return last > 0 && (now - last) < 30;
+  }
+  function ioBadgeTooltip(worker: any, stats: any, now: number): string {
+    const eff = stats?.effectiveConcurrency ?? 0;
+    const last = Number(stats?.lastThrottleAt ?? 0);
+    const iowait = (stats?.iowaitPercent ?? 0).toFixed(1);
+    const configured = worker?.concurrency ?? 0;
+    let s = `Adaptive IO throttle active — client is holding concurrency below its ceiling because storage is saturated.\niowait: ${iowait}%\neffective / configured: ${eff} / ${configured}`;
+    if (last > 0) s += `\nlast throttle: ${now - last}s ago`;
+    return s;
+  }
+
+  /**
    * Count of tasks by worker ID and status
    * @type {Record<number, Record<string, number>>}
    */
@@ -123,7 +158,14 @@
    * Component mount lifecycle hook
    * Sets up WS event listeners (no periodic updateWorkerData).
    */
+  // Ticker that keeps nowSec fresh so the IO badge's 30-second pulse
+  // window decays reactively without needing a per-frame update.
+  let nowSecInterval: ReturnType<typeof setInterval> | null = null;
+
   onMount(() => {
+    nowSecInterval = setInterval(() => {
+      nowSec = Math.floor(Date.now() / 1000);
+    }, 1000);
     // On mount, load all task stats and fetch workers
     getAllTaskStats().then(({ perWorkerStatusCounts, globalStatusCounts, totalCount: t }) => {
       allCount = globalStatusCounts;
@@ -287,6 +329,10 @@
     return () => {
       if (unsubscribeWS) unsubscribeWS();
       unsubscribeWS = null;
+      if (nowSecInterval) {
+        clearInterval(nowSecInterval);
+        nowSecInterval = null;
+      }
     };
   });
 
@@ -1090,6 +1136,17 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
                     class="worker-upgrade-badge worker-upgrade-pending-emergency"
                     title="Emergency upgrade pending — worker is draining in-flight tasks, then will swap binaries (30 min hard cap)."
                   >upg drain</span>
+                {/if}
+                <!-- Adaptive-concurrency IO throttle badge. Solid orange
+                     when the client is holding effective_concurrency
+                     below its configured ceiling (IO limiting
+                     throughput); pulses for 30s after each throttle
+                     event. See client/iothrottle for the controller. -->
+                {#if ioBadgeVisible(worker, workersStatsMap[worker.workerId], nowSec)}
+                  <span
+                    class="worker-io-badge {ioBadgePulse(workersStatsMap[worker.workerId], nowSec) ? 'worker-io-badge-pulse' : ''}"
+                    title={ioBadgeTooltip(worker, workersStatsMap[worker.workerId], nowSec)}
+                  >IO</span>
                 {/if}
                 <!-- Worker-events badge: ⓘ normally, ⚠ when this worker
                      has been failing tasks (>=2 since last success) OR has

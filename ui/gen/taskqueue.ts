@@ -2890,6 +2890,25 @@ export interface WorkerStats {
      * @generated from protobuf field: int32 num_cpus = 8
      */
     numCpus: number; // Number of CPU cores on this worker
+    /**
+     * Adaptive-concurrency (IO throttle) state, reported by the client
+     * each ping. See client/iothrottle. Server-side assignment caps a
+     * worker's slots at min(configured concurrency, effective_concurrency).
+     * effective_concurrency == 0 means the client is not throttling
+     * (either running an old build, or has yet to complete its first
+     * sampling window).
+     *
+     * @generated from protobuf field: int32 effective_concurrency = 9
+     */
+    effectiveConcurrency: number;
+    /**
+     * Unix seconds of the most recent throttle event (concurrency
+     * decrement) on this worker. 0 = no throttle observed. UI uses this
+     * to blink the IO badge for 30s after a fresh event.
+     *
+     * @generated from protobuf field: int64 last_throttle_at = 10
+     */
+    lastThrottleAt: string;
 }
 /**
  * @generated from protobuf message taskqueue.DiskUsage
@@ -11891,7 +11910,9 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
             { no: 5, name: "disks", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => DiskUsage },
             { no: 6, name: "disk_io", kind: "message", T: () => DiskIOStats },
             { no: 7, name: "net_io", kind: "message", T: () => NetIOStats },
-            { no: 8, name: "num_cpus", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 8, name: "num_cpus", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 9, name: "effective_concurrency", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "last_throttle_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStats>): WorkerStats {
@@ -11902,6 +11923,8 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
         message.iowaitPercent = 0;
         message.disks = [];
         message.numCpus = 0;
+        message.effectiveConcurrency = 0;
+        message.lastThrottleAt = "0";
         if (value !== undefined)
             reflectionMergePartial<WorkerStats>(this, message, value);
         return message;
@@ -11934,6 +11957,12 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
                     break;
                 case /* int32 num_cpus */ 8:
                     message.numCpus = reader.int32();
+                    break;
+                case /* int32 effective_concurrency */ 9:
+                    message.effectiveConcurrency = reader.int32();
+                    break;
+                case /* int64 last_throttle_at */ 10:
+                    message.lastThrottleAt = reader.int64().toString();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -11971,6 +12000,12 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
         /* int32 num_cpus = 8; */
         if (message.numCpus !== 0)
             writer.tag(8, WireType.Varint).int32(message.numCpus);
+        /* int32 effective_concurrency = 9; */
+        if (message.effectiveConcurrency !== 0)
+            writer.tag(9, WireType.Varint).int32(message.effectiveConcurrency);
+        /* int64 last_throttle_at = 10; */
+        if (message.lastThrottleAt !== "0")
+            writer.tag(10, WireType.Varint).int64(message.lastThrottleAt);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

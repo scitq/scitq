@@ -1253,6 +1253,18 @@ message WorkerStats {
     DiskIOStats disk_io = 6;            // Global disk IO (aggregated)
     NetIOStats net_io = 7;              // Global network IO (aggregated)
     int32 num_cpus = 8;                // Number of CPU cores on this worker
+
+    // Adaptive-concurrency (IO throttle) state, reported by the client
+    // each ping. See client/iothrottle. Server-side assignment caps a
+    // worker's slots at min(configured concurrency, effective_concurrency).
+    // effective_concurrency == 0 means the client is not throttling
+    // (either running an old build, or has yet to complete its first
+    // sampling window).
+    int32 effective_concurrency = 9;
+    // Unix seconds of the most recent throttle event (concurrency
+    // decrement) on this worker. 0 = no throttle observed. UI uses this
+    // to blink the IO badge for 30s after a fresh event.
+    int64 last_throttle_at = 10;
 }
 
 message DiskUsage {

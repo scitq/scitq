@@ -7916,8 +7916,19 @@ type WorkerStats struct {
 	DiskIo          *DiskIOStats           `protobuf:"bytes,6,opt,name=disk_io,json=diskIo,proto3" json:"disk_io,omitempty"`                                // Global disk IO (aggregated)
 	NetIo           *NetIOStats            `protobuf:"bytes,7,opt,name=net_io,json=netIo,proto3" json:"net_io,omitempty"`                                   // Global network IO (aggregated)
 	NumCpus         int32                  `protobuf:"varint,8,opt,name=num_cpus,json=numCpus,proto3" json:"num_cpus,omitempty"`                            // Number of CPU cores on this worker
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Adaptive-concurrency (IO throttle) state, reported by the client
+	// each ping. See client/iothrottle. Server-side assignment caps a
+	// worker's slots at min(configured concurrency, effective_concurrency).
+	// effective_concurrency == 0 means the client is not throttling
+	// (either running an old build, or has yet to complete its first
+	// sampling window).
+	EffectiveConcurrency int32 `protobuf:"varint,9,opt,name=effective_concurrency,json=effectiveConcurrency,proto3" json:"effective_concurrency,omitempty"`
+	// Unix seconds of the most recent throttle event (concurrency
+	// decrement) on this worker. 0 = no throttle observed. UI uses this
+	// to blink the IO badge for 30s after a fresh event.
+	LastThrottleAt int64 `protobuf:"varint,10,opt,name=last_throttle_at,json=lastThrottleAt,proto3" json:"last_throttle_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkerStats) Reset() {
@@ -8002,6 +8013,20 @@ func (x *WorkerStats) GetNetIo() *NetIOStats {
 func (x *WorkerStats) GetNumCpus() int32 {
 	if x != nil {
 		return x.NumCpus
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetEffectiveConcurrency() int32 {
+	if x != nil {
+		return x.EffectiveConcurrency
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetLastThrottleAt() int64 {
+	if x != nil {
+		return x.LastThrottleAt
 	}
 	return 0
 }
@@ -12464,7 +12489,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\v_start_timeB\v\n" +
 	"\t_end_time\"?\n" +
 	"\x11StepStatsResponse\x12*\n" +
-	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xcf\x02\n" +
+	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xae\x03\n" +
 	"\vWorkerStats\x12*\n" +
 	"\x11cpu_usage_percent\x18\x01 \x01(\x02R\x0fcpuUsagePercent\x12*\n" +
 	"\x11mem_usage_percent\x18\x02 \x01(\x02R\x0fmemUsagePercent\x12\x1b\n" +
@@ -12473,7 +12498,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05disks\x18\x05 \x03(\v2\x14.taskqueue.DiskUsageR\x05disks\x12/\n" +
 	"\adisk_io\x18\x06 \x01(\v2\x16.taskqueue.DiskIOStatsR\x06diskIo\x12,\n" +
 	"\x06net_io\x18\a \x01(\v2\x15.taskqueue.NetIOStatsR\x05netIo\x12\x19\n" +
-	"\bnum_cpus\x18\b \x01(\x05R\anumCpus\"Q\n" +
+	"\bnum_cpus\x18\b \x01(\x05R\anumCpus\x123\n" +
+	"\x15effective_concurrency\x18\t \x01(\x05R\x14effectiveConcurrency\x12(\n" +
+	"\x10last_throttle_at\x18\n" +
+	" \x01(\x03R\x0elastThrottleAt\"Q\n" +
 	"\tDiskUsage\x12\x1f\n" +
 	"\vdevice_name\x18\x01 \x01(\tR\n" +
 	"deviceName\x12#\n" +

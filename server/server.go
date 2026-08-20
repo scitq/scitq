@@ -4915,6 +4915,20 @@ func (s *taskQueueServer) GetTaskStatusCounts(ctx context.Context, req *pb.TaskS
 }
 
 func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingAndGetNewTasksRequest) (*pb.TaskListAndOther, error) {
+	// Register the ping IMMEDIATELY at RPC entry — not at the end. The
+	// worker has already made contact by getting here; the rest of this
+	// function is bookkeeping the server does on the worker's behalf.
+	//
+	// When the server is under load (heavy step-stats churn, big-list
+	// queries on wide workflows, a CPU-pinned worker generating slow
+	// gRPC pings), the tail-registered version could take 10+ minutes
+	// to reach the WorkerPinged call, at which point the watchdog had
+	// already flipped the worker to O and reclaimOfflineWorkerTasks had
+	// reset its running task to P — producing exactly the symptom we
+	// saw with backup3: worker alive, pinging every 5s, but server
+	// stuck reporting it offline for hours.
+	s.watchdog.WorkerPinged(req.WorkerId)
+
 	var (
 		tasks            []*pb.Task
 		concurrency      int32
@@ -5096,8 +5110,8 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 	}
 
 	// No longer need to clean up in-memory weightMemory here
-
-	s.watchdog.WorkerPinged(req.WorkerId)
+	// (WorkerPinged was moved to the start of this RPC — see the top
+	// of PingAndTakeNewTasks for rationale.)
 
 	if req.Stats != nil {
 		s.workerStats.Store(req.WorkerId, req.Stats)

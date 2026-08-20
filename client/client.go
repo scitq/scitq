@@ -25,6 +25,7 @@ import (
 
 	"github.com/scitq/scitq/client/event"
 	"github.com/scitq/scitq/client/install"
+	"github.com/scitq/scitq/client/iothrottle"
 	"github.com/scitq/scitq/client/workerstats"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/internal/version"
@@ -1000,6 +1001,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	activeTasks *sync.Map,
 	numaAllocator *NumaAllocator,
 	lastDerivedStep *int32, // step_id we last auto-derived concurrency for; 0 = none yet
+	throttle *iothrottle.Throttle,
 ) ([]*pb.Task, string, bool, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -1019,6 +1021,20 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 			ws.NumCPUs = c
 		}
 		query = &pb.PingAndGetNewTasksRequest{WorkerId: id, Stats: ws.ToProto()}
+	}
+
+	// Attach adaptive-concurrency state. Overrides the ping's raw iowait
+	// with the throttle's smoothed value so what the UI shows matches
+	// what the controller decides on. If stats came back nil above we
+	// synthesize a minimal WorkerStats to still deliver the IO fields.
+	if throttle != nil {
+		effective, iowaitSmoothed, lastThrottleUnix := throttle.State()
+		if query.Stats == nil {
+			query.Stats = &pb.WorkerStats{}
+		}
+		query.Stats.EffectiveConcurrency = effective
+		query.Stats.IowaitPercent = iowaitSmoothed
+		query.Stats.LastThrottleAt = lastThrottleUnix
 	}
 
 	// Report the tasks we're actually tracking locally so the server can
@@ -1083,6 +1099,12 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		log.Printf("Resizing concurrency from %d to %d", w.Concurrency, res.Concurrency)
 		sem.ResizeAll(float64(res.Concurrency), updates)
 		w.Concurrency = res.Concurrency
+		if throttle != nil {
+			// Update the throttle's ceiling so a server-pushed
+			// concurrency change takes effect immediately. Any
+			// currently-elevated effective value is clamped down.
+			throttle.SetCeiling(res.Concurrency)
+		}
 	} else {
 		sem.ResizeTasks(updates)
 	}
@@ -1137,6 +1159,9 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 			// same value back from the server, which is idempotent.
 			sem.ResizeAll(float64(desired), updates)
 			w.Concurrency = desired
+			if throttle != nil {
+				throttle.SetCeiling(desired)
+			}
 		}
 		// Mark this step as derived even when desired==current — we
 		// don't want to re-emit the log line on every ping just because
@@ -1381,7 +1406,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map, numaAllocator *NumaAllocator, lastDerivedStep *int32) {
+func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map, numaAllocator *NumaAllocator, lastDerivedStep *int32, throttle *iothrottle.Throttle) {
 	store := dm.Store
 
 	var consecErrors int
@@ -1439,7 +1464,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			break
 		}
 
-		tasks, upgradeReq, serverGating, serverActiveCount, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, lastDerivedStep)
+		tasks, upgradeReq, serverGating, serverActiveCount, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, lastDerivedStep, throttle)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -1776,6 +1801,14 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	createHelpers(config.Store)
 	sem := utils.NewResizableSemaphore(float64(config.Concurrency))
 
+	// Adaptive-concurrency (IO throttle) controller. Starts effective at
+	// 1 and lets the sampler ramp it up under sustained GREEN iowait.
+	// See client/iothrottle for the algorithm. The controller's ceiling
+	// tracks config.Concurrency; fetchTasks pushes any server-side
+	// change through SetCeiling on each ping.
+	throttle := iothrottle.New(config.Concurrency)
+	iothrottle.StartSampler(ctx, throttle)
+
 	// Shared live-resizable caps. Seeded from the CLI flags; the
 	// fetchTasks loop reconciles them with the server's view on every
 	// ping, so an operator can change them via UpdateWorker without
@@ -1830,7 +1863,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc, gpuAlloc)
 
 	// Start processing tasks
-	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &lastDerivedStep)
+	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &lastDerivedStep, throttle)
 
 	// 🔎 Periodic diagnostics: detect tasks stuck active but not executing (likely in O)
 	go func() {

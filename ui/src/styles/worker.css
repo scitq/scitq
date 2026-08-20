@@ -709,6 +709,33 @@
   color: #dc2626;
 }
 
+/* Adaptive-concurrency IO throttle badge (see client/iothrottle).
+   Solid orange when the worker's effective concurrency is below its
+   configured ceiling (durable state); pulses for ~30s after each
+   throttle event to draw the eye. */
+.worker-io-badge {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0.05em 0.35em;
+  font-size: 0.72em;
+  font-weight: 700;
+  line-height: 1.4;
+  border-radius: 3px;
+  vertical-align: middle;
+  cursor: help;
+  user-select: none;
+  background: #f97316; /* orange-500 */
+  color: #1f2937;
+  border: 1px solid #c2410c;
+}
+.worker-io-badge-pulse {
+  animation: worker-io-badge-pulse 1.5s ease-in-out infinite;
+}
+@keyframes worker-io-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
 /* Worker-events badge (ℹ︎ / ⚠) in the worker name cell. */
 .worker-events-badge {
   display: inline-flex;
