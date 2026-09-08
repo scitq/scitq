@@ -151,13 +151,23 @@
   z-index: 1001;
 }
 
-/* Modal styles */
+/* Modal styles. Sized generously for the params form (10+ fields is
+ * common; 30%/40% left barely two visible rows). Users can drag the
+ * bottom-right corner to grow / shrink further — the `resize: both`
+ * handle is a native browser affordance, no extra JS. The min sizes
+ * keep the modal usable if a user resizes tiny by mistake. */
 .wfTemp-modal {
   background: var(--bg-secondary);
   padding: 2rem;
   border-radius: 8px;
-  width: 30%;
-  height: 40%; /* Maximum height of 80% of screen height */
+  width: min(720px, 92vw);
+  height: min(80vh, 720px);
+  min-width: 360px;
+  min-height: 320px;
+  max-width: 96vw;
+  max-height: 96vh;
+  resize: both;
+  overflow: auto;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   border: 1px solid var(--border-color);
   display: flex;

@@ -13,6 +13,11 @@
   let showRunSuccessModal = $state(false);
   let showRunErrorModal = $state(false);
   let successMessage = $state('');
+  // Populated on a successful run so the success modal can offer a
+  // direct "Open" link to the newly-created workflow, not just a
+  // generic "Go to workflows" jump.
+  let lastRunWorkflowId: number | null = $state(null);
+  let lastRunWorkflowName: string = $state('');
   // True while a RunTemplate gRPC call is in flight. Used to visibly
   // disable the Run button and show a spinner so the user knows their
   // click was registered — the server-side template script can take
@@ -343,7 +348,20 @@
       }
 
       // ✅ Success case
-      successMessage = '✅ Template run created successfully!';
+      // Prefer the concrete "workflow <name> (#<id>)" line — Florian
+      // asked for the workflow identity after the run, not just a
+      // generic success banner. Fall back to the plain banner when
+      // an older server didn't populate workflow_name / workflow_id
+      // (extends may also leave workflow_id 0 in some paths).
+      const wfName = (res as any).workflowName;
+      const wfId = (res as any).workflowId;
+      if (wfId) {
+        successMessage = `✅ Workflow ${wfName ? `"${wfName}" ` : ''}(#${wfId}) created.`;
+      } else {
+        successMessage = '✅ Template run created successfully!';
+      }
+      lastRunWorkflowId = wfId ?? null;
+      lastRunWorkflowName = wfName ?? '';
       if (res.errorMessage) {
         successMessage += `\n⚠️ ${res.errorMessage}`;
       }
@@ -486,6 +504,11 @@
       <h2>Workflow Created</h2>
       <p>{successMessage}</p>
       <div class="wfTemp-modal-actions">
+        {#if lastRunWorkflowId}
+          <button class="button-primary" onclick={() => { showRunSuccessModal = false; window.location.hash = `#/workflows?open=${lastRunWorkflowId}`; }}>
+            Open workflow{lastRunWorkflowName ? ` "${lastRunWorkflowName}"` : ''}
+          </button>
+        {/if}
         <button class="button-primary" onclick={() => { showRunSuccessModal = false; window.location.hash = '#/workflows'; }}>
           Go to workflows
         </button>
