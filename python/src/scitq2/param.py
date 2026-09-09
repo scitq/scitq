@@ -216,6 +216,11 @@ class ParamSpec(type):
         # str-subclass types (Path, Text, ProviderRegion) round-trip
         # through JSON as plain strings, which is what consumers want;
         # no special casing needed here.
+        # `requires` is the param-dependency map (see __init__). We surface
+        # it to consumers so the UI can grey out a dependent field when its
+        # requirements aren't met — otherwise the operator has to trip a
+        # server-side validation error to discover the coupling. The value
+        # is emitted as-is (a plain dict), which JSON round-trips cleanly.
         return [
             {
                 "name": name,
@@ -224,6 +229,7 @@ class ParamSpec(type):
                 "default": param.default if param.default is not None else None,
                 "choices": list(param.choices) if param.choices else None,
                 "help": param.help,
+                "requires": param.requires,
             }
             for name, param in cls._declared_params.items()
         ]

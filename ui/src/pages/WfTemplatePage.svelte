@@ -239,6 +239,36 @@
   }
 
   /**
+   * True when this param's requires: declaration is satisfied by
+   * the current user inputs. When a param declares
+   * `requires: { <other>: <value> }`, the UI greys it out until every
+   * such (other, value) pair matches — the same rule the server uses
+   * to reject a run where the coupled fields disagree. A missing
+   * `requires` clause means the param is always active. The `when:`
+   * key inside requires is a server-side trigger override and doesn't
+   * take part in the UI relevance check.
+   */
+  function isParamActive(param: any, values: Record<string, any>): boolean {
+    const req = param?.requires;
+    if (!req || typeof req !== 'object') return true;
+    for (const key of Object.keys(req)) {
+      if (key === 'when') continue;
+      const want = req[key];
+      const actual = values[key];
+      if (typeof want === 'boolean') {
+        // Booleans: honour "false"/"true"/etc. string coercions so a
+        // JSON-serialised param default still compares correctly.
+        const falsy = new Set(['', '0', 'false', 'False', 'no', 'No', 'none', 'None', 'null']);
+        const actualBool = actual === true || (typeof actual === 'string' && !falsy.has(actual)) || (typeof actual === 'number' && actual !== 0);
+        if (actualBool !== want) return false;
+      } else {
+        if (String(actual ?? '') !== String(want)) return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Opens parameter modal and initializes parameter states
    * @param {Template} template - Template to run
    */
@@ -293,6 +323,14 @@
       let hasErrors = false;
 
       parsedParams.forEach(param => {
+        // Inactive (greyed-out) params: strip their value before
+        // submitting so a stale entry doesn't trigger the server's
+        // `requires:` validator, and skip the "required" check since
+        // the field isn't editable right now.
+        if (!isParamActive(param, userParams)) {
+          userParams[param.name] = param.default ?? '';
+          return;
+        }
         if (param.required && (!userParams[param.name] || userParams[param.name].trim() === '')) {
           paramErrors[param.name] = 'This field is required';
           hasErrors = true;
@@ -553,17 +591,24 @@
           </div>
         {/if}
         
-        <!-- Parameter input fields -->
+        <!-- Parameter input fields.
+             `active` is the per-param dependency check; when a
+             param's `requires:` clause isn't satisfied by the current
+             values, we visually dim the group and lock every input in
+             it. The submit handler mirrors this by stripping the
+             value on inactive params so a stale entry doesn't trip
+             the server-side `requires:` validator. -->
         {#each JSON.parse(selectedTemplate?.paramJson || '[]') as param (param.name)}
-          <div class="wfTemp-form-group">
-            <label 
+          {@const active = isParamActive(param, userParams)}
+          <div class="wfTemp-form-group" class:inactive={!active}>
+            <label
               for={param.name}
               class:required={param.required}
-              class:error={showParamErrors && param.required && !userParams[param.name]}
+              class:error={active && showParamErrors && param.required && !userParams[param.name]}
             >
               {param.name}
             </label>
-            
+
             <div class="wfTemp-input-container">
               {#if param.choices}
                 <!-- Dropdown for choice parameters -->
@@ -571,7 +616,8 @@
                   <select
                     id={param.name}
                     bind:value={userParams[param.name]}
-                    class:error={showParamErrors && param.required && !userParams[param.name]}
+                    disabled={!active}
+                    class:error={active && showParamErrors && param.required && !userParams[param.name]}
                   >
                     {#if !param.required}
                       <option value="">-- Select --</option>
@@ -581,7 +627,7 @@
                     {/each}
                   </select>
                 </div>
-              
+
               {:else if param.type === 'bool'}
                 <!-- Checkbox for boolean parameters -->
                 <label class="wfTemp-checkbox-label">
@@ -589,17 +635,19 @@
                     type="checkbox"
                     id={param.name}
                     bind:checked={userParams[param.name]}
-                    class:error={showParamErrors && param.required && !userParams[param.name]}
+                    disabled={!active}
+                    class:error={active && showParamErrors && param.required && !userParams[param.name]}
                   />
                 </label>
-              
+
               {:else if param.type === 'int'}
                 <!-- Number input for integer parameters -->
                 <input
                   type="number"
                   id={param.name}
                   bind:value={userParams[param.name]}
-                  class:error={showParamErrors && param.required && !userParams[param.name]}
+                  disabled={!active}
+                  class:error={active && showParamErrors && param.required && !userParams[param.name]}
                   placeholder="Enter number"
                 />
 
@@ -613,7 +661,8 @@
                   step="any"
                   id={param.name}
                   bind:value={userParams[param.name]}
-                  class:error={showParamErrors && param.required && !userParams[param.name]}
+                  disabled={!active}
+                  class:error={active && showParamErrors && param.required && !userParams[param.name]}
                   placeholder="Enter decimal"
                 />
 
@@ -627,6 +676,7 @@
                 <div class="wfTemp-text">
                   <input
                     type="file"
+                    disabled={!active}
                     onchange={(e) => {
                       const f = e.target.files && e.target.files[0];
                       if (!f) return;
@@ -639,7 +689,8 @@
                     id={param.name}
                     rows="6"
                     bind:value={userParams[param.name]}
-                    class:error={showParamErrors && param.required && !userParams[param.name]}
+                    disabled={!active}
+                    class:error={active && showParamErrors && param.required && !userParams[param.name]}
                     placeholder={param.help || 'Upload a file or paste content (one item per line)'}
                   ></textarea>
                 </div>
@@ -650,23 +701,24 @@
                   type="text"
                   id={param.name}
                   bind:value={userParams[param.name]}
-                  class:error={showParamErrors && param.required && !userParams[param.name]}
+                  disabled={!active}
+                  class:error={active && showParamErrors && param.required && !userParams[param.name]}
                   placeholder={param.help || 'Enter value'}
                 />
               {/if}
-              
+
               {#if param.help}
                 <button class="wfTemp-help-button" onclick={() => toggleHelp(param.name)}>
                   ?
                 </button>
               {/if}
             </div>
-            
+
             {#if showHelp[param.name] && param.help}
               <div class="wfTemp-help-text">{param.help}</div>
             {/if}
-            
-            {#if showParamErrors && param.required && !userParams[param.name]}
+
+            {#if active && showParamErrors && param.required && !userParams[param.name]}
               <div class="wfTemp-field-error">This field is required</div>
             {/if}
           </div>

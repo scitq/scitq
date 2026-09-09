@@ -284,6 +284,11 @@ func (s *taskQueueServer) scriptRunner(
 }
 
 func transformParamSchema(rawJSON string, cfg config.Config) (string, error) {
+	// The struct must list every field the Python schema() emits.
+	// Anything omitted here is dropped on the round-trip through
+	// json.Unmarshal / json.MarshalIndent — that's how the earlier
+	// `requires` regression happened. Keep this in lockstep with
+	// `Params.schema()` in python/src/scitq2/param.py.
 	type Param struct {
 		Name     string      `json:"name"`
 		Type     string      `json:"type"`
@@ -291,6 +296,7 @@ func transformParamSchema(rawJSON string, cfg config.Config) (string, error) {
 		Default  interface{} `json:"default"`
 		Choices  interface{} `json:"choices"` // can be null or []string
 		Help     string      `json:"help"`
+		Requires interface{} `json:"requires"` // {other_param: expected_value, "when": optional_trigger} or null
 	}
 
 	var params []Param

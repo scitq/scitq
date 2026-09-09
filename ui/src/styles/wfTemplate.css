@@ -259,6 +259,19 @@
   margin-bottom: 0.75rem;
 }
 
+/* A param whose `requires:` clause isn't satisfied by the current
+ * values is dimmed and its inputs are `disabled=` — the operator
+ * sees at a glance that the field is not in play for this run.
+ * pointer-events on the label/help stay off so a mis-click doesn't
+ * try to type into an inert input; the browser handles the actual
+ * input lockout via the disabled attribute. */
+.wfTemp-form-group.inactive {
+  opacity: 0.5;
+}
+.wfTemp-form-group.inactive label {
+  pointer-events: none;
+}
+
 .wfTemp-form-group label {
   display: block;
   font-weight: 600;
