@@ -1037,6 +1037,25 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		query.Stats.LastThrottleAt = lastThrottleUnix
 	}
 
+	// Count tasks the client is CURRENTLY executing (semaphore acquired,
+	// container/exec running, upload not yet started). This is the
+	// runtime ground truth for "worker is doing something right now" —
+	// independent of DB status buckets, so a stuck hidden-R task
+	// (2026-09-09 worker-6629 leak) can't inflate it. Works for both
+	// dockerised and bare tasks; every launch path passes through
+	// executingTasks.Store in excuterThread. Server-side metric
+	// scitq_worker_running_tasks joins this with idle-seconds to
+	// produce a leak-proof alert.
+	if query.Stats == nil {
+		query.Stats = &pb.WorkerStats{}
+	}
+	var runningTaskCount int32
+	executingTasks.Range(func(_, _ any) bool {
+		runningTaskCount++
+		return true
+	})
+	query.Stats.RunningTasks = runningTaskCount
+
 	// Report the tasks we're actually tracking locally so the server can
 	// reconcile: any task it believes is active on us but that we no longer
 	// list has been lost (finished + cleaned up but terminal status update

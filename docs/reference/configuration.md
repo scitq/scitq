@@ -253,3 +253,241 @@ region, so a wildcard avoids needing to repeat the entry for every
 permanent worker. Cloud providers with multiple regions usually want
 explicit per-region entries so cross-region transfer fees are visible
 (and avoidable).
+
+## Notifications (user-facing)
+
+scitq can send convenience notifications when a workflow reaches a
+terminal state (Succeeded or Failed). This is deliberately **not** the
+admin monitoring path — leaked workers, DB pool saturation, quota
+exhaustion and other operational alerts surface through the
+Prometheus `/metrics` endpoint (see [Monitoring](monitoring.md)) so
+that Zabbix / Prometheus / Grafana own the alerting logic (silence,
+escalate, correlate, page on-call).
+
+The whole subsystem is best-effort: a failed webhook is logged and
+the caller keeps going. Users who miss a workflow-done ping are
+mildly annoyed; that's the whole failure surface.
+
+Absent or empty `notifications:` block means "no notifications sent"
+— the dispatcher becomes a no-op. Safe to leave unconfigured.
+
+### Config shape
+
+```yaml
+notifications:
+  # Optional. When true, every dispatched notification is also
+  # written to the server log in addition to being routed to
+  # configured channels. Useful as an audit trail or to smoke-test
+  # rules without wiring a real backend. Default: false.
+  always_log: false
+
+  # Delivery targets. Each entry has a name (used in the route
+  # table below and in log lines) plus a backend kind.
+  channels:
+    - name: gmt-alerts
+      kind: zulip
+      url: "https://gmt.zulipchat.com/api/v1/external/generic?api_key=${ZULIP_KEY}&stream=alerts&topic=scitq"
+      # options are backend-specific string knobs (see per-backend
+      # sections below). Unknown keys are ignored.
+      options:
+        topic: "workflows"
+
+  # Event -> channels. One event can fan out to several channels;
+  # one channel can subscribe to several events.
+  routes:
+    - event: workflow.terminal
+      channels: [gmt-alerts]
+```
+
+### Backends
+
+Four concrete kinds ship out of the box. Others can be added by
+implementing the `Notifier` interface in `server/notifications/`.
+
+#### `zulip` — Zulip incoming webhook
+
+Native support for Zulip's "Incoming webhook (generic)" integration.
+Set `url` to the URL Zulip hands out on the integration page (it
+already carries `api_key`, `stream`, and `topic` as query
+parameters). No other config is required.
+
+```yaml
+- name: gmt-alerts
+  kind: zulip
+  url: "https://gmt.zulipchat.com/api/v1/external/generic?api_key=${ZULIP_KEY}&stream=alerts&topic=scitq"
+  options:
+    # Optional. Overrides the URL's default topic per-channel. Handy
+    # when one integration URL covers several events and each event
+    # wants its own thread.
+    topic: "workflows"
+```
+
+Message format: the notification's `Title` and `Body` are rendered as
+`**<title>**` on the first line, then a blank line, then `<body>`.
+Zulip's Markdown renderer bolds the title, so it stands out in the
+stream without any extra widget.
+
+#### `zulip-dm` — Zulip direct message to the workflow owner
+
+The right backend for per-user personal notifications ("your
+workflow finished"). Unlike `zulip` above (which POSTs to a stream
+via the incoming-webhook endpoint), this backend hits Zulip's
+regular `messages` API and sends a private message. The recipient
+address is not baked into the channel — it's read from each
+message's `Meta["run_by_email"]` at Send time, so ONE channel
+serves every user whose scitq account has an email set.
+
+Requires a Zulip bot of type **"Generic bot"** (not "Incoming
+webhook"). Incoming-webhook bots are limited to the
+`external/generic` endpoint and cannot send DMs.
+
+```yaml
+- name: gmt-zulip-dm
+  kind: zulip-dm
+  url: "https://gmt.zulipchat.com"          # Zulip realm root, no path
+  options:
+    bot_email: "scitq-bot@gmt.zulipchat.com"
+    api_key: ${ZULIP_API_KEY}
+    # recipient_meta_key defaults to "run_by_email". Override if a
+    # future event carries the target under a different key.
+    recipient_meta_key: "run_by_email"
+```
+
+For the `workflow.terminal` event, `run_by_email` is populated
+automatically from the workflow's owning `scitq_user.email` (via
+`workflow.created_by` — migration 000036). Users with `email IS
+NULL` in the DB receive nothing (the backend logs `dropped (no
+run_by_email in message meta)` and moves on — not an error).
+
+Message format is the same as the `zulip` backend: `**<title>**`,
+blank line, `<body>` — Zulip's Markdown renderer bolds the title
+so the subject line stands out at the top of the DM view.
+
+#### `webhook` — generic HTTP POST with a templated body
+
+Fits Slack, Discord, ntfy.sh, or any custom endpoint that accepts
+JSON or plain text. The body is a Go
+[`text/template`](https://pkg.go.dev/text/template) with access to
+the notification's fields; the default template emits a compact JSON
+object that most generic hook consumers can parse without extra
+mapping.
+
+Available template variables:
+
+- `{{.Event}}` — the event routing key (e.g. `workflow.terminal`)
+- `{{.Severity}}` — `info` / `warn` / `crit`
+- `{{.Title}}` — short title (e.g. `Workflow "hermes.PRJNA..." succeeded (#123)`)
+- `{{.Body}}` — one-line summary (e.g. `status=S tasks=42 succeeded=42 failed=0`)
+- `{{.Meta.workflow_id}}`, `{{.Meta.workflow_name}}`,
+  `{{.Meta.status}}`, `{{.Meta.total_tasks}}`,
+  `{{.Meta.succeeded_tasks}}`, `{{.Meta.failed_tasks}}`,
+  `{{.Meta.run_by}}` — per-event context
+- `{{toJSON <value>}}` — JSON-quote a string or serialise a map
+  (needed to keep JSON output safe when a title contains quotes)
+
+```yaml
+# Slack incoming-webhook
+- name: slack-alerts
+  kind: webhook
+  url: "https://hooks.slack.com/services/T.../B.../..."
+  options:
+    template: '{"text": {{toJSON .Title}} }'
+
+# Discord webhook
+- name: discord-alerts
+  kind: webhook
+  url: "https://discord.com/api/webhooks/.../..."
+  options:
+    template: '{"content": {{toJSON .Title}} }'
+
+# ntfy.sh — plain text body, headers carry the title
+- name: ntfy-alerts
+  kind: webhook
+  url: "https://ntfy.sh/my-scitq-topic"
+  options:
+    template: "{{.Body}}"
+    content_type: "text/plain"
+  headers:
+    Title: "scitq"
+    Tags: "workflow"
+
+# Custom internal endpoint with JWT auth
+- name: internal-events
+  kind: webhook
+  url: "https://events.internal/scitq"
+  headers:
+    Authorization: "Bearer ${INTERNAL_EVENTS_TOKEN}"
+  # options.template omitted → default JSON envelope
+  #   {"event":"...","severity":"...","title":"...","body":"...","meta":{...}}
+```
+
+All `options` keys are string; all `headers` are appended verbatim to
+every request. `method` (default `POST`) and `content_type` (default
+`application/json`) are the two other knobs.
+
+#### `log` — server log
+
+Writes the notification to the standard server log
+(`journalctl -u scitq.service` on a systemd install). Always
+available with zero external dependencies — useful as a smoke test
+channel, or as a fallback "notify me on the console" for a lab
+operator without a separate integration.
+
+```yaml
+- name: console
+  kind: log
+```
+
+### Events
+
+Currently one event fires from the server:
+
+| Event                 | When                                            | Payload keys                                                                                                                     |
+|-----------------------|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `workflow.terminal`   | Workflow transitions to `S` (succeeded) or `F` (failed) | `workflow_id`, `workflow_name`, `status`, `total_tasks`, `succeeded_tasks`, `failed_tasks`, `run_by`, `run_by_email` (when set)  |
+
+More events (workflow entered Debug, template run failed to compile,
+long-running step exceeded a threshold, …) can be added in
+`server/notifications/notifications.go` — one enum entry per event,
+one `Emit()` call at the site.
+
+### End-to-end example
+
+Route successful runs to a low-priority stream, and failed runs to a
+higher-signal one:
+
+```yaml
+notifications:
+  channels:
+    - name: workflows-info
+      kind: zulip
+      url: "https://gmt.zulipchat.com/api/v1/external/generic?api_key=${ZULIP_KEY}&stream=scitq-info"
+    - name: workflows-alert
+      kind: zulip
+      url: "https://gmt.zulipchat.com/api/v1/external/generic?api_key=${ZULIP_KEY}&stream=scitq-alerts"
+    - name: audit
+      kind: log
+  routes:
+    - event: workflow.terminal
+      channels: [workflows-info, workflows-alert, audit]
+```
+
+For v1 the route table dispatches every matching event to every
+listed channel — filtering by status (S vs F) or severity is left to
+the receiving side (Zulip stream muting, Slack channel routing) or to
+a future `match:` clause on `NotificationRoute`.
+
+### What is NOT covered here (yet)
+
+- **Per-user route resolution beyond email lookup.** The `zulip-dm`
+  backend uses `scitq_user.email` as the recipient address. If a
+  future integration needs a different per-user identifier (Slack
+  user ID, Discord snowflake, Matrix handle, ...), the `scitq_user`
+  table would need one more column and the meta-building code needs
+  one more field. Not hard; not shipped.
+- **Retries / dedup / rate limiting.** Best-effort delivery only. A
+  flapping event source (which we don't have today) would need
+  per-channel `min_interval` before it becomes an issue.
+- **Admin alerts (worker leaked, quota exhausted, ...).** Those are
+  metrics + Zabbix triggers, not notifications. See
+  [Monitoring](monitoring.md).

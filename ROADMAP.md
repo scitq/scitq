@@ -43,4 +43,27 @@
 [ ] implement workflow strategy (sticky)
 [ ] heterogeneous worker pools per step — currently a step has one `worker_pool` and one `task_spec`, which assumes every worker serving the step shares the same per-task budget shape. Some workloads would benefit from declaring N pools per step with paired task_specs (e.g. a NUMA-bound megahit step that recruits both EPYC 7451 boxes and Intel single-socket machines, each with its own `task_spec.numa` derivation). Goes beyond NUMA — same model unlocks "GPU pool + CPU pool serving the same step" and similar. Worth doing once a real workload demands it.
 [ ] chaining workflow v2 — next iteration of the workflow_chain feature shipped in commit 49d6a19 (`specs/workflow_chain.md`). Scope TBD when a real need surfaces.
+[ ] workflow ↔ tasks status drift — two symmetric shapes of `recomputeWorkflowStatus` not converging, both observed during the 09-10 metrics cleanup:
+  - **R with 0 pending / 0 running / all tasks S** — should have flipped to S but didn't. Observed on `gpredomics0.IOScope3a.3` (workflow 764) and `.4` (769); `live=false`, so not the live latch. Suspect the last S→recompute call was missed (server restart mid-flight, or CTE's `total = COUNT(*) FILTER (NOT hidden)` returning 0 when every task row was hidden — `total=0` skips the transition).
+  - **S / F with pending P or W tasks** — the reverse, observed on `upload-kraken2-db` (1351), `gpredomics-optuna-ICI-IOScope3d` (1751), and several others. The workflow was declared succeeded/failed while stragglers were still queued. Either the recompute fired on stale counts before all tasks landed, or the workflow was moved to S by a different code path (extend / retry?) that didn't re-check task state.
+
+Both bugs feed the same Prometheus alert (`scitq_task_pending_seconds_max`), which is how we found them.
+
+Diagnostic query for R-with-0-pending:
+```
+SELECT status, COUNT(*) FILTER (WHERE NOT hidden) AS visible, COUNT(*) AS total
+  FROM task t JOIN step s ON s.step_id=t.step_id
+ WHERE s.workflow_id = <ID> GROUP BY status;
+```
+If `visible=0` on all rows but `total>0`, the CTE at server.go:855 is the culprit — add a branch that flips R→S (or R→F if there are hidden F rows) when the workflow has tasks but none visible. Manual clear meanwhile: `UPDATE workflow SET status='S' WHERE workflow_id=<ID>`.
+
+Diagnostic query for orphan pending in finalized workflows:
+```
+SELECT w.workflow_id, w.workflow_name, w.status AS wf_status,
+       COUNT(*) FILTER (WHERE t.status='P') AS p, COUNT(*) FILTER (WHERE t.status='W') AS w
+  FROM task t JOIN step s ON s.step_id=t.step_id JOIN workflow w ON w.workflow_id=s.workflow_id
+ WHERE t.status IN ('P','W') AND NOT t.hidden AND w.status IN ('S','F')
+ GROUP BY w.workflow_id, w.workflow_name, w.status ORDER BY 1;
+```
+Fix idea: `recomputeWorkflowStatus` should ALSO run in reverse — after any task transition into P/W, if the parent workflow is already S/F, either promote the workflow back to R or (better) terminate the stranded task automatically. Manual clear meanwhile: `UPDATE task SET status='F' WHERE task_id IN (...)` or delete the task rows.
 

@@ -28,6 +28,8 @@ import (
 
 	"github.com/scitq/scitq/internal/version"
 	"github.com/scitq/scitq/server/config"
+	"github.com/scitq/scitq/server/metrics"
+	"github.com/scitq/scitq/server/notifications"
 	"github.com/scitq/scitq/server/protofilter"
 	"github.com/scitq/scitq/server/providers"
 	"github.com/scitq/scitq/server/watchdog"
@@ -83,6 +85,11 @@ type taskQueueServer struct {
 	assignTrigger  int32
 	qm             recruitment.QuotaManager
 	watchdog       *watchdog.Watchdog
+	// notifier dispatches user-facing convenience notifications
+	// (workflow completion). Nil-safe: dispatcher.Emit no-ops when the
+	// pointer is nil, so a config without a notifications block just
+	// stays silent.
+	notifier       *notifications.Dispatcher
 
 	stopWatchdog      chan struct{}
 	done              chan struct{}
@@ -165,6 +172,11 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 	if err != nil {
 		log.Fatalf("⚠️ Failed to initialize step stats aggregator: %v", err)
 	}
+	// Notifications dispatcher. Config-driven; an empty config yields
+	// a dispatcher with no channels — Emit becomes a no-op. Bad
+	// channel entries are logged and skipped rather than blocking
+	// startup (see notifications.New).
+	s.notifier = notifications.New(cfg.Notifications)
 	// Wire the test seam so integration tests can read this server's
 	// aggregator + DB handle for the property-parity check. Idempotent
 	// overwrite — the last server started this process wins, matching
@@ -274,6 +286,12 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 	// changed, emit a `step-stats` snapshot for each affected workflow.
 	// Zero traffic when idle. See specs/task_transitions.md.
 	go s.stats.FlushLoop(100*time.Millisecond, s.stopWatchdog)
+
+	// Prometheus /metrics refresh loop. Owned by the server (not the
+	// watchdog) because it needs both the DB handle and watchdog memory.
+	// See server/metrics/metrics.go for the metric catalog and
+	// metrics_refresh.go for the sampling logic.
+	go s.runMetricsRefresh(s.stopWatchdog)
 
 	// Periodic live quality extraction for running tasks
 	go func() {
@@ -918,7 +936,97 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 	// workflow_chain_fire.go and specs/workflow_chain.md.
 	if newStatus == "S" || newStatus == "F" {
 		go s.evaluateChainEntriesForWorkflow(workflowID, newStatus)
+		s.emitWorkflowTerminalNotification(workflowID, newStatus)
 	}
+}
+
+// emitWorkflowTerminalNotification pulls the human-readable workflow
+// identity + terminal task counts and hands them to the notification
+// dispatcher. Deliberately best-effort: a DB error or a broken
+// channel must never affect the workflow's terminal-state persistence.
+// Fire-and-forget: the dispatcher itself is non-blocking, but the DB
+// hit here isn't — run it in a goroutine so recomputeWorkflowStatus
+// returns promptly.
+func (s *taskQueueServer) emitWorkflowTerminalNotification(workflowID int32, newStatus string) {
+	if s.notifier == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var (
+			name           string
+			totalTasks     int
+			succeededTasks int
+			failedTasks    int
+			runByUsername  sql.NullString
+			runByEmail     sql.NullString
+		)
+		// workflow.created_by is the direct owner link (migration
+		// 000036). Earlier revisions of this query went via
+		// template_run.run_by, but (a) the FK direction is
+		// template_run → workflow (not the other way), and (b)
+		// created_by covers workflows submitted outside the template
+		// flow (direct DSL, CLI submit, etc.) that have no
+		// template_run row at all.
+		err := s.db.QueryRowContext(ctx, `
+			SELECT
+				w.workflow_name,
+				COUNT(t.*)                                    AS total,
+				COUNT(t.*) FILTER (WHERE t.status = 'S')      AS succeeded,
+				COUNT(t.*) FILTER (WHERE t.status = 'F')      AS failed,
+				u.username,
+				u.email
+			FROM workflow w
+			LEFT JOIN step s ON s.workflow_id = w.workflow_id
+			LEFT JOIN task t ON t.step_id = s.step_id AND NOT t.hidden
+			LEFT JOIN scitq_user u ON u.user_id = w.created_by
+			WHERE w.workflow_id = $1
+			GROUP BY w.workflow_name, u.username, u.email
+		`, workflowID).Scan(&name, &totalTasks, &succeededTasks, &failedTasks, &runByUsername, &runByEmail)
+		if err != nil {
+			log.Printf("⚠️ notifications: failed to fetch workflow %d for terminal event: %v", workflowID, err)
+			return
+		}
+
+		severity := notifications.SeverityInfo
+		verb := "succeeded"
+		if newStatus == "F" {
+			severity = notifications.SeverityWarn
+			verb = "failed"
+		}
+
+		title := fmt.Sprintf("Workflow %q %s (#%d)", name, verb, workflowID)
+		body := fmt.Sprintf("status=%s tasks=%d succeeded=%d failed=%d", newStatus, totalTasks, succeededTasks, failedTasks)
+		meta := map[string]string{
+			"workflow_id":     fmt.Sprintf("%d", workflowID),
+			"workflow_name":   name,
+			"status":          newStatus,
+			"total_tasks":     fmt.Sprintf("%d", totalTasks),
+			"succeeded_tasks": fmt.Sprintf("%d", succeededTasks),
+			"failed_tasks":    fmt.Sprintf("%d", failedTasks),
+		}
+		if runByUsername.Valid {
+			meta["run_by"] = runByUsername.String
+		}
+		if runByEmail.Valid && runByEmail.String != "" {
+			// Consumed by the zulip-dm backend (or any future
+			// user-scoped Notifier) to route the message to the
+			// workflow's owner. Left absent when the user has no
+			// email set on their scitq_user row; the receiving
+			// backend logs "no recipient" and drops silently.
+			meta["run_by_email"] = runByEmail.String
+		}
+
+		s.notifier.Emit(ctx, notifications.Message{
+			Event:    notifications.EventWorkflowTerminal,
+			Severity: severity,
+			Title:    title,
+			Body:     body,
+			Meta:     meta,
+		})
+	}()
 }
 
 func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStatusUpdate) (*pb.Ack, error) {
@@ -2423,6 +2531,13 @@ func (s *taskQueueServer) reclaimOfflineWorkerTasks(ctx context.Context, workerI
 	if len(items) == 0 {
 		return nil
 	}
+
+	// One reclaim event = one increment (regardless of how many tasks
+	// it swept). The count doesn't matter for the "is this happening
+	// too often?" question; the number of RECLAIM EVENTS does. `reason`
+	// stays "offline" for now — future callers (e.g. an explicit
+	// operator-forced reclaim) can pass different values.
+	metrics.WatchdogReclaims.WithLabelValues("offline").Inc()
 
 	// Step aggregator + WS notifications. Locking once for the whole
 	// batch is fine — reclaim is a single event, not a stream.
@@ -7801,6 +7916,12 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	mux.HandleFunc("/ws", ws.Handler)
 	mux.Handle("/mcp", newMCPHandler(s))
 	mux.HandleFunc("/api/task/edit-retry", s.httpEditAndRetryTask)
+
+	// Prometheus scrape endpoint. Kept on the same HTTP server as
+	// everything else — one port to configure. Rely on network policy
+	// (or a reverse proxy) upstream if /metrics needs auth-gating; the
+	// endpoint carries no secrets, just aggregate state.
+	mux.Handle("/metrics", metrics.Handler())
 
 	// 🧲 Static files and binary client
 	mux.Handle("/scitq-client", staticHandler)

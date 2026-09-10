@@ -213,6 +213,70 @@ type Config struct {
 	// Create your config using native rclone with `rclone config`
 	// then export the config to `scitq.yaml` with the CLI `scitq config import-rclone >> /etc/scitq.yaml`
 	Rclone map[string]map[string]string `yaml:"rclone"`
+
+	// Notifications configures user-facing convenience notifications
+	// (workflow completion, ...). NOT the admin monitoring path —
+	// leaked workers etc. surface via server/metrics for Zabbix /
+	// Prometheus / Grafana consumption. See server/notifications.
+	Notifications NotificationsConfig `yaml:"notifications"`
+}
+
+// NotificationsConfig is the top-level entry for the notifications
+// subsystem. Empty (or absent) means no notifications are sent — the
+// package just no-ops, safe default.
+type NotificationsConfig struct {
+	// AlwaysLog writes every dispatched notification to the server log
+	// in addition to routing to configured channels. Useful as an
+	// audit trail or to smoke-test rules without wiring a real backend.
+	AlwaysLog bool `yaml:"always_log" default:"false"`
+
+	// Channels declares the delivery targets. See NotificationChannel
+	// for the shape.
+	Channels []NotificationChannel `yaml:"channels"`
+
+	// Routes maps events to channel names. One event can fan out to
+	// several channels; one channel can subscribe to several events.
+	Routes []NotificationRoute `yaml:"routes"`
+}
+
+// NotificationChannel is one delivery target — a Zulip stream, a
+// generic HTTP webhook, or the server log.
+type NotificationChannel struct {
+	// Name identifies this channel in the routes table and in log
+	// lines. Must be non-empty.
+	Name string `yaml:"name"`
+
+	// Kind picks the backend: "zulip" | "webhook" | "log".
+	Kind string `yaml:"kind"`
+
+	// URL is the endpoint the backend POSTs to. Required for zulip
+	// and webhook; ignored by log.
+	URL string `yaml:"url"`
+
+	// Headers are added to every HTTP request the backend makes.
+	// Useful for Authorization / X-Auth-Token style tokens on
+	// generic webhooks. Ignored by zulip (its URL already carries
+	// the api_key as a query param).
+	Headers map[string]string `yaml:"headers"`
+
+	// Options carries backend-specific string knobs — kept as a
+	// generic map so a new backend can pick up new keys without
+	// widening this struct. Known keys:
+	//   zulip:   "topic" (override the URL's default topic)
+	//   webhook: "template" (Go text/template body),
+	//            "method" (default POST),
+	//            "content_type" (default application/json)
+	Options map[string]string `yaml:"options"`
+}
+
+// NotificationRoute subscribes a set of channels to one event type.
+type NotificationRoute struct {
+	// Event is the routing key. Currently: "workflow.terminal".
+	Event string `yaml:"event"`
+
+	// Channels lists channel names (matching NotificationChannel.Name)
+	// that receive this event.
+	Channels []string `yaml:"channels"`
 }
 
 // Quota defines resource limits such as CPU and memory for cloud provider instances.

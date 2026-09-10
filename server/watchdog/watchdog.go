@@ -317,6 +317,54 @@ type WorkerInfo struct {
 	LastNotIdle *time.Time
 }
 
+// WorkerSnapshot is a point-in-time read of everything the watchdog
+// tracks per worker. Used by the metrics refresher (see
+// server/metrics) so it can compute idle-seconds and active-task
+// drift without holding a reference to the internal maps. Values are
+// copies; safe to hand to any consumer.
+type WorkerSnapshot struct {
+	WorkerID    int32
+	IsPermanent bool
+	// Seconds since lastNotIdle. -1 when the worker has never been
+	// idle (still tracks a task) — the metrics side turns that into
+	// NaN so the series is skipped by Prometheus queries.
+	IdleSeconds float64
+	// Watchdog's in-memory active-task count. Metrics computes drift
+	// as (DB count) - (this value); steady-state should be 0 after
+	// the 2026-09-10 retryTaskInternal + ResyncActiveTasks fixes.
+	ActiveTasks int
+}
+
+// Snapshot returns a point-in-time copy of the watchdog's per-worker
+// state. Iteration is over the idleStatus map (every worker the
+// watchdog is tracking, including permanent and offline ones — the
+// metrics refresher can filter). Safe to call concurrently with
+// checkIdle / TaskAccepted / TaskFinished (sync.Map handles the
+// concurrency).
+func (w *Watchdog) Snapshot() []WorkerSnapshot {
+	now := time.Now()
+	var out []WorkerSnapshot
+	w.idleStatus.Range(func(key, _ any) bool {
+		id := key.(int32)
+		snap := WorkerSnapshot{WorkerID: id}
+		if v, ok := w.isPermanent.Load(id); ok {
+			snap.IsPermanent = v.(bool)
+		}
+		if v, ok := w.activeTasks.Load(id); ok {
+			snap.ActiveTasks = v.(int)
+		}
+		if v, ok := w.lastNotIdle.Load(id); ok {
+			snap.IdleSeconds = now.Sub(v.(time.Time)).Seconds()
+		} else {
+			// Never idle → sentinel that metrics reads as NaN.
+			snap.IdleSeconds = -1
+		}
+		out = append(out, snap)
+		return true
+	})
+	return out
+}
+
 func (w *Watchdog) RebuildFromWorkers(workers []WorkerInfo) {
 	now := time.Now()
 

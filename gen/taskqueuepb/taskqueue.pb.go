@@ -7927,8 +7927,20 @@ type WorkerStats struct {
 	// decrement) on this worker. 0 = no throttle observed. UI uses this
 	// to blink the IO badge for 30s after a fresh event.
 	LastThrottleAt int64 `protobuf:"varint,10,opt,name=last_throttle_at,json=lastThrottleAt,proto3" json:"last_throttle_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Number of tasks the client is CURRENTLY EXECUTING right now —
+	// populated from client's `executingTasks` map (Store at semaphore
+	// acquisition + container/exec launch, Delete when execution ends).
+	// Ground-truth runtime signal, independent of any DB-side status
+	// (A/C/D/O/R). Used by the leak-detection alert on the monitoring
+	// side: "worker has been idle for X AND running_tasks==0" catches
+	// the 6629-shape bug where the DB and watchdog memory diverged
+	// from what the worker was actually doing. Works for both
+	// dockerised and bare tasks — the executingTasks map is populated
+	// by the client wrapper regardless of the execution mode. See
+	// client/client.go:executingTasks.
+	RunningTasks  int32 `protobuf:"varint,11,opt,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkerStats) Reset() {
@@ -8027,6 +8039,13 @@ func (x *WorkerStats) GetEffectiveConcurrency() int32 {
 func (x *WorkerStats) GetLastThrottleAt() int64 {
 	if x != nil {
 		return x.LastThrottleAt
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetRunningTasks() int32 {
+	if x != nil {
+		return x.RunningTasks
 	}
 	return 0
 }
@@ -12489,7 +12508,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\v_start_timeB\v\n" +
 	"\t_end_time\"?\n" +
 	"\x11StepStatsResponse\x12*\n" +
-	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xae\x03\n" +
+	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xd3\x03\n" +
 	"\vWorkerStats\x12*\n" +
 	"\x11cpu_usage_percent\x18\x01 \x01(\x02R\x0fcpuUsagePercent\x12*\n" +
 	"\x11mem_usage_percent\x18\x02 \x01(\x02R\x0fmemUsagePercent\x12\x1b\n" +
@@ -12501,7 +12520,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bnum_cpus\x18\b \x01(\x05R\anumCpus\x123\n" +
 	"\x15effective_concurrency\x18\t \x01(\x05R\x14effectiveConcurrency\x12(\n" +
 	"\x10last_throttle_at\x18\n" +
-	" \x01(\x03R\x0elastThrottleAt\"Q\n" +
+	" \x01(\x03R\x0elastThrottleAt\x12#\n" +
+	"\rrunning_tasks\x18\v \x01(\x05R\frunningTasks\"Q\n" +
 	"\tDiskUsage\x12\x1f\n" +
 	"\vdevice_name\x18\x01 \x01(\tR\n" +
 	"deviceName\x12#\n" +

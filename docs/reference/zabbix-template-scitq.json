@@ -1,0 +1,351 @@
+{
+    "zabbix_export": {
+        "version": "7.0",
+        "template_groups": [
+            {
+                "uuid": "a571c0d144b14fd4a87a9d9b2aa9fcd6",
+                "name": "Templates/Applications"
+            }
+        ],
+        "templates": [
+            {
+                "uuid": "991c5bf08ea74ef185cbdcf40ab02743",
+                "template": "Template App scitq",
+                "name": "Template App scitq",
+                "description": "scitq server metrics via /metrics (Prometheus). See docs/reference/monitoring.md.",
+                "groups": [
+                    {
+                        "name": "Templates/Applications"
+                    }
+                ],
+                "items": [
+                    {
+                        "uuid": "446a95101750492484b20a5247b07309",
+                        "name": "scitq: DB connections in use",
+                        "type": "DEPENDENT",
+                        "key": "scitq.db.in_use",
+                        "delay": "0",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_db_connections_in_use",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        }
+                    },
+                    {
+                        "uuid": "4b44d9f13d9d42a1b88dd3fdf60dee3a",
+                        "name": "scitq: DB connections open",
+                        "type": "DEPENDENT",
+                        "key": "scitq.db.open",
+                        "delay": "0",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_db_connections_open",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        }
+                    },
+                    {
+                        "uuid": "f3af3e5b9e1c4fb4a7af3caee0d0cabd",
+                        "name": "scitq: deletion jobs stuck",
+                        "type": "DEPENDENT",
+                        "key": "scitq.deletion.stuck",
+                        "delay": "0",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_deletion_jobs_stuck",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        },
+                        "triggers": [
+                            {
+                                "uuid": "3d2cd4a94acf43188852f94dc0217772",
+                                "expression": "min(/Template App scitq/scitq.deletion.stuck,15m)>0",
+                                "name": "scitq: {ITEM.LASTVALUE} worker-delete jobs stuck > 10 min",
+                                "priority": "WARNING"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "9f7914e8d8d94a94b73616c599839a48",
+                        "name": "scitq metrics raw",
+                        "type": "HTTP_AGENT",
+                        "key": "scitq.metrics.raw",
+                        "delay": "30s",
+                        "history": "0",
+                        "value_type": "TEXT",
+                        "trends": "0",
+                        "url": "https://{HOST.CONN}/metrics"
+                    },
+                    {
+                        "uuid": "1c10f7ce50ba4c3f87fbbefd6c304edf",
+                        "name": "scitq: failed tasks (F)",
+                        "type": "DEPENDENT",
+                        "key": "scitq.tasks.failed",
+                        "delay": "0",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_tasks{status=\"F\"}",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        }
+                    },
+                    {
+                        "uuid": "1e9ec7bce0a440a59df12b6dcfe1ecd6",
+                        "name": "scitq: pending tasks (P)",
+                        "type": "DEPENDENT",
+                        "key": "scitq.tasks.pending",
+                        "delay": "0",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_tasks{status=\"P\"}",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        }
+                    },
+                    {
+                        "uuid": "c97266dd68594cb8b124f439511873d8",
+                        "name": "scitq: oldest pending task, seconds",
+                        "type": "DEPENDENT",
+                        "key": "scitq.tasks.pending_max_seconds",
+                        "delay": "0",
+                        "value_type": "FLOAT",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_task_pending_seconds_max",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        },
+                        "triggers": [
+                            {
+                                "uuid": "65453a74b8bf46ab9a5a8c450d136a7e",
+                                "expression": "min(/Template App scitq/scitq.tasks.pending_max_seconds,15m)>3600",
+                                "name": "scitq: oldest pending task > 1 h",
+                                "priority": "WARNING"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "66e9c5bf1b6c49d9b15055d778333698",
+                        "name": "scitq: server up",
+                        "type": "DEPENDENT",
+                        "key": "scitq.up",
+                        "delay": "0",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_up",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        },
+                        "triggers": [
+                            {
+                                "uuid": "a2778a4b5146430699ff3c6b53338fca",
+                                "expression": "nodata(/Template App scitq/scitq.up,5m)=1 or last(/Template App scitq/scitq.up)=0",
+                                "name": "scitq server is down (5 min)",
+                                "priority": "DISASTER"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "f6426d0e1d7f40d3accb650f0fb73649",
+                        "name": "scitq: active workflows",
+                        "type": "DEPENDENT",
+                        "key": "scitq.workflow.active",
+                        "delay": "0",
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_PATTERN",
+                                "parameters": [
+                                    "scitq_workflow_active",
+                                    "value",
+                                    ""
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        }
+                    }
+                ],
+                "discovery_rules": [
+                    {
+                        "uuid": "217ab74655ed4bfbb00fd5be0ed076af",
+                        "name": "scitq: worker discovery",
+                        "type": "DEPENDENT",
+                        "key": "scitq.worker.discovery",
+                        "delay": "0",
+                        "lifetime": "2h",
+                        "item_prototypes": [
+                            {
+                                "uuid": "57e8b390fb8f4eb896e41704648b95fc",
+                                "name": "scitq: worker {#WORKER_NAME} active-task drift",
+                                "type": "DEPENDENT",
+                                "key": "scitq.worker.drift[{#WORKER_ID}]",
+                                "delay": "0",
+                                "value_type": "FLOAT",
+                                "preprocessing": [
+                                    {
+                                        "type": "PROMETHEUS_PATTERN",
+                                        "parameters": [
+                                            "scitq_worker_active_tasks_drift{worker_id=\"{#WORKER_ID}\"}",
+                                            "value",
+                                            ""
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "scitq.metrics.raw"
+                                },
+                                "trigger_prototypes": [
+                                    {
+                                        "uuid": "5079e2f38f4f407a969b8dedf7756bb4",
+                                        "expression": "min(/Template App scitq/scitq.worker.drift[{#WORKER_ID}],15m) > 0 or max(/Template App scitq/scitq.worker.drift[{#WORKER_ID}],15m) < 0",
+                                        "name": "scitq: worker {#WORKER_NAME} watchdog drift",
+                                        "priority": "WARNING"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "e1dc2132389c4218ba2b874f6b1cb27f",
+                                "name": "scitq: worker {#WORKER_NAME} idle seconds",
+                                "type": "DEPENDENT",
+                                "key": "scitq.worker.idle_seconds[{#WORKER_ID}]",
+                                "delay": "0",
+                                "value_type": "FLOAT",
+                                "preprocessing": [
+                                    {
+                                        "type": "PROMETHEUS_PATTERN",
+                                        "parameters": [
+                                            "scitq_worker_idle_seconds{worker_id=\"{#WORKER_ID}\"}",
+                                            "value",
+                                            ""
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "scitq.metrics.raw"
+                                }
+                            },
+                            {
+                                "uuid": "4f087c651bcb4560a9a3c738dae4ea1e",
+                                "name": "scitq: worker {#WORKER_NAME} running tasks",
+                                "type": "DEPENDENT",
+                                "key": "scitq.worker.running_tasks[{#WORKER_ID}]",
+                                "delay": "0",
+                                "preprocessing": [
+                                    {
+                                        "type": "PROMETHEUS_PATTERN",
+                                        "parameters": [
+                                            "scitq_worker_running_tasks{worker_id=\"{#WORKER_ID}\"}",
+                                            "value",
+                                            ""
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "scitq.metrics.raw"
+                                }
+                            }
+                        ],
+                        "trigger_prototypes": [
+                            {
+                                "uuid": "cf93f808ef0e4ce5b4e34a0854af8e18",
+                                "expression": "{#PERMANENT}=\"false\" and min(/Template App scitq/scitq.worker.idle_seconds[{#WORKER_ID}],5m) > 600 and max(/Template App scitq/scitq.worker.running_tasks[{#WORKER_ID}],5m) = 0",
+                                "name": "scitq: worker {#WORKER_NAME} leaked (idle > 2\u00d7 idle_timeout)",
+                                "priority": "HIGH"
+                            }
+                        ],
+                        "master_item": {
+                            "key": "scitq.metrics.raw"
+                        },
+                        "lld_macro_paths": [
+                            {
+                                "lld_macro": "{#PERMANENT}",
+                                "path": "$.permanent"
+                            },
+                            {
+                                "lld_macro": "{#WORKER_ID}",
+                                "path": "$.worker_id"
+                            },
+                            {
+                                "lld_macro": "{#WORKER_NAME}",
+                                "path": "$.worker_name"
+                            }
+                        ],
+                        "preprocessing": [
+                            {
+                                "type": "PROMETHEUS_TO_JSON",
+                                "parameters": [
+                                    "scitq_worker_idle_seconds"
+                                ]
+                            },
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$[*].labels"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+        "triggers": [
+            {
+                "uuid": "eda05d95e05248f6bd3ed6e9d6f0c957",
+                "expression": "last(/Template App scitq/scitq.db.in_use) * 100 / last(/Template App scitq/scitq.db.open) > 80",
+                "name": "scitq: DB pool > 80% in use",
+                "priority": "WARNING"
+            }
+        ]
+    }
+}

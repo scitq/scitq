@@ -1265,6 +1265,19 @@ message WorkerStats {
     // decrement) on this worker. 0 = no throttle observed. UI uses this
     // to blink the IO badge for 30s after a fresh event.
     int64 last_throttle_at = 10;
+
+    // Number of tasks the client is CURRENTLY EXECUTING right now —
+    // populated from client's `executingTasks` map (Store at semaphore
+    // acquisition + container/exec launch, Delete when execution ends).
+    // Ground-truth runtime signal, independent of any DB-side status
+    // (A/C/D/O/R). Used by the leak-detection alert on the monitoring
+    // side: "worker has been idle for X AND running_tasks==0" catches
+    // the 6629-shape bug where the DB and watchdog memory diverged
+    // from what the worker was actually doing. Works for both
+    // dockerised and bare tasks — the executingTasks map is populated
+    // by the client wrapper regardless of the execution mode. See
+    // client/client.go:executingTasks.
+    int32 running_tasks = 11;
 }
 
 message DiskUsage {

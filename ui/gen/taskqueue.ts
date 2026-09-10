@@ -2909,6 +2909,22 @@ export interface WorkerStats {
      * @generated from protobuf field: int64 last_throttle_at = 10
      */
     lastThrottleAt: string;
+    /**
+     * Number of tasks the client is CURRENTLY EXECUTING right now —
+     * populated from client's `executingTasks` map (Store at semaphore
+     * acquisition + container/exec launch, Delete when execution ends).
+     * Ground-truth runtime signal, independent of any DB-side status
+     * (A/C/D/O/R). Used by the leak-detection alert on the monitoring
+     * side: "worker has been idle for X AND running_tasks==0" catches
+     * the 6629-shape bug where the DB and watchdog memory diverged
+     * from what the worker was actually doing. Works for both
+     * dockerised and bare tasks — the executingTasks map is populated
+     * by the client wrapper regardless of the execution mode. See
+     * client/client.go:executingTasks.
+     *
+     * @generated from protobuf field: int32 running_tasks = 11
+     */
+    runningTasks: number;
 }
 /**
  * @generated from protobuf message taskqueue.DiskUsage
@@ -11912,7 +11928,8 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
             { no: 7, name: "net_io", kind: "message", T: () => NetIOStats },
             { no: 8, name: "num_cpus", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 9, name: "effective_concurrency", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 10, name: "last_throttle_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
+            { no: 10, name: "last_throttle_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
+            { no: 11, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStats>): WorkerStats {
@@ -11925,6 +11942,7 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
         message.numCpus = 0;
         message.effectiveConcurrency = 0;
         message.lastThrottleAt = "0";
+        message.runningTasks = 0;
         if (value !== undefined)
             reflectionMergePartial<WorkerStats>(this, message, value);
         return message;
@@ -11963,6 +11981,9 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
                     break;
                 case /* int64 last_throttle_at */ 10:
                     message.lastThrottleAt = reader.int64().toString();
+                    break;
+                case /* int32 running_tasks */ 11:
+                    message.runningTasks = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -12006,6 +12027,9 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
         /* int64 last_throttle_at = 10; */
         if (message.lastThrottleAt !== "0")
             writer.tag(10, WireType.Varint).int64(message.lastThrottleAt);
+        /* int32 running_tasks = 11; */
+        if (message.runningTasks !== 0)
+            writer.tag(11, WireType.Varint).int32(message.runningTasks);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

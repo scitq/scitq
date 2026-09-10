@@ -12,6 +12,7 @@ import (
 	"github.com/lib/pq"
 
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/server/metrics"
 	"github.com/scitq/scitq/server/protofilter"
 	ws "github.com/scitq/scitq/server/websocket"
 	"github.com/scitq/scitq/utils"
@@ -1031,6 +1032,7 @@ func deployWorkers(
 
 			if qm.IsFlavorBlacklisted(ri.Name, ri.Provider, fr.Name) {
 				log.Printf("⚠️ Skipping blacklisted flavor %s in %s/%s", fr.Name, ri.Provider, ri.Name)
+				metrics.RecruiterLaunches.WithLabelValues(ri.Provider, ri.Name, "blacklisted").Inc()
 				continue
 			}
 			if qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
@@ -1040,6 +1042,7 @@ func deployWorkers(
 				break
 			} else {
 				log.Printf("⚠️ Quota exhausted for flavor %d region %d", fr.FlavorID, fr.RegionID)
+				metrics.RecruiterLaunches.WithLabelValues(ri.Provider, ri.Name, "quota").Inc()
 			}
 		}
 
@@ -1084,10 +1087,12 @@ func deployWorkers(
 		})
 		if err != nil {
 			log.Printf("⚠️ Failed to create worker (flavor %d region %d): %v", selected.FlavorID, selected.RegionID, err)
+			metrics.RecruiterLaunches.WithLabelValues(regionInfo.Provider, regionInfo.Name, "error").Inc()
 			return deployed, err
 		}
 
 		log.Printf("✅ Deployed worker: step=%d flavor=%d region=%d provider=%s", recruiter.StepID, selected.FlavorID, selected.RegionID, regionInfo.Provider)
+		metrics.RecruiterLaunches.WithLabelValues(regionInfo.Provider, regionInfo.Name, "success").Inc()
 		workflowCounterMemory.Counter++
 
 		//qm.RegisterLaunch(regionInfo.Name, regionInfo.Provider, int32(newConcurrency), float32(newPrefetch))
