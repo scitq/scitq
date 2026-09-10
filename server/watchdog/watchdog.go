@@ -349,10 +349,21 @@ func (w *Watchdog) RebuildFromWorkers(workers []WorkerInfo) {
 // fixes up any drift caused by TaskFinished calls that arrived between the
 // initial FetchWorkersForWatchdog query and RebuildFromWorkers.
 func (w *Watchdog) ResyncActiveTasks(ctx context.Context, db *sql.DB) {
+	// Match FetchWorkersForWatchdog and every other active-task query in
+	// the codebase (recruitment.findRecyclableWorkers, assigntask, etc.)
+	// by filtering hidden. Without this, a retried parent still carrying
+	// its worker_id and an active-looking status (before the retry path
+	// terminates it) reads as one active task here, drifts memory upward
+	// on every resync, and blocks checkIdle's deletion path forever —
+	// the 09-09 worker-6629 leak. The primary fix (terminating status in
+	// retryTaskInternal's hide clause) makes this unlikely to recur, but
+	// this filter is the cheap belt-and-suspenders that stops the same
+	// class of bug from any future path that forgets.
 	rows, err := db.QueryContext(ctx, `
 		SELECT worker_id, COUNT(*) as active_tasks
 		FROM task
 		WHERE status IN ('A', 'C', 'D', 'O', 'R')
+		  AND NOT hidden
 		GROUP BY worker_id
 	`)
 	if err != nil {

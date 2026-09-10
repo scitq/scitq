@@ -1011,7 +1011,14 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			(p.old_status = $1) AS same_status,
 			(u.task_id IS NOT NULL) AS did_update
 		FROM prior p
-		JOIN upd u   ON TRUE
+		-- LEFT JOIN so a hidden or same-status row (upd returns empty)
+		-- still surfaces prior.hidden and same_status back to Go, instead
+		-- of collapsing to sql.ErrNoRows. Without the LEFT JOIN the
+		-- diagnostic "🛡️ refusing UpdateTaskStatus on hidden task N"
+		-- log a few lines below was unreachable, and every hidden-task
+		-- update from a client returned NotFound with zero server-side
+		-- signal (found while diagnosing worker 6629, 09-09).
+		LEFT JOIN upd u   ON TRUE
 		LEFT JOIN step s  ON u.step_id = s.step_id
     `,
 		req.NewStatus, req.TaskId, req.Duration, (req.FreeRetry != nil && *req.FreeRetry),
@@ -2050,7 +2057,21 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 			-- (PingAndTakeNewTasks: AND NOT hidden) and from capacity/recruit
 			-- load joins (AND NOT t.hidden), so a retained worker_id never
 			-- causes a re-hand-out or a phantom capacity charge.
-			UPDATE task SET hidden = TRUE, modified_at = NOW()
+			--
+			-- Force a terminal status when hiding: a parent killed mid-run
+			-- (A/C/D/O/R/U/V) or aborted while still queued (I/W/P) has no
+			-- more code paths to reach S/F on its own — any late worker
+			-- report on it hits the AND-NOT-hidden filter in
+			-- UpdateTaskStatus and silently drops. Leaving status=R on a
+			-- hidden row poisons every active-task query that forgets the
+			-- hidden filter (the watchdog ResyncActiveTasks did — see
+			-- the 6629 leak, 09-09 19:34). Keep S / F as they already are:
+			-- successful re-runs shouldn't lose their green count, and F
+			-- is already terminal.
+			UPDATE task SET
+				hidden = TRUE,
+				modified_at = NOW(),
+				status = CASE WHEN status IN ('S','F') THEN status ELSE 'F' END
 			WHERE task_id = (SELECT task_id FROM validated)
 			RETURNING TRUE
 		)
@@ -2166,6 +2187,23 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit retry transaction: %w", err)
+	}
+
+	// Watchdog fix-up. Normally s.watchdog.TaskFinished fires from
+	// UpdateTaskStatus on the S/F transition; but the retry path
+	// terminates the parent's status directly in the hide UPDATE above,
+	// so we must fire it here or activeTasks[worker] never decrements —
+	// which is exactly how worker 6629 leaked (09-09). Only fire when the
+	// parent had actually reached C (TaskAccepted was called), so the
+	// decrement corresponds to a real earlier increment. A parent that
+	// never got past A means TaskAccepted was never called: nothing to
+	// undo. Same for I/W/P (never assigned) and S/F (TaskFinished has
+	// already fired via the normal path).
+	if oldTaskWorkerID.Valid {
+		switch oldTaskStatus.String {
+		case "C", "D", "O", "R", "U", "V":
+			s.watchdog.TaskFinished(oldTaskWorkerID.Int32)
+		}
 	}
 
 	// Update step aggregator. The retried task may have been in any visible
