@@ -76,7 +76,7 @@ var (
 
 	DeletionJobsStuck = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "scitq_deletion_jobs_stuck",
-		Help: "Number of worker-deletion jobs (action=D) that have been in R (running) for more than 10 minutes. Nonzero means a cloud-side delete is hanging — orphan VM risk.",
+		Help: "Number of worker-deletion jobs (action=D) stuck in R for >10 min AND whose target worker is still alive (worker.deleted_at IS NULL). Nonzero means a cloud-side delete is genuinely hanging — orphan VM risk. Delete jobs whose worker is already gone are excluded: they're bookkeeping drift (typically a server restart between the cloud API returning and the status-write), not an operational issue.",
 	})
 
 	DBConnectionsOpen = promauto.NewGauge(prometheus.GaugeOpts{

@@ -71,7 +71,7 @@ of leak we've hit or seen coming. Add more in
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `scitq_recruiter_launches_total` | counter | `provider`, `region`, `outcome` | Cumulative deployments the recruiter attempted. `outcome` is `success` / `error` / `quota` / `blacklisted`. |
-| `scitq_deletion_jobs_stuck` | gauge | — | Worker-deletion jobs (`action=D`) that have been in `R` for > 10 min. Nonzero means a cloud-side delete is hanging — orphan VM risk. |
+| `scitq_deletion_jobs_stuck` | gauge | — | Worker-deletion jobs (`action=D`) stuck in `R` for > 10 min **AND** whose target worker is still alive (`worker.deleted_at IS NULL`). The joined worker check makes the metric truthful: a stuck-at-R job whose worker is already gone is bookkeeping drift (server restart between the cloud API returning and the status-write), not an operational issue. Nonzero on this metric means a cloud-side delete is genuinely hanging — orphan VM risk. |
 | `scitq_watchdog_reclaims_total` | counter | `reason` | Times the watchdog has reset `A/C/D/O` tasks back to `P` because their worker went offline. |
 
 ### Process health

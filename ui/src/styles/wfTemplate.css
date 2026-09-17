@@ -272,6 +272,68 @@
   pointer-events: none;
 }
 
+/* Modal title row: run header + version picker side by side. Wraps
+ * to two lines on narrow modals so the picker never overflows. */
+.wfTemp-modal-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.wfTemp-modal-title h2 {
+  margin: 0;
+}
+.wfTemp-version-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, var(--text-primary));
+}
+.wfTemp-version-picker select {
+  padding: 0.2rem 0.4rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+.wfTemp-version-picker select:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Provenance banner shown at the top of the param modal when it was
+ * opened via the TemplateRunModal's "Launch new workflow from this"
+ * shortcut. Just an info tint — not a warning. */
+.wfTemp-prefill-note {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.5rem;
+  background: var(--bg-secondary);
+  border-left: 3px solid var(--primary-color, #1f6feb);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  border-radius: 3px;
+}
+/* Warning banner: the source run had param names that the current
+ * template schema no longer knows about. Amber tint so it stands
+ * apart from the neutral provenance banner above. */
+.wfTemp-prefill-drop {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.5rem;
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 3px solid #f59e0b;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  border-radius: 3px;
+}
+.wfTemp-prefill-drop code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
 .wfTemp-form-group label {
   display: block;
   font-weight: 600;

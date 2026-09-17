@@ -4,7 +4,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { wsClient } from '../lib/wsClient';
   import { Plus, Check, Loader2 } from 'lucide-svelte';
-  import { getTemplates, UploadTemplates, runTemp, updateTemplateHidden } from '../lib/api';
+  import { getTemplates, UploadTemplates, runTemp, updateTemplateHidden, getTemplateRun } from '../lib/api';
   import WfTemplateList from '../components/WfTemplateList.svelte';
   import '../styles/wfTemplate.css';
   import type { UploadTemplateResponse } from '../lib/types';
@@ -126,7 +126,87 @@
   onMount(async () => {
     await reloadTemplates();
     unsubscribeWS = wsClient.subscribeWithTopics({ template: [] }, handleMessage);
+    // If we arrived here via #/workflowsTemplate?from_run=<id> (from
+    // the TemplateRunModal's "Launch new workflow from this" button),
+    // fetch that run and open the param modal pre-filled with its
+    // values. See TemplateRunModal.launchFromThis.
+    await maybeHandleFromRunURL();
   });
+
+  /**
+   * Consume the `from_run=<id>` query fragment on the hash, if
+   * present, and open the parameter modal pre-filled with that run's
+   * paramValuesJson. Best-effort: any failure lands as a small note
+   * in errorMessage rather than a crash, since the user asked for a
+   * shortcut, not a critical operation.
+   */
+  async function maybeHandleFromRunURL() {
+    const hash = window.location.hash;
+    const qIdx = hash.indexOf('?');
+    if (qIdx < 0) return;
+    const params = new URLSearchParams(hash.slice(qIdx + 1));
+    const fromRunRaw = params.get('from_run');
+    if (!fromRunRaw) return;
+    const fromRunId = parseInt(fromRunRaw, 10);
+    if (!Number.isFinite(fromRunId) || fromRunId <= 0) return;
+    // Strip the query so a browser refresh doesn't re-open the modal
+    // and so the URL bar is clean while the user tweaks values.
+    const pathOnly = hash.slice(0, qIdx);
+    history.replaceState(null, '', location.pathname + location.search + pathOnly);
+
+    let templateRun: any;
+    try {
+      templateRun = await getTemplateRun(fromRunId);
+    } catch (e) {
+      console.error('from_run: failed to fetch template run', e);
+      return;
+    }
+    if (!templateRun || !templateRun.workflowTemplateId) {
+      console.warn('from_run: template run not found or is an ad-hoc script run', fromRunId);
+      return;
+    }
+    // Look up the referenced template — try the already-loaded set
+    // first, fall back to a targeted fetch (covers the hidden case
+    // where the template isn't in the default listing).
+    let template = workflowsTemp.find(t => t.workflowTemplateId === templateRun.workflowTemplateId);
+    if (!template) {
+      const fetched = await getTemplates(templateRun.workflowTemplateId, undefined, undefined, false, true);
+      template = fetched?.[0];
+    }
+    if (!template) {
+      // Template was deleted. Surface via the run-error modal —
+      // that's what the operator will already be primed to read.
+      errorMessage = `Template ${templateRun.templateName ?? ''}@${templateRun.templateVersion ?? ''} referenced by run #${fromRunId} is no longer available.`;
+      showRunErrorModal = true;
+      return;
+    }
+    // Parse the run's captured values into a plain object.
+    let prefill: Record<string, any> = {};
+    try {
+      prefill = JSON.parse(templateRun.paramValuesJson || '{}');
+    } catch (e) {
+      console.warn('from_run: paramValuesJson unparseable', e);
+    }
+    openParamModal(template, {
+      values: prefill,
+      note: `Pre-filled from run #${fromRunId}${templateRun.createdAt ? ' (' + templateRun.createdAt.slice(0, 10) + ')' : ''}. Change any value before launching.`,
+    });
+  }
+
+  // Small info banner shown at the top of the param modal when it
+  // was opened via the from_run shortcut. Cleared on next open.
+  let paramModalNote: string = $state('');
+  // Keys present in the source run but absent from the target
+  // template's schema (added when the template was later edited).
+  // Displayed as a warning so the operator knows some values were
+  // dropped and won't be part of the new run.
+  let paramModalDropped: string[] = $state([]);
+  // Every uploaded version of the currently-open template, populated
+  // when the param modal opens. Drives the version <select> in the
+  // modal header so the operator can run against a different version
+  // of the same template without leaving the launcher. Sorted
+  // newest-uploaded first (workflow_template_id descending).
+  let paramModalVersions: Template[] = $state([]);
 
   /** Hide or unhide a single template by id, then reload. */
   async function toggleHidden(templateId: number, hidden: boolean) {
@@ -269,14 +349,25 @@
   }
 
   /**
-   * Opens parameter modal and initializes parameter states
-   * @param {Template} template - Template to run
+   * Opens parameter modal and initializes parameter states.
+   *
+   * @param template — Template to run.
+   * @param prefill  — Optional { values, note } bundle. `values` is a
+   *   name→value map (typically a previous run's paramValuesJson);
+   *   after defaults are applied, keys that also appear in the
+   *   template's current schema get overwritten with the prefill
+   *   value. Keys present in prefill but missing from the current
+   *   schema (template was edited since the source run) are surfaced
+   *   as `paramModalDropped` so the user sees what was left behind.
+   *   `note` renders as a small info banner at the top of the modal.
    */
-  function openParamModal(template: Template) {
+  function openParamModal(template: Template, prefill?: { values: Record<string, any>; note?: string }) {
     selectedTemplate = template;
     paramErrors = {};
     showParamErrors = false;
     showHelp = {};
+    paramModalNote = prefill?.note ?? '';
+    paramModalDropped = [];
     try {
       const parsedParams = JSON.parse(template.paramJson || '[]');
 
@@ -285,15 +376,37 @@
       }
 
       userParams = {};
+      const knownKeys = new Set<string>();
       parsedParams.forEach(param => {
         if (param.name) {
-          userParams[param.name] = param.default ?? '';
+          knownKeys.add(param.name);
+          // Prefill wins over default. Boolean-typed params need a
+          // real boolean for the checkbox binding; strings come out
+          // of paramValuesJson as-is, so a `bool` field ends up
+          // string "true"/"false" — coerce so the checkbox reflects
+          // the correct state.
+          let initial: any = param.default ?? '';
+          if (prefill && Object.prototype.hasOwnProperty.call(prefill.values, param.name)) {
+            initial = prefill.values[param.name];
+            if (param.type === 'bool' && typeof initial === 'string') {
+              initial = initial === 'true' || initial === 'True' || initial === '1';
+            }
+          }
+          userParams[param.name] = initial;
           showHelp[param.name] = false;
-          if (param.required && !param.default) {
+          // Required-and-empty check: after prefill, most required
+          // fields will be populated, but flag the ones that
+          // genuinely aren't.
+          if (param.required && (userParams[param.name] === '' || userParams[param.name] == null)) {
             paramErrors[param.name] = 'This field is required';
           }
         }
       });
+      if (prefill) {
+        for (const k of Object.keys(prefill.values)) {
+          if (!knownKeys.has(k)) paramModalDropped.push(k);
+        }
+      }
 
     } catch (error) {
       console.error("Error parsing paramJson:", error);
@@ -306,6 +419,66 @@
     runRetryFailedOnly = false;
 
     showParamModal = true;
+
+    // Fire-and-forget: fetch every version of this template so the
+    // header <select> can offer them. The dropdown is disabled until
+    // the fetch returns; done this way (rather than blocking the
+    // modal open) so a slow server never delays the operator seeing
+    // the form. Only reload if we haven't already loaded them for
+    // this template name — the reload during a version switch reuses
+    // the existing list.
+    if (
+      paramModalVersions.length === 0 ||
+      paramModalVersions[0]?.name !== template.name
+    ) {
+      paramModalVersions = [];
+      loadParamModalVersions(template.name);
+    }
+  }
+
+  /**
+   * Populate `paramModalVersions` with every uploaded version of the
+   * named template. `allVersions=true, showHidden=true` because the
+   * operator may reasonably want to (a) run an older version they
+   * pinned earlier, or (b) reproduce a run against a version that's
+   * been hidden since.
+   */
+  async function loadParamModalVersions(name: string) {
+    if (!name) return;
+    try {
+      const versions = await getTemplates(undefined, name, undefined, true, true);
+      // Sort newest-uploaded first. workflow_template_id is monotonic
+      // in upload order, which is the ordering an operator expects
+      // ("what did I just push?").
+      versions.sort((a, b) => (b.workflowTemplateId ?? 0) - (a.workflowTemplateId ?? 0));
+      paramModalVersions = versions;
+    } catch (e) {
+      console.error('failed to load template versions', e);
+    }
+  }
+
+  /**
+   * Switch the currently-open param modal to a different version of
+   * the same template. Carries the operator's current userParams
+   * forward as prefill so any editing / from_run inheritance
+   * survives — fields present in the new version get the current
+   * value, dropped fields land in the paramModalDropped banner,
+   * added fields get their defaults. The version <select>'s
+   * onchange calls this.
+   */
+  function switchTemplateVersion(newTemplateId: number) {
+    if (!selectedTemplate) return;
+    if (newTemplateId === selectedTemplate.workflowTemplateId) return;
+    const target = paramModalVersions.find(v => v.workflowTemplateId === newTemplateId);
+    if (!target) return;
+    // Reopen the modal with the same values as prefill; keep any
+    // provenance note the operator was already shown.
+    const carried = { ...userParams };
+    const existingNote = paramModalNote;
+    openParamModal(target, {
+      values: carried,
+      note: existingNote || `Switched to ${target.name}@${target.version}. Values preserved from the previous version.`,
+    });
   }
 
   /**
@@ -583,8 +756,49 @@
   <div class="wfTemp-modal-backdrop">
     <div class="wfTemp-modal">
       <div class="wfTemp-modal-content">
-        <h2>Run "{selectedTemplate?.name}"</h2>
-        
+        <div class="wfTemp-modal-title">
+          <h2>Run "{selectedTemplate?.name}"</h2>
+          <!-- Version picker. Populated by loadParamModalVersions on
+               modal open; disabled until at least the current version
+               appears in the list (so the operator can't select
+               something before the fetch settles). Switching versions
+               reloads the form with the new schema and carries over
+               userParams by name. -->
+          <label class="wfTemp-version-picker">
+            <span>Version</span>
+            <select
+              disabled={paramModalVersions.length === 0}
+              value={selectedTemplate?.workflowTemplateId ?? ''}
+              onchange={(e) => switchTemplateVersion(parseInt((e.currentTarget as HTMLSelectElement).value, 10))}
+            >
+              {#if paramModalVersions.length === 0 && selectedTemplate}
+                <option value={selectedTemplate.workflowTemplateId}>{selectedTemplate.version}</option>
+              {/if}
+              {#each paramModalVersions as v (v.workflowTemplateId)}
+                <option value={v.workflowTemplateId}>{v.version}{v.hidden ? ' (hidden)' : ''}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+
+        {#if paramModalNote}
+          <!-- Provenance banner when the modal was opened via the
+               "Launch new workflow from this" shortcut. Makes it
+               obvious the fields aren't blank defaults. -->
+          <div class="wfTemp-prefill-note">{paramModalNote}</div>
+        {/if}
+        {#if paramModalDropped.length > 0}
+          <!-- Schema drift: the source run captured values for
+               parameters that are no longer part of the template's
+               current schema (template edited between the source run
+               and now). Surface them so the operator knows what was
+               left behind rather than silently losing information. -->
+          <div class="wfTemp-prefill-drop">
+            Some values from the source run don't map to the current template schema and were dropped:
+            <code>{paramModalDropped.join(', ')}</code>
+          </div>
+        {/if}
+
         {#if showParamErrors}
           <div class="wfTemp-error-message">
             Please fill in all required fields

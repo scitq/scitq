@@ -260,16 +260,28 @@ func (s *taskQueueServer) refreshWorkflowAndJobMetrics(ctx context.Context) {
 		metrics.WorkflowsActive.Set(float64(active))
 	}
 
-	// Deletion jobs that have been R for too long. `now() - created_at`
-	// captures the total age; retry cycles inside the job engine reset
-	// modified_at but not created_at, so this catches jobs that keep
-	// failing and retrying just as much as jobs stuck without retrying.
+	// Deletion jobs that have been R for too long AND whose target
+	// worker still exists undeleted. The joined-worker check is what
+	// makes this metric truthful — a stuck-at-R job whose worker HAS
+	// been soft-deleted (or whose row is gone) is just paperwork
+	// drift: the cloud-side delete actually happened, the job engine
+	// just didn't get to write status='S' back (typically because
+	// the server restarted between the cloud call returning and the
+	// status-write). We alert only on the real thing: an old delete
+	// job AND a still-alive worker to prove it never finished.
+	// `now() - created_at` captures the total age; retry cycles reset
+	// modified_at but not created_at, so this catches retry loops
+	// the same as one-shot hangs.
 	var stuck int
 	err = s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM job
-		WHERE action = 'D'
-		  AND status = 'R'
-		  AND NOW() - created_at > $1
+		SELECT COUNT(*)
+		  FROM job j
+		  JOIN worker w ON w.worker_id = j.worker_id
+		 WHERE j.action = 'D'
+		   AND j.status = 'R'
+		   AND NOW() - j.created_at > $1
+		   AND j.worker_id IS NOT NULL
+		   AND w.deleted_at IS NULL
 	`, deletionJobStuckThreshold).Scan(&stuck)
 	if err != nil {
 		log.Printf("⚠️ metrics: deletion-jobs query failed: %v", err)
