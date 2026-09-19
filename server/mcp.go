@@ -466,6 +466,16 @@ func (h *mcpHandler) listTools() []mcpTool {
 			InputSchema: inputSchema{Type: "object"},
 		},
 		{
+			Name:        "get_worker_stats",
+			Description: "Read live runtime stats for one or more workers — CPU%, memory%, load, iowait%, per-disk usage, disk IO / net IO rates, num_cpus, effective_concurrency (adaptive IO throttle), last_throttle_at, and running_tasks (client-reported ground truth). Sourced from the ping-time WorkerStats cache; a worker that hasn't pinged since server start returns stats=null. Pass worker_ids to target specific workers; omit for the full fleet.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"worker_ids": {Type: "array", Description: "Worker IDs (array of integers) to query. Omit or empty for every non-deleted worker."},
+				},
+			},
+		},
+		{
 			Name:        "list_jobs",
 			Description: "List server-internal jobs (worker create/delete/restart). Each entry includes status (P/R/S/F/X) and the provider error_class — one of 'auth' (credentials invalid: rotate the SP secret), 'quota' (regional/family cap), 'capacity' (region/zone stockout), 'unsupported_flavor' (provider rejected the SKU), 'transient' (timeout/5xx — retried), 'unknown'. error_message holds the raw provider error text. error_class + error_message are stamped after EVERY failed attempt — a job in status R that's still burning its retry budget already shows the last attempt's diagnosis, so you don't need to wait for the full retry cycle to conclude. THIS IS THE FIRST PLACE TO LOOK when recruitment or deletion is failing — auth errors in particular are silent in worker_events and only surface here.",
 			InputSchema: inputSchema{
@@ -937,6 +947,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolTaskStatusCounts(authCtx, call.Arguments)
 	case "list_workers":
 		return h.toolListWorkers(authCtx)
+	case "get_worker_stats":
+		return h.toolGetWorkerStats(authCtx, call.Arguments)
 	case "list_jobs":
 		return h.toolListJobs(authCtx, call.Arguments)
 	case "deploy_worker":
@@ -1271,6 +1283,61 @@ func (h *mcpHandler) toolListWorkers(ctx context.Context) (any, *rpcError) {
 		return errorResult(err), nil
 	}
 	return jsonResult(res.Workers), nil
+}
+
+func (h *mcpHandler) toolGetWorkerStats(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		WorkerIDs []int32 `json:"worker_ids"`
+	}
+	_ = json.Unmarshal(args, &p)
+
+	// Resolve the worker set: explicit list wins; empty means "the
+	// full fleet". We always fetch the worker rows too, so the
+	// response can attach worker_name to each stats blob — otherwise
+	// the caller has to cross-reference a naked worker_id map against
+	// list_workers, which is friction for the agent.
+	workersRes, err := h.server.ListWorkers(ctx, &pb.ListWorkersRequest{})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	nameByID := make(map[int32]string, len(workersRes.Workers))
+	for _, w := range workersRes.Workers {
+		nameByID[w.WorkerId] = w.Name
+	}
+
+	ids := p.WorkerIDs
+	if len(ids) == 0 {
+		ids = make([]int32, 0, len(workersRes.Workers))
+		for _, w := range workersRes.Workers {
+			ids = append(ids, w.WorkerId)
+		}
+	}
+
+	statsRes, err := h.server.GetWorkerStats(ctx, &pb.GetWorkerStatsRequest{WorkerIds: ids})
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	// Return an array of {worker_id, worker_name, stats} — friendlier
+	// for agents than a map keyed by integer-as-string. Preserves the
+	// caller's requested order (or ListWorkers's order when the caller
+	// didn't specify), so a repeated call reads predictably. A worker
+	// that has never pinged since server start has stats=null (versus
+	// missing from the map in the raw gRPC response).
+	type row struct {
+		WorkerID   int32           `json:"worker_id"`
+		WorkerName string          `json:"worker_name,omitempty"`
+		Stats      *pb.WorkerStats `json:"stats"`
+	}
+	out := make([]row, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, row{
+			WorkerID:   id,
+			WorkerName: nameByID[id],
+			Stats:      statsRes.WorkerStats[id],
+		})
+	}
+	return jsonResult(out), nil
 }
 
 func (h *mcpHandler) toolListJobs(ctx context.Context, args json.RawMessage) (any, *rpcError) {
