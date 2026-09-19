@@ -41,3 +41,19 @@ func curveAtAttempt(curve []float64, attempt int) (float64, bool) {
 	}
 	return curve[attempt], true
 }
+
+// curveFromPG narrows a PG double-precision curve read via pq.Float64Array
+// down to the pb.Task's []float32 shape. Nil / empty input returns nil so
+// downstream consumers can distinguish "no curve declared" from "curve
+// element is zero" (which itself is rejected at submit time — curves
+// must be all positive).
+func curveFromPG(curve []float64) []float32 {
+	if len(curve) == 0 {
+		return nil
+	}
+	out := make([]float32, len(curve))
+	for i, v := range curve {
+		out[i] = float32(v)
+	}
+	return out
+}

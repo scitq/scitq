@@ -4817,6 +4817,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			t.download_duration, t.run_duration, t.upload_duration,
 			t.quality_score, t.quality_vars::text,
 			t.min_cpu, t.min_mem, t.min_disk, t.min_gpu, t.gpu_all,
+			t.cpu_curve, t.mem_curve, t.disk_curve,
 			EXTRACT(EPOCH FROM t.created_at)::bigint AS created_epoch,
 			EXTRACT(EPOCH FROM t.modified_at)::bigint AS modified_epoch
         FROM task t
@@ -4869,6 +4870,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			minCpu, minMem, minDisk                                           sql.NullFloat64
 			minGpu                                                            sql.NullInt32
 			gpuAll                                                            bool
+			cpuCurve, memCurve, diskCurve                                     pq.Float64Array
 			retryCount                                                        int32
 			hidden                                                            bool
 			createdEpoch, modifiedEpoch                                       sql.NullInt64
@@ -4905,6 +4907,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&minDisk,
 			&minGpu,
 			&gpuAll,
+			&cpuCurve,
+			&memCurve,
+			&diskCurve,
 			&createdEpoch,
 			&modifiedEpoch,
 		); err != nil {
@@ -4961,6 +4966,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		if gpuAll {
 			task.GpuAll = &gpuAll
 		}
+		task.CpuCurve = curveFromPG(cpuCurve)
+		task.MemCurve = curveFromPG(memCurve)
+		task.DiskCurve = curveFromPG(diskCurve)
 
 		tasks = append(tasks, &task)
 	}

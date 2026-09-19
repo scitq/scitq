@@ -849,6 +849,29 @@ Branches may declare any subset of fields; whatever isn't in the chosen branch b
 
 **Why a structured block rather than per-field expressions.** Free-form expressions in `cpu:` / `mem:` (`mem: "{sample.size * 2 + 8}"`) would produce a unique spec per sample in the worst case and fragment recruitment into 1-flavor-per-task — directly at odds with scitq's batching model. A `cond:` block forces the workflow author to declare a finite set of buckets; the recruiter recruits a flavor per branch, not per sample.
 
+#### Per-attempt resource escalation (retry curves)
+
+`cpu`, `mem`, and `disk` each accept either a scalar (constant across every attempt, the common case) **or a list** giving the resource ask for each successive attempt. This is scitq's equivalent of Nextflow's `memory { task.attempt * 8.GB }` pattern — useful for tasks that occasionally hit OOM or run out of disk and would succeed with a heavier flavor:
+
+```yaml
+  - module: align.yaml
+    retry: 2                    # up to 2 retries (3 attempts total)
+    task_spec:
+      cpu: 8                    # flat: same 8 CPUs every attempt
+      mem: [40, 80, 160]        # 40 GB first attempt, 80 GB on retry, 160 GB on 2nd retry
+      disk: [200, 400]          # 200 GB then 400 GB; further attempts stay at 400 GB
+```
+
+Semantics:
+
+- **Monotonically non-decreasing.** A retry must never ask for less than a previous attempt. `mem: [40, 20]` is rejected at load time.
+- **The recruiter sizes for the worst case.** Workers are provisioned to fit the *largest* value in the curve, so a retry never blocks on capacity that wasn't reserved up front.
+- **Beyond the curve length, the last value repeats.** With `mem: [40, 80]` and `retry: 5`, attempts 3–6 all get 80 GB. `retry:` governs *how many* attempts; the curve governs *at what size*.
+- **Evictions ignore the curve.** If a task fails because its worker was preempted (`failure_class = 'eviction'`), the retry keeps the *original* attempt's resources — an eviction means "the VM died", not "we need more memory".
+- **Curves compose with `cond:`.** Either branch may supply a curve, a scalar, or a mix; the same monotonicity/positivity rules apply after substitution.
+
+Mix with `retry:` and `accept_failure:` freely — the curve is orthogonal.
+
 #### `numa: <int>` — pin tasks to specific NUMA nodes
 
 When set, each task of this step is launched with `--cpuset-cpus` / `--cpuset-mems` pointing at `numa` consecutive NUMA nodes on its worker. The per-task `$CPU` env var becomes the count of CPUs in those nodes; `$MEM` is approximated from the host's total memory scaled by node share.

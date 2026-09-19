@@ -348,6 +348,17 @@ optimize:
     depth: {type: int, low: 1, high: 10}
 ` + "`" + `
 
+### Retry with escalating resources
+task_spec.cpu / mem / disk each accept either a scalar (constant) or a list to escalate on retry — scitq's equivalent of Nextflow's ` + "`" + `memory { task.attempt * 8.GB }` + "`" + `. Use it for tasks that occasionally hit OOM and would succeed with a heavier flavor:
+` + "`" + `yaml
+- module: align.yaml
+  retry: 2
+  task_spec:
+    cpu: 8                    # flat across every attempt
+    mem: [40, 80, 160]        # first attempt 40 GB, retry 80, then 160
+` + "`" + `
+Rules: curves must be monotonically non-decreasing; the recruiter sizes workers for the largest value; beyond curve length the last value repeats; evictions ignore the curve. When inspecting a running task via list_tasks, the min_cpu/min_mem/min_disk fields report what THIS attempt asked for (server shifts these along the curve on retry); cpu_curve/mem_curve/disk_curve show the full escalation plan when set.
+
 Always call login first to authenticate before using other tools.`,
 		},
 	}
@@ -1183,6 +1194,18 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		ReuseKey         string   `json:"reuse_key,omitempty"`
 		Hidden           bool     `json:"hidden,omitempty"`
 		PreviousTaskID   int32    `json:"previous_task_id,omitempty"`
+		// Per-task resource requirements. These are the ask for THIS
+		// attempt — server shifts them along the curve on edit_and_retry.
+		MinCpu           *float32  `json:"min_cpu,omitempty"`
+		MinMem           *float32  `json:"min_mem,omitempty"`
+		MinDisk          *float32  `json:"min_disk,omitempty"`
+		// Full per-attempt escalation curve (Nextflow-style retry with
+		// extra resource). Emitted only when the task actually declares
+		// escalation — a single-element curve is just the scalar min_*
+		// and would double the output for no information gain.
+		CpuCurve         []float32 `json:"cpu_curve,omitempty"`
+		MemCurve         []float32 `json:"mem_curve,omitempty"`
+		DiskCurve        []float32 `json:"disk_curve,omitempty"`
 	}
 	summaries := make([]taskSummary, 0, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -1211,6 +1234,14 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		if t.QualityVars != nil { s.QualityVars = *t.QualityVars }
 		if t.ReuseKey != nil { s.ReuseKey = *t.ReuseKey }
 		if t.PreviousTaskId != nil { s.PreviousTaskID = *t.PreviousTaskId }
+		if t.MinCpu != nil { s.MinCpu = t.MinCpu }
+		if t.MinMem != nil { s.MinMem = t.MinMem }
+		if t.MinDisk != nil { s.MinDisk = t.MinDisk }
+		// Only surface curves that actually escalate; a single-element
+		// curve is just the scalar min_* under a different name.
+		if len(t.CpuCurve) > 1 { s.CpuCurve = t.CpuCurve }
+		if len(t.MemCurve) > 1 { s.MemCurve = t.MemCurve }
+		if len(t.DiskCurve) > 1 { s.DiskCurve = t.DiskCurve }
 		summaries = append(summaries, s)
 	}
 	return jsonResult(summaries), nil

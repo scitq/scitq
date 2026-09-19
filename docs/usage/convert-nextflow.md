@@ -45,6 +45,7 @@ The converter parses Nextflow `process` definitions (directives, inputs, outputs
 | `conda 'pkg=ver'` | `container: gmtscience/pkg:ver` + a mkdocker Dockerfile emitted on stderr |
 | `cpus 4` / `memory '8 GB'` | `task_spec: { cpu: 4, mem: 8 }` |
 | `label 'process_medium'` / `'process_high'` | `task_spec` filled from the [nf-core label heuristic](#nf-core-label-heuristics) when explicit `cpus`/`memory` aren't set |
+| `errorStrategy 'retry'` + `memory { task.attempt * 8.GB }` | `retry: N` + `task_spec: { mem: [8, 16, 24, ...] }` — list form escalates per attempt; see [Per-attempt resource escalation](yaml-templates.md#per-attempt-resource-escalation-retry-curves) |
 | `publishDir "..."` | `publish: true` (paired with workflow-level `publish_root:`) |
 | `input: tuple val(meta), path(reads)` | per-sample step (`tag` carried implicitly by the iterator) |
 | `input: path(file)` only | one-off step (`per_sample: false`) |

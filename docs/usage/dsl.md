@@ -256,6 +256,18 @@ A TaskSpec can either specify concurrency (e.g. static concurrency) or specify o
 
 Note that this does not impact the worker pool itself, just how many tasks each worker within this pool can do.
 
+#### Per-attempt resource escalation (retry curves)
+
+`cpu`, `mem`, and `disk` each accept either a scalar or a **list** giving the resource ask for each successive attempt — scitq's equivalent of Nextflow's `memory { task.attempt * 8.GB }`:
+
+```python
+TaskSpec(cpu=8, mem=[40, 80, 160], disk=[200, 400])
+```
+
+Here every attempt gets 8 CPUs, but memory escalates 40 → 80 → 160 GB across retries and disk goes 200 → 400 GB. The recruiter sizes workers for the *worst-case* (`max_mem`, `max_disk`), so a retry never blocks on capacity that wasn't provisioned. Curves must be monotonically non-decreasing and all positive; beyond the curve length the last value repeats. Evictions (worker preempted) ignore the curve — the retry keeps the original attempt's resources because "the VM died" isn't an OOM signal.
+
+Same syntax works in YAML: `mem: [40, 80, 160]` in a `task_spec:` block.
+
 #### `scitq_auth`: let the task call `scitq file copy`
 
 `TaskSpec` accepts one more option, `scitq_auth: bool` (default `False`). When set to `True` the worker, before launching the task, injects two environment variables into the container — `SCITQ_SERVER` (the address the worker registered with) and `SCITQ_TOKEN` (the worker's own auth token) — and bind-mounts the worker's `/usr/local/bin/scitq` into the container at the same path (read-only).

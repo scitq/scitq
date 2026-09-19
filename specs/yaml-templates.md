@@ -494,7 +494,7 @@ Supported install methods: `conda:`, `apt:`, `binary:`, `pip:`.
 | `skip_if_exists` | `true` to skip if output already has files |
 | `accept_failure` | `true` to allow this step to run even if some prerequisites failed terminally (all retries exhausted). Default: `false` — any failed prerequisite blocks the step |
 | `paired` | `true`/`false` or `"{params.paired}"` — passed to modules that support it |
-| `task_spec` | `cpu:`, `mem:`, `disk:` per task |
+| `task_spec` | `cpu:`, `mem:`, `disk:` per task — scalar or a list to escalate on retry, see [Per-attempt resource escalation](#per-attempt-resource-escalation-retry-curves) |
 | `worker_pool` | Override with `max_recruited:` etc. |
 | `container` | Override the module's default container |
 
@@ -516,6 +516,29 @@ The `accept_failure: true` flag changes this: a prerequisite is also considered 
 ```
 
 A prerequisite that fails but still has retries remaining is **not** considered terminal — the retry will create a fresh clone, and the dependency waits for the clone's outcome. Only when all retries are exhausted does `accept_failure` apply.
+
+### Per-attempt resource escalation (retry curves)
+
+`task_spec.cpu`, `task_spec.mem`, and `task_spec.disk` each accept either a scalar (constant across every attempt, the common case) **or a list** giving the resource ask for each successive attempt. This is scitq's equivalent of Nextflow's `memory { task.attempt * 8.GB }` pattern — useful for tasks that occasionally hit OOM or run out of disk and would succeed with a heavier flavor.
+
+```yaml
+- module: align.yaml
+  retry: 2                    # up to 2 retries (3 attempts total)
+  task_spec:
+    cpu: 8                    # flat: same 8 CPUs every attempt
+    mem: [40, 80, 160]        # 40 GB first attempt, 80 GB on retry, 160 GB on 2nd retry
+    disk: [200, 400]          # 200 GB then 400 GB; further attempts stay at 400 GB
+```
+
+Semantics:
+
+- **Monotonically non-decreasing.** A retry must never ask for less than a previous attempt. `mem: [40, 20]` is rejected at load time.
+- **Worker is sized for the worst case.** The recruiter provisions machines that fit the *largest* value in the curve, so a retry never blocks on capacity that wasn't reserved up front.
+- **Beyond the curve length, the last value repeats.** With `mem: [40, 80]` and `retry: 5`, attempts 3–6 all get 80 GB. The retry limit (`retry:`) governs *how many* attempts; the curve governs *at what size*.
+- **Evictions ignore the curve.** If a task fails because its worker was preempted (`failure_class = 'eviction'`), the retry keeps the *original* attempt's resources — an eviction means "the VM died", not "we need more memory".
+- **Curves can appear under `cond:`.** The two branches can supply different curves (or a mix of scalar/curve), same as any other task_spec field.
+
+Mix with `retry:` and `accept_failure:` freely — the curve is orthogonal.
 
 ### The `resource` field
 
