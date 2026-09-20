@@ -519,7 +519,7 @@ A prerequisite that fails but still has retries remaining is **not** considered 
 
 ### Auto-cleanup of intermediate data (`outputs.lifetime`)
 
-Declaring `lifetime: workflow` inside a step's `outputs:` block marks that step's data as intermediate. When the parent workflow reaches **S**, the server sweeps the workspace copies of every output that step produced. On **F**, nothing is deleted — the data stays for debugging.
+`lifetime: workflow` on a step's `outputs:` block marks that step's data as intermediate. When the parent workflow reaches **S**, the server deletes the workspace copies of every output that step produced. On **F** or **D**, nothing is deleted.
 
 ```yaml
 - name: trim
@@ -529,18 +529,36 @@ Declaring `lifetime: workflow` inside a step's `outputs:` block marks that step'
     cleaned: "*.clean.fq.gz"
 ```
 
-Semantics:
-
-- **Only workspace copies are affected.** Files sent to an explicit `publish:` destination are never touched. With `publish_mode: copy`, the publish copy persists and the workspace copy is swept — the usual "publish + intermediate" combination.
-- **Best-effort deletion.** A backend hiccup logs a warning and the sweep moves on; a failed cleanup never rewinds the workflow from S back to R. Manual re-cleanup remains possible via `scitq file` if needed.
-- **Fires only on S**, never on F or D. Manual re-runs (extend/retry) re-produce the intermediate data.
-- **Reserved values.** Only `workflow` is accepted today. A future release may add `task` (drop after the single downstream consumer succeeds).
+- Only workspace copies are affected. Files sent to an explicit `publish:` destination are kept. With `publish_mode: copy`, the publish copy persists and the workspace copy is deleted.
+- Cleanup is best-effort: a backend failure is logged and the workflow status is not affected.
+- Only `workflow` is accepted. `task` is reserved for a future release (drop after the single downstream consumer succeeds).
 
 Storage: one nullable CHAR(1) column `output_lifetime` on `step` (`W` = workflow, NULL = keep). See migration `000045_step_output_lifetime.up.sql`.
 
+### Shared memory / disk overhead (`mem_shared`, `disk_shared`)
+
+Tools that mmap a large read-only reference (hermes, bowtie2, kraken2) share one page cache on the host regardless of concurrency. `mem_shared` (and `disk_shared`) declare that per-host overhead so the recruiter's sizing math accounts for it:
+
+```yaml
+task_spec:
+  cpu: 4
+  mem: 5              # per-task incremental
+  mem_shared: 15      # per-host shared overhead
+```
+
+- `mem` is the per-task incremental memory; `mem_shared` is the additional overhead paid once per worker. Total on a worker: `mem_shared + concurrency × mem`.
+- Recruiter concurrency: `floor((worker.mem - mem_shared) / mem)`.
+- Assignment fit predicate: `worker.mem >= mem + mem_shared`.
+- Both fields accept a curve (list) for per-attempt escalation, shifted at the same attempt index as `mem` / `disk`. Values must be all positive and monotonically non-decreasing.
+- `disk_shared` behaves the same way for disk. There is no `cpu_shared`.
+
+`mem_shared` is a declaration, not something the worker verifies. Setting it for a tool that loads its own copy per task will over-commit the worker and OOM.
+
+Storage: `min_mem_shared`, `min_disk_shared`, `mem_shared_curve`, `disk_shared_curve` on `task`; `memory_shared_per_task`, `disk_shared_per_task` on `recruiter`. See migration `000046_task_shared_resources.up.sql`.
+
 ### Per-attempt resource escalation (retry curves)
 
-`task_spec.cpu`, `task_spec.mem`, and `task_spec.disk` each accept either a scalar (constant across every attempt, the common case) **or a list** giving the resource ask for each successive attempt. This is scitq's equivalent of Nextflow's `memory { task.attempt * 8.GB }` pattern — useful for tasks that occasionally hit OOM or run out of disk and would succeed with a heavier flavor.
+`task_spec.cpu`, `task_spec.mem`, and `task_spec.disk` each accept either a scalar (constant across every attempt) **or a list** giving the resource ask for each successive attempt. Use a list for tasks that occasionally hit OOM or run out of disk and would succeed with a heavier allocation.
 
 ```yaml
 - module: align.yaml
@@ -551,15 +569,12 @@ Storage: one nullable CHAR(1) column `output_lifetime` on `step` (`W` = workflow
     disk: [200, 400]          # 200 GB then 400 GB; further attempts stay at 400 GB
 ```
 
-Semantics:
-
-- **Monotonically non-decreasing.** A retry must never ask for less than a previous attempt. `mem: [40, 20]` is rejected at load time.
-- **Worker is sized for the worst case.** The recruiter provisions machines that fit the *largest* value in the curve, so a retry never blocks on capacity that wasn't reserved up front.
-- **Beyond the curve length, the last value repeats.** With `mem: [40, 80]` and `retry: 5`, attempts 3–6 all get 80 GB. The retry limit (`retry:`) governs *how many* attempts; the curve governs *at what size*.
-- **Evictions ignore the curve.** If a task fails because its worker was preempted (`failure_class = 'eviction'`), the retry keeps the *original* attempt's resources — an eviction means "the VM died", not "we need more memory".
-- **Curves can appear under `cond:`.** The two branches can supply different curves (or a mix of scalar/curve), same as any other task_spec field.
-
-Mix with `retry:` and `accept_failure:` freely — the curve is orthogonal.
+- A curve must be monotonically non-decreasing and all positive. `mem: [40, 20]` is rejected at load time.
+- The recruiter provisions workers for the largest value in each curve.
+- Attempts past the curve length reuse the last value. With `mem: [40, 80]` and `retry: 5`, attempts 3–6 all get 80 GB. `retry:` sets how many attempts happen; the curve sets the size of each.
+- Evictions (worker preempted, `failure_class = 'eviction'`) do not advance the curve; the retry keeps the same resources as the previous attempt.
+- Curves compose with `cond:` — a branch may supply a curve, a scalar, or a mix. Validation applies after substitution.
+- Curves compose with `mem_shared` / `disk_shared`; the shared value can be a curve of its own, shifted at the same attempt index.
 
 ### The `resource` field
 

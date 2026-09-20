@@ -408,6 +408,10 @@ class Scitq2Client:
         cpu_curve: Optional[List[float]] = None,
         mem_curve: Optional[List[float]] = None,
         disk_curve: Optional[List[float]] = None,
+        min_mem_shared: Optional[float] = None,
+        min_disk_shared: Optional[float] = None,
+        mem_shared_curve: Optional[List[float]] = None,
+        disk_shared_curve: Optional[List[float]] = None,
         publish_mode: Optional[str] = None,
     ) -> int:
         """
@@ -484,6 +488,14 @@ class Scitq2Client:
             request.mem_curve.extend(mem_curve)
         if disk_curve and len(disk_curve) > 1:
             request.disk_curve.extend(disk_curve)
+        if min_mem_shared is not None:
+            request.min_mem_shared = min_mem_shared
+        if min_disk_shared is not None:
+            request.min_disk_shared = min_disk_shared
+        if mem_shared_curve and len(mem_shared_curve) > 1:
+            request.mem_shared_curve.extend(mem_shared_curve)
+        if disk_shared_curve and len(disk_shared_curve) > 1:
+            request.disk_shared_curve.extend(disk_shared_curve)
         if publish_mode is not None and publish_mode != "" and publish_mode != "move":
             # "move" is the default — only send the field for the non-default
             # ("copy") so legacy paths stay untouched on the wire.
@@ -495,6 +507,7 @@ class Scitq2Client:
                          concurrency: Optional[int]=None, prefetch: Optional[int]=None,
                          cpu_per_task: Optional[int]=None, memory_per_task: Optional[float]=None, disk_per_task: Optional[float]=None,
                          gpu_per_task: Optional[int]=None,
+                         memory_shared_per_task: Optional[float]=None, disk_shared_per_task: Optional[float]=None,
                          image: Optional[str]=None, gpu_image: Optional[str]=None,
                          concurrency_max: Optional[int]=None, concurrency_min: Optional[int]=None,
                          prefetch_percent: Optional[int]=None,
@@ -547,6 +560,8 @@ class Scitq2Client:
             memory_per_task=memory_per_task,
             disk_per_task=disk_per_task,
             gpu_per_task=_i(gpu_per_task),
+            memory_shared_per_task=memory_shared_per_task,
+            disk_shared_per_task=disk_shared_per_task,
             image=image,
             gpu_image=gpu_image,
             prefetch_percent=_i(prefetch_percent),

@@ -256,6 +256,19 @@ message TaskRequest {
     // results bucket also gets the artefacts). Empty = move. Only
     // meaningful when `publish` is set. Spec: addition_from_nextflow.md B.
     optional string publish_mode = 31;
+    // Shared per-worker overhead (mem/disk only — CPU sharing is rare).
+    // Reading B: total_on_worker = shared + concurrency * min_mem, so the
+    // recruiter picks concurrency = floor((worker.mem - shared) / min_mem).
+    // Used by hermes / bowtie2 / kraken2 style tools that mmap one large
+    // read-only reference per host and serve many parallel queries against
+    // it. NULL / unset = 0 (linear model, today's behaviour). Curve mirrors
+    // mem_curve — shifts at the same retry_count index. This is a
+    // user-declared invariant, not enforced: setting shared for a tool that
+    // loads its own copy per task will over-commit and OOM.
+    optional float min_mem_shared      = 32;
+    optional float min_disk_shared     = 33;
+    repeated float mem_shared_curve    = 34;
+    repeated float disk_shared_curve   = 35;
 }
 
 message Task {
@@ -326,6 +339,13 @@ message Task {
     // once submitted; `modified_at` bumps on every state transition.
     int64 created_at = 45;
     int64 modified_at = 46;
+    // See TaskRequest.min_mem_shared / min_disk_shared / mem_shared_curve /
+    // disk_shared_curve. Server-side retry shifts min_*_shared to
+    // *_shared_curve[retry_count] the same way it shifts min_mem/min_disk.
+    optional float min_mem_shared     = 47;
+    optional float min_disk_shared    = 48;
+    repeated float mem_shared_curve   = 49;
+    repeated float disk_shared_curve  = 50;
 }
 
 message TaskList {
@@ -993,6 +1013,13 @@ message Recruiter {
     // beats image; both fall through to scitq.yaml defaults when unset.
     optional string image = 16;
     optional string gpu_image = 17;
+    // Per-worker shared overhead for the dynamic concurrency formula.
+    // Concurrency for this recruiter's workers becomes
+    //   floor((worker.mem - memory_shared_per_task) / memory_per_task)
+    // (and similarly for disk). NULL / 0 = today's linear model. Matches
+    // TaskRequest.min_mem_shared / min_disk_shared on the task side.
+    optional float memory_shared_per_task = 18;
+    optional float disk_shared_per_task   = 19;
 }
 
 message RecruiterUpdate {
@@ -1013,6 +1040,9 @@ message RecruiterUpdate {
   optional int32 gpu_per_task = 15;
   optional string image = 16;
   optional string gpu_image = 17;
+  // See Recruiter.memory_shared_per_task / disk_shared_per_task.
+  optional float memory_shared_per_task = 18;
+  optional float disk_shared_per_task   = 19;
 }
 
 message RecruiterList {

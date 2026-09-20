@@ -271,6 +271,20 @@ class WorkerPool:
                 options["cpu_per_task"]=task_spec.max_cpu if task_spec.max_cpu is not None else task_spec.cpu
                 options["memory_per_task"]=task_spec.max_mem if task_spec.max_mem is not None else task_spec.mem
                 options["disk_per_task"]=task_spec.max_disk if task_spec.max_disk is not None else task_spec.disk
+                # Shared overhead: worst-case across the curve, same logic
+                # as max_mem — the recruiter must reserve enough headroom
+                # for the heaviest attempt's shared footprint or a retry
+                # OOMs the moment it lands. Only forwarded when set (None
+                # leaves the DB column NULL, preserving the linear model
+                # for callers that don't opt in).
+                if getattr(task_spec, 'max_mem_shared', None) is not None:
+                    options["memory_shared_per_task"] = task_spec.max_mem_shared
+                elif getattr(task_spec, 'mem_shared', None) is not None:
+                    options["memory_shared_per_task"] = task_spec.mem_shared
+                if getattr(task_spec, 'max_disk_shared', None) is not None:
+                    options["disk_shared_per_task"] = task_spec.max_disk_shared
+                elif getattr(task_spec, 'disk_shared', None) is not None:
+                    options["disk_shared_per_task"] = task_spec.disk_shared
                 # task_spec.gpu>0 makes GPU the 4th dimension of dynamic
                 # concurrency: at recruit time the server picks
                 # floor(flavor.gpu_count / gpu_per_task) and the minimum

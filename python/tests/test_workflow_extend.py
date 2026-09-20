@@ -55,7 +55,7 @@ class FakeClient:
         self.calls.append(("create_workflow", name))
         return i
 
-    def create_step(self, workflow_id, name, quality_definition=None):
+    def create_step(self, workflow_id, name, quality_definition=None, output_lifetime=None):
         i = self._id()
         self.steps[i] = (workflow_id, name)
         self.calls.append(("create_step", name))

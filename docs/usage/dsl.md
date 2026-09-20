@@ -256,15 +256,30 @@ A TaskSpec can either specify concurrency (e.g. static concurrency) or specify o
 
 Note that this does not impact the worker pool itself, just how many tasks each worker within this pool can do.
 
+#### Shared memory / disk overhead
+
+Some tools (hermes, bowtie2 with a large index, kraken2 with a large database) load a read-only reference once per host and serve multiple queries against it in parallel. Because the reference is mmap'd from a shared file, one copy sits in the host's page cache regardless of concurrency. Declare that overhead so the recruiter sizes workers accurately:
+
+```python
+TaskSpec(cpu=4, mem=5, mem_shared=15)                    # 5 GB per query + 15 GB shared index
+TaskSpec(cpu=4, mem=[5, 10, 20], mem_shared=[15, 15, 30])  # curves for retry escalation
+```
+
+`mem` is the per-task incremental memory, `mem_shared` the per-host overhead. Total on a worker: `mem_shared + concurrency × mem`. Recruiter concurrency: `floor((worker.mem - mem_shared) / mem)`. Assignment eligibility: `worker.mem >= mem + mem_shared`. `disk_shared` behaves the same way for disk. There is no `cpu_shared`; the feature is restricted to memory and disk.
+
+⚠️ `mem_shared` is a declaration, not something scitq verifies. If the tool loads its own copy per task rather than mmap'ing a shared file, the worker will be over-committed and tasks will OOM. Only set `mem_shared` when the tool truly shares the data (an mmap of a `/resource/`-mounted read-only file is the typical case).
+
+Same syntax works in YAML: `mem_shared: 15` (or `mem_shared: [15, 15, 30]`) inside a `task_spec:` block.
+
 #### Per-attempt resource escalation (retry curves)
 
-`cpu`, `mem`, and `disk` each accept either a scalar or a **list** giving the resource ask for each successive attempt — scitq's equivalent of Nextflow's `memory { task.attempt * 8.GB }`:
+`cpu`, `mem`, and `disk` each accept either a scalar or a **list** giving the resource ask for each successive attempt:
 
 ```python
 TaskSpec(cpu=8, mem=[40, 80, 160], disk=[200, 400])
 ```
 
-Here every attempt gets 8 CPUs, but memory escalates 40 → 80 → 160 GB across retries and disk goes 200 → 400 GB. The recruiter sizes workers for the *worst-case* (`max_mem`, `max_disk`), so a retry never blocks on capacity that wasn't provisioned. Curves must be monotonically non-decreasing and all positive; beyond the curve length the last value repeats. Evictions (worker preempted) ignore the curve — the retry keeps the original attempt's resources because "the VM died" isn't an OOM signal.
+Every attempt gets 8 CPUs; memory escalates 40 → 80 → 160 GB across retries and disk goes 200 → 400 GB. The recruiter provisions workers for the largest value in each curve, so a retry never blocks on capacity that wasn't reserved up front. Curves must be monotonically non-decreasing and all positive; attempts past the curve length reuse the last value. Evictions (worker preempted) do not advance the curve — the retry keeps the same resources as the previous attempt.
 
 Same syntax works in YAML: `mem: [40, 80, 160]` in a `task_spec:` block.
 
@@ -986,13 +1001,13 @@ There is also a specific meaning attached to this: the default workspace that de
 
 #### `lifetime="workflow"`: auto-cleanup of intermediate data
 
-Pass `lifetime="workflow"` on the `Outputs` and the server sweeps this step's workspace copies when the workflow reaches S:
+`lifetime="workflow"` on the `Outputs` marks the step's data as intermediate. When the parent workflow reaches S, the server deletes the workspace copies of every output produced by that step:
 
 ```python
 outputs=Outputs(lifetime="workflow", cleaned="*.clean.fq.gz")
 ```
 
-Only the workspace is affected — anything sent to a `publish:` destination stays. On workflow F, nothing is deleted (data kept for debugging). The sweep is best-effort: a backend hiccup logs a warning and moves on, never rewinding the workflow. Only `"workflow"` is accepted today; `"task"` is reserved for a future release.
+Only workspace copies are affected; files sent to a `publish:` destination are kept. On workflow F or D, nothing is deleted. The cleanup is best-effort: a backend failure is logged and the workflow status is not affected. Only `"workflow"` is accepted; `"task"` is reserved for a future release.
 
 Same syntax works in YAML: `lifetime: workflow` sibling of the named globs inside `outputs:`.
 

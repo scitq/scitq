@@ -54,8 +54,8 @@ of leak we've hit or seen coming. Add more in
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `scitq_workers` | gauge | `status`, `provider`, `permanent` | Non-deleted workers grouped by row status (R/O/I/…), cloud provider (`azure.primary`, `openstack.ovh`, `local.local`, …), and whether they're marked permanent. Dashboard slice-and-dice metric. |
-| `scitq_worker_idle_seconds` | gauge | `worker_id`, `worker_name`, `permanent` | Seconds since this worker last finished a task (or since the watchdog started tracking it, for a "born idle" worker). **Non-permanent workers reading above `2 × scitq.idle_timeout` are the direct signature of a leaked worker** (see the 2026-09-09 worker-6629 incident). |
-| `scitq_worker_active_tasks_drift` | gauge | `worker_id`, `worker_name` | DB active-task count (`status IN A/C/D/O/R AND NOT hidden`) minus watchdog in-memory active-task count. Should be `0` in steady state; sustained non-zero means the watchdog memory has diverged from the DB — the class of bug that let worker 6629 leak. |
+| `scitq_worker_idle_seconds` | gauge | `worker_id`, `worker_name`, `permanent` | Seconds since this worker last finished a task (or since the watchdog started tracking it, for a "born idle" worker). **Non-permanent workers reading above `2 × scitq.idle_timeout` are the direct signature of a leaked worker.** |
+| `scitq_worker_active_tasks_drift` | gauge | `worker_id`, `worker_name` | DB active-task count (`status IN A/C/D/O/R AND NOT hidden`) minus watchdog in-memory active-task count. Should be `0` in steady state; sustained non-zero means the watchdog memory has diverged from the DB. |
 | `scitq_worker_running_tasks` | gauge | `worker_id`, `worker_name`, `permanent` | Number of tasks the WORKER CLIENT itself reports as currently executing (container/exec launched, upload not started). **This is the ground-truth runtime signal**: independent of any DB status bucket, sourced from the client's own `executingTasks` map (populated at semaphore acquisition + container/exec launch, cleared when execution ends). A stuck hidden R task cannot inflate it. Pair with `scitq_worker_idle_seconds` for a leak-proof leak-detection alert. |
 
 ### Task & workflow shape
@@ -128,7 +128,7 @@ groups:
       severity: warning
     annotations:
       summary: "scitq watchdog memory drifted from DB on worker {{ $labels.worker_name }}"
-      description: "Steady non-zero drift means a task-status transition didn't update the watchdog. This is the root cause of the 2026-09-09 leak; if it fires post-fix, a new code path forgot to notify."
+      description: "Steady non-zero drift means a task-status transition did not update the watchdog. If it fires, a code path is failing to notify the watchdog and the alert should be investigated as a possible worker-leak precursor."
 
   - alert: ScitqDeletionStuck
     expr: scitq_deletion_jobs_stuck > 0

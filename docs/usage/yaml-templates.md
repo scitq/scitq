@@ -783,7 +783,7 @@ Without named outputs, the step exposes its entire `/output/` directory.
 
 #### `lifetime:` — auto-cleanup of intermediate data
 
-Declaring `lifetime: workflow` on a step's outputs tells scitq that this step's data is intermediate. When the parent workflow reaches **S** (succeeded), the server sweeps the workspace copies of every output produced by that step. On **F** (failed) nothing is deleted — the data stays put for debugging.
+`lifetime: workflow` on a step's outputs marks that step's data as intermediate. When the parent workflow reaches **S** (succeeded), the server deletes the workspace copies of every output produced by that step. On **F** (failed) or **D** (debug), nothing is deleted — the data stays for inspection.
 
 ```yaml
   - name: trim
@@ -793,18 +793,17 @@ Declaring `lifetime: workflow` on a step's outputs tells scitq that this step's 
       cleaned: "*.clean.fq.gz"
 ```
 
-What gets deleted:
+Scope:
 
-- **Only the workspace copies.** Files sent to an explicit `publish:` destination are never touched — the author explicitly asked for those to persist.
-- With `publish_mode: copy`, the publish location keeps its copy and the workspace copy is swept. That's usually what you want for intermediate data you also happen to be archiving.
-- With `publish_mode: move` (the default), the workspace has nothing to begin with, so the sweep is a no-op.
+- Only workspace copies are affected. Files sent to an explicit `publish:` destination are kept.
+- With `publish_mode: copy`, the publish location keeps its copy and the workspace copy is deleted.
+- With `publish_mode: move` (the default), the workspace has nothing to delete, so the cleanup is a no-op.
 
-Rules:
+Behaviour:
 
-- Only `lifetime: workflow` is accepted today. A future release may add `lifetime: task` (drop as soon as the single consumer succeeds); reserving the value now.
-- The sweep is **best-effort**. A backend hiccup logs a warning and moves on — a bad rclone response never rewinds the workflow to R.
-- Fires **only on workflow → S**, never on F or D. If a workflow is manually re-run (extend or retry), intermediate data from the earlier attempt is already gone; a re-run reproduces it.
-- Alt-form via param: `lifetime: "{params.cleanup}"` where `cleanup:` is a top-level param the user picks; an empty/None value means "keep".
+- Only `lifetime: workflow` is accepted. The value `lifetime: task` is reserved for a future release and rejected today.
+- The cleanup is best-effort: a backend failure is logged and the workflow status is not affected.
+- `lifetime` may reference a parameter — `lifetime: "{params.cleanup}"` — where the parameter resolves to `workflow` to enable cleanup, or to an empty value to disable it.
 
 ### Container options
 
@@ -874,9 +873,41 @@ Branches may declare any subset of fields; whatever isn't in the chosen branch b
 
 **Why a structured block rather than per-field expressions.** Free-form expressions in `cpu:` / `mem:` (`mem: "{sample.size * 2 + 8}"`) would produce a unique spec per sample in the worst case and fragment recruitment into 1-flavor-per-task — directly at odds with scitq's batching model. A `cond:` block forces the workflow author to declare a finite set of buckets; the recruiter recruits a flavor per branch, not per sample.
 
+#### Shared memory / disk overhead
+
+Some tools load a large read-only reference (an mmap'd genome index, a kraken2 database, a hermes `.herm` file) once per host and serve multiple queries against it in parallel. Because the reference is mmap'd from a shared read-only file, only one copy sits in the host's page cache regardless of concurrency. The same applies to a decompressed reference on disk.
+
+`mem_shared` (and `disk_shared`) declare that per-host overhead so the recruiter's sizing math accounts for it:
+
+```yaml
+  - name: hermes-align
+    task_spec:
+      cpu: 4
+      mem: 5              # per-task incremental (working set per query)
+      mem_shared: 15      # per-host shared overhead (mmap'd .herm index)
+```
+
+- `mem` is the per-task incremental memory; `mem_shared` is the additional overhead paid once per worker. Total memory used on a worker is `mem_shared + concurrency × mem`.
+- Recruiter concurrency: `floor((worker.mem - mem_shared) / mem)`. On a 60 GB worker with the example above, `(60-15)/5 = 9` concurrent tasks.
+- Assignment fit: a worker is only eligible when `worker.mem >= mem + mem_shared`.
+- Both fields accept a curve (list) for per-attempt escalation. Retry shifts `mem` and `mem_shared` independently, at the same attempt index:
+
+  ```yaml
+  mem: [5, 10, 20]
+  mem_shared: [15, 15, 30]
+  ```
+
+  Either curve is optional; when set, values must be all positive and monotonically non-decreasing.
+- `disk_shared` behaves the same way for disk.
+- There is no `cpu_shared`; the feature is restricted to memory and disk.
+
+> ⚠️ `mem_shared` is a declaration, not something scitq verifies. If the tool actually loads its own copy per task rather than mmap'ing a shared file, the worker will be over-committed and tasks will OOM. Only set `mem_shared` when the tool truly shares the data (an mmap of a `/resource/`-mounted read-only file is the typical case).
+
+When you hand-write a `worker_pool` filter, remember to size it for the shared block too: `mem: 5 mem_shared: 15` at concurrency 3 needs `mem >= 30` (15 shared + 3×5) at minimum. The DSL derives this automatically from `task_spec`; hand-written YAML `worker_pool` filters do not.
+
 #### Per-attempt resource escalation (retry curves)
 
-`cpu`, `mem`, and `disk` each accept either a scalar (constant across every attempt, the common case) **or a list** giving the resource ask for each successive attempt. This is scitq's equivalent of Nextflow's `memory { task.attempt * 8.GB }` pattern — useful for tasks that occasionally hit OOM or run out of disk and would succeed with a heavier flavor:
+`cpu`, `mem`, and `disk` each accept either a scalar (constant across every attempt) **or a list** giving the resource ask for each successive attempt. Use a list for tasks that occasionally hit OOM or run out of disk and would succeed with a heavier allocation:
 
 ```yaml
   - module: align.yaml
@@ -887,15 +918,12 @@ Branches may declare any subset of fields; whatever isn't in the chosen branch b
       disk: [200, 400]          # 200 GB then 400 GB; further attempts stay at 400 GB
 ```
 
-Semantics:
-
-- **Monotonically non-decreasing.** A retry must never ask for less than a previous attempt. `mem: [40, 20]` is rejected at load time.
-- **The recruiter sizes for the worst case.** Workers are provisioned to fit the *largest* value in the curve, so a retry never blocks on capacity that wasn't reserved up front.
-- **Beyond the curve length, the last value repeats.** With `mem: [40, 80]` and `retry: 5`, attempts 3–6 all get 80 GB. `retry:` governs *how many* attempts; the curve governs *at what size*.
-- **Evictions ignore the curve.** If a task fails because its worker was preempted (`failure_class = 'eviction'`), the retry keeps the *original* attempt's resources — an eviction means "the VM died", not "we need more memory".
-- **Curves compose with `cond:`.** Either branch may supply a curve, a scalar, or a mix; the same monotonicity/positivity rules apply after substitution.
-
-Mix with `retry:` and `accept_failure:` freely — the curve is orthogonal.
+- A curve must be monotonically non-decreasing and all positive. `mem: [40, 20]` is rejected at load time.
+- The recruiter provisions workers to fit the largest value in the curve, so a retry never blocks on capacity that wasn't reserved up front.
+- Attempts past the curve length reuse the last value. With `mem: [40, 80]` and `retry: 5`, attempts 3–6 all get 80 GB. `retry:` sets how many attempts happen; the curve sets the size of each.
+- Evictions (worker preempted) do not advance the curve; the retry keeps the same resources as the previous attempt.
+- Curves compose with `cond:` — a branch may supply a curve, a scalar, or a mix. Monotonicity and positivity apply after substitution.
+- Curves compose with `mem_shared` / `disk_shared`; the shared value can be a curve of its own, shifted at the same attempt index.
 
 #### `numa: <int>` — pin tasks to specific NUMA nodes
 

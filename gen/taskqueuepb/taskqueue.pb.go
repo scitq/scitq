@@ -316,9 +316,22 @@ type TaskRequest struct {
 	// downstream consumer can still read from the workspace while the
 	// results bucket also gets the artefacts). Empty = move. Only
 	// meaningful when `publish` is set. Spec: addition_from_nextflow.md B.
-	PublishMode   *string `protobuf:"bytes,31,opt,name=publish_mode,json=publishMode,proto3,oneof" json:"publish_mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PublishMode *string `protobuf:"bytes,31,opt,name=publish_mode,json=publishMode,proto3,oneof" json:"publish_mode,omitempty"`
+	// Shared per-worker overhead (mem/disk only — CPU sharing is rare).
+	// Reading B: total_on_worker = shared + concurrency * min_mem, so the
+	// recruiter picks concurrency = floor((worker.mem - shared) / min_mem).
+	// Used by hermes / bowtie2 / kraken2 style tools that mmap one large
+	// read-only reference per host and serve many parallel queries against
+	// it. NULL / unset = 0 (linear model, today's behaviour). Curve mirrors
+	// mem_curve — shifts at the same retry_count index. This is a
+	// user-declared invariant, not enforced: setting shared for a tool that
+	// loads its own copy per task will over-commit and OOM.
+	MinMemShared    *float32  `protobuf:"fixed32,32,opt,name=min_mem_shared,json=minMemShared,proto3,oneof" json:"min_mem_shared,omitempty"`
+	MinDiskShared   *float32  `protobuf:"fixed32,33,opt,name=min_disk_shared,json=minDiskShared,proto3,oneof" json:"min_disk_shared,omitempty"`
+	MemSharedCurve  []float32 `protobuf:"fixed32,34,rep,packed,name=mem_shared_curve,json=memSharedCurve,proto3" json:"mem_shared_curve,omitempty"`
+	DiskSharedCurve []float32 `protobuf:"fixed32,35,rep,packed,name=disk_shared_curve,json=diskSharedCurve,proto3" json:"disk_shared_curve,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TaskRequest) Reset() {
@@ -582,6 +595,34 @@ func (x *TaskRequest) GetPublishMode() string {
 	return ""
 }
 
+func (x *TaskRequest) GetMinMemShared() float32 {
+	if x != nil && x.MinMemShared != nil {
+		return *x.MinMemShared
+	}
+	return 0
+}
+
+func (x *TaskRequest) GetMinDiskShared() float32 {
+	if x != nil && x.MinDiskShared != nil {
+		return *x.MinDiskShared
+	}
+	return 0
+}
+
+func (x *TaskRequest) GetMemSharedCurve() []float32 {
+	if x != nil {
+		return x.MemSharedCurve
+	}
+	return nil
+}
+
+func (x *TaskRequest) GetDiskSharedCurve() []float32 {
+	if x != nil {
+		return x.DiskSharedCurve
+	}
+	return nil
+}
+
 type Task struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TaskId           int32                  `protobuf:"varint,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -649,10 +690,17 @@ type Task struct {
 	// was this task submitted" and "when did it last change" in the
 	// task list. Epoch seconds; 0 means unset. `created_at` is stable
 	// once submitted; `modified_at` bumps on every state transition.
-	CreatedAt     int64 `protobuf:"varint,45,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	ModifiedAt    int64 `protobuf:"varint,46,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CreatedAt  int64 `protobuf:"varint,45,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ModifiedAt int64 `protobuf:"varint,46,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`
+	// See TaskRequest.min_mem_shared / min_disk_shared / mem_shared_curve /
+	// disk_shared_curve. Server-side retry shifts min_*_shared to
+	// *_shared_curve[retry_count] the same way it shifts min_mem/min_disk.
+	MinMemShared    *float32  `protobuf:"fixed32,47,opt,name=min_mem_shared,json=minMemShared,proto3,oneof" json:"min_mem_shared,omitempty"`
+	MinDiskShared   *float32  `protobuf:"fixed32,48,opt,name=min_disk_shared,json=minDiskShared,proto3,oneof" json:"min_disk_shared,omitempty"`
+	MemSharedCurve  []float32 `protobuf:"fixed32,49,rep,packed,name=mem_shared_curve,json=memSharedCurve,proto3" json:"mem_shared_curve,omitempty"`
+	DiskSharedCurve []float32 `protobuf:"fixed32,50,rep,packed,name=disk_shared_curve,json=diskSharedCurve,proto3" json:"disk_shared_curve,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -1005,6 +1053,34 @@ func (x *Task) GetModifiedAt() int64 {
 		return x.ModifiedAt
 	}
 	return 0
+}
+
+func (x *Task) GetMinMemShared() float32 {
+	if x != nil && x.MinMemShared != nil {
+		return *x.MinMemShared
+	}
+	return 0
+}
+
+func (x *Task) GetMinDiskShared() float32 {
+	if x != nil && x.MinDiskShared != nil {
+		return *x.MinDiskShared
+	}
+	return 0
+}
+
+func (x *Task) GetMemSharedCurve() []float32 {
+	if x != nil {
+		return x.MemSharedCurve
+	}
+	return nil
+}
+
+func (x *Task) GetDiskSharedCurve() []float32 {
+	if x != nil {
+		return x.DiskSharedCurve
+	}
+	return nil
 }
 
 type TaskList struct {
@@ -5752,10 +5828,19 @@ type Recruiter struct {
 	// (Azure: "publisher/offer/sku/version"; OpenStack: image name or
 	// UUID). Precedence: gpu_image (when chosen flavor has_gpu=TRUE)
 	// beats image; both fall through to scitq.yaml defaults when unset.
-	Image         *string `protobuf:"bytes,16,opt,name=image,proto3,oneof" json:"image,omitempty"`
-	GpuImage      *string `protobuf:"bytes,17,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Image    *string `protobuf:"bytes,16,opt,name=image,proto3,oneof" json:"image,omitempty"`
+	GpuImage *string `protobuf:"bytes,17,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
+	// Per-worker shared overhead for the dynamic concurrency formula.
+	// Concurrency for this recruiter's workers becomes
+	//
+	//	floor((worker.mem - memory_shared_per_task) / memory_per_task)
+	//
+	// (and similarly for disk). NULL / 0 = today's linear model. Matches
+	// TaskRequest.min_mem_shared / min_disk_shared on the task side.
+	MemorySharedPerTask *float32 `protobuf:"fixed32,18,opt,name=memory_shared_per_task,json=memorySharedPerTask,proto3,oneof" json:"memory_shared_per_task,omitempty"`
+	DiskSharedPerTask   *float32 `protobuf:"fixed32,19,opt,name=disk_shared_per_task,json=diskSharedPerTask,proto3,oneof" json:"disk_shared_per_task,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Recruiter) Reset() {
@@ -5907,6 +5992,20 @@ func (x *Recruiter) GetGpuImage() string {
 	return ""
 }
 
+func (x *Recruiter) GetMemorySharedPerTask() float32 {
+	if x != nil && x.MemorySharedPerTask != nil {
+		return *x.MemorySharedPerTask
+	}
+	return 0
+}
+
+func (x *Recruiter) GetDiskSharedPerTask() float32 {
+	if x != nil && x.DiskSharedPerTask != nil {
+		return *x.DiskSharedPerTask
+	}
+	return 0
+}
+
 type RecruiterUpdate struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	StepId          int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
@@ -5926,8 +6025,11 @@ type RecruiterUpdate struct {
 	GpuPerTask      *int32                 `protobuf:"varint,15,opt,name=gpu_per_task,json=gpuPerTask,proto3,oneof" json:"gpu_per_task,omitempty"`
 	Image           *string                `protobuf:"bytes,16,opt,name=image,proto3,oneof" json:"image,omitempty"`
 	GpuImage        *string                `protobuf:"bytes,17,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// See Recruiter.memory_shared_per_task / disk_shared_per_task.
+	MemorySharedPerTask *float32 `protobuf:"fixed32,18,opt,name=memory_shared_per_task,json=memorySharedPerTask,proto3,oneof" json:"memory_shared_per_task,omitempty"`
+	DiskSharedPerTask   *float32 `protobuf:"fixed32,19,opt,name=disk_shared_per_task,json=diskSharedPerTask,proto3,oneof" json:"disk_shared_per_task,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RecruiterUpdate) Reset() {
@@ -6077,6 +6179,20 @@ func (x *RecruiterUpdate) GetGpuImage() string {
 		return *x.GpuImage
 	}
 	return ""
+}
+
+func (x *RecruiterUpdate) GetMemorySharedPerTask() float32 {
+	if x != nil && x.MemorySharedPerTask != nil {
+		return *x.MemorySharedPerTask
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetDiskSharedPerTask() float32 {
+	if x != nil && x.DiskSharedPerTask != nil {
+		return *x.DiskSharedPerTask
+	}
+	return 0
 }
 
 type RecruiterList struct {
@@ -11576,7 +11692,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\x89\v\n" +
+	"build_arch\x18\x03 \x01(\tR\tbuildArchJ\x04\b\x04\x10\x05R\x06urgent\"\xde\f\n" +
 	"\vTaskRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x88\x01\x01\x12\x1c\n" +
@@ -11617,7 +11733,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tmem_curve\x18\x1d \x03(\x02R\bmemCurve\x12\x1d\n" +
 	"\n" +
 	"disk_curve\x18\x1e \x03(\x02R\tdiskCurve\x12&\n" +
-	"\fpublish_mode\x18\x1f \x01(\tH\x15R\vpublishMode\x88\x01\x01B\b\n" +
+	"\fpublish_mode\x18\x1f \x01(\tH\x15R\vpublishMode\x88\x01\x01\x12)\n" +
+	"\x0emin_mem_shared\x18  \x01(\x02H\x16R\fminMemShared\x88\x01\x01\x12+\n" +
+	"\x0fmin_disk_shared\x18! \x01(\x02H\x17R\rminDiskShared\x88\x01\x01\x12(\n" +
+	"\x10mem_shared_curve\x18\" \x03(\x02R\x0ememSharedCurve\x12*\n" +
+	"\x11disk_shared_curve\x18# \x03(\x02R\x0fdiskSharedCurveB\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -11647,7 +11767,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_min_gpuB\n" +
 	"\n" +
 	"\b_gpu_allB\x0f\n" +
-	"\r_publish_mode\"\x95\x10\n" +
+	"\r_publish_modeB\x11\n" +
+	"\x0f_min_mem_sharedB\x12\n" +
+	"\x10_min_disk_shared\"\xea\x11\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -11703,7 +11825,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18- \x01(\x03R\tcreatedAt\x12\x1f\n" +
 	"\vmodified_at\x18. \x01(\x03R\n" +
-	"modifiedAtB\b\n" +
+	"modifiedAt\x12)\n" +
+	"\x0emin_mem_shared\x18/ \x01(\x02H R\fminMemShared\x88\x01\x01\x12+\n" +
+	"\x0fmin_disk_shared\x180 \x01(\x02H!R\rminDiskShared\x88\x01\x01\x12(\n" +
+	"\x10mem_shared_curve\x181 \x03(\x02R\x0ememSharedCurve\x12*\n" +
+	"\x11disk_shared_curve\x182 \x03(\x02R\x0fdiskSharedCurveB\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -11744,7 +11870,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\b_gpu_allB\x10\n" +
 	"\x0e_failure_classB\x0f\n" +
-	"\r_publish_mode\"1\n" +
+	"\r_publish_modeB\x11\n" +
+	"\x0f_min_mem_sharedB\x12\n" +
+	"\x10_min_disk_shared\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +
@@ -12238,7 +12366,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_step_id\":\n" +
 	"\vRecruiterId\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xb1\x06\n" +
+	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xd5\a\n" +
 	"\tRecruiter\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12 \n" +
@@ -12261,7 +12389,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"gpuPerTask\x88\x01\x01\x12\x19\n" +
 	"\x05image\x18\x10 \x01(\tH\n" +
 	"R\x05image\x88\x01\x01\x12 \n" +
-	"\tgpu_image\x18\x11 \x01(\tH\vR\bgpuImage\x88\x01\x01B\x0e\n" +
+	"\tgpu_image\x18\x11 \x01(\tH\vR\bgpuImage\x88\x01\x01\x128\n" +
+	"\x16memory_shared_per_task\x18\x12 \x01(\x02H\fR\x13memorySharedPerTask\x88\x01\x01\x124\n" +
+	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\rR\x11diskSharedPerTask\x88\x01\x01B\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
 	"\f_max_workersB\x0f\n" +
@@ -12274,7 +12404,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\r_gpu_per_taskB\b\n" +
 	"\x06_imageB\f\n" +
 	"\n" +
-	"_gpu_image\"\xed\x06\n" +
+	"_gpu_imageB\x19\n" +
+	"\x17_memory_shared_per_taskB\x17\n" +
+	"\x15_disk_shared_per_task\"\x91\b\n" +
 	"\x0fRecruiterUpdate\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12%\n" +
@@ -12297,7 +12429,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\fgpu_per_task\x18\x0f \x01(\x05H\fR\n" +
 	"gpuPerTask\x88\x01\x01\x12\x19\n" +
 	"\x05image\x18\x10 \x01(\tH\rR\x05image\x88\x01\x01\x12 \n" +
-	"\tgpu_image\x18\x11 \x01(\tH\x0eR\bgpuImage\x88\x01\x01B\x0e\n" +
+	"\tgpu_image\x18\x11 \x01(\tH\x0eR\bgpuImage\x88\x01\x01\x128\n" +
+	"\x16memory_shared_per_task\x18\x12 \x01(\x02H\x0fR\x13memorySharedPerTask\x88\x01\x01\x124\n" +
+	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\x10R\x11diskSharedPerTask\x88\x01\x01B\x0e\n" +
 	"\f_protofilterB\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
@@ -12314,7 +12448,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\r_gpu_per_taskB\b\n" +
 	"\x06_imageB\f\n" +
 	"\n" +
-	"_gpu_image\"E\n" +
+	"_gpu_imageB\x19\n" +
+	"\x17_memory_shared_per_taskB\x17\n" +
+	"\x15_disk_shared_per_task\"E\n" +
 	"\rRecruiterList\x124\n" +
 	"\n" +
 	"recruiters\x18\x01 \x03(\v2\x14.taskqueue.RecruiterR\n" +

@@ -49,7 +49,13 @@ func workerGpuCountForResolve(caps workerCaps) int32 {
 // gpu is integer-valued in the proto (count of GPUs); we carry it as
 // float64 here only so the NaN-bypass logic in fitsWorker is uniform
 // with cpu/mem/disk. Same hoist rationale as workerCaps.
-type taskMins struct{ cpu, mem, disk, gpu float64 }
+//
+// memShared / diskShared are the per-worker shared overhead (Reading B):
+// worker.mem must fit `mem + memShared` for AT LEAST ONE task's share
+// plus the shared overhead. Zero (not NaN) is the "no shared overhead"
+// signal — the caller reads min_mem_shared as NULL → 0 rather than NaN
+// because 0 makes the arithmetic uniform (adding 0 changes nothing).
+type taskMins struct{ cpu, mem, disk, gpu, memShared, diskShared float64 }
 
 func (s *taskQueueServer) waitForAssignEvents(context context.Context) {
 	for {
@@ -255,10 +261,13 @@ func (s *taskQueueServer) assignPendingTasks() {
 		if !math.IsNaN(req.cpu) && !math.IsNaN(caps.cpu) && req.cpu > caps.cpu {
 			return false
 		}
-		if !math.IsNaN(req.mem) && !math.IsNaN(caps.mem) && req.mem > caps.mem {
+		// mem / disk: fit AT LEAST ONE task's share plus the shared
+		// overhead. memShared is 0 (not NaN) when unset — the addition
+		// is a no-op for the legacy scalar-only case.
+		if !math.IsNaN(req.mem) && !math.IsNaN(caps.mem) && req.mem+req.memShared > caps.mem {
 			return false
 		}
-		if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk > caps.disk {
+		if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk+req.diskShared > caps.disk {
 			return false
 		}
 		if !math.IsNaN(req.gpu) && !math.IsNaN(caps.gpu) && req.gpu > caps.gpu {
@@ -340,12 +349,17 @@ func (s *taskQueueServer) assignPendingTasks() {
 				argIdx++
 			}
 			if !math.IsNaN(caps.mem) {
-				conds = append(conds, fmt.Sprintf("(t.min_mem IS NULL OR t.min_mem <= $%d)", argIdx))
+				// Shared overhead (0 if NULL) plus one task's incremental
+				// mem must fit. Same predicate as fitsWorker: worker.mem
+				// >= min_mem + min_mem_shared.
+				conds = append(conds, fmt.Sprintf(
+					"(t.min_mem IS NULL OR t.min_mem + COALESCE(t.min_mem_shared, 0) <= $%d)", argIdx))
 				fetchArgs = append(fetchArgs, caps.mem)
 				argIdx++
 			}
 			if !math.IsNaN(caps.disk) {
-				conds = append(conds, fmt.Sprintf("(t.min_disk IS NULL OR t.min_disk <= $%d)", argIdx))
+				conds = append(conds, fmt.Sprintf(
+					"(t.min_disk IS NULL OR t.min_disk + COALESCE(t.min_disk_shared, 0) <= $%d)", argIdx))
 				fetchArgs = append(fetchArgs, caps.disk)
 				argIdx++
 			}
@@ -398,10 +412,11 @@ func (s *taskQueueServer) assignPendingTasks() {
 				// warning. If the step has no P tasks at all
 				// (e.g. a smaller worker just drained them in this
 				// same tick), skip the warning entirely.
-				var sampleCpu, sampleMem, sampleDisk sql.NullFloat64
+				var sampleCpu, sampleMem, sampleDisk, sampleMemShared, sampleDiskShared sql.NullFloat64
 				var sampleGPU sql.NullInt32
 				err := tx.QueryRow(`
-					SELECT t.min_cpu, t.min_mem, t.min_disk, t.min_gpu
+					SELECT t.min_cpu, t.min_mem, t.min_disk, t.min_gpu,
+					       t.min_mem_shared, t.min_disk_shared
 					FROM task t
 					LEFT JOIN step s ON s.step_id = t.step_id
 					LEFT JOIN workflow w ON w.workflow_id = s.workflow_id
@@ -410,7 +425,7 @@ func (s *taskQueueServer) assignPendingTasks() {
 					  AND (t.step_id IS NULL OR t.step_id = 0 OR w.status = 'R')
 					ORDER BY t.created_at
 					LIMIT 1
-				`, stepID).Scan(&sampleCpu, &sampleMem, &sampleDisk, &sampleGPU)
+				`, stepID).Scan(&sampleCpu, &sampleMem, &sampleDisk, &sampleGPU, &sampleMemShared, &sampleDiskShared)
 				if err == nil {
 					req := taskMins{cpu: math.NaN(), mem: math.NaN(), disk: math.NaN(), gpu: math.NaN()}
 					if sampleCpu.Valid {
@@ -424,6 +439,12 @@ func (s *taskQueueServer) assignPendingTasks() {
 					}
 					if sampleGPU.Valid && sampleGPU.Int32 > 0 {
 						req.gpu = float64(sampleGPU.Int32)
+					}
+					if sampleMemShared.Valid {
+						req.memShared = sampleMemShared.Float64
+					}
+					if sampleDiskShared.Valid {
+						req.diskShared = sampleDiskShared.Float64
 					}
 					if !fitsWorker(req, caps) {
 						s.maybeWarnNoFit(workerID, stepID, whyDoesNotFit(req, caps))
@@ -1071,13 +1092,15 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 
 	var stepID sql.NullInt32
 	var workflowID sql.NullInt32
-	var minCpu, minMem, minDisk sql.NullFloat64
+	var minCpu, minMem, minDisk, minMemShared, minDiskShared sql.NullFloat64
 	err = tx.QueryRow(`
-		SELECT t.step_id, s.workflow_id, t.min_cpu, t.min_mem, t.min_disk
+		SELECT t.step_id, s.workflow_id,
+		       t.min_cpu, t.min_mem, t.min_disk,
+		       t.min_mem_shared, t.min_disk_shared
 		FROM task t
 		LEFT JOIN step s ON s.step_id = t.step_id
 		WHERE t.task_id = $1 AND t.status = 'P'
-	`, taskID).Scan(&stepID, &workflowID, &minCpu, &minMem, &minDisk)
+	`, taskID).Scan(&stepID, &workflowID, &minCpu, &minMem, &minDisk, &minMemShared, &minDiskShared)
 	if err == sql.ErrNoRows {
 		return 0, sql.NullInt32{}, fmt.Errorf("task %d not pending", taskID)
 	}
@@ -1089,9 +1112,10 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 	}
 
 	// Per-task fit check: a candidate worker's flavor must satisfy the
-	// task's min_cpu/min_mem/min_disk (NULL on either side bypasses the
-	// check for that dimension — legacy tasks/workers always fit). Spec:
-	// addition_from_nextflow.md A.
+	// task's min_cpu/min_mem/min_disk plus the shared overhead (NULL on
+	// either side bypasses that dimension — legacy tasks/workers always
+	// fit). Shared cols default to 0 so pre-feature rows keep the linear
+	// mem-fit behaviour. Spec: addition_from_nextflow.md A + shared_mem.
 	var workerID sql.NullInt32
 	err = tx.QueryRow(`
 		WITH candidate AS (
@@ -1101,8 +1125,8 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 			LEFT JOIN task t ON t.worker_id = w.worker_id AND t.status IN ('A','C','D','O','R') AND NOT t.hidden
 			WHERE w.status = 'R' AND w.deleted_at IS NULL AND w.step_id = $2
 			  AND ($3::double precision IS NULL OR f.cpu  IS NULL OR f.cpu  >= $3)
-			  AND ($4::double precision IS NULL OR f.mem  IS NULL OR f.mem  >= $4)
-			  AND ($5::double precision IS NULL OR f.disk IS NULL OR f.disk >= $5)
+			  AND ($4::double precision IS NULL OR f.mem  IS NULL OR f.mem  >= $4 + COALESCE($6::double precision, 0))
+			  AND ($5::double precision IS NULL OR f.disk IS NULL OR f.disk >= $5 + COALESCE($7::double precision, 0))
 			GROUP BY w.worker_id, w.concurrency, w.prefetch
 			HAVING COALESCE(SUM(t.weight),0) < (w.concurrency + w.prefetch)
 			ORDER BY (w.concurrency + w.prefetch - COALESCE(SUM(t.weight),0)) DESC, w.worker_id
@@ -1116,7 +1140,7 @@ func (s *taskQueueServer) assignSingleTask(taskID int32) (int32, sql.NullInt32, 
 			RETURNING worker_id, step_id
 		)
 		SELECT worker_id FROM updated
-	`, taskID, stepID.Int32, minCpu, minMem, minDisk).Scan(&workerID)
+	`, taskID, stepID.Int32, minCpu, minMem, minDisk, minMemShared, minDiskShared).Scan(&workerID)
 	if err == sql.ErrNoRows {
 		return 0, workflowID, fmt.Errorf("no compatible worker available for task %d", taskID)
 	}
@@ -1187,10 +1211,18 @@ func whyDoesNotFit(req taskMins, caps workerCaps) string {
 	if !math.IsNaN(req.cpu) && !math.IsNaN(caps.cpu) && req.cpu > caps.cpu {
 		return fmt.Sprintf("task needs cpu=%g, worker has cpu=%g", req.cpu, caps.cpu)
 	}
-	if !math.IsNaN(req.mem) && !math.IsNaN(caps.mem) && req.mem > caps.mem {
+	if !math.IsNaN(req.mem) && !math.IsNaN(caps.mem) && req.mem+req.memShared > caps.mem {
+		if req.memShared > 0 {
+			return fmt.Sprintf("task needs mem=%g + shared=%g = %g GB, worker has mem=%g GB",
+				req.mem, req.memShared, req.mem+req.memShared, caps.mem)
+		}
 		return fmt.Sprintf("task needs mem=%g GB, worker has mem=%g GB", req.mem, caps.mem)
 	}
-	if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk > caps.disk {
+	if !math.IsNaN(req.disk) && !math.IsNaN(caps.disk) && req.disk+req.diskShared > caps.disk {
+		if req.diskShared > 0 {
+			return fmt.Sprintf("task needs disk=%g + shared=%g = %g GB, worker has disk=%g GB",
+				req.disk, req.diskShared, req.disk+req.diskShared, caps.disk)
+		}
 		return fmt.Sprintf("task needs disk=%g GB, worker has disk=%g GB", req.disk, caps.disk)
 	}
 	if !math.IsNaN(req.gpu) && !math.IsNaN(caps.gpu) && req.gpu > caps.gpu {

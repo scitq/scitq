@@ -81,6 +81,11 @@ type Recruiter struct {
 	CpuPerTask            *int
 	MemoryPerTask         *float32
 	DiskPerTask           *float32
+	// Per-worker shared overhead — subtracted from the worker's mem/disk
+	// before dividing by per-task cost. Zero (or NULL) preserves the
+	// pre-feature linear behaviour. See computeConcurrencyForRecruiterWorker.
+	MemorySharedPerTask   *float32
+	DiskSharedPerTask     *float32
 	// GPU devices the step's task_spec asked for, per task. When
 	// set, computeConcurrencyForRecruiterWorker adds
 	// flavor.gpu_count / gpu_per_task to the min-of-ratios
@@ -164,6 +169,8 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.prefetch_percent,
             r.concurrency_min,
             r.concurrency_max,
+            r.memory_shared_per_task,
+            r.disk_shared_per_task,
             r.maximum_workers AS step_maximum,
             COALESCE(wagg.current_workers, 0) AS current_workers,
             wf.workflow_id,
@@ -190,6 +197,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.cpu_per_task, r.memory_per_task, r.disk_per_task, r.gpu_per_task,
             r.image, r.gpu_image,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
+            r.memory_shared_per_task, r.disk_shared_per_task,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
@@ -228,6 +236,8 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.PrefetchPercent,
 			&r.ConcurrencyMin,
 			&r.ConcurrencyMax,
+			&r.MemorySharedPerTask,
+			&r.DiskSharedPerTask,
 			&r.MaximumWorkers,
 			&r.CurrentWorkers,
 			&r.WorkflowID,
@@ -331,6 +341,8 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.prefetch_percent,
             r.concurrency_min,
             r.concurrency_max,
+            r.memory_shared_per_task,
+            r.disk_shared_per_task,
             r.maximum_workers AS step_maximum,
             COALESCE(wagg.current_workers, 0) AS current_workers,
             wf.workflow_id,
@@ -359,6 +371,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.cpu_per_task, r.memory_per_task, r.disk_per_task, r.gpu_per_task,
             r.image, r.gpu_image,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
+            r.memory_shared_per_task, r.disk_shared_per_task,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
@@ -392,6 +405,8 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
 			&r.PrefetchPercent,
 			&r.ConcurrencyMin,
 			&r.ConcurrencyMax,
+			&r.MemorySharedPerTask,
+			&r.DiskSharedPerTask,
 			&r.MaximumWorkers,
 			&r.CurrentWorkers,
 			&r.WorkflowID,
@@ -904,11 +919,32 @@ func computeConcurrencyForRecruiterWorker(r Recruiter, w RecyclableWorker) int {
 	if r.CpuPerTask != nil && w.Cpu != nil && *r.CpuPerTask > 0 {
 		ratios = append(ratios, float64(*w.Cpu)/float64(*r.CpuPerTask))
 	}
+	// Shared overhead (Reading B) subtracts once from the worker capacity
+	// before we compute per-task ratios. A worker where shared alone
+	// exceeds the flavor's mem/disk yields ratio 0 → clamped to 1 by
+	// the floor at the end (recruiter still returns 1 rather than 0
+	// because the assignment layer's fitsWorker will reject the worker
+	// anyway — no assignments will happen, and returning 0 breaks the
+	// UI's "recruited but idle" story).
 	if r.MemoryPerTask != nil && w.Memory != nil && *r.MemoryPerTask > 0 {
-		ratios = append(ratios, float64(*w.Memory)/float64(*r.MemoryPerTask))
+		free := float64(*w.Memory)
+		if r.MemorySharedPerTask != nil {
+			free -= float64(*r.MemorySharedPerTask)
+		}
+		if free < 0 {
+			free = 0
+		}
+		ratios = append(ratios, free/float64(*r.MemoryPerTask))
 	}
 	if r.DiskPerTask != nil && w.Disk != nil && *r.DiskPerTask > 0 {
-		ratios = append(ratios, float64(*w.Disk)/float64(*r.DiskPerTask))
+		free := float64(*w.Disk)
+		if r.DiskSharedPerTask != nil {
+			free -= float64(*r.DiskSharedPerTask)
+		}
+		if free < 0 {
+			free = 0
+		}
+		ratios = append(ratios, free/float64(*r.DiskPerTask))
 	}
 	if r.GpuPerTask != nil && w.GpuCount != nil && *r.GpuPerTask > 0 {
 		// gpu_count == 0 on a CPU-only flavor → ratio 0 → min

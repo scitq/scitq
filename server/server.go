@@ -660,6 +660,8 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 	cpuCurveArg := curveToPG(req.CpuCurve)
 	memCurveArg := curveToPG(req.MemCurve)
 	diskCurveArg := curveToPG(req.DiskCurve)
+	memSharedCurveArg := curveToPG(req.MemSharedCurve)
+	diskSharedCurveArg := curveToPG(req.DiskSharedCurve)
 
 	err = tx.QueryRowContext(ctx,
 		`WITH inserted AS (
@@ -669,7 +671,9 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              download_timeout, running_timeout, upload_timeout,
              status, task_name, skip_if_exists, publish, reuse_key, consume_reuse, scitq_auth, numa,
              min_cpu, min_mem, min_disk, min_gpu, gpu_all,
-             cpu_curve, mem_curve, disk_curve, publish_mode, created_at
+             cpu_curve, mem_curve, disk_curve, publish_mode,
+             min_mem_shared, min_disk_shared, mem_shared_curve, disk_shared_curve,
+             created_at
            )
            VALUES (
              $1, $2, $3, $4, $5,
@@ -677,7 +681,9 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
              $12, $13, $14,
              $15, $16, $17, $18, $19, $20, $21, $22,
              $23, $24, $25, $26, $27,
-             $28, $29, $30, $31, NOW()
+             $28, $29, $30, $31,
+             $32, $33, $34, $35,
+             NOW()
            )
            RETURNING task_id, step_id
          )
@@ -690,6 +696,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(), req.Numa,
 		req.MinCpu, req.MinMem, req.MinDisk, req.MinGpu, req.GetGpuAll(),
 		cpuCurveArg, memCurveArg, diskCurveArg, req.PublishMode,
+		req.MinMemShared, req.MinDiskShared, memSharedCurveArg, diskSharedCurveArg,
 	).Scan(&taskID, &workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit task: %w", err)
@@ -1510,7 +1517,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					input_hash, previous_task_id, retry_count,
 					task_name, publish, reuse_key, consume_reuse, scitq_auth,
 					min_cpu, min_mem, min_disk, min_gpu, gpu_all,
-					cpu_curve, mem_curve, disk_curve, weight, publish_mode
+					cpu_curve, mem_curve, disk_curve, weight, publish_mode,
+					min_mem_shared, min_disk_shared, mem_shared_curve, disk_shared_curve
 				)
 				SELECT
 					step_id, command, shell, container, container_options,
@@ -1554,7 +1562,17 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 					            THEN disk_curve[LEAST(retry_count + 2, array_length(disk_curve, 1))] / disk_curve[1]
 					            ELSE 1.0 END
 					     ) END,
-					publish_mode
+					publish_mode,
+					-- Shared overhead follows the same shift as min_mem/min_disk:
+					-- if the workflow declared mem_shared_curve, the retry moves
+					-- to curve[retry_count+2]; otherwise the scalar min_mem_shared
+					-- carries over verbatim. Eviction skips the shift for the
+					-- same reason as mem/disk (VM died, not OOM).
+					CASE WHEN failure_class = 'eviction' THEN min_mem_shared
+					     ELSE COALESCE(mem_shared_curve[LEAST(retry_count + 2, array_length(mem_shared_curve, 1))], min_mem_shared) END,
+					CASE WHEN failure_class = 'eviction' THEN min_disk_shared
+					     ELSE COALESCE(disk_shared_curve[LEAST(retry_count + 2, array_length(disk_shared_curve, 1))], min_disk_shared) END,
+					mem_shared_curve, disk_shared_curve
 				FROM task
 				WHERE task_id = $1
 				RETURNING task_id
@@ -2115,7 +2133,8 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				input_hash, previous_task_id, retry_count, task_name, scitq_auth,
 				publish, skip_if_exists, skip_checked, reuse_key, consume_reuse, numa,
 				min_cpu, min_mem, min_disk, min_gpu, gpu_all,
-				cpu_curve, mem_curve, disk_curve, weight, publish_mode
+				cpu_curve, mem_curve, disk_curve, weight, publish_mode,
+				min_mem_shared, min_disk_shared, mem_shared_curve, disk_shared_curve
 			)
 			SELECT
 				t.step_id, t.command, t.shell, t.container, t.container_options,
@@ -2160,7 +2179,14 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 				-- Fresh attempt chain → weight resets to 1.0 (= curve[0]/curve[0])
 				-- unless the previous failure was eviction (preserve parent weight).
 				CASE WHEN t.failure_class = 'eviction' THEN t.weight ELSE 1.0 END,
-				t.publish_mode
+				t.publish_mode,
+				-- Shared overhead resets to curve[0] on edit_and_retry, same
+				-- pattern as min_mem/min_disk above.
+				CASE WHEN t.failure_class = 'eviction' THEN t.min_mem_shared
+				     ELSE COALESCE(t.mem_shared_curve[1], t.min_mem_shared) END,
+				CASE WHEN t.failure_class = 'eviction' THEN t.min_disk_shared
+				     ELSE COALESCE(t.disk_shared_curve[1], t.min_disk_shared) END,
+				t.mem_shared_curve, t.disk_shared_curve
 			FROM task t
 			WHERE t.task_id = (SELECT task_id FROM validated)
 			RETURNING task_id
@@ -4825,6 +4851,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			t.quality_score, t.quality_vars::text,
 			t.min_cpu, t.min_mem, t.min_disk, t.min_gpu, t.gpu_all,
 			t.cpu_curve, t.mem_curve, t.disk_curve,
+			t.min_mem_shared, t.min_disk_shared,
+			t.mem_shared_curve, t.disk_shared_curve,
 			EXTRACT(EPOCH FROM t.created_at)::bigint AS created_epoch,
 			EXTRACT(EPOCH FROM t.modified_at)::bigint AS modified_epoch
         FROM task t
@@ -4878,6 +4906,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			minGpu                                                            sql.NullInt32
 			gpuAll                                                            bool
 			cpuCurve, memCurve, diskCurve                                     pq.Float64Array
+			minMemShared, minDiskShared                                       sql.NullFloat64
+			memSharedCurve, diskSharedCurve                                   pq.Float64Array
 			retryCount                                                        int32
 			hidden                                                            bool
 			createdEpoch, modifiedEpoch                                       sql.NullInt64
@@ -4917,6 +4947,10 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&cpuCurve,
 			&memCurve,
 			&diskCurve,
+			&minMemShared,
+			&minDiskShared,
+			&memSharedCurve,
+			&diskSharedCurve,
 			&createdEpoch,
 			&modifiedEpoch,
 		); err != nil {
@@ -4976,6 +5010,16 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		task.CpuCurve = curveFromPG(cpuCurve)
 		task.MemCurve = curveFromPG(memCurve)
 		task.DiskCurve = curveFromPG(diskCurve)
+		if minMemShared.Valid {
+			v := float32(minMemShared.Float64)
+			task.MinMemShared = &v
+		}
+		if minDiskShared.Valid {
+			v := float32(minDiskShared.Float64)
+			task.MinDiskShared = &v
+		}
+		task.MemSharedCurve = curveFromPG(memSharedCurve)
+		task.DiskSharedCurve = curveFromPG(diskSharedCurve)
 
 		tasks = append(tasks, &task)
 	}
@@ -6084,7 +6128,8 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 		worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
 		cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
 		image, gpu_image,
-		prefetch_percent, concurrency_min, concurrency_max
+		prefetch_percent, concurrency_min, concurrency_max,
+		memory_shared_per_task, disk_shared_per_task
 		FROM recruiter`
 
 	args := []interface{}{}
@@ -6109,6 +6154,7 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 			&recruiter.CpuPerTask, &recruiter.MemoryPerTask, &recruiter.DiskPerTask, &recruiter.GpuPerTask,
 			&recruiter.Image, &recruiter.GpuImage,
 			&recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
+			&recruiter.MemorySharedPerTask, &recruiter.DiskSharedPerTask,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
@@ -6147,13 +6193,15 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				worker_concurrency, worker_prefetch, rounds, timeout,
 				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
 				image, gpu_image,
-				prefetch_percent, concurrency_min, concurrency_max
+				prefetch_percent, concurrency_min, concurrency_max,
+				memory_shared_per_task, disk_shared_per_task
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7,
 				$8, $9, $10, $11,
 				$12, $13,
-				$14, $15, $16
+				$14, $15, $16,
+				$17, $18
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
@@ -6161,6 +6209,7 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask,
 			req.Image, req.GpuImage,
 			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
+			req.MemorySharedPerTask, req.DiskSharedPerTask,
 		)
 	} else {
 		_, err = s.db.ExecContext(ctx, `
@@ -6169,13 +6218,15 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				worker_concurrency, worker_prefetch, maximum_workers, rounds, timeout,
 				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
 				image, gpu_image,
-				prefetch_percent, concurrency_min, concurrency_max
+				prefetch_percent, concurrency_min, concurrency_max,
+				memory_shared_per_task, disk_shared_per_task
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7, $8,
 				$9, $10, $11, $12,
 				$13, $14,
-				$15, $16, $17
+				$15, $16, $17,
+				$18, $19
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
@@ -6183,6 +6234,7 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			req.CpuPerTask, req.MemoryPerTask, req.DiskPerTask, req.GpuPerTask,
 			req.Image, req.GpuImage,
 			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
+			req.MemorySharedPerTask, req.DiskSharedPerTask,
 		)
 	}
 
@@ -6315,6 +6367,14 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	if req.ConcurrencyMax != nil {
 		clauses = append(clauses, fmt.Sprintf("concurrency_max = $%d", len(args)+1))
 		args = append(args, *req.ConcurrencyMax)
+	}
+	if req.MemorySharedPerTask != nil {
+		clauses = append(clauses, fmt.Sprintf("memory_shared_per_task = $%d", len(args)+1))
+		args = append(args, *req.MemorySharedPerTask)
+	}
+	if req.DiskSharedPerTask != nil {
+		clauses = append(clauses, fmt.Sprintf("disk_shared_per_task = $%d", len(args)+1))
+		args = append(args, *req.DiskSharedPerTask)
 	}
 
 	if len(clauses) == 0 {

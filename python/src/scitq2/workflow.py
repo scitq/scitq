@@ -510,6 +510,14 @@ class Task:
             cpu_curve = ts.cpu_curve
             mem_curve = ts.mem_curve
             disk_curve = ts.disk_curve
+            # Shared overhead follows the same "curve[0] for the initial
+            # attempt, full curve for the retry-shift path" pattern as
+            # min_mem/min_disk. Server shifts along mem_shared_curve on
+            # retry the same way it shifts along mem_curve.
+            min_mem_shared = ts.mem_shared_curve[0] if ts.mem_shared_curve else None
+            min_disk_shared = ts.disk_shared_curve[0] if ts.disk_shared_curve else None
+            mem_shared_curve = ts.mem_shared_curve
+            disk_shared_curve = ts.disk_shared_curve
             # gpu == "all" is the sentinel — wire it as gpu_all=True
             # and leave min_gpu unset; the server resolves the count
             # at assignment from worker.flavor.gpu_count. Numeric
@@ -523,6 +531,8 @@ class Task:
         else:
             min_cpu = min_mem = min_disk = None
             cpu_curve = mem_curve = disk_curve = None
+            min_mem_shared = min_disk_shared = None
+            mem_shared_curve = disk_shared_curve = None
             min_gpu = None
             gpu_all = False
 
@@ -561,6 +571,10 @@ class Task:
                     cpu_curve=cpu_curve,
                     mem_curve=mem_curve,
                     disk_curve=disk_curve,
+                    min_mem_shared=min_mem_shared,
+                    min_disk_shared=min_disk_shared,
+                    mem_shared_curve=mem_shared_curve,
+                    disk_shared_curve=disk_shared_curve,
                     publish_mode=self.publish_mode,
                 )
             if ext is not None:
@@ -696,7 +710,8 @@ class Task:
 class TaskSpec:
     def __init__(self, *, cpu=None, mem=None, disk=None, gpu=None,
                  concurrency: Optional[int]=None, prefetch: Optional[Union[str,int]]=None,
-                 scitq_auth: bool=False, numa: Optional[int]=None):
+                 scitq_auth: bool=False, numa: Optional[int]=None,
+                 mem_shared=None, disk_shared=None):
         # cpu / mem / disk: either a scalar or a non-empty monotonically
         # non-decreasing list ("curve") of per-attempt resource requirements
         # (spec: addition_from_nextflow.md A — Retry with resource escalation).
@@ -707,6 +722,19 @@ class TaskSpec:
         cpu_curve = self._normalize_curve('cpu', cpu)
         mem_curve = self._normalize_curve('mem', mem)
         disk_curve = self._normalize_curve('disk', disk)
+        # mem_shared / disk_shared: per-worker shared overhead (Reading B).
+        # A tool loading one large mmap'd reference (hermes/bowtie2/kraken2)
+        # declares the reference size once here; the recruiter subtracts it
+        # from worker capacity before computing concurrency. Same
+        # scalar-or-curve shape as mem/disk. CPU has no shared column —
+        # sharing CPU is rare and modelled poorly.
+        # Same _normalize_curve enforces non-empty + all-positive +
+        # monotonic non-decreasing; a shared curve should retain the same
+        # length as the corresponding mem/disk curve when set, but we don't
+        # cross-validate that — the shared curve is allowed to grow slower
+        # (or not at all) than the incremental curve.
+        mem_shared_curve = self._normalize_curve('mem_shared', mem_shared) if mem_shared is not None else None
+        disk_shared_curve = self._normalize_curve('disk_shared', disk_shared) if disk_shared is not None else None
 
         # numa: pin each task to N NUMA nodes on its worker (docker
         # --cpuset-cpus / --cpuset-mems). Concurrency and per-task CPU/mem
@@ -740,6 +768,8 @@ class TaskSpec:
         self.cpu_curve = cpu_curve
         self.mem_curve = mem_curve
         self.disk_curve = disk_curve
+        self.mem_shared_curve = mem_shared_curve
+        self.disk_shared_curve = disk_shared_curve
         # Back-compat scalar attributes. When a curve was passed, these are
         # the first element (curve[0]) — what the recruiter quoted as
         # cpu_per_task historically. Callers that need the worst-case for
@@ -747,6 +777,8 @@ class TaskSpec:
         self.cpu = cpu_curve[0] if cpu_curve else None
         self.mem = mem_curve[0] if mem_curve else None
         self.disk = disk_curve[0] if disk_curve else None
+        self.mem_shared = mem_shared_curve[0] if mem_shared_curve else None
+        self.disk_shared = disk_shared_curve[0] if disk_shared_curve else None
         self.concurrency = concurrency
         self.prefetch = self._parse_prefetch(prefetch)
         # scitq_auth: when True, the worker injects SCITQ_SERVER + SCITQ_TOKEN
@@ -853,6 +885,19 @@ class TaskSpec:
     def max_disk(self):
         """Worst-case disk across the attempt curve."""
         return self.disk_curve[-1] if self.disk_curve else None
+
+    @property
+    def max_mem_shared(self):
+        """Worst-case shared memory overhead across the attempt curve. The
+        recruiter subtracts this from worker.mem before dividing by
+        max_mem — that's the minimum memory a worker must have before it
+        can even fit one task at its heaviest attempt."""
+        return self.mem_shared_curve[-1] if self.mem_shared_curve else None
+
+    @property
+    def max_disk_shared(self):
+        """Worst-case shared disk overhead across the attempt curve."""
+        return self.disk_shared_curve[-1] if self.disk_shared_curve else None
 
     def resources_at_attempt(self, attempt: int):
         """Return (cpu, mem, disk) for the given attempt index (0-based).

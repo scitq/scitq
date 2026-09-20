@@ -368,6 +368,16 @@ task_spec.cpu / mem / disk each accept either a scalar (constant) or a list to e
 ` + "`" + `
 Rules: curves must be monotonically non-decreasing; the recruiter sizes workers for the largest value; beyond curve length the last value repeats; evictions ignore the curve. When inspecting a running task via list_tasks, the min_cpu/min_mem/min_disk fields report what THIS attempt asked for (server shifts these along the curve on retry); cpu_curve/mem_curve/disk_curve show the full escalation plan when set.
 
+### Shared memory / disk overhead
+Some tools (hermes, bowtie2 with big indexes, kraken2) load a large read-only reference once per host and serve many parallel queries. Declare that overhead so the recruiter's concurrency math accounts for it — total on worker becomes ` + "`" + `shared + concurrency * per_task` + "`" + `.
+` + "`" + `yaml
+task_spec:
+  cpu: 4
+  mem: 5              # per-task incremental
+  mem_shared: 15      # per-host shared overhead (mmap'd index)
+` + "`" + `
+Same syntax exists for disk (` + "`" + `disk_shared` + "`" + `). No ` + "`" + `cpu_shared` + "`" + ` — CPU sharing is rare. Both may be curves (` + "`" + `mem_shared: [15, 15, 30]` + "`" + `). This is a USER-DECLARED INVARIANT — nothing enforces that the tool actually mmaps a shared file; setting it for a tool that loads its own copy per task will OOM. list_tasks surfaces min_mem_shared / min_disk_shared / mem_shared_curve / disk_shared_curve when set.
+
 Always call login first to authenticate before using other tools.`,
 		},
 	}
@@ -1215,6 +1225,14 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		CpuCurve         []float32 `json:"cpu_curve,omitempty"`
 		MemCurve         []float32 `json:"mem_curve,omitempty"`
 		DiskCurve        []float32 `json:"disk_curve,omitempty"`
+		// Shared per-worker overhead (mem/disk only). Reading B:
+		// total_on_worker = shared + concurrency * min_mem. Emitted
+		// only when actually set, same guard as the curves so scalar-
+		// only tasks stay compact.
+		MinMemShared     *float32  `json:"min_mem_shared,omitempty"`
+		MinDiskShared    *float32  `json:"min_disk_shared,omitempty"`
+		MemSharedCurve   []float32 `json:"mem_shared_curve,omitempty"`
+		DiskSharedCurve  []float32 `json:"disk_shared_curve,omitempty"`
 	}
 	summaries := make([]taskSummary, 0, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -1251,6 +1269,10 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		if len(t.CpuCurve) > 1 { s.CpuCurve = t.CpuCurve }
 		if len(t.MemCurve) > 1 { s.MemCurve = t.MemCurve }
 		if len(t.DiskCurve) > 1 { s.DiskCurve = t.DiskCurve }
+		if t.MinMemShared != nil { s.MinMemShared = t.MinMemShared }
+		if t.MinDiskShared != nil { s.MinDiskShared = t.MinDiskShared }
+		if len(t.MemSharedCurve) > 1 { s.MemSharedCurve = t.MemSharedCurve }
+		if len(t.DiskSharedCurve) > 1 { s.DiskSharedCurve = t.DiskSharedCurve }
 		summaries = append(summaries, s)
 	}
 	return jsonResult(summaries), nil

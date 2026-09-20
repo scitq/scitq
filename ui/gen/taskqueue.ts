@@ -272,6 +272,32 @@ export interface TaskRequest {
      * @generated from protobuf field: optional string publish_mode = 31
      */
     publishMode?: string;
+    /**
+     * Shared per-worker overhead (mem/disk only — CPU sharing is rare).
+     * Reading B: total_on_worker = shared + concurrency * min_mem, so the
+     * recruiter picks concurrency = floor((worker.mem - shared) / min_mem).
+     * Used by hermes / bowtie2 / kraken2 style tools that mmap one large
+     * read-only reference per host and serve many parallel queries against
+     * it. NULL / unset = 0 (linear model, today's behaviour). Curve mirrors
+     * mem_curve — shifts at the same retry_count index. This is a
+     * user-declared invariant, not enforced: setting shared for a tool that
+     * loads its own copy per task will over-commit and OOM.
+     *
+     * @generated from protobuf field: optional float min_mem_shared = 32
+     */
+    minMemShared?: number;
+    /**
+     * @generated from protobuf field: optional float min_disk_shared = 33
+     */
+    minDiskShared?: number;
+    /**
+     * @generated from protobuf field: repeated float mem_shared_curve = 34
+     */
+    memSharedCurve: number[];
+    /**
+     * @generated from protobuf field: repeated float disk_shared_curve = 35
+     */
+    diskSharedCurve: number[];
 }
 /**
  * @generated from protobuf message taskqueue.Task
@@ -490,6 +516,26 @@ export interface Task {
      * @generated from protobuf field: int64 modified_at = 46
      */
     modifiedAt: string;
+    /**
+     * See TaskRequest.min_mem_shared / min_disk_shared / mem_shared_curve /
+     * disk_shared_curve. Server-side retry shifts min_*_shared to
+     * *_shared_curve[retry_count] the same way it shifts min_mem/min_disk.
+     *
+     * @generated from protobuf field: optional float min_mem_shared = 47
+     */
+    minMemShared?: number;
+    /**
+     * @generated from protobuf field: optional float min_disk_shared = 48
+     */
+    minDiskShared?: number;
+    /**
+     * @generated from protobuf field: repeated float mem_shared_curve = 49
+     */
+    memSharedCurve: number[];
+    /**
+     * @generated from protobuf field: repeated float disk_shared_curve = 50
+     */
+    diskSharedCurve: number[];
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -2150,6 +2196,20 @@ export interface Recruiter {
      * @generated from protobuf field: optional string gpu_image = 17
      */
     gpuImage?: string;
+    /**
+     * Per-worker shared overhead for the dynamic concurrency formula.
+     * Concurrency for this recruiter's workers becomes
+     *   floor((worker.mem - memory_shared_per_task) / memory_per_task)
+     * (and similarly for disk). NULL / 0 = today's linear model. Matches
+     * TaskRequest.min_mem_shared / min_disk_shared on the task side.
+     *
+     * @generated from protobuf field: optional float memory_shared_per_task = 18
+     */
+    memorySharedPerTask?: number;
+    /**
+     * @generated from protobuf field: optional float disk_shared_per_task = 19
+     */
+    diskSharedPerTask?: number;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterUpdate
@@ -2223,6 +2283,16 @@ export interface RecruiterUpdate {
      * @generated from protobuf field: optional string gpu_image = 17
      */
     gpuImage?: string;
+    /**
+     * See Recruiter.memory_shared_per_task / disk_shared_per_task.
+     *
+     * @generated from protobuf field: optional float memory_shared_per_task = 18
+     */
+    memorySharedPerTask?: number;
+    /**
+     * @generated from protobuf field: optional float disk_shared_per_task = 19
+     */
+    diskSharedPerTask?: number;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterList
@@ -4304,7 +4374,11 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
             { no: 28, name: "cpu_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 29, name: "mem_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 30, name: "disk_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 31, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 31, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 32, name: "min_mem_shared", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 33, name: "min_disk_shared", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 34, name: "mem_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 35, name: "disk_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<TaskRequest>): TaskRequest {
@@ -4320,6 +4394,8 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         message.cpuCurve = [];
         message.memCurve = [];
         message.diskCurve = [];
+        message.memSharedCurve = [];
+        message.diskSharedCurve = [];
         if (value !== undefined)
             reflectionMergePartial<TaskRequest>(this, message, value);
         return message;
@@ -4444,6 +4520,26 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
                 case /* optional string publish_mode */ 31:
                     message.publishMode = reader.string();
                     break;
+                case /* optional float min_mem_shared */ 32:
+                    message.minMemShared = reader.float();
+                    break;
+                case /* optional float min_disk_shared */ 33:
+                    message.minDiskShared = reader.float();
+                    break;
+                case /* repeated float mem_shared_curve */ 34:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.memSharedCurve.push(reader.float());
+                    else
+                        message.memSharedCurve.push(reader.float());
+                    break;
+                case /* repeated float disk_shared_curve */ 35:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.diskSharedCurve.push(reader.float());
+                    else
+                        message.diskSharedCurve.push(reader.float());
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4565,6 +4661,26 @@ class TaskRequest$Type extends MessageType<TaskRequest> {
         /* optional string publish_mode = 31; */
         if (message.publishMode !== undefined)
             writer.tag(31, WireType.LengthDelimited).string(message.publishMode);
+        /* optional float min_mem_shared = 32; */
+        if (message.minMemShared !== undefined)
+            writer.tag(32, WireType.Bit32).float(message.minMemShared);
+        /* optional float min_disk_shared = 33; */
+        if (message.minDiskShared !== undefined)
+            writer.tag(33, WireType.Bit32).float(message.minDiskShared);
+        /* repeated float mem_shared_curve = 34; */
+        if (message.memSharedCurve.length) {
+            writer.tag(34, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.memSharedCurve.length; i++)
+                writer.float(message.memSharedCurve[i]);
+            writer.join();
+        }
+        /* repeated float disk_shared_curve = 35; */
+        if (message.diskSharedCurve.length) {
+            writer.tag(35, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.diskSharedCurve.length; i++)
+                writer.float(message.diskSharedCurve[i]);
+            writer.join();
+        }
         /* optional int32 min_gpu = 38; */
         if (message.minGpu !== undefined)
             writer.tag(38, WireType.Varint).int32(message.minGpu);
@@ -4630,7 +4746,11 @@ class Task$Type extends MessageType<Task> {
             { no: 41, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 42, name: "publish_mode", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 45, name: "created_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
-            { no: 46, name: "modified_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
+            { no: 46, name: "modified_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
+            { no: 47, name: "min_mem_shared", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 48, name: "min_disk_shared", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 49, name: "mem_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 50, name: "disk_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -4649,6 +4769,8 @@ class Task$Type extends MessageType<Task> {
         message.diskCurve = [];
         message.createdAt = "0";
         message.modifiedAt = "0";
+        message.memSharedCurve = [];
+        message.diskSharedCurve = [];
         if (value !== undefined)
             reflectionMergePartial<Task>(this, message, value);
         return message;
@@ -4807,6 +4929,26 @@ class Task$Type extends MessageType<Task> {
                     break;
                 case /* int64 modified_at */ 46:
                     message.modifiedAt = reader.int64().toString();
+                    break;
+                case /* optional float min_mem_shared */ 47:
+                    message.minMemShared = reader.float();
+                    break;
+                case /* optional float min_disk_shared */ 48:
+                    message.minDiskShared = reader.float();
+                    break;
+                case /* repeated float mem_shared_curve */ 49:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.memSharedCurve.push(reader.float());
+                    else
+                        message.memSharedCurve.push(reader.float());
+                    break;
+                case /* repeated float disk_shared_curve */ 50:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.diskSharedCurve.push(reader.float());
+                    else
+                        message.diskSharedCurve.push(reader.float());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4970,6 +5112,26 @@ class Task$Type extends MessageType<Task> {
         /* int64 modified_at = 46; */
         if (message.modifiedAt !== "0")
             writer.tag(46, WireType.Varint).int64(message.modifiedAt);
+        /* optional float min_mem_shared = 47; */
+        if (message.minMemShared !== undefined)
+            writer.tag(47, WireType.Bit32).float(message.minMemShared);
+        /* optional float min_disk_shared = 48; */
+        if (message.minDiskShared !== undefined)
+            writer.tag(48, WireType.Bit32).float(message.minDiskShared);
+        /* repeated float mem_shared_curve = 49; */
+        if (message.memSharedCurve.length) {
+            writer.tag(49, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.memSharedCurve.length; i++)
+                writer.float(message.memSharedCurve[i]);
+            writer.join();
+        }
+        /* repeated float disk_shared_curve = 50; */
+        if (message.diskSharedCurve.length) {
+            writer.tag(50, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.diskSharedCurve.length; i++)
+                writer.float(message.diskSharedCurve[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9796,7 +9958,9 @@ class Recruiter$Type extends MessageType<Recruiter> {
             { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 16, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 18, name: "memory_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<Recruiter>): Recruiter {
@@ -9866,6 +10030,12 @@ class Recruiter$Type extends MessageType<Recruiter> {
                 case /* optional string gpu_image */ 17:
                     message.gpuImage = reader.string();
                     break;
+                case /* optional float memory_shared_per_task */ 18:
+                    message.memorySharedPerTask = reader.float();
+                    break;
+                case /* optional float disk_shared_per_task */ 19:
+                    message.diskSharedPerTask = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9929,6 +10099,12 @@ class Recruiter$Type extends MessageType<Recruiter> {
         /* optional string gpu_image = 17; */
         if (message.gpuImage !== undefined)
             writer.tag(17, WireType.LengthDelimited).string(message.gpuImage);
+        /* optional float memory_shared_per_task = 18; */
+        if (message.memorySharedPerTask !== undefined)
+            writer.tag(18, WireType.Bit32).float(message.memorySharedPerTask);
+        /* optional float disk_shared_per_task = 19; */
+        if (message.diskSharedPerTask !== undefined)
+            writer.tag(19, WireType.Bit32).float(message.diskSharedPerTask);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9959,7 +10135,9 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
             { no: 14, name: "concurrency_max", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 15, name: "gpu_per_task", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 16, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 18, name: "memory_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<RecruiterUpdate>): RecruiterUpdate {
@@ -10026,6 +10204,12 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
                 case /* optional string gpu_image */ 17:
                     message.gpuImage = reader.string();
                     break;
+                case /* optional float memory_shared_per_task */ 18:
+                    message.memorySharedPerTask = reader.float();
+                    break;
+                case /* optional float disk_shared_per_task */ 19:
+                    message.diskSharedPerTask = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10089,6 +10273,12 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
         /* optional string gpu_image = 17; */
         if (message.gpuImage !== undefined)
             writer.tag(17, WireType.LengthDelimited).string(message.gpuImage);
+        /* optional float memory_shared_per_task = 18; */
+        if (message.memorySharedPerTask !== undefined)
+            writer.tag(18, WireType.Bit32).float(message.memorySharedPerTask);
+        /* optional float disk_shared_per_task = 19; */
+        if (message.diskSharedPerTask !== undefined)
+            writer.tag(19, WireType.Bit32).float(message.diskSharedPerTask);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
