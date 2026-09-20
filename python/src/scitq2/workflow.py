@@ -84,7 +84,8 @@ class Outputs:
     - a relative path (no "://") — appended to the workflow's publish_root
     """
     def __init__(self, publish: Optional[Union[str, bool]]=None,
-                 publish_mode: Optional[str]=None, **kwargs):
+                 publish_mode: Optional[str]=None,
+                 lifetime: Optional[str]=None, **kwargs):
         self.globs: Dict[str, str] = kwargs
         self.publish = publish
         # publish_mode: "move" (default — task uploads to publish *instead of*
@@ -97,6 +98,20 @@ class Outputs:
 
         if publish is not None and publish is not True and not isinstance(publish, str):
             raise ValueError("publish must be a string, True, or None")
+
+        # lifetime: declares that this step's outputs are intermediate data.
+        # "workflow" (only accepted value today) triggers server-side sweep of
+        # the workspace URIs when the parent workflow reaches S. Publish
+        # destinations are never touched — an author who set publish is
+        # explicitly saying they want the file persisted somewhere. On F,
+        # everything is kept for debugging. Reserved for future use:
+        # "task" (drop as soon as the single consumer succeeds).
+        if lifetime is not None and lifetime not in ("workflow",):
+            raise ValueError(
+                f"Outputs(lifetime=...) must be None or 'workflow' (got {lifetime!r}); "
+                "task-scope lifetime is reserved for a future release"
+            )
+        self.lifetime = lifetime
 
 
 class OutputBase(ABC):
@@ -930,6 +945,10 @@ class Step:
         self.task_spec = task_spec
         self.step_id: Optional[int] = None
         self.outputs_globs: Dict[str, str] = {}
+        # Populated from the first Outputs(lifetime=...) attached to this
+        # step; forwarded to CreateStep so the server-side terminal sweep
+        # knows to purge this step's workspace outputs on workflow S.
+        self.output_lifetime: Optional[str] = None
         self.workflow = workflow
         self.naming_strategy = naming_strategy
         self.quality = quality
@@ -964,6 +983,18 @@ class Step:
             if self.outputs_globs and outputs.globs != self.outputs_globs:
                 raise ValueError(f"Inconsistent outputs declared in step '{self.name}'")
             self.outputs_globs = outputs.globs
+            # lifetime is a per-STEP setting (deletion granularity is a
+            # task output URI prefix, one per task, all belonging to the
+            # same step). Reject conflicting declarations across tasks
+            # in the same step rather than silently taking the last one.
+            if outputs.lifetime is not None:
+                if self.output_lifetime is None:
+                    self.output_lifetime = outputs.lifetime
+                elif self.output_lifetime != outputs.lifetime:
+                    raise ValueError(
+                        f"Inconsistent Outputs(lifetime=...) declared in step "
+                        f"'{self.name}': {self.output_lifetime!r} vs {outputs.lifetime!r}"
+                    )
 
         if isinstance(resources, Resource) or isinstance(resources, str):
             resources_list = [resources]
@@ -1046,7 +1077,9 @@ class Step:
             self.step_id = ext.step_ids[self.name]
             step_existed = True
         else:
-            self.step_id = client.create_step(self.workflow.workflow_id, self.name, quality_definition=quality_json)
+            self.step_id = client.create_step(self.workflow.workflow_id, self.name,
+                                              quality_definition=quality_json,
+                                              output_lifetime=self.output_lifetime)
             if ext is not None:
                 ext.step_ids[self.name] = self.step_id
 

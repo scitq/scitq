@@ -2720,6 +2720,17 @@ export interface StepRequest {
      * @generated from protobuf field: optional string quality_definition = 4
      */
     qualityDefinition?: string; // JSON: {"variables": {...}, "formula": "..."}
+    /**
+     * output_lifetime: declares that this step's workspace outputs are
+     * intermediate data and can be swept when the workflow reaches S.
+     * Accepted values: "" / unset (persist, today's behaviour) or
+     * "workflow" (delete workspace outputs on workflow success; publish
+     * outputs are untouched). Anything else is rejected server-side.
+     * See migration 000045_step_output_lifetime.
+     *
+     * @generated from protobuf field: optional string output_lifetime = 5
+     */
+    outputLifetime?: string;
 }
 /**
  * @generated from protobuf message taskqueue.StepList
@@ -11443,7 +11454,8 @@ class StepRequest$Type extends MessageType<StepRequest> {
             { no: 1, name: "workflow_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "quality_definition", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 4, name: "quality_definition", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "output_lifetime", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<StepRequest>): StepRequest {
@@ -11470,6 +11482,9 @@ class StepRequest$Type extends MessageType<StepRequest> {
                 case /* optional string quality_definition */ 4:
                     message.qualityDefinition = reader.string();
                     break;
+                case /* optional string output_lifetime */ 5:
+                    message.outputLifetime = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11494,6 +11509,9 @@ class StepRequest$Type extends MessageType<StepRequest> {
         /* optional string quality_definition = 4; */
         if (message.qualityDefinition !== undefined)
             writer.tag(4, WireType.LengthDelimited).string(message.qualityDefinition);
+        /* optional string output_lifetime = 5; */
+        if (message.outputLifetime !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.outputLifetime);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

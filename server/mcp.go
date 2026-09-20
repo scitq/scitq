@@ -348,6 +348,15 @@ optimize:
     depth: {type: int, low: 1, high: 10}
 ` + "`" + `
 
+### Auto-cleanup of intermediate data
+Add ` + "`" + `lifetime: workflow` + "`" + ` (sibling of the named globs) inside a step's ` + "`" + `outputs:` + "`" + ` block to have the server sweep this step's workspace copies when the workflow reaches S. Publish destinations are never touched. Fires only on workflow S (never F/D); best-effort — a backend hiccup logs a warning and moves on. Use for intermediate data (e.g. trimmed reads that only exist to feed the next step). Only ` + "`" + `workflow` + "`" + ` is accepted today; ` + "`" + `task` + "`" + ` is reserved.
+` + "`" + `yaml
+- name: trim
+  outputs:
+    lifetime: workflow
+    cleaned: "*.clean.fq.gz"
+` + "`" + `
+
 ### Retry with escalating resources
 task_spec.cpu / mem / disk each accept either a scalar (constant) or a list to escalate on retry — scitq's equivalent of Nextflow's ` + "`" + `memory { task.attempt * 8.GB }` + "`" + `. Use it for tasks that occasionally hit OOM and would succeed with a heavier flavor:
 ` + "`" + `yaml

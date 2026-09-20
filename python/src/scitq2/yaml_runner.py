@@ -2673,6 +2673,17 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     publish_mode = step_def.get('publish_mode')
     if outputs_def or publish or publish_mode:
         out_kwargs = dict(outputs_def) if isinstance(outputs_def, dict) else {}
+        # lifetime: step-level sibling of the named globs inside outputs:.
+        # Resolve any {param} reference before handing it to Outputs so a
+        # workflow can flip cleanup on/off via a top-level param
+        # (e.g. `lifetime: "{params.cleanup:workflow}"`). Outputs
+        # itself rejects any value other than None / "workflow".
+        if 'lifetime' in out_kwargs:
+            resolved_lt = _resolve_field(out_kwargs['lifetime'], params, itervar, extra_vars=extra_vars)
+            if resolved_lt in (None, '', 'none', 'None'):
+                out_kwargs.pop('lifetime', None)
+            else:
+                out_kwargs['lifetime'] = resolved_lt
         if publish:
             out_kwargs['publish'] = True if publish is True else _resolve_field(publish, params, itervar, extra_vars=extra_vars)
         if publish_mode is not None:

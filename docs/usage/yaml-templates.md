@@ -781,6 +781,31 @@ Named outputs let downstream steps reference specific file patterns:
 
 Without named outputs, the step exposes its entire `/output/` directory.
 
+#### `lifetime:` — auto-cleanup of intermediate data
+
+Declaring `lifetime: workflow` on a step's outputs tells scitq that this step's data is intermediate. When the parent workflow reaches **S** (succeeded), the server sweeps the workspace copies of every output produced by that step. On **F** (failed) nothing is deleted — the data stays put for debugging.
+
+```yaml
+  - name: trim
+    container: fastp:latest
+    outputs:
+      lifetime: workflow       # sibling of the named globs
+      cleaned: "*.clean.fq.gz"
+```
+
+What gets deleted:
+
+- **Only the workspace copies.** Files sent to an explicit `publish:` destination are never touched — the author explicitly asked for those to persist.
+- With `publish_mode: copy`, the publish location keeps its copy and the workspace copy is swept. That's usually what you want for intermediate data you also happen to be archiving.
+- With `publish_mode: move` (the default), the workspace has nothing to begin with, so the sweep is a no-op.
+
+Rules:
+
+- Only `lifetime: workflow` is accepted today. A future release may add `lifetime: task` (drop as soon as the single consumer succeeds); reserving the value now.
+- The sweep is **best-effort**. A backend hiccup logs a warning and moves on — a bad rclone response never rewinds the workflow to R.
+- Fires **only on workflow → S**, never on F or D. If a workflow is manually re-run (extend or retry), intermediate data from the earlier attempt is already gone; a re-run reproduces it.
+- Alt-form via param: `lifetime: "{params.cleanup}"` where `cleanup:` is a top-level param the user picks; an empty/None value means "keep".
+
 ### Container options
 
 `container_options:` appends free-form flags to the `docker run` argv used for this step's tasks. Use for runtime settings `task_spec` doesn't model — `--shm-size`, `--ipc=host`, `--privileged`, custom `--mount`, `--device`, etc.

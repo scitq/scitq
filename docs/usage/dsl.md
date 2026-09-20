@@ -984,6 +984,18 @@ Step(
 
 There is also a specific meaning attached to this: the default workspace that depends on the workspace root is deemed a temporary workspace, it may be deleted to get some free space or to reduce costs. Published outputs represent data stored specifically in a separate space that is here to stay.
 
+#### `lifetime="workflow"`: auto-cleanup of intermediate data
+
+Pass `lifetime="workflow"` on the `Outputs` and the server sweeps this step's workspace copies when the workflow reaches S:
+
+```python
+outputs=Outputs(lifetime="workflow", cleaned="*.clean.fq.gz")
+```
+
+Only the workspace is affected — anything sent to a `publish:` destination stays. On workflow F, nothing is deleted (data kept for debugging). The sweep is best-effort: a backend hiccup logs a warning and moves on, never rewinding the workflow. Only `"workflow"` is accepted today; `"task"` is reserved for a future release.
+
+Same syntax works in YAML: `lifetime: workflow` sibling of the named globs inside `outputs:`.
+
 #### Real task_specs
 
 Nothing new here compared to previous examples. Here our TaskSpec object uses dynamic concurrency which is often recommended in production.

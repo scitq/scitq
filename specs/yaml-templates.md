@@ -487,7 +487,7 @@ Supported install methods: `conda:`, `apt:`, `binary:`, `pip:`.
 |---|---|
 | `inputs` | Dot notation: `step_name.output_name`. Default: previous step's first output, or `sample.fastqs` for the first step |
 | `resource` | URI to a resource file or folder (mounted read-only in `/resource/`). Supports `\|untar`, `\|gunzip` actions |
-| `outputs` | Named output globs: `report: "*.txt"` |
+| `outputs` | Named output globs: `report: "*.txt"`. May also carry `lifetime: workflow` (sibling of the globs) to have the server sweep this step's workspace outputs when the workflow reaches S — see [Auto-cleanup of intermediate data](#auto-cleanup-of-intermediate-data-outputslifetime) |
 | `publish` | `true` (uses `publish_root`) or a full URI |
 | `grouped` | `true` for fan-in steps (after the sample loop, collects all samples) |
 | `per_sample` | `false` for one-off steps (before the sample loop, e.g. index building) |
@@ -516,6 +516,27 @@ The `accept_failure: true` flag changes this: a prerequisite is also considered 
 ```
 
 A prerequisite that fails but still has retries remaining is **not** considered terminal — the retry will create a fresh clone, and the dependency waits for the clone's outcome. Only when all retries are exhausted does `accept_failure` apply.
+
+### Auto-cleanup of intermediate data (`outputs.lifetime`)
+
+Declaring `lifetime: workflow` inside a step's `outputs:` block marks that step's data as intermediate. When the parent workflow reaches **S**, the server sweeps the workspace copies of every output that step produced. On **F**, nothing is deleted — the data stays for debugging.
+
+```yaml
+- name: trim
+  container: fastp:latest
+  outputs:
+    lifetime: workflow       # sibling of the named globs
+    cleaned: "*.clean.fq.gz"
+```
+
+Semantics:
+
+- **Only workspace copies are affected.** Files sent to an explicit `publish:` destination are never touched. With `publish_mode: copy`, the publish copy persists and the workspace copy is swept — the usual "publish + intermediate" combination.
+- **Best-effort deletion.** A backend hiccup logs a warning and the sweep moves on; a failed cleanup never rewinds the workflow from S back to R. Manual re-cleanup remains possible via `scitq file` if needed.
+- **Fires only on S**, never on F or D. Manual re-runs (extend/retry) re-produce the intermediate data.
+- **Reserved values.** Only `workflow` is accepted today. A future release may add `task` (drop after the single downstream consumer succeeds).
+
+Storage: one nullable CHAR(1) column `output_lifetime` on `step` (`W` = workflow, NULL = keep). See migration `000045_step_output_lifetime.up.sql`.
 
 ### Per-attempt resource escalation (retry curves)
 

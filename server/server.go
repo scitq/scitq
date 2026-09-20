@@ -938,6 +938,13 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 		go s.evaluateChainEntriesForWorkflow(workflowID, newStatus)
 		s.emitWorkflowTerminalNotification(workflowID, newStatus)
 	}
+	// Workspace cleanup for lifetime='W' outputs — success only. On F,
+	// keep everything for debugging. Fire-and-forget in its own
+	// goroutine because rclone Purge can take real time on slow
+	// backends and must not block the recompute / EmitWS path.
+	if newStatus == "S" {
+		go s.sweepWorkflowLifetimeOutputs(workflowID)
+	}
 }
 
 // emitWorkflowTerminalNotification pulls the human-readable workflow
@@ -7064,21 +7071,37 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 		qualityDef = *req.QualityDefinition
 	}
 
+	// output_lifetime: "workflow" -> 'W', "" / unset -> NULL. Anything
+	// else is a client bug — reject it explicitly rather than silently
+	// dropping it, otherwise a typo like "worflow" would look like
+	// "cleanup didn't run" from the operator side.
+	var outputLifetime interface{} = nil
+	if req.OutputLifetime != nil && *req.OutputLifetime != "" {
+		switch *req.OutputLifetime {
+		case "workflow":
+			outputLifetime = "W"
+		default:
+			return nil, status.Errorf(codes.InvalidArgument,
+				"unknown output_lifetime %q (accepted: \"\", \"workflow\")",
+				*req.OutputLifetime)
+		}
+	}
+
 	if req.WorkflowId != nil && *req.WorkflowId != 0 {
 		err = s.db.QueryRow(`
-			INSERT INTO step (step_name, workflow_id, quality_definition)
-			VALUES ($1, $2, $3::jsonb)
+			INSERT INTO step (step_name, workflow_id, quality_definition, output_lifetime)
+			VALUES ($1, $2, $3::jsonb, $4)
 			RETURNING step_id, workflow_id
-		`, req.Name, *req.WorkflowId, qualityDef).Scan(&stepID, &workflowID)
+		`, req.Name, *req.WorkflowId, qualityDef, outputLifetime).Scan(&stepID, &workflowID)
 	} else if req.WorkflowName != nil {
 		err = s.db.QueryRow(`
 			WITH wf AS (
 				SELECT w.workflow_id FROM workflow w WHERE w.workflow_name = $1
 			)
-			INSERT INTO step (step_name, workflow_id, quality_definition)
-			SELECT $2, wf.workflow_id, $3::jsonb FROM wf
+			INSERT INTO step (step_name, workflow_id, quality_definition, output_lifetime)
+			SELECT $2, wf.workflow_id, $3::jsonb, $4 FROM wf
 			RETURNING step_id, workflow_id
-		`, *req.WorkflowName, req.Name, qualityDef).Scan(&stepID, &workflowID)
+		`, *req.WorkflowName, req.Name, qualityDef, outputLifetime).Scan(&stepID, &workflowID)
 	} else {
 		return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
 	}

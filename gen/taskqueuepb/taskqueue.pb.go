@@ -7448,8 +7448,15 @@ type StepRequest struct {
 	WorkflowId        *int32                 `protobuf:"varint,2,opt,name=workflow_id,json=workflowId,proto3,oneof" json:"workflow_id,omitempty"`
 	Name              string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	QualityDefinition *string                `protobuf:"bytes,4,opt,name=quality_definition,json=qualityDefinition,proto3,oneof" json:"quality_definition,omitempty"` // JSON: {"variables": {...}, "formula": "..."}
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// output_lifetime: declares that this step's workspace outputs are
+	// intermediate data and can be swept when the workflow reaches S.
+	// Accepted values: "" / unset (persist, today's behaviour) or
+	// "workflow" (delete workspace outputs on workflow success; publish
+	// outputs are untouched). Anything else is rejected server-side.
+	// See migration 000045_step_output_lifetime.
+	OutputLifetime *string `protobuf:"bytes,5,opt,name=output_lifetime,json=outputLifetime,proto3,oneof" json:"output_lifetime,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *StepRequest) Reset() {
@@ -7506,6 +7513,13 @@ func (x *StepRequest) GetName() string {
 func (x *StepRequest) GetQualityDefinition() string {
 	if x != nil && x.QualityDefinition != nil {
 		return *x.QualityDefinition
+	}
+	return ""
+}
+
+func (x *StepRequest) GetOutputLifetime() string {
+	if x != nil && x.OutputLifetime != nil {
+		return *x.OutputLifetime
 	}
 	return ""
 }
@@ -12457,16 +12471,18 @@ const file_taskqueue_proto_rawDesc = "" +
 	"workflowId\x12\x12\n" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x122\n" +
 	"\x12quality_definition\x18\x05 \x01(\tH\x00R\x11qualityDefinition\x88\x01\x01B\x15\n" +
-	"\x13_quality_definition\"\xde\x01\n" +
+	"\x13_quality_definition\"\xa0\x02\n" +
 	"\vStepRequest\x12(\n" +
 	"\rworkflow_name\x18\x01 \x01(\tH\x00R\fworkflowName\x88\x01\x01\x12$\n" +
 	"\vworkflow_id\x18\x02 \x01(\x05H\x01R\n" +
 	"workflowId\x88\x01\x01\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x122\n" +
-	"\x12quality_definition\x18\x04 \x01(\tH\x02R\x11qualityDefinition\x88\x01\x01B\x10\n" +
+	"\x12quality_definition\x18\x04 \x01(\tH\x02R\x11qualityDefinition\x88\x01\x01\x12,\n" +
+	"\x0foutput_lifetime\x18\x05 \x01(\tH\x03R\x0eoutputLifetime\x88\x01\x01B\x10\n" +
 	"\x0e_workflow_nameB\x0e\n" +
 	"\f_workflow_idB\x15\n" +
-	"\x13_quality_definition\"1\n" +
+	"\x13_quality_definitionB\x12\n" +
+	"\x10_output_lifetime\"1\n" +
 	"\bStepList\x12%\n" +
 	"\x05steps\x18\x01 \x03(\v2\x0f.taskqueue.StepR\x05steps\"c\n" +
 	"\x10StepStatsRequest\x12$\n" +

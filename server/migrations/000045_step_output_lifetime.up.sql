@@ -1,0 +1,25 @@
+-- Per-step output lifetime hint.
+--
+-- Declares that this step's outputs are intermediate data and can be
+-- deleted from the workspace once the parent workflow reaches a terminal
+-- SUCCESS state. Fires only on workflow -> S; on workflow -> F everything
+-- is kept for debugging. Publish outputs are untouched — a user who set
+-- publish: has explicitly asked for the file to persist somewhere.
+--
+-- Values:
+--   NULL: default. Persist forever (today's behaviour).
+--   'W':  workflow-scope. Sweep on workflow S.
+--
+-- Reserved for future use (not accepted by CreateStep yet):
+--   'T':  task-scope. Sweep as soon as the single downstream consumer
+--         has succeeded (the "|consume" other-agent proposal — needs a
+--         "who consumes what" model before it can be safely wired).
+--
+-- One column on step (not step_output — no such table) means every
+-- output of a step shares its lifetime. That matches the natural
+-- granularity of the workspace layout: a task's output URI is a single
+-- prefix that holds all files for one task's outputs, so per-glob
+-- deletion isn't achievable at the storage layer without extra
+-- bookkeeping we don't have.
+ALTER TABLE step
+  ADD COLUMN output_lifetime CHAR(1) NULL;

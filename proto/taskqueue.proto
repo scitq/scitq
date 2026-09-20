@@ -1197,6 +1197,13 @@ message StepRequest {
     optional int32 workflow_id = 2;
     string name = 3;
     optional string quality_definition = 4; // JSON: {"variables": {...}, "formula": "..."}
+    // output_lifetime: declares that this step's workspace outputs are
+    // intermediate data and can be swept when the workflow reaches S.
+    // Accepted values: "" / unset (persist, today's behaviour) or
+    // "workflow" (delete workspace outputs on workflow success; publish
+    // outputs are untouched). Anything else is rejected server-side.
+    // See migration 000045_step_output_lifetime.
+    optional string output_lifetime = 5;
 }
 message StepList {
     repeated Step steps = 1;

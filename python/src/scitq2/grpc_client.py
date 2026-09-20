@@ -278,7 +278,9 @@ class Scitq2Client:
             return self.stub.StreamTaskLogsErr(taskqueue_pb2.TaskId(task_id=task_id))
         raise ValueError("log_type must be 'stdout' or 'stderr'")
 
-    def create_step(self, workflow_id: int, name: str, quality_definition: Optional[str] = None) -> int:
+    def create_step(self, workflow_id: int, name: str,
+                    quality_definition: Optional[str] = None,
+                    output_lifetime: Optional[str] = None) -> int:
         """
         Creates a new step associated with a given workflow.
 
@@ -286,6 +288,9 @@ class Scitq2Client:
         - workflow_id (int): The parent workflow's ID
         - name (str): Name of the step
         - quality_definition (str, optional): JSON quality definition
+        - output_lifetime (str, optional): "workflow" to have the server sweep
+          this step's workspace outputs when the workflow reaches S. None /
+          omitted keeps the pre-feature behaviour (outputs persist).
 
         Returns:
         - int: The step ID
@@ -293,6 +298,8 @@ class Scitq2Client:
         request = taskqueue_pb2.StepRequest(workflow_id=workflow_id, name=name)
         if quality_definition is not None:
             request.quality_definition = quality_definition
+        if output_lifetime is not None:
+            request.output_lifetime = output_lifetime
         response = self.stub.CreateStep(request)
         return response.step_id
 
