@@ -293,6 +293,15 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 	// metrics_refresh.go for the sampling logic.
 	go s.runMetricsRefresh(s.stopWatchdog)
 
+	// Rolling retention of worker_stats_history. Skipped entirely when
+	// worker_stats_retention_hours is 0 (feature disabled) — the ping
+	// handler also checks that knob before writing, so no rows ever
+	// accumulate. See lifetime_sweep.go for the sibling workflow-output
+	// sweeper.
+	if s.cfg.Scitq.WorkerStatsRetentionHours > 0 {
+		go s.runWorkerStatsHistorySweep(s.stopWatchdog)
+	}
+
 	// Periodic live quality extraction for running tasks
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -5334,6 +5343,12 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 			WorkerId: req.WorkerId,
 			Stats:    req.Stats,
 		})
+		// Persist one row per ping to the history table when the feature
+		// is enabled. Fire-and-forget so ping latency isn't affected by
+		// the extra INSERT. See worker_stats_history.go.
+		if s.cfg.Scitq.WorkerStatsRetentionHours > 0 {
+			s.persistWorkerStatsSample(req.WorkerId, req.Stats)
+		}
 	} else {
 		log.Printf("⚠️ Worker %d did not send stats", req.WorkerId)
 	}

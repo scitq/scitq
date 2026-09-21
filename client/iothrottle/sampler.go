@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 // SampleInterval is the tick period for the sampler goroutine. Kept at
@@ -20,10 +21,16 @@ const SampleInterval = 1 * time.Second
 // workerstats.CollectWorkerStats (which is called on a separate
 // cadence, from the ping loop).
 //
+// When a non-nil PeakTracker is passed, the sampler additionally folds
+// per-tick cpu%, mem%, and iowait% into it so the ping loop can report
+// sub-ping-interval peaks to the server. Pass nil to keep only the
+// throttle feed (older behaviour). A cpu% or mem% read error skips
+// that dimension for the tick but does not stop the sampler.
+//
 // Returns immediately. The goroutine stops when ctx is done. Failures
 // to read cpu.Times are logged but non-fatal — a missed sample just
 // means the throttle sees no new data for that tick.
-func StartSampler(ctx context.Context, t *Throttle) {
+func StartSampler(ctx context.Context, t *Throttle, peaks *PeakTracker) {
 	go func() {
 		ticker := time.NewTicker(SampleInterval)
 		defer ticker.Stop()
@@ -44,6 +51,7 @@ func StartSampler(ctx context.Context, t *Throttle) {
 			if len(last) == len(curr) && len(curr) > 0 {
 				totalDelta := 0.0
 				iowaitDelta := 0.0
+				busyDelta := 0.0
 				for i := range curr {
 					p, c := last[i], curr[i]
 					pTot := p.User + p.System + p.Idle + p.Nice + p.Iowait + p.Irq + p.Softirq + p.Steal + p.Guest + p.GuestNice
@@ -51,14 +59,32 @@ func StartSampler(ctx context.Context, t *Throttle) {
 					if delta := cTot - pTot; delta > 0 {
 						totalDelta += delta
 						iowaitDelta += c.Iowait - p.Iowait
+						// "busy" is what CollectWorkerStats reports as
+						// cpu_usage_percent: everything except idle +
+						// iowait. Keeps the peak comparable to the
+						// same-named current-value field.
+						busyDelta += (c.User + c.System + c.Nice + c.Irq + c.Softirq + c.Steal) -
+							(p.User + p.System + p.Nice + p.Irq + p.Softirq + p.Steal)
 					}
 				}
 				if totalDelta > 0 {
-					pct := float32((iowaitDelta / totalDelta) * 100.0)
-					if pct < 0 {
-						pct = 0
+					iowaitPct := float32((iowaitDelta / totalDelta) * 100.0)
+					if iowaitPct < 0 {
+						iowaitPct = 0
 					}
-					t.Sample(pct)
+					t.Sample(iowaitPct)
+
+					if peaks != nil {
+						cpuPct := float32((busyDelta / totalDelta) * 100.0)
+						if cpuPct < 0 {
+							cpuPct = 0
+						}
+						var memPct float32
+						if v, err := mem.VirtualMemory(); err == nil {
+							memPct = float32(v.UsedPercent)
+						}
+						peaks.Observe(cpuPct, memPct, iowaitPct)
+					}
 				}
 			}
 			last = curr

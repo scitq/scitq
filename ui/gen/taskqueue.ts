@@ -3020,6 +3020,27 @@ export interface WorkerStats {
      * @generated from protobuf field: int32 running_tasks = 11
      */
     runningTasks: number;
+    /**
+     * Peaks observed by the client's 1 Hz sampler between the previous
+     * ping and this one. Ping cadence is O(5s) so the raw cpu/mem/iowait
+     * above catches only whatever happened to be true at the moment of
+     * the ping; the peaks capture sub-ping-interval spikes that are
+     * otherwise invisible (a 500ms memory allocation, a 2s iowait burst).
+     * The sampler resets its running max after every ping-send.
+     * The server aggregates these into the "what did this workflow really
+     * need?" summary; a client that lacks the sampler leaves them at 0.
+     *
+     * @generated from protobuf field: optional float peak_cpu_percent = 12
+     */
+    peakCpuPercent?: number;
+    /**
+     * @generated from protobuf field: optional float peak_mem_percent = 13
+     */
+    peakMemPercent?: number;
+    /**
+     * @generated from protobuf field: optional float peak_iowait_percent = 14
+     */
+    peakIowaitPercent?: number;
 }
 /**
  * @generated from protobuf message taskqueue.DiskUsage
@@ -3095,6 +3116,183 @@ export interface GetWorkerStatsResponse {
     workerStats: {
         [key: number]: WorkerStats;
     };
+}
+// Historical worker stats, populated from the worker_stats_history table.
+// See migration 000048_worker_stats_history and
+// scitq.worker_stats_retention_hours in scitq.yaml.
+
+/**
+ * @generated from protobuf message taskqueue.WorkerStatsHistoryFilter
+ */
+export interface WorkerStatsHistoryFilter {
+    /**
+     * Filter dimensions AND together. All optional; a filter with none
+     * of them set returns nothing (rather than every sample ever) — the
+     * history table is unbounded until the retention sweep hits.
+     *
+     * @generated from protobuf field: optional int32 workflow_id = 1
+     */
+    workflowId?: number;
+    /**
+     * @generated from protobuf field: optional int32 worker_id = 2
+     */
+    workerId?: number;
+    /**
+     * @generated from protobuf field: optional int32 step_id = 3
+     */
+    stepId?: number;
+    /**
+     * @generated from protobuf field: optional int64 start_epoch = 4
+     */
+    startEpoch?: string;
+    /**
+     * @generated from protobuf field: optional int64 end_epoch = 5
+     */
+    endEpoch?: string;
+    /**
+     * Cap returned rows (safety net for series). Default 10000 when unset.
+     *
+     * @generated from protobuf field: optional int32 limit = 6
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerStatsHistorySample
+ */
+export interface WorkerStatsHistorySample {
+    /**
+     * @generated from protobuf field: int32 worker_id = 1
+     */
+    workerId: number;
+    /**
+     * @generated from protobuf field: string worker_name = 2
+     */
+    workerName: string; // denormalised for readability
+    /**
+     * @generated from protobuf field: int64 sampled_at = 3
+     */
+    sampledAt: string; // unix seconds
+    /**
+     * @generated from protobuf field: optional int32 step_id = 4
+     */
+    stepId?: number;
+    /**
+     * @generated from protobuf field: optional float cpu_percent = 5
+     */
+    cpuPercent?: number;
+    /**
+     * @generated from protobuf field: optional float mem_percent = 6
+     */
+    memPercent?: number;
+    /**
+     * @generated from protobuf field: optional float iowait_percent = 7
+     */
+    iowaitPercent?: number;
+    /**
+     * @generated from protobuf field: optional float peak_cpu_percent = 8
+     */
+    peakCpuPercent?: number;
+    /**
+     * @generated from protobuf field: optional float peak_mem_percent = 9
+     */
+    peakMemPercent?: number;
+    /**
+     * @generated from protobuf field: optional float peak_iowait_percent = 10
+     */
+    peakIowaitPercent?: number;
+    /**
+     * @generated from protobuf field: optional int32 effective_concurrency = 11
+     */
+    effectiveConcurrency?: number;
+    /**
+     * @generated from protobuf field: optional int32 running_tasks = 12
+     */
+    runningTasks?: number;
+    /**
+     * @generated from protobuf field: optional int64 last_throttle_at = 13
+     */
+    lastThrottleAt?: string;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerStatsHistoryList
+ */
+export interface WorkerStatsHistoryList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.WorkerStatsHistorySample samples = 1
+     */
+    samples: WorkerStatsHistorySample[];
+    /**
+     * If truncated by the row limit, the caller can retry with a tighter
+     * time range. A non-zero value means "some samples were dropped".
+     *
+     * @generated from protobuf field: int32 dropped = 2
+     */
+    dropped: number;
+}
+/**
+ * Aggregated view: one row per worker over the filter window. This is
+ * the answer to "what did this workflow actually need?".
+ *
+ * @generated from protobuf message taskqueue.WorkerStatsSummaryEntry
+ */
+export interface WorkerStatsSummaryEntry {
+    /**
+     * @generated from protobuf field: int32 worker_id = 1
+     */
+    workerId: number;
+    /**
+     * @generated from protobuf field: string worker_name = 2
+     */
+    workerName: string;
+    /**
+     * @generated from protobuf field: int32 sample_count = 3
+     */
+    sampleCount: number;
+    /**
+     * @generated from protobuf field: int64 first_sample_at = 4
+     */
+    firstSampleAt: string; // unix seconds
+    /**
+     * @generated from protobuf field: int64 last_sample_at = 5
+     */
+    lastSampleAt: string;
+    /**
+     * @generated from protobuf field: optional float max_cpu_percent = 6
+     */
+    maxCpuPercent?: number;
+    /**
+     * @generated from protobuf field: optional float max_mem_percent = 7
+     */
+    maxMemPercent?: number;
+    /**
+     * @generated from protobuf field: optional float max_iowait_percent = 8
+     */
+    maxIowaitPercent?: number;
+    /**
+     * @generated from protobuf field: optional float avg_cpu_percent = 9
+     */
+    avgCpuPercent?: number;
+    /**
+     * @generated from protobuf field: optional float avg_mem_percent = 10
+     */
+    avgMemPercent?: number;
+    /**
+     * @generated from protobuf field: optional float avg_iowait_percent = 11
+     */
+    avgIowaitPercent?: number;
+    /**
+     * @generated from protobuf field: optional int32 max_running_tasks = 12
+     */
+    maxRunningTasks?: number;
+}
+/**
+ * @generated from protobuf message taskqueue.WorkerStatsSummary
+ */
+export interface WorkerStatsSummary {
+    /**
+     * @generated from protobuf field: repeated taskqueue.WorkerStatsSummaryEntry entries = 1
+     */
+    entries: WorkerStatsSummaryEntry[];
 }
 /**
  * @generated from protobuf message taskqueue.FetchListRequest
@@ -12165,7 +12363,10 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
             { no: 8, name: "num_cpus", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 9, name: "effective_concurrency", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 10, name: "last_throttle_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
-            { no: 11, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 11, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 12, name: "peak_cpu_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 13, name: "peak_mem_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 14, name: "peak_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStats>): WorkerStats {
@@ -12221,6 +12422,15 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
                 case /* int32 running_tasks */ 11:
                     message.runningTasks = reader.int32();
                     break;
+                case /* optional float peak_cpu_percent */ 12:
+                    message.peakCpuPercent = reader.float();
+                    break;
+                case /* optional float peak_mem_percent */ 13:
+                    message.peakMemPercent = reader.float();
+                    break;
+                case /* optional float peak_iowait_percent */ 14:
+                    message.peakIowaitPercent = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12266,6 +12476,15 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
         /* int32 running_tasks = 11; */
         if (message.runningTasks !== 0)
             writer.tag(11, WireType.Varint).int32(message.runningTasks);
+        /* optional float peak_cpu_percent = 12; */
+        if (message.peakCpuPercent !== undefined)
+            writer.tag(12, WireType.Bit32).float(message.peakCpuPercent);
+        /* optional float peak_mem_percent = 13; */
+        if (message.peakMemPercent !== undefined)
+            writer.tag(13, WireType.Bit32).float(message.peakMemPercent);
+        /* optional float peak_iowait_percent = 14; */
+        if (message.peakIowaitPercent !== undefined)
+            writer.tag(14, WireType.Bit32).float(message.peakIowaitPercent);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12595,6 +12814,450 @@ class GetWorkerStatsResponse$Type extends MessageType<GetWorkerStatsResponse> {
  * @generated MessageType for protobuf message taskqueue.GetWorkerStatsResponse
  */
 export const GetWorkerStatsResponse = new GetWorkerStatsResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerStatsHistoryFilter$Type extends MessageType<WorkerStatsHistoryFilter> {
+    constructor() {
+        super("taskqueue.WorkerStatsHistoryFilter", [
+            { no: 1, name: "workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "worker_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "start_epoch", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
+            { no: 5, name: "end_epoch", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
+            { no: 6, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerStatsHistoryFilter>): WorkerStatsHistoryFilter {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<WorkerStatsHistoryFilter>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatsHistoryFilter): WorkerStatsHistoryFilter {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional int32 workflow_id */ 1:
+                    message.workflowId = reader.int32();
+                    break;
+                case /* optional int32 worker_id */ 2:
+                    message.workerId = reader.int32();
+                    break;
+                case /* optional int32 step_id */ 3:
+                    message.stepId = reader.int32();
+                    break;
+                case /* optional int64 start_epoch */ 4:
+                    message.startEpoch = reader.int64().toString();
+                    break;
+                case /* optional int64 end_epoch */ 5:
+                    message.endEpoch = reader.int64().toString();
+                    break;
+                case /* optional int32 limit */ 6:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerStatsHistoryFilter, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int32 workflow_id = 1; */
+        if (message.workflowId !== undefined)
+            writer.tag(1, WireType.Varint).int32(message.workflowId);
+        /* optional int32 worker_id = 2; */
+        if (message.workerId !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.workerId);
+        /* optional int32 step_id = 3; */
+        if (message.stepId !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.stepId);
+        /* optional int64 start_epoch = 4; */
+        if (message.startEpoch !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.startEpoch);
+        /* optional int64 end_epoch = 5; */
+        if (message.endEpoch !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.endEpoch);
+        /* optional int32 limit = 6; */
+        if (message.limit !== undefined)
+            writer.tag(6, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatsHistoryFilter
+ */
+export const WorkerStatsHistoryFilter = new WorkerStatsHistoryFilter$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerStatsHistorySample$Type extends MessageType<WorkerStatsHistorySample> {
+    constructor() {
+        super("taskqueue.WorkerStatsHistorySample", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "worker_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "sampled_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
+            { no: 4, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "cpu_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 6, name: "mem_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 7, name: "iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 8, name: "peak_cpu_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 9, name: "peak_mem_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 10, name: "peak_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 11, name: "effective_concurrency", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 12, name: "running_tasks", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 13, name: "last_throttle_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerStatsHistorySample>): WorkerStatsHistorySample {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = 0;
+        message.workerName = "";
+        message.sampledAt = "0";
+        if (value !== undefined)
+            reflectionMergePartial<WorkerStatsHistorySample>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatsHistorySample): WorkerStatsHistorySample {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 worker_id */ 1:
+                    message.workerId = reader.int32();
+                    break;
+                case /* string worker_name */ 2:
+                    message.workerName = reader.string();
+                    break;
+                case /* int64 sampled_at */ 3:
+                    message.sampledAt = reader.int64().toString();
+                    break;
+                case /* optional int32 step_id */ 4:
+                    message.stepId = reader.int32();
+                    break;
+                case /* optional float cpu_percent */ 5:
+                    message.cpuPercent = reader.float();
+                    break;
+                case /* optional float mem_percent */ 6:
+                    message.memPercent = reader.float();
+                    break;
+                case /* optional float iowait_percent */ 7:
+                    message.iowaitPercent = reader.float();
+                    break;
+                case /* optional float peak_cpu_percent */ 8:
+                    message.peakCpuPercent = reader.float();
+                    break;
+                case /* optional float peak_mem_percent */ 9:
+                    message.peakMemPercent = reader.float();
+                    break;
+                case /* optional float peak_iowait_percent */ 10:
+                    message.peakIowaitPercent = reader.float();
+                    break;
+                case /* optional int32 effective_concurrency */ 11:
+                    message.effectiveConcurrency = reader.int32();
+                    break;
+                case /* optional int32 running_tasks */ 12:
+                    message.runningTasks = reader.int32();
+                    break;
+                case /* optional int64 last_throttle_at */ 13:
+                    message.lastThrottleAt = reader.int64().toString();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerStatsHistorySample, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 worker_id = 1; */
+        if (message.workerId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.workerId);
+        /* string worker_name = 2; */
+        if (message.workerName !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.workerName);
+        /* int64 sampled_at = 3; */
+        if (message.sampledAt !== "0")
+            writer.tag(3, WireType.Varint).int64(message.sampledAt);
+        /* optional int32 step_id = 4; */
+        if (message.stepId !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.stepId);
+        /* optional float cpu_percent = 5; */
+        if (message.cpuPercent !== undefined)
+            writer.tag(5, WireType.Bit32).float(message.cpuPercent);
+        /* optional float mem_percent = 6; */
+        if (message.memPercent !== undefined)
+            writer.tag(6, WireType.Bit32).float(message.memPercent);
+        /* optional float iowait_percent = 7; */
+        if (message.iowaitPercent !== undefined)
+            writer.tag(7, WireType.Bit32).float(message.iowaitPercent);
+        /* optional float peak_cpu_percent = 8; */
+        if (message.peakCpuPercent !== undefined)
+            writer.tag(8, WireType.Bit32).float(message.peakCpuPercent);
+        /* optional float peak_mem_percent = 9; */
+        if (message.peakMemPercent !== undefined)
+            writer.tag(9, WireType.Bit32).float(message.peakMemPercent);
+        /* optional float peak_iowait_percent = 10; */
+        if (message.peakIowaitPercent !== undefined)
+            writer.tag(10, WireType.Bit32).float(message.peakIowaitPercent);
+        /* optional int32 effective_concurrency = 11; */
+        if (message.effectiveConcurrency !== undefined)
+            writer.tag(11, WireType.Varint).int32(message.effectiveConcurrency);
+        /* optional int32 running_tasks = 12; */
+        if (message.runningTasks !== undefined)
+            writer.tag(12, WireType.Varint).int32(message.runningTasks);
+        /* optional int64 last_throttle_at = 13; */
+        if (message.lastThrottleAt !== undefined)
+            writer.tag(13, WireType.Varint).int64(message.lastThrottleAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatsHistorySample
+ */
+export const WorkerStatsHistorySample = new WorkerStatsHistorySample$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerStatsHistoryList$Type extends MessageType<WorkerStatsHistoryList> {
+    constructor() {
+        super("taskqueue.WorkerStatsHistoryList", [
+            { no: 1, name: "samples", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => WorkerStatsHistorySample },
+            { no: 2, name: "dropped", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerStatsHistoryList>): WorkerStatsHistoryList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.samples = [];
+        message.dropped = 0;
+        if (value !== undefined)
+            reflectionMergePartial<WorkerStatsHistoryList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatsHistoryList): WorkerStatsHistoryList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.WorkerStatsHistorySample samples */ 1:
+                    message.samples.push(WorkerStatsHistorySample.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* int32 dropped */ 2:
+                    message.dropped = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerStatsHistoryList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.WorkerStatsHistorySample samples = 1; */
+        for (let i = 0; i < message.samples.length; i++)
+            WorkerStatsHistorySample.internalBinaryWrite(message.samples[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int32 dropped = 2; */
+        if (message.dropped !== 0)
+            writer.tag(2, WireType.Varint).int32(message.dropped);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatsHistoryList
+ */
+export const WorkerStatsHistoryList = new WorkerStatsHistoryList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerStatsSummaryEntry$Type extends MessageType<WorkerStatsSummaryEntry> {
+    constructor() {
+        super("taskqueue.WorkerStatsSummaryEntry", [
+            { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "worker_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "sample_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "first_sample_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
+            { no: 5, name: "last_sample_at", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
+            { no: 6, name: "max_cpu_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 7, name: "max_mem_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 8, name: "max_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 9, name: "avg_cpu_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 10, name: "avg_mem_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 11, name: "avg_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 12, name: "max_running_tasks", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerStatsSummaryEntry>): WorkerStatsSummaryEntry {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.workerId = 0;
+        message.workerName = "";
+        message.sampleCount = 0;
+        message.firstSampleAt = "0";
+        message.lastSampleAt = "0";
+        if (value !== undefined)
+            reflectionMergePartial<WorkerStatsSummaryEntry>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatsSummaryEntry): WorkerStatsSummaryEntry {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 worker_id */ 1:
+                    message.workerId = reader.int32();
+                    break;
+                case /* string worker_name */ 2:
+                    message.workerName = reader.string();
+                    break;
+                case /* int32 sample_count */ 3:
+                    message.sampleCount = reader.int32();
+                    break;
+                case /* int64 first_sample_at */ 4:
+                    message.firstSampleAt = reader.int64().toString();
+                    break;
+                case /* int64 last_sample_at */ 5:
+                    message.lastSampleAt = reader.int64().toString();
+                    break;
+                case /* optional float max_cpu_percent */ 6:
+                    message.maxCpuPercent = reader.float();
+                    break;
+                case /* optional float max_mem_percent */ 7:
+                    message.maxMemPercent = reader.float();
+                    break;
+                case /* optional float max_iowait_percent */ 8:
+                    message.maxIowaitPercent = reader.float();
+                    break;
+                case /* optional float avg_cpu_percent */ 9:
+                    message.avgCpuPercent = reader.float();
+                    break;
+                case /* optional float avg_mem_percent */ 10:
+                    message.avgMemPercent = reader.float();
+                    break;
+                case /* optional float avg_iowait_percent */ 11:
+                    message.avgIowaitPercent = reader.float();
+                    break;
+                case /* optional int32 max_running_tasks */ 12:
+                    message.maxRunningTasks = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerStatsSummaryEntry, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 worker_id = 1; */
+        if (message.workerId !== 0)
+            writer.tag(1, WireType.Varint).int32(message.workerId);
+        /* string worker_name = 2; */
+        if (message.workerName !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.workerName);
+        /* int32 sample_count = 3; */
+        if (message.sampleCount !== 0)
+            writer.tag(3, WireType.Varint).int32(message.sampleCount);
+        /* int64 first_sample_at = 4; */
+        if (message.firstSampleAt !== "0")
+            writer.tag(4, WireType.Varint).int64(message.firstSampleAt);
+        /* int64 last_sample_at = 5; */
+        if (message.lastSampleAt !== "0")
+            writer.tag(5, WireType.Varint).int64(message.lastSampleAt);
+        /* optional float max_cpu_percent = 6; */
+        if (message.maxCpuPercent !== undefined)
+            writer.tag(6, WireType.Bit32).float(message.maxCpuPercent);
+        /* optional float max_mem_percent = 7; */
+        if (message.maxMemPercent !== undefined)
+            writer.tag(7, WireType.Bit32).float(message.maxMemPercent);
+        /* optional float max_iowait_percent = 8; */
+        if (message.maxIowaitPercent !== undefined)
+            writer.tag(8, WireType.Bit32).float(message.maxIowaitPercent);
+        /* optional float avg_cpu_percent = 9; */
+        if (message.avgCpuPercent !== undefined)
+            writer.tag(9, WireType.Bit32).float(message.avgCpuPercent);
+        /* optional float avg_mem_percent = 10; */
+        if (message.avgMemPercent !== undefined)
+            writer.tag(10, WireType.Bit32).float(message.avgMemPercent);
+        /* optional float avg_iowait_percent = 11; */
+        if (message.avgIowaitPercent !== undefined)
+            writer.tag(11, WireType.Bit32).float(message.avgIowaitPercent);
+        /* optional int32 max_running_tasks = 12; */
+        if (message.maxRunningTasks !== undefined)
+            writer.tag(12, WireType.Varint).int32(message.maxRunningTasks);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatsSummaryEntry
+ */
+export const WorkerStatsSummaryEntry = new WorkerStatsSummaryEntry$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WorkerStatsSummary$Type extends MessageType<WorkerStatsSummary> {
+    constructor() {
+        super("taskqueue.WorkerStatsSummary", [
+            { no: 1, name: "entries", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => WorkerStatsSummaryEntry }
+        ]);
+    }
+    create(value?: PartialMessage<WorkerStatsSummary>): WorkerStatsSummary {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.entries = [];
+        if (value !== undefined)
+            reflectionMergePartial<WorkerStatsSummary>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WorkerStatsSummary): WorkerStatsSummary {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.WorkerStatsSummaryEntry entries */ 1:
+                    message.entries.push(WorkerStatsSummaryEntry.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WorkerStatsSummary, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.WorkerStatsSummaryEntry entries = 1; */
+        for (let i = 0; i < message.entries.length; i++)
+            WorkerStatsSummaryEntry.internalBinaryWrite(message.entries[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.WorkerStatsSummary
+ */
+export const WorkerStatsSummary = new WorkerStatsSummary$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class FetchListRequest$Type extends MessageType<FetchListRequest> {
     constructor() {
@@ -15904,6 +16567,8 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "DeleteStep", options: {}, I: StepId, O: Ack },
     { name: "GetStepStats", options: {}, I: StepStatsRequest, O: StepStatsResponse },
     { name: "GetWorkerStats", options: {}, I: GetWorkerStatsRequest, O: GetWorkerStatsResponse },
+    { name: "ListWorkerStatsHistory", options: {}, I: WorkerStatsHistoryFilter, O: WorkerStatsHistoryList },
+    { name: "GetWorkerStatsSummary", options: {}, I: WorkerStatsHistoryFilter, O: WorkerStatsSummary },
     { name: "FetchList", options: {}, I: FetchListRequest, O: FetchListResponse },
     { name: "FetchInfo", options: {}, I: FetchListRequest, O: FetchInfoResponse },
     { name: "UploadTemplate", options: {}, I: UploadTemplateRequest, O: UploadTemplateResponse },

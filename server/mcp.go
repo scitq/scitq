@@ -506,6 +506,33 @@ func (h *mcpHandler) listTools() []mcpTool {
 			},
 		},
 		{
+			Name:        "get_worker_stats_peak",
+			Description: "Per-worker aggregated peak/average stats over a completed (or in-flight) workflow. Answers the operational question 'what did this workflow actually need?' — max_cpu_percent / max_mem_percent / max_iowait_percent per worker across the sample window, plus averages and sample counts. Server-side MAX() over historical samples, so peaks include the sub-ping-interval spikes captured by the client's 1 Hz sampler (the raw ping-time values would miss them). Requires scitq.worker_stats_retention_hours > 0 (default 168h).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"workflow_id": {Type: "integer", Description: "Workflow to aggregate over (samples where the worker was serving a step of this workflow)."},
+					"worker_id":   {Type: "integer", Description: "Optional single-worker filter (combines with workflow_id)."},
+					"step_id":     {Type: "integer", Description: "Optional single-step filter."},
+					"hours_back":  {Type: "integer", Description: "Convenience filter: only samples in the last N hours. Combines with the other filters."},
+				},
+			},
+		},
+		{
+			Name:        "get_worker_stats_history",
+			Description: "Raw historical worker stats samples (one row per ping). Same fields as get_worker_stats plus peak_* (max in the 1 Hz sampler window since the previous ping). Filter by any of workflow_id / worker_id / step_id / hours_back — at least one is required. Capped at 10000 samples by default; response.dropped is non-zero when the cap was hit — narrow the window and retry. Use get_worker_stats_peak first for the common 'what were the peaks' question; reach for this only when you need the time series (plotting, identifying WHEN the peak happened).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"workflow_id": {Type: "integer", Description: "Samples where the worker was serving a step of this workflow."},
+					"worker_id":   {Type: "integer", Description: "Single worker."},
+					"step_id":     {Type: "integer", Description: "Single step."},
+					"hours_back":  {Type: "integer", Description: "Only samples in the last N hours."},
+					"limit":       {Type: "integer", Description: "Max samples returned (default 10000, hard cap 200000)."},
+				},
+			},
+		},
+		{
 			Name:        "list_jobs",
 			Description: "List server-internal jobs (worker create/delete/restart). Each entry includes status (P/R/S/F/X) and the provider error_class — one of 'auth' (credentials invalid: rotate the SP secret), 'quota' (regional/family cap), 'capacity' (region/zone stockout), 'unsupported_flavor' (provider rejected the SKU), 'transient' (timeout/5xx — retried), 'unknown'. error_message holds the raw provider error text. error_class + error_message are stamped after EVERY failed attempt — a job in status R that's still burning its retry budget already shows the last attempt's diagnosis, so you don't need to wait for the full retry cycle to conclude. THIS IS THE FIRST PLACE TO LOOK when recruitment or deletion is failing — auth errors in particular are silent in worker_events and only surface here.",
 			InputSchema: inputSchema{
@@ -979,6 +1006,10 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolListWorkers(authCtx)
 	case "get_worker_stats":
 		return h.toolGetWorkerStats(authCtx, call.Arguments)
+	case "get_worker_stats_peak":
+		return h.toolGetWorkerStatsPeak(authCtx, call.Arguments)
+	case "get_worker_stats_history":
+		return h.toolGetWorkerStatsHistory(authCtx, call.Arguments)
 	case "list_jobs":
 		return h.toolListJobs(authCtx, call.Arguments)
 	case "deploy_worker":
@@ -1400,6 +1431,73 @@ func (h *mcpHandler) toolGetWorkerStats(ctx context.Context, args json.RawMessag
 		})
 	}
 	return jsonResult(out), nil
+}
+
+// mcpHistoryFilter is the shared decode for the two history-facing MCP
+// tools: same filter shape, but the peak endpoint accepts (and requires
+// something meaningful, either workflow_id or worker_id) while the
+// history endpoint accepts the extra `limit` knob. The `hours_back`
+// convenience is resolved to a concrete start_epoch here so callers
+// don't have to build epoch timestamps themselves.
+type mcpHistoryFilter struct {
+	WorkflowID int32 `json:"workflow_id"`
+	WorkerID   int32 `json:"worker_id"`
+	StepID     int32 `json:"step_id"`
+	HoursBack  int32 `json:"hours_back"`
+	Limit      int32 `json:"limit"`
+}
+
+func (mhf mcpHistoryFilter) toPB() *pb.WorkerStatsHistoryFilter {
+	f := &pb.WorkerStatsHistoryFilter{}
+	if mhf.WorkflowID != 0 {
+		f.WorkflowId = &mhf.WorkflowID
+	}
+	if mhf.WorkerID != 0 {
+		f.WorkerId = &mhf.WorkerID
+	}
+	if mhf.StepID != 0 {
+		f.StepId = &mhf.StepID
+	}
+	if mhf.HoursBack > 0 {
+		startEpoch := time.Now().Add(-time.Duration(mhf.HoursBack) * time.Hour).Unix()
+		f.StartEpoch = &startEpoch
+	}
+	if mhf.Limit > 0 {
+		f.Limit = &mhf.Limit
+	}
+	return f
+}
+
+func (h *mcpHandler) toolGetWorkerStatsPeak(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p mcpHistoryFilter
+	_ = json.Unmarshal(args, &p)
+	if p.WorkflowID == 0 && p.WorkerID == 0 && p.StepID == 0 && p.HoursBack == 0 {
+		return &toolResult{
+			Content: []contentBlock{{Type: "text", Text: "get_worker_stats_peak needs at least one of workflow_id, worker_id, step_id, or hours_back"}},
+			IsError: true,
+		}, nil
+	}
+	res, err := h.server.GetWorkerStatsSummary(ctx, p.toPB())
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.GetEntries()), nil
+}
+
+func (h *mcpHandler) toolGetWorkerStatsHistory(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p mcpHistoryFilter
+	_ = json.Unmarshal(args, &p)
+	if p.WorkflowID == 0 && p.WorkerID == 0 && p.StepID == 0 && p.HoursBack == 0 {
+		return &toolResult{
+			Content: []contentBlock{{Type: "text", Text: "get_worker_stats_history needs at least one of workflow_id, worker_id, step_id, or hours_back"}},
+			IsError: true,
+		}, nil
+	}
+	res, err := h.server.ListWorkerStatsHistory(ctx, p.toPB())
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res), nil
 }
 
 func (h *mcpHandler) toolListJobs(ctx context.Context, args json.RawMessage) (any, *rpcError) {

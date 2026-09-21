@@ -118,6 +118,16 @@ type Config struct {
 		// flaky networks where transient ping loss is common.
 		OfflineTimeout int `yaml:"offline_timeout" default:"600"`
 
+		// WorkerStatsRetentionHours controls how long historical per-worker
+		// stats samples (worker_stats_history table) are kept. Each ping
+		// writes one row with the worker's current and peak-since-last-ping
+		// cpu/mem/iowait, so a completed workflow can be inspected days
+		// later ("what did this workflow actually need?"). 0 disables the
+		// feature entirely — no rows are written and the sweep goroutine
+		// does not run. Default 168 (7 days) comfortably covers a Friday
+		// workflow inspected on Monday.
+		WorkerStatsRetentionHours int `yaml:"worker_stats_retention_hours" default:"168"`
+
 		// TaskDownloadTimeout is the timeout in seconds for task data downloads.
 		TaskDownloadTimeout int `yaml:"task_download_timeout" default:"600"`
 

@@ -244,6 +244,21 @@ Grafana Agent). A basic dashboard covers most of the needs:
 - Row 4: `scitq_db_connections_open`, `scitq_db_connections_in_use`
   vs. `max_db_concurrency`.
 
+## Historical worker stats
+
+The `/metrics` endpoint exposes only the current values; a completed workflow has no live workers left to scrape. For "what did this workflow actually need?" the server writes one row per ping into `worker_stats_history` and exposes two RPCs on top of it:
+
+- `ListWorkerStatsHistory` — raw samples matching a filter (workflow_id / worker_id / step_id / time range). Series-shaped output; suitable for plotting or identifying WHEN a spike happened.
+- `GetWorkerStatsSummary` — per-worker aggregation over the same filter: max_cpu / max_mem / max_iowait, plus averages, sample count, first/last sample epoch. The natural answer to sizing questions.
+
+Both surface the same fields as the live `WorkerStats` (cpu%, mem%, iowait%, effective_concurrency, running_tasks, last_throttle_at), plus `peak_cpu_percent`, `peak_mem_percent`, `peak_iowait_percent` — the maximum values observed by the client's 1 Hz sampler between the previous ping and the ping being recorded. The peaks catch sub-ping-interval spikes (a 500 ms memory allocation, a 2 s iowait burst) that the raw ping-time values miss. `GetWorkerStatsSummary` uses `GREATEST(peak_*, current_*)` when aggregating, so a worker running an older client that doesn't send peaks still contributes its ping-time gauges to the max.
+
+MCP exposes both as `get_worker_stats_peak` (summary — the common case) and `get_worker_stats_history` (raw series).
+
+Retention is capped by `scitq.worker_stats_retention_hours` (default 168 h = 7 days). Setting it to `0` disables the feature entirely: no rows are written, no sweep goroutine runs, and both RPCs return `FailedPrecondition`. At the default a fleet of 20 workers pinging every 5 s produces about a million rows in the window (~100 MB); the hourly sweep keeps that steady.
+
+Peaks are max-of-1Hz-samples between pings, not hardware peaks: a 200 ms allocation that never straddles a sampler tick is invisible. Increase the sampler cadence in `client/iothrottle/sampler.go` if that resolution matters.
+
 ## Adding a metric
 
 Pattern in `server/metrics/metrics.go`:

@@ -385,6 +385,16 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.GetWorkerStatsRequest.SerializeToString,
                 response_deserializer=taskqueue__pb2.GetWorkerStatsResponse.FromString,
                 _registered_method=True)
+        self.ListWorkerStatsHistory = channel.unary_unary(
+                '/taskqueue.TaskQueue/ListWorkerStatsHistory',
+                request_serializer=taskqueue__pb2.WorkerStatsHistoryFilter.SerializeToString,
+                response_deserializer=taskqueue__pb2.WorkerStatsHistoryList.FromString,
+                _registered_method=True)
+        self.GetWorkerStatsSummary = channel.unary_unary(
+                '/taskqueue.TaskQueue/GetWorkerStatsSummary',
+                request_serializer=taskqueue__pb2.WorkerStatsHistoryFilter.SerializeToString,
+                response_deserializer=taskqueue__pb2.WorkerStatsSummary.FromString,
+                _registered_method=True)
         self.FetchList = channel.unary_unary(
                 '/taskqueue.TaskQueue/FetchList',
                 request_serializer=taskqueue__pb2.FetchListRequest.SerializeToString,
@@ -990,6 +1000,18 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListWorkerStatsHistory(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetWorkerStatsSummary(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def FetchList(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1548,6 +1570,16 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.GetWorkerStats,
                     request_deserializer=taskqueue__pb2.GetWorkerStatsRequest.FromString,
                     response_serializer=taskqueue__pb2.GetWorkerStatsResponse.SerializeToString,
+            ),
+            'ListWorkerStatsHistory': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListWorkerStatsHistory,
+                    request_deserializer=taskqueue__pb2.WorkerStatsHistoryFilter.FromString,
+                    response_serializer=taskqueue__pb2.WorkerStatsHistoryList.SerializeToString,
+            ),
+            'GetWorkerStatsSummary': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetWorkerStatsSummary,
+                    request_deserializer=taskqueue__pb2.WorkerStatsHistoryFilter.FromString,
+                    response_serializer=taskqueue__pb2.WorkerStatsSummary.SerializeToString,
             ),
             'FetchList': grpc.unary_unary_rpc_method_handler(
                     servicer.FetchList,
@@ -3595,6 +3627,60 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/GetWorkerStats',
             taskqueue__pb2.GetWorkerStatsRequest.SerializeToString,
             taskqueue__pb2.GetWorkerStatsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListWorkerStatsHistory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ListWorkerStatsHistory',
+            taskqueue__pb2.WorkerStatsHistoryFilter.SerializeToString,
+            taskqueue__pb2.WorkerStatsHistoryList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetWorkerStatsSummary(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/GetWorkerStatsSummary',
+            taskqueue__pb2.WorkerStatsHistoryFilter.SerializeToString,
+            taskqueue__pb2.WorkerStatsSummary.FromString,
             options,
             channel_credentials,
             insecure,

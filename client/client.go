@@ -1002,6 +1002,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	numaAllocator *NumaAllocator,
 	lastDerivedStep *int32, // step_id we last auto-derived concurrency for; 0 = none yet
 	throttle *iothrottle.Throttle,
+	peaks *iothrottle.PeakTracker,
 ) ([]*pb.Task, string, bool, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -1055,6 +1056,20 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 		return true
 	})
 	query.Stats.RunningTasks = runningTaskCount
+
+	// Drain the peak tracker on every ping so the server records the
+	// actual worst-case cpu/mem/iowait between this ping and the last.
+	// hasData=false means no sample landed since the last drain (first
+	// tick after boot, or the sampler goroutine hasn't run yet) — leave
+	// the fields unset so the server writes NULL rather than a
+	// misleading 0.
+	if peaks != nil {
+		if cpuP, memP, ioP, hasData := peaks.Drain(); hasData {
+			query.Stats.PeakCpuPercent = &cpuP
+			query.Stats.PeakMemPercent = &memP
+			query.Stats.PeakIowaitPercent = &ioP
+		}
+	}
 
 	// Report the tasks we're actually tracking locally so the server can
 	// reconcile: any task it believes is active on us but that we no longer
@@ -1425,7 +1440,7 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 }
 
 // workerLoop continuously fetches and executes tasks in parallel.
-func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map, numaAllocator *NumaAllocator, lastDerivedStep *int32, throttle *iothrottle.Throttle) {
+func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.Reporter, config WorkerConfig, caps *LiveCaps, sem *utils.ResizableSemaphore, dm *DownloadManager, um *UploadManager, taskWeights *sync.Map, activeTasks *sync.Map, numaAllocator *NumaAllocator, lastDerivedStep *int32, throttle *iothrottle.Throttle, peaks *iothrottle.PeakTracker) {
 	store := dm.Store
 
 	var consecErrors int
@@ -1483,7 +1498,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			break
 		}
 
-		tasks, upgradeReq, serverGating, serverActiveCount, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, lastDerivedStep, throttle)
+		tasks, upgradeReq, serverGating, serverActiveCount, err := config.fetchTasks(caps, ctx, client, reporter, config.WorkerId, sem, taskWeights, activeTasks, numaAllocator, lastDerivedStep, throttle, peaks)
 		if err != nil {
 			log.Printf("⚠️ Error fetching tasks: %v", err)
 			consecErrors++
@@ -1826,7 +1841,12 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	// tracks config.Concurrency; fetchTasks pushes any server-side
 	// change through SetCeiling on each ping.
 	throttle := iothrottle.New(config.Concurrency)
-	iothrottle.StartSampler(ctx, throttle)
+	// PeakTracker records the 1 Hz max of cpu/mem/iowait since the last
+	// ping. fetchTasks drains it into the ping's peak_* fields so the
+	// server sees the true worst-case across the ping interval, not just
+	// the instant the ping fired. See client/iothrottle/peaks.go.
+	peaks := iothrottle.NewPeakTracker()
+	iothrottle.StartSampler(ctx, throttle, peaks)
 
 	// Shared live-resizable caps. Seeded from the CLI flags; the
 	// fetchTasks loop reconciles them with the server's view on every
@@ -1882,7 +1902,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc, gpuAlloc)
 
 	// Start processing tasks
-	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &lastDerivedStep, throttle)
+	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &lastDerivedStep, throttle, peaks)
 
 	// 🔎 Periodic diagnostics: detect tasks stuck active but not executing (likely in O)
 	go func() {

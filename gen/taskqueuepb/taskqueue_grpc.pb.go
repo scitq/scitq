@@ -90,6 +90,8 @@ const (
 	TaskQueue_DeleteStep_FullMethodName                = "/taskqueue.TaskQueue/DeleteStep"
 	TaskQueue_GetStepStats_FullMethodName              = "/taskqueue.TaskQueue/GetStepStats"
 	TaskQueue_GetWorkerStats_FullMethodName            = "/taskqueue.TaskQueue/GetWorkerStats"
+	TaskQueue_ListWorkerStatsHistory_FullMethodName    = "/taskqueue.TaskQueue/ListWorkerStatsHistory"
+	TaskQueue_GetWorkerStatsSummary_FullMethodName     = "/taskqueue.TaskQueue/GetWorkerStatsSummary"
 	TaskQueue_FetchList_FullMethodName                 = "/taskqueue.TaskQueue/FetchList"
 	TaskQueue_FetchInfo_FullMethodName                 = "/taskqueue.TaskQueue/FetchInfo"
 	TaskQueue_UploadTemplate_FullMethodName            = "/taskqueue.TaskQueue/UploadTemplate"
@@ -215,6 +217,8 @@ type TaskQueueClient interface {
 	DeleteStep(ctx context.Context, in *StepId, opts ...grpc.CallOption) (*Ack, error)
 	GetStepStats(ctx context.Context, in *StepStatsRequest, opts ...grpc.CallOption) (*StepStatsResponse, error)
 	GetWorkerStats(ctx context.Context, in *GetWorkerStatsRequest, opts ...grpc.CallOption) (*GetWorkerStatsResponse, error)
+	ListWorkerStatsHistory(ctx context.Context, in *WorkerStatsHistoryFilter, opts ...grpc.CallOption) (*WorkerStatsHistoryList, error)
+	GetWorkerStatsSummary(ctx context.Context, in *WorkerStatsHistoryFilter, opts ...grpc.CallOption) (*WorkerStatsSummary, error)
 	FetchList(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchListResponse, error)
 	FetchInfo(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchInfoResponse, error)
 	// Template system
@@ -997,6 +1001,26 @@ func (c *taskQueueClient) GetWorkerStats(ctx context.Context, in *GetWorkerStats
 	return out, nil
 }
 
+func (c *taskQueueClient) ListWorkerStatsHistory(ctx context.Context, in *WorkerStatsHistoryFilter, opts ...grpc.CallOption) (*WorkerStatsHistoryList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerStatsHistoryList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListWorkerStatsHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) GetWorkerStatsSummary(ctx context.Context, in *WorkerStatsHistoryFilter, opts ...grpc.CallOption) (*WorkerStatsSummary, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerStatsSummary)
+	err := c.cc.Invoke(ctx, TaskQueue_GetWorkerStatsSummary_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *taskQueueClient) FetchList(ctx context.Context, in *FetchListRequest, opts ...grpc.CallOption) (*FetchListResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FetchListResponse)
@@ -1399,6 +1423,8 @@ type TaskQueueServer interface {
 	DeleteStep(context.Context, *StepId) (*Ack, error)
 	GetStepStats(context.Context, *StepStatsRequest) (*StepStatsResponse, error)
 	GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error)
+	ListWorkerStatsHistory(context.Context, *WorkerStatsHistoryFilter) (*WorkerStatsHistoryList, error)
+	GetWorkerStatsSummary(context.Context, *WorkerStatsHistoryFilter) (*WorkerStatsSummary, error)
 	FetchList(context.Context, *FetchListRequest) (*FetchListResponse, error)
 	FetchInfo(context.Context, *FetchListRequest) (*FetchInfoResponse, error)
 	// Template system
@@ -1669,6 +1695,12 @@ func (UnimplementedTaskQueueServer) GetStepStats(context.Context, *StepStatsRequ
 }
 func (UnimplementedTaskQueueServer) GetWorkerStats(context.Context, *GetWorkerStatsRequest) (*GetWorkerStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkerStats not implemented")
+}
+func (UnimplementedTaskQueueServer) ListWorkerStatsHistory(context.Context, *WorkerStatsHistoryFilter) (*WorkerStatsHistoryList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkerStatsHistory not implemented")
+}
+func (UnimplementedTaskQueueServer) GetWorkerStatsSummary(context.Context, *WorkerStatsHistoryFilter) (*WorkerStatsSummary, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWorkerStatsSummary not implemented")
 }
 func (UnimplementedTaskQueueServer) FetchList(context.Context, *FetchListRequest) (*FetchListResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FetchList not implemented")
@@ -3019,6 +3051,42 @@ func _TaskQueue_GetWorkerStats_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskQueue_ListWorkerStatsHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerStatsHistoryFilter)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListWorkerStatsHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListWorkerStatsHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListWorkerStatsHistory(ctx, req.(*WorkerStatsHistoryFilter))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_GetWorkerStatsSummary_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerStatsHistoryFilter)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).GetWorkerStatsSummary(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_GetWorkerStatsSummary_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).GetWorkerStatsSummary(ctx, req.(*WorkerStatsHistoryFilter))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskQueue_FetchList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FetchListRequest)
 	if err := dec(in); err != nil {
@@ -3851,6 +3919,14 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkerStats",
 			Handler:    _TaskQueue_GetWorkerStats_Handler,
+		},
+		{
+			MethodName: "ListWorkerStatsHistory",
+			Handler:    _TaskQueue_ListWorkerStatsHistory_Handler,
+		},
+		{
+			MethodName: "GetWorkerStatsSummary",
+			Handler:    _TaskQueue_GetWorkerStatsSummary_Handler,
 		},
 		{
 			MethodName: "FetchList",

@@ -95,6 +95,8 @@ service TaskQueue {
     rpc DeleteStep(StepId) returns (Ack);
     rpc GetStepStats(StepStatsRequest) returns (StepStatsResponse);
     rpc GetWorkerStats (GetWorkerStatsRequest) returns (GetWorkerStatsResponse);
+    rpc ListWorkerStatsHistory (WorkerStatsHistoryFilter) returns (WorkerStatsHistoryList);
+    rpc GetWorkerStatsSummary  (WorkerStatsHistoryFilter) returns (WorkerStatsSummary);
     rpc FetchList (FetchListRequest) returns (FetchListResponse);
     rpc FetchInfo (FetchListRequest) returns (FetchInfoResponse);
     // Template system
@@ -1321,6 +1323,18 @@ message WorkerStats {
     // by the client wrapper regardless of the execution mode. See
     // client/client.go:executingTasks.
     int32 running_tasks = 11;
+
+    // Peaks observed by the client's 1 Hz sampler between the previous
+    // ping and this one. Ping cadence is O(5s) so the raw cpu/mem/iowait
+    // above catches only whatever happened to be true at the moment of
+    // the ping; the peaks capture sub-ping-interval spikes that are
+    // otherwise invisible (a 500ms memory allocation, a 2s iowait burst).
+    // The sampler resets its running max after every ping-send.
+    // The server aggregates these into the "what did this workflow really
+    // need?" summary; a client that lacks the sampler leaves them at 0.
+    optional float peak_cpu_percent    = 12;
+    optional float peak_mem_percent    = 13;
+    optional float peak_iowait_percent = 14;
 }
 
 message DiskUsage {
@@ -1348,6 +1362,67 @@ message GetWorkerStatsRequest {
 
 message GetWorkerStatsResponse {
     map<int32, WorkerStats> worker_stats = 1;
+}
+
+// Historical worker stats, populated from the worker_stats_history table.
+// See migration 000048_worker_stats_history and
+// scitq.worker_stats_retention_hours in scitq.yaml.
+
+message WorkerStatsHistoryFilter {
+    // Filter dimensions AND together. All optional; a filter with none
+    // of them set returns nothing (rather than every sample ever) — the
+    // history table is unbounded until the retention sweep hits.
+    optional int32 workflow_id  = 1;
+    optional int32 worker_id    = 2;
+    optional int32 step_id      = 3;
+    optional int64 start_epoch  = 4;
+    optional int64 end_epoch    = 5;
+    // Cap returned rows (safety net for series). Default 10000 when unset.
+    optional int32 limit        = 6;
+}
+
+message WorkerStatsHistorySample {
+    int32 worker_id                 = 1;
+    string worker_name              = 2;   // denormalised for readability
+    int64 sampled_at                = 3;   // unix seconds
+    optional int32 step_id          = 4;
+    optional float cpu_percent      = 5;
+    optional float mem_percent      = 6;
+    optional float iowait_percent   = 7;
+    optional float peak_cpu_percent    = 8;
+    optional float peak_mem_percent    = 9;
+    optional float peak_iowait_percent = 10;
+    optional int32 effective_concurrency = 11;
+    optional int32 running_tasks    = 12;
+    optional int64 last_throttle_at = 13;
+}
+
+message WorkerStatsHistoryList {
+    repeated WorkerStatsHistorySample samples = 1;
+    // If truncated by the row limit, the caller can retry with a tighter
+    // time range. A non-zero value means "some samples were dropped".
+    int32 dropped = 2;
+}
+
+// Aggregated view: one row per worker over the filter window. This is
+// the answer to "what did this workflow actually need?".
+message WorkerStatsSummaryEntry {
+    int32 worker_id              = 1;
+    string worker_name           = 2;
+    int32 sample_count           = 3;
+    int64 first_sample_at        = 4;   // unix seconds
+    int64 last_sample_at         = 5;
+    optional float max_cpu_percent    = 6;
+    optional float max_mem_percent    = 7;
+    optional float max_iowait_percent = 8;
+    optional float avg_cpu_percent    = 9;
+    optional float avg_mem_percent    = 10;
+    optional float avg_iowait_percent = 11;
+    optional int32 max_running_tasks  = 12;
+}
+
+message WorkerStatsSummary {
+    repeated WorkerStatsSummaryEntry entries = 1;
 }
 
 message FetchListRequest {
