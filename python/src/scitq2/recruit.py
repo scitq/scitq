@@ -293,6 +293,10 @@ class WorkerPool:
                 if getattr(task_spec, 'gpu', None) is not None and task_spec.gpu > 0:
                     options["gpu_per_task"] = task_spec.gpu
                 options["prefetch_percent"]=int(task_spec.prefetch*100)
+                # Rounding rule: floor by default, ceil when the author
+                # wrote ">=25%" / ">25%" in the DSL/YAML. See TaskSpec._parse_prefetch.
+                if getattr(task_spec, 'prefetch_ceil', False):
+                    options["prefetch_percent_ceil"] = True
             else:
                 concurrency = task_spec.concurrency
                 prefetch = round(concurrency * task_spec.prefetch)

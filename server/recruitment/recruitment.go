@@ -86,6 +86,11 @@ type Recruiter struct {
 	// pre-feature linear behaviour. See computeConcurrencyForRecruiterWorker.
 	MemorySharedPerTask   *float32
 	DiskSharedPerTask     *float32
+	// Rounding rule for prefetch_percent × concurrency / 100.
+	// false (default) = floor (today's behaviour); true = ceil,
+	// which guarantees at least 1 prefetch slot on small workers where
+	// the floor would round down to 0.
+	PrefetchPercentCeil   bool
 	// GPU devices the step's task_spec asked for, per task. When
 	// set, computeConcurrencyForRecruiterWorker adds
 	// flavor.gpu_count / gpu_per_task to the min-of-ratios
@@ -171,6 +176,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.concurrency_max,
             r.memory_shared_per_task,
             r.disk_shared_per_task,
+            r.prefetch_percent_ceil,
             r.maximum_workers AS step_maximum,
             COALESCE(wagg.current_workers, 0) AS current_workers,
             wf.workflow_id,
@@ -198,6 +204,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.image, r.gpu_image,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             r.memory_shared_per_task, r.disk_shared_per_task,
+            r.prefetch_percent_ceil,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
@@ -238,6 +245,7 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.ConcurrencyMax,
 			&r.MemorySharedPerTask,
 			&r.DiskSharedPerTask,
+			&r.PrefetchPercentCeil,
 			&r.MaximumWorkers,
 			&r.CurrentWorkers,
 			&r.WorkflowID,
@@ -343,6 +351,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.concurrency_max,
             r.memory_shared_per_task,
             r.disk_shared_per_task,
+            r.prefetch_percent_ceil,
             r.maximum_workers AS step_maximum,
             COALESCE(wagg.current_workers, 0) AS current_workers,
             wf.workflow_id,
@@ -372,6 +381,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.image, r.gpu_image,
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             r.memory_shared_per_task, r.disk_shared_per_task,
+            r.prefetch_percent_ceil,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
@@ -407,6 +417,7 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
 			&r.ConcurrencyMax,
 			&r.MemorySharedPerTask,
 			&r.DiskSharedPerTask,
+			&r.PrefetchPercentCeil,
 			&r.MaximumWorkers,
 			&r.CurrentWorkers,
 			&r.WorkflowID,
@@ -987,6 +998,29 @@ func computeConcurrencyForRecruiterWorker(r Recruiter, w RecyclableWorker) int {
 	return c
 }
 
+// computePrefetchForRecruiterWorker resolves the prefetch value for the
+// worker at the given concurrency. Static WorkerPrefetch wins if set;
+// otherwise the percent × concurrency formula runs — floor by default,
+// ceil when the recruiter opted in via prefetch_percent_ceil (the
+// ">=25%" DSL shorthand). Returns 0 when neither field is set — the
+// caller decides how to complain about that misconfiguration.
+func computePrefetchForRecruiterWorker(r Recruiter, concurrency int) int {
+	if r.WorkerPrefetch != nil {
+		return *r.WorkerPrefetch
+	}
+	if r.PrefetchPercent == nil {
+		return 0
+	}
+	if r.PrefetchPercentCeil {
+		// ceil = -(-numerator / denominator) with integer division.
+		// Kept in ints to avoid float rounding surprises around exact
+		// multiples (e.g. ceil(4 * 25 / 100) must be 1, not 2).
+		num := concurrency * *r.PrefetchPercent
+		return (num + 99) / 100
+	}
+	return (concurrency * *r.PrefetchPercent) / 100
+}
+
 // selectWorkersForRecruiter selects recyclable workers to fill a throughput gap (neededTaskrate),
 // summing up their concurrency until the total meets or exceeds neededTaskrate.
 func selectWorkersForRecruiter(
@@ -1101,14 +1135,7 @@ func deployWorkers(
 
 		newConcurrency := computeConcurrencyForRecruiterWorker(recruiter,
 			RecyclableWorker{Cpu: &selected.Cpu, Memory: &selected.Memory, Disk: &selected.Disk, GpuCount: &selected.GpuCount})
-		var newPrefetch int
-		if recruiter.WorkerPrefetch != nil {
-			newPrefetch = *recruiter.WorkerPrefetch
-		} else {
-			if recruiter.PrefetchPercent != nil {
-				newPrefetch = (newConcurrency * *recruiter.PrefetchPercent) / 100
-			}
-		}
+		newPrefetch := computePrefetchForRecruiterWorker(recruiter, newConcurrency)
 
 		_, err := creator.CreateWorker(ctx, &pb.WorkerRequest{
 			FlavorId:    selected.FlavorID,
@@ -1243,16 +1270,12 @@ func RecruiterCycle(
 					if w, ok := recyclableMap[wid]; ok {
 						newConcurrency := computeConcurrencyForRecruiterWorker(recruiter, w)
 						newConcurrencyByWorkerID[wid] = newConcurrency
-						if recruiter.WorkerPrefetch != nil {
-							newPrefetchByWorkerID[wid] = *recruiter.WorkerPrefetch
+						if recruiter.WorkerPrefetch == nil && recruiter.PrefetchPercent == nil {
+							log.Printf("!! Recruiter %d:%d should have either WorkerPrefetch or PrefetchPercent !!",
+								recruiter.StepID, recruiter.Rank)
+							newPrefetchByWorkerID[wid] = 0
 						} else {
-							if recruiter.PrefetchPercent != nil {
-								newPrefetchByWorkerID[wid] = int(float32(newConcurrency) * float32(*recruiter.PrefetchPercent) / 100.0)
-							} else {
-								log.Printf("!! Recruiter %d:%d should have either WorkerPrefetch or PrefetchPercent !!",
-									recruiter.StepID, recruiter.Rank)
-								newPrefetchByWorkerID[wid] = 0
-							}
+							newPrefetchByWorkerID[wid] = computePrefetchForRecruiterWorker(recruiter, newConcurrency)
 						}
 					}
 				}
@@ -1432,16 +1455,12 @@ func DebugRecruitStep(
 					if w, ok := recyclableMap[wid]; ok {
 						newConcurrency := computeConcurrencyForRecruiterWorker(recruiter, w)
 						newConcurrencyByWorkerID[wid] = newConcurrency
-						if recruiter.WorkerPrefetch != nil {
-							newPrefetchByWorkerID[wid] = *recruiter.WorkerPrefetch
+						if recruiter.WorkerPrefetch == nil && recruiter.PrefetchPercent == nil {
+							log.Printf("!! Recruiter %d:%d should have either WorkerPrefetch or PrefetchPercent !!",
+								recruiter.StepID, recruiter.Rank)
+							newPrefetchByWorkerID[wid] = 0
 						} else {
-							if recruiter.PrefetchPercent != nil {
-								newPrefetchByWorkerID[wid] = int(float32(newConcurrency) * float32(*recruiter.PrefetchPercent) / 100.0)
-							} else {
-								log.Printf("!! Recruiter %d:%d should have either WorkerPrefetch or PrefetchPercent !!",
-									recruiter.StepID, recruiter.Rank)
-								newPrefetchByWorkerID[wid] = 0
-							}
+							newPrefetchByWorkerID[wid] = computePrefetchForRecruiterWorker(recruiter, newConcurrency)
 						}
 					}
 				}

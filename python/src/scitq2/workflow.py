@@ -914,10 +914,29 @@ class TaskSpec:
         return (_at(self.cpu_curve, a), _at(self.mem_curve, a), _at(self.disk_curve, a))
 
     def _parse_prefetch(self, p):
+        # Prefetch percent strings default to floor when the server applies
+        # them at recruit time. A leading ">=" (or ">") on a percent string
+        # switches to ceil, so a positive percent always yields at least one
+        # prefetch slot on small workers where floor would round down to 0.
+        # See TaskSpec.prefetch_ceil below and the server's
+        # computePrefetchForRecruiterWorker helper.
+        self.prefetch_ceil = False
         if p is None:
             return 0
-        if isinstance(p, str) and p.endswith("%"):
-            return float(p.strip("%")) / 100.0
+        if isinstance(p, str):
+            s = p.strip()
+            if s.startswith(">="):
+                s = s[2:].strip()
+                self.prefetch_ceil = True
+            elif s.startswith(">"):
+                s = s[1:].strip()
+                self.prefetch_ceil = True
+            if s.endswith("%"):
+                return float(s.rstrip("%")) / 100.0
+            # A bare number (e.g. ">=1") after the operator still parses as
+            # a static count — no rounding rule needed then; drop the flag.
+            self.prefetch_ceil = False
+            return float(s)
         return float(p)
 
     def __eq__(self, other):

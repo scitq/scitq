@@ -5839,6 +5839,10 @@ type Recruiter struct {
 	// TaskRequest.min_mem_shared / min_disk_shared on the task side.
 	MemorySharedPerTask *float32 `protobuf:"fixed32,18,opt,name=memory_shared_per_task,json=memorySharedPerTask,proto3,oneof" json:"memory_shared_per_task,omitempty"`
 	DiskSharedPerTask   *float32 `protobuf:"fixed32,19,opt,name=disk_shared_per_task,json=diskSharedPerTask,proto3,oneof" json:"disk_shared_per_task,omitempty"`
+	// Round up when applying prefetch_percent. Default (FALSE) is floor
+	// — today's behaviour. TRUE picks ceil, so a positive percent always
+	// yields at least one prefetch slot on small workers.
+	PrefetchPercentCeil *bool `protobuf:"varint,20,opt,name=prefetch_percent_ceil,json=prefetchPercentCeil,proto3,oneof" json:"prefetch_percent_ceil,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -6006,6 +6010,13 @@ func (x *Recruiter) GetDiskSharedPerTask() float32 {
 	return 0
 }
 
+func (x *Recruiter) GetPrefetchPercentCeil() bool {
+	if x != nil && x.PrefetchPercentCeil != nil {
+		return *x.PrefetchPercentCeil
+	}
+	return false
+}
+
 type RecruiterUpdate struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	StepId          int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
@@ -6028,6 +6039,8 @@ type RecruiterUpdate struct {
 	// See Recruiter.memory_shared_per_task / disk_shared_per_task.
 	MemorySharedPerTask *float32 `protobuf:"fixed32,18,opt,name=memory_shared_per_task,json=memorySharedPerTask,proto3,oneof" json:"memory_shared_per_task,omitempty"`
 	DiskSharedPerTask   *float32 `protobuf:"fixed32,19,opt,name=disk_shared_per_task,json=diskSharedPerTask,proto3,oneof" json:"disk_shared_per_task,omitempty"`
+	// See Recruiter.prefetch_percent_ceil.
+	PrefetchPercentCeil *bool `protobuf:"varint,20,opt,name=prefetch_percent_ceil,json=prefetchPercentCeil,proto3,oneof" json:"prefetch_percent_ceil,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -6193,6 +6206,13 @@ func (x *RecruiterUpdate) GetDiskSharedPerTask() float32 {
 		return *x.DiskSharedPerTask
 	}
 	return 0
+}
+
+func (x *RecruiterUpdate) GetPrefetchPercentCeil() bool {
+	if x != nil && x.PrefetchPercentCeil != nil {
+		return *x.PrefetchPercentCeil
+	}
+	return false
 }
 
 type RecruiterList struct {
@@ -12366,7 +12386,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_step_id\":\n" +
 	"\vRecruiterId\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xd5\a\n" +
+	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xa8\b\n" +
 	"\tRecruiter\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12 \n" +
@@ -12391,7 +12411,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"R\x05image\x88\x01\x01\x12 \n" +
 	"\tgpu_image\x18\x11 \x01(\tH\vR\bgpuImage\x88\x01\x01\x128\n" +
 	"\x16memory_shared_per_task\x18\x12 \x01(\x02H\fR\x13memorySharedPerTask\x88\x01\x01\x124\n" +
-	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\rR\x11diskSharedPerTask\x88\x01\x01B\x0e\n" +
+	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\rR\x11diskSharedPerTask\x88\x01\x01\x127\n" +
+	"\x15prefetch_percent_ceil\x18\x14 \x01(\bH\x0eR\x13prefetchPercentCeil\x88\x01\x01B\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
 	"\f_max_workersB\x0f\n" +
@@ -12406,7 +12427,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_gpu_imageB\x19\n" +
 	"\x17_memory_shared_per_taskB\x17\n" +
-	"\x15_disk_shared_per_task\"\x91\b\n" +
+	"\x15_disk_shared_per_taskB\x18\n" +
+	"\x16_prefetch_percent_ceil\"\xe4\b\n" +
 	"\x0fRecruiterUpdate\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12%\n" +
@@ -12431,7 +12453,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x05image\x18\x10 \x01(\tH\rR\x05image\x88\x01\x01\x12 \n" +
 	"\tgpu_image\x18\x11 \x01(\tH\x0eR\bgpuImage\x88\x01\x01\x128\n" +
 	"\x16memory_shared_per_task\x18\x12 \x01(\x02H\x0fR\x13memorySharedPerTask\x88\x01\x01\x124\n" +
-	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\x10R\x11diskSharedPerTask\x88\x01\x01B\x0e\n" +
+	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\x10R\x11diskSharedPerTask\x88\x01\x01\x127\n" +
+	"\x15prefetch_percent_ceil\x18\x14 \x01(\bH\x11R\x13prefetchPercentCeil\x88\x01\x01B\x0e\n" +
 	"\f_protofilterB\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
@@ -12450,7 +12473,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"_gpu_imageB\x19\n" +
 	"\x17_memory_shared_per_taskB\x17\n" +
-	"\x15_disk_shared_per_task\"E\n" +
+	"\x15_disk_shared_per_taskB\x18\n" +
+	"\x16_prefetch_percent_ceil\"E\n" +
 	"\rRecruiterList\x124\n" +
 	"\n" +
 	"recruiters\x18\x01 \x03(\v2\x14.taskqueue.RecruiterR\n" +

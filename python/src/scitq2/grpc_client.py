@@ -511,6 +511,7 @@ class Scitq2Client:
                          image: Optional[str]=None, gpu_image: Optional[str]=None,
                          concurrency_max: Optional[int]=None, concurrency_min: Optional[int]=None,
                          prefetch_percent: Optional[int]=None,
+                         prefetch_percent_ceil: bool=False,
                          max_recruited: Optional[int]=None, rounds: int=1, timeout: int=DEFAULT_RECRUITER_TIMEOUT) -> int:
         """
         Creates a recruiter for a given step.
@@ -562,6 +563,7 @@ class Scitq2Client:
             gpu_per_task=_i(gpu_per_task),
             memory_shared_per_task=memory_shared_per_task,
             disk_shared_per_task=disk_shared_per_task,
+            prefetch_percent_ceil=prefetch_percent_ceil,
             image=image,
             gpu_image=gpu_image,
             prefetch_percent=_i(prefetch_percent),

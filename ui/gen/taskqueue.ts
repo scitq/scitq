@@ -2210,6 +2210,14 @@ export interface Recruiter {
      * @generated from protobuf field: optional float disk_shared_per_task = 19
      */
     diskSharedPerTask?: number;
+    /**
+     * Round up when applying prefetch_percent. Default (FALSE) is floor
+     * — today's behaviour. TRUE picks ceil, so a positive percent always
+     * yields at least one prefetch slot on small workers.
+     *
+     * @generated from protobuf field: optional bool prefetch_percent_ceil = 20
+     */
+    prefetchPercentCeil?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterUpdate
@@ -2293,6 +2301,12 @@ export interface RecruiterUpdate {
      * @generated from protobuf field: optional float disk_shared_per_task = 19
      */
     diskSharedPerTask?: number;
+    /**
+     * See Recruiter.prefetch_percent_ceil.
+     *
+     * @generated from protobuf field: optional bool prefetch_percent_ceil = 20
+     */
+    prefetchPercentCeil?: boolean;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterList
@@ -9960,7 +9974,8 @@ class Recruiter$Type extends MessageType<Recruiter> {
             { no: 16, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 18, name: "memory_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 20, name: "prefetch_percent_ceil", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Recruiter>): Recruiter {
@@ -10036,6 +10051,9 @@ class Recruiter$Type extends MessageType<Recruiter> {
                 case /* optional float disk_shared_per_task */ 19:
                     message.diskSharedPerTask = reader.float();
                     break;
+                case /* optional bool prefetch_percent_ceil */ 20:
+                    message.prefetchPercentCeil = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10105,6 +10123,9 @@ class Recruiter$Type extends MessageType<Recruiter> {
         /* optional float disk_shared_per_task = 19; */
         if (message.diskSharedPerTask !== undefined)
             writer.tag(19, WireType.Bit32).float(message.diskSharedPerTask);
+        /* optional bool prefetch_percent_ceil = 20; */
+        if (message.prefetchPercentCeil !== undefined)
+            writer.tag(20, WireType.Varint).bool(message.prefetchPercentCeil);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10137,7 +10158,8 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
             { no: 16, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 18, name: "memory_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 20, name: "prefetch_percent_ceil", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<RecruiterUpdate>): RecruiterUpdate {
@@ -10210,6 +10232,9 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
                 case /* optional float disk_shared_per_task */ 19:
                     message.diskSharedPerTask = reader.float();
                     break;
+                case /* optional bool prefetch_percent_ceil */ 20:
+                    message.prefetchPercentCeil = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10279,6 +10304,9 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
         /* optional float disk_shared_per_task = 19; */
         if (message.diskSharedPerTask !== undefined)
             writer.tag(19, WireType.Bit32).float(message.diskSharedPerTask);
+        /* optional bool prefetch_percent_ceil = 20; */
+        if (message.prefetchPercentCeil !== undefined)
+            writer.tag(20, WireType.Varint).bool(message.prefetchPercentCeil);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

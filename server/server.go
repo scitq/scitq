@@ -6129,7 +6129,8 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 		cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
 		image, gpu_image,
 		prefetch_percent, concurrency_min, concurrency_max,
-		memory_shared_per_task, disk_shared_per_task
+		memory_shared_per_task, disk_shared_per_task,
+		prefetch_percent_ceil
 		FROM recruiter`
 
 	args := []interface{}{}
@@ -6155,6 +6156,7 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 			&recruiter.Image, &recruiter.GpuImage,
 			&recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
 			&recruiter.MemorySharedPerTask, &recruiter.DiskSharedPerTask,
+			&recruiter.PrefetchPercentCeil,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
@@ -6186,6 +6188,11 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 
 	var err error
 	// Insert with embedded subqueries for provider_id and region_id
+	// prefetch_percent_ceil is a NOT NULL BOOL with a DEFAULT FALSE, so
+	// we can just deref the pointer with GetPrefetchPercentCeil (returns
+	// false when unset). Older clients that don't send the field still
+	// keep the pre-feature floor behaviour.
+	prefetchCeil := req.GetPrefetchPercentCeil()
 	if req.MaxWorkers == nil {
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO recruiter (
@@ -6194,14 +6201,16 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
 				image, gpu_image,
 				prefetch_percent, concurrency_min, concurrency_max,
-				memory_shared_per_task, disk_shared_per_task
+				memory_shared_per_task, disk_shared_per_task,
+				prefetch_percent_ceil
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7,
 				$8, $9, $10, $11,
 				$12, $13,
 				$14, $15, $16,
-				$17, $18
+				$17, $18,
+				$19
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
@@ -6210,6 +6219,7 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			req.Image, req.GpuImage,
 			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 			req.MemorySharedPerTask, req.DiskSharedPerTask,
+			prefetchCeil,
 		)
 	} else {
 		_, err = s.db.ExecContext(ctx, `
@@ -6219,14 +6229,16 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				cpu_per_task, memory_per_task, disk_per_task, gpu_per_task,
 				image, gpu_image,
 				prefetch_percent, concurrency_min, concurrency_max,
-				memory_shared_per_task, disk_shared_per_task
+				memory_shared_per_task, disk_shared_per_task,
+				prefetch_percent_ceil
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7, $8,
 				$9, $10, $11, $12,
 				$13, $14,
 				$15, $16, $17,
-				$18, $19
+				$18, $19,
+				$20
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
@@ -6235,6 +6247,7 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			req.Image, req.GpuImage,
 			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 			req.MemorySharedPerTask, req.DiskSharedPerTask,
+			prefetchCeil,
 		)
 	}
 
@@ -6375,6 +6388,10 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	if req.DiskSharedPerTask != nil {
 		clauses = append(clauses, fmt.Sprintf("disk_shared_per_task = $%d", len(args)+1))
 		args = append(args, *req.DiskSharedPerTask)
+	}
+	if req.PrefetchPercentCeil != nil {
+		clauses = append(clauses, fmt.Sprintf("prefetch_percent_ceil = $%d", len(args)+1))
+		args = append(args, *req.PrefetchPercentCeil)
 	}
 
 	if len(clauses) == 0 {

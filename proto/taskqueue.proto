@@ -1020,6 +1020,10 @@ message Recruiter {
     // TaskRequest.min_mem_shared / min_disk_shared on the task side.
     optional float memory_shared_per_task = 18;
     optional float disk_shared_per_task   = 19;
+    // Round up when applying prefetch_percent. Default (FALSE) is floor
+    // — today's behaviour. TRUE picks ceil, so a positive percent always
+    // yields at least one prefetch slot on small workers.
+    optional bool  prefetch_percent_ceil  = 20;
 }
 
 message RecruiterUpdate {
@@ -1043,6 +1047,8 @@ message RecruiterUpdate {
   // See Recruiter.memory_shared_per_task / disk_shared_per_task.
   optional float memory_shared_per_task = 18;
   optional float disk_shared_per_task   = 19;
+  // See Recruiter.prefetch_percent_ceil.
+  optional bool  prefetch_percent_ceil  = 20;
 }
 
 message RecruiterList {

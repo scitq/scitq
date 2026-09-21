@@ -256,6 +256,17 @@ A TaskSpec can either specify concurrency (e.g. static concurrency) or specify o
 
 Note that this does not impact the worker pool itself, just how many tasks each worker within this pool can do.
 
+#### Prefetch rounding
+
+`prefetch="25%"` computes `floor(0.25 × concurrency)` at recruit time. On a small worker (concurrency 2 or 3) this rounds to 0, which is usually not what you want. Prefix with `>=` (or `>`) to switch to ceiling arithmetic — a positive percent then always yields at least 1 prefetch slot:
+
+```python
+TaskSpec(cpu=4, prefetch=">=25%")   # ceil: at least 1 prefetch even at concurrency=2
+TaskSpec(cpu=4, prefetch="25%")     # floor: may be 0 on small workers
+```
+
+The prefix has no effect on a bare integer (`prefetch=1`). Same syntax in YAML: `prefetch: ">=25%"`.
+
 #### Shared memory / disk overhead
 
 Some tools (hermes, bowtie2 with a large index, kraken2 with a large database) load a read-only reference once per host and serve multiple queries against it in parallel. Because the reference is mmap'd from a shared file, one copy sits in the host's page cache regardless of concurrency. Declare that overhead so the recruiter sizes workers accurately:

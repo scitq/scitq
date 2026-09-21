@@ -834,12 +834,26 @@ Caveats:
       disk: 100        # …and 100 GB disk each
       gpu: 1           # …and 1 GPU each (see "GPU" below); or "all" for one task per worker with every device
       concurrency: 4   # OR: static concurrency (mutually exclusive with cpu/mem/disk)
-      prefetch: "50%"  # download up to N task inputs in advance (N = concurrency * prefetch)
+      prefetch: "50%"  # download up to N task inputs in advance (N = floor(percent * concurrency))
       scitq_auth: true # see below
       numa: 1          # OR: pin each task to N NUMA nodes (see below; mutually exclusive with cpu/mem)
 ```
 
 At least one of `concurrency`, `cpu`, `mem`, `numa`, or `gpu ≥ 1` (integer or `"all"`) is required. `cpu`/`mem`/`disk`/`gpu` drive dynamic concurrency (scitq picks a per-worker concurrency that fits the worker's flavour and these per-task budgets); `concurrency` pins it to a static value; `numa` (see below) derives the per-task CPU and memory budget from the worker's NUMA topology.
+
+##### Prefetch rounding
+
+`prefetch: "25%"` computes `floor(0.25 × concurrency)` at recruit time. On a small worker (concurrency 2 or 3) this rounds to 0, which usually is not the intent — a worker with 0 prefetch waits for the next task's inputs to download between every run.
+
+Prefixing the value with `>=` (or `>`) switches to ceiling arithmetic, so a positive percent always yields at least 1 prefetch slot:
+
+| Form | Meaning | On concurrency 2 |
+|---|---|---|
+| `prefetch: "25%"` | `floor(percent × concurrency)` | `0` |
+| `prefetch: ">=25%"` | `ceil(percent × concurrency)` | `1` |
+| `prefetch: ">25%"` | Same as `>=25%` | `1` |
+
+The prefix has no effect on a bare integer (`prefetch: 2`) or when `prefetch: 0` is intended; both stay exact.
 
 **Heads-up:** declaring `task_spec.gpu` on a step whose `worker_pool` has no GPU filter (`gpu: true` / `W.has_gpu == True`) emits a `RuntimeWarning` at compile time. The recruiter would otherwise pick a CPU-only flavor and every assignment would then fail the fit predicate, stranding the step.
 
