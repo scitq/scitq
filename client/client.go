@@ -1064,10 +1064,11 @@ func (w *WorkerConfig) fetchTasks(caps *LiveCaps,
 	// the fields unset so the server writes NULL rather than a
 	// misleading 0.
 	if peaks != nil {
-		if cpuP, memP, ioP, hasData := peaks.Drain(); hasData {
+		if cpuP, memP, ioP, diskP, hasData := peaks.Drain(); hasData {
 			query.Stats.PeakCpuPercent = &cpuP
 			query.Stats.PeakMemPercent = &memP
 			query.Stats.PeakIowaitPercent = &ioP
+			query.Stats.PeakDiskPercent = &diskP
 		}
 	}
 

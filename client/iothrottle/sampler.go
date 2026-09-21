@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
@@ -83,7 +84,26 @@ func StartSampler(ctx context.Context, t *Throttle, peaks *PeakTracker) {
 						if v, err := mem.VirtualMemory(); err == nil {
 							memPct = float32(v.UsedPercent)
 						}
-						peaks.Observe(cpuPct, memPct, iowaitPct)
+						// MAX across every reachable partition. workerstats
+						// walks the same list per ping; we recompute here
+						// so the tracker sees fresh values every second
+						// (a full-per-ping snapshot would leak up to 5s of
+						// truth). "true" reports all partitions including
+						// pseudo-filesystems; the disk.Usage call skips
+						// those it can't stat, so a lost-mount or a
+						// permission-denied path contributes 0 rather
+						// than poisoning the max.
+						var diskPct float32
+						if parts, err := disk.Partitions(true); err == nil {
+							for _, part := range parts {
+								if u, err := disk.Usage(part.Mountpoint); err == nil {
+									if p := float32(u.UsedPercent); p > diskPct {
+										diskPct = p
+									}
+								}
+							}
+						}
+						peaks.Observe(cpuPct, memPct, iowaitPct, diskPct)
 					}
 				}
 			}

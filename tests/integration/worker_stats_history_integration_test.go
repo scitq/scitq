@@ -58,7 +58,8 @@ func TestWorkerStatsHistory_SummaryReflectsPeaks(t *testing.T) {
 	// the middle value (55) is the true peak. Verifying the summary
 	// returns 55, not the last value (42) or the current-gauge (5),
 	// proves both that we're taking the max and that peaks flow into
-	// the aggregate.
+	// the aggregate. Disk peak is fed alongside so the new disk field
+	// carries through the same path.
 	peaks := []float32{25, 55, 42}
 	for _, peak := range peaks {
 		low := float32(5)
@@ -72,6 +73,7 @@ func TestWorkerStatsHistory_SummaryReflectsPeaks(t *testing.T) {
 				PeakCpuPercent:    &p,
 				PeakMemPercent:    &p,
 				PeakIowaitPercent: &p,
+				PeakDiskPercent:   &p,
 				RunningTasks:      0,
 			},
 		})
@@ -114,6 +116,16 @@ func TestWorkerStatsHistory_SummaryReflectsPeaks(t *testing.T) {
 	require.InDelta(t, 55.0, *got.MaxCpuPercent, 0.5)
 	require.NotNil(t, got.MaxIowaitPercent)
 	require.InDelta(t, 55.0, *got.MaxIowaitPercent, 0.5)
+	require.NotNil(t, got.MaxDiskPercent,
+		"disk peak must flow through to the summary")
+	require.InDelta(t, 55.0, *got.MaxDiskPercent, 0.5)
+
+	// sampled_at is milliseconds now — check by comparing first vs
+	// last_sample_at against wall clock. Three pings within a couple
+	// of seconds should span well under 60_000 ms; a value of ~3 (the
+	// old seconds representation) would fail this assertion.
+	require.Greater(t, got.LastSampleAt, got.FirstSampleAt-1,
+		"last should be >= first when there are multiple samples")
 
 	// Raw-series path returns the same three samples with peaks intact.
 	hist, err := qc.ListWorkerStatsHistory(ctx, &pb.WorkerStatsHistoryFilter{
@@ -128,6 +140,81 @@ func TestWorkerStatsHistory_SummaryReflectsPeaks(t *testing.T) {
 		require.InDelta(t, want, *last3[i].PeakMemPercent, 0.5,
 			"sample %d peak_mem_percent mismatch", i)
 	}
+}
+
+// TestWorkerStatsHistory_ReasonFieldOnEmptyResult: a filter that
+// matches nothing must return a typed reason so the caller can
+// distinguish "no samples in this window" from "unknown worker/step/
+// workflow" from "feature disabled here". Locks in the shape the peer
+// asked for in the 2026-09-21 MCP review — a null-shaped empty
+// response is what triggered a misdiagnosis of the feature as
+// unavailable.
+func TestWorkerStatsHistory_ReasonFieldOnEmptyResult(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
+	defer cleanup()
+
+	var c cli.CLI
+	c.Attr.Server = serverAddr
+	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
+	require.NoError(t, err)
+	token := extractToken(out)
+
+	qclient, err := lib.CreateClient(serverAddr, token)
+	require.NoError(t, err)
+	defer qclient.Close()
+	qc := qclient.Client
+
+	// A worker_id that clearly doesn't exist must surface as
+	// "unknown_worker", not "no_samples" — the two shapes look the
+	// same on the wire otherwise, and the operator has no way to tell
+	// their filter has a typo from "the worker really never pinged".
+	//
+	// Note: over the wire proto3 serialises an empty repeated field
+	// as absent, so `samples` and `entries` come back as nil (not
+	// []) even though the server sent an empty slice. The MCP
+	// wrapper normalises to [] for JSON output — but for the gRPC
+	// path, "nil == empty" is what matters. We check the reason
+	// field instead, which IS carried across the wire.
+	unknownID := int32(999999)
+	hist, err := qc.ListWorkerStatsHistory(ctx, &pb.WorkerStatsHistoryFilter{
+		WorkerId: &unknownID,
+	})
+	require.NoError(t, err)
+	require.Empty(t, hist.Samples)
+	require.NotNil(t, hist.Reason, "reason must be set on empty result")
+	require.Equal(t, "unknown_worker", *hist.Reason)
+
+	summary, err := qc.GetWorkerStatsSummary(ctx, &pb.WorkerStatsHistoryFilter{
+		WorkerId: &unknownID,
+	})
+	require.NoError(t, err)
+	require.Empty(t, summary.Entries)
+	require.NotNil(t, summary.Reason)
+	require.Equal(t, "unknown_worker", *summary.Reason)
+
+	// A valid worker_id with no samples yet returns "no_samples" —
+	// distinguishes the "your id is bad" branch from the "your
+	// filter is fine, nothing has happened yet" branch.
+	db, err := sql.Open("postgres", dbURLForAddr(t, serverAddr))
+	require.NoError(t, err)
+	defer db.Close()
+	var goodID int32
+	require.NoError(t, db.QueryRow(`
+		INSERT INTO worker (worker_name, status, is_permanent)
+		VALUES ('reason-test', 'R', TRUE)
+		RETURNING worker_id
+	`).Scan(&goodID))
+
+	hist, err = qc.ListWorkerStatsHistory(ctx, &pb.WorkerStatsHistoryFilter{
+		WorkerId: &goodID,
+	})
+	require.NoError(t, err)
+	require.Empty(t, hist.Samples)
+	require.NotNil(t, hist.Reason)
+	require.Equal(t, "no_samples", *hist.Reason)
 }
 
 // TestWorkerStatsHistory_FilterlessQueryRejected: an empty filter would

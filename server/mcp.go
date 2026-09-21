@@ -507,7 +507,7 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "get_worker_stats_peak",
-			Description: "Per-worker aggregated peak/average stats over a completed (or in-flight) workflow. Answers the operational question 'what did this workflow actually need?' — max_cpu_percent / max_mem_percent / max_iowait_percent per worker across the sample window, plus averages and sample counts. Server-side MAX() over historical samples, so peaks include the sub-ping-interval spikes captured by the client's 1 Hz sampler (the raw ping-time values would miss them). Requires scitq.worker_stats_retention_hours > 0 (default 168h).",
+			Description: "Per-worker aggregated peak/average stats over a completed (or in-flight) workflow. Answers 'what did this workflow actually need?' — max_cpu_percent / max_mem_percent / max_iowait_percent / max_disk_percent per worker across the sample window, plus averages, sample counts, and max_running_tasks (the divisor when the worker was serving multiple concurrent tasks). Server-side MAX() over historical samples, so peaks include the sub-ping-interval spikes captured by the client's 1 Hz sampler. Returns {entries:[], reason:'...'} when the filter matches nothing — reason values: no_samples / unknown_worker / unknown_step / unknown_workflow. Requires scitq.worker_stats_retention_hours > 0 (default 168h).",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
@@ -520,7 +520,7 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "get_worker_stats_history",
-			Description: "Raw historical worker stats samples (one row per ping). Same fields as get_worker_stats plus peak_* (max in the 1 Hz sampler window since the previous ping). Filter by any of workflow_id / worker_id / step_id / hours_back — at least one is required. Capped at 10000 samples by default; response.dropped is non-zero when the cap was hit — narrow the window and retry. Use get_worker_stats_peak first for the common 'what were the peaks' question; reach for this only when you need the time series (plotting, identifying WHEN the peak happened).",
+			Description: "Raw historical worker stats samples (one row per ping). Same fields as get_worker_stats plus peak_cpu_percent / peak_mem_percent / peak_iowait_percent / peak_disk_percent (max in the 1 Hz sampler window since the previous ping). sampled_at is unix MILLIseconds — divide by 1000 for seconds. Filter by any of workflow_id / worker_id / step_id / hours_back — at least one is required. Capped at 10000 samples by default (payload can be very large through MCP; set limit smaller or narrow the window); response.dropped is non-zero when the cap was hit. Returns {samples:[], dropped:0, reason:'...'} when empty. Use get_worker_stats_peak first for the common 'what were the peaks' question; reach for this only when you need the time series (plotting, identifying WHEN the peak happened).",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
@@ -1481,7 +1481,19 @@ func (h *mcpHandler) toolGetWorkerStatsPeak(ctx context.Context, args json.RawMe
 	if err != nil {
 		return errorResult(err), nil
 	}
-	return jsonResult(res.GetEntries()), nil
+	// Return the full response object rather than bare entries so an
+	// empty result reads as {entries: [], reason: "..."} instead of
+	// null — the caller needs to distinguish "no samples in window"
+	// from "unknown id" from "feature disabled".
+	entries := res.GetEntries()
+	if entries == nil {
+		entries = []*pb.WorkerStatsSummaryEntry{}
+	}
+	out := map[string]any{"entries": entries}
+	if r := res.GetReason(); r != "" {
+		out["reason"] = r
+	}
+	return jsonResult(out), nil
 }
 
 func (h *mcpHandler) toolGetWorkerStatsHistory(ctx context.Context, args json.RawMessage) (any, *rpcError) {
@@ -1497,7 +1509,22 @@ func (h *mcpHandler) toolGetWorkerStatsHistory(ctx context.Context, args json.Ra
 	if err != nil {
 		return errorResult(err), nil
 	}
-	return jsonResult(res), nil
+	// Force samples to an empty slice when the server returned nil so
+	// the JSON reads as {"samples": [], "dropped": 0, "reason": "..."}
+	// instead of {"samples": null} — the shape the peer's consumer
+	// misparsed as "unknown feature".
+	samples := res.GetSamples()
+	if samples == nil {
+		samples = []*pb.WorkerStatsHistorySample{}
+	}
+	out := map[string]any{
+		"samples": samples,
+		"dropped": res.GetDropped(),
+	}
+	if r := res.GetReason(); r != "" {
+		out["reason"] = r
+	}
+	return jsonResult(out), nil
 }
 
 func (h *mcpHandler) toolListJobs(ctx context.Context, args json.RawMessage) (any, *rpcError) {

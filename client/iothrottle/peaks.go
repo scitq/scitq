@@ -23,6 +23,7 @@ type PeakTracker struct {
 	cpuPct           float32
 	memPct           float32
 	iowaitPct        float32
+	diskPct          float32
 	sawSample        bool
 }
 
@@ -36,8 +37,12 @@ func NewPeakTracker() *PeakTracker {
 // rejected because it would poison the max via comparison (>NaN is
 // always false so NaN would stick as the max forever); NaN never
 // arrives from gopsutil in normal operation but we guard anyway.
-func (p *PeakTracker) Observe(cpu, mem, iowait float32) {
-	if isNaNf(cpu) || isNaNf(mem) || isNaNf(iowait) {
+//
+// `disk` is the MAX across every disk the worker sees at this tick —
+// aggregating here rather than tracking per-disk keeps the ping
+// payload flat while still catching "any disk approaching full".
+func (p *PeakTracker) Observe(cpu, mem, iowait, disk float32) {
+	if isNaNf(cpu) || isNaNf(mem) || isNaNf(iowait) || isNaNf(disk) {
 		return
 	}
 	if cpu < 0 {
@@ -48,6 +53,9 @@ func (p *PeakTracker) Observe(cpu, mem, iowait float32) {
 	}
 	if iowait < 0 {
 		iowait = 0
+	}
+	if disk < 0 {
+		disk = 0
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -60,6 +68,9 @@ func (p *PeakTracker) Observe(cpu, mem, iowait float32) {
 	if iowait > p.iowaitPct {
 		p.iowaitPct = iowait
 	}
+	if disk > p.diskPct {
+		p.diskPct = disk
+	}
 	p.sawSample = true
 }
 
@@ -67,11 +78,11 @@ func (p *PeakTracker) Observe(cpu, mem, iowait float32) {
 // false when no Observe has landed since the last Drain — the caller
 // then leaves the ping's peak_* fields unset rather than writing a
 // misleading 0.
-func (p *PeakTracker) Drain() (cpu, mem, iowait float32, hasData bool) {
+func (p *PeakTracker) Drain() (cpu, mem, iowait, disk float32, hasData bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	cpu, mem, iowait, hasData = p.cpuPct, p.memPct, p.iowaitPct, p.sawSample
-	p.cpuPct, p.memPct, p.iowaitPct, p.sawSample = 0, 0, 0, false
+	cpu, mem, iowait, disk, hasData = p.cpuPct, p.memPct, p.iowaitPct, p.diskPct, p.sawSample
+	p.cpuPct, p.memPct, p.iowaitPct, p.diskPct, p.sawSample = 0, 0, 0, 0, false
 	return
 }
 

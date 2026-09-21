@@ -13,33 +13,31 @@ import (
 func TestPeakTracker_TracksMaxAndResets(t *testing.T) {
 	p := NewPeakTracker()
 
-	// Interval 1: rising values.
-	p.Observe(10, 30, 5)
-	p.Observe(20, 30, 15)
-	p.Observe(15, 40, 10)
+	// Interval 1: rising values across every dimension, including disk.
+	p.Observe(10, 30, 5, 60)
+	p.Observe(20, 30, 15, 75)
+	p.Observe(15, 40, 10, 70)
 
-	cpu, mem, io, ok := p.Drain()
+	cpu, mem, io, disk, ok := p.Drain()
 	if !ok {
 		t.Fatal("Drain should report hasData=true after Observe")
 	}
-	if cpu != 20 || mem != 40 || io != 15 {
-		t.Fatalf("expected max (20, 40, 15), got (%v, %v, %v)", cpu, mem, io)
+	if cpu != 20 || mem != 40 || io != 15 || disk != 75 {
+		t.Fatalf("expected max (20, 40, 15, 75), got (%v, %v, %v, %v)", cpu, mem, io, disk)
 	}
 
 	// Post-drain: no samples yet in the new interval → hasData=false.
-	// The ping loop uses this to leave peak_* unset rather than
-	// writing a misleading 0.
-	_, _, _, ok = p.Drain()
+	_, _, _, _, ok = p.Drain()
 	if ok {
 		t.Fatal("Drain should report hasData=false immediately after reset")
 	}
 
 	// Interval 2: distinct maxes; nothing carries over from interval 1.
-	p.Observe(50, 10, 3)
-	cpu, mem, io, ok = p.Drain()
-	if !ok || cpu != 50 || mem != 10 || io != 3 {
-		t.Fatalf("interval-2 drain: got hasData=%v (%v, %v, %v); want (50, 10, 3)",
-			ok, cpu, mem, io)
+	p.Observe(50, 10, 3, 42)
+	cpu, mem, io, disk, ok = p.Drain()
+	if !ok || cpu != 50 || mem != 10 || io != 3 || disk != 42 {
+		t.Fatalf("interval-2 drain: got hasData=%v (%v, %v, %v, %v); want (50, 10, 3, 42)",
+			ok, cpu, mem, io, disk)
 	}
 }
 
@@ -47,14 +45,14 @@ func TestPeakTracker_TracksMaxAndResets(t *testing.T) {
 // deltas around counter rollovers. Peaks must not carry those forward.
 func TestPeakTracker_ClampsNegative(t *testing.T) {
 	p := NewPeakTracker()
-	p.Observe(-5, -1, -0.001)
-	p.Observe(2, 3, 4)
-	cpu, mem, io, ok := p.Drain()
+	p.Observe(-5, -1, -0.001, -3)
+	p.Observe(2, 3, 4, 5)
+	cpu, mem, io, disk, ok := p.Drain()
 	if !ok {
 		t.Fatal("Drain should report hasData=true")
 	}
-	if cpu != 2 || mem != 3 || io != 4 {
-		t.Fatalf("negative samples should clamp to 0; got (%v, %v, %v)", cpu, mem, io)
+	if cpu != 2 || mem != 3 || io != 4 || disk != 5 {
+		t.Fatalf("negative samples should clamp to 0; got (%v, %v, %v, %v)", cpu, mem, io, disk)
 	}
 }
 
@@ -65,17 +63,17 @@ func TestPeakTracker_ClampsNegative(t *testing.T) {
 // bookkeeping. Follow-up valid samples still land as expected.
 func TestPeakTracker_IgnoresNaN(t *testing.T) {
 	p := NewPeakTracker()
-	p.Observe(float32(math.NaN()), 42, 5)
-	p.Observe(10, 20, 3)
-	cpu, mem, io, ok := p.Drain()
+	p.Observe(float32(math.NaN()), 42, 5, 60)
+	p.Observe(10, 20, 3, 15)
+	cpu, mem, io, disk, ok := p.Drain()
 	if !ok {
 		t.Fatal("Drain should report hasData=true after a valid Observe")
 	}
-	// The NaN-carrying Observe is rejected as a whole, so mem=42 and
-	// io=5 from it do NOT influence the max — only the second call's
-	// (10, 20, 3) does.
-	if cpu != 10 || mem != 20 || io != 3 {
-		t.Fatalf("NaN sample should be dropped as a whole; got (%v, %v, %v)", cpu, mem, io)
+	// The NaN-carrying Observe is rejected as a whole, so mem=42, io=5,
+	// and disk=60 from it do NOT influence the max — only the second
+	// call's (10, 20, 3, 15) does.
+	if cpu != 10 || mem != 20 || io != 3 || disk != 15 {
+		t.Fatalf("NaN sample should be dropped as a whole; got (%v, %v, %v, %v)", cpu, mem, io, disk)
 	}
 }
 
@@ -84,11 +82,11 @@ func TestPeakTracker_IgnoresNaN(t *testing.T) {
 // hasData=false so the caller writes no peak_* fields.
 func TestPeakTracker_DrainWithoutObserve(t *testing.T) {
 	p := NewPeakTracker()
-	cpu, mem, io, ok := p.Drain()
+	cpu, mem, io, disk, ok := p.Drain()
 	if ok {
 		t.Fatal("fresh tracker should report hasData=false")
 	}
-	if cpu != 0 || mem != 0 || io != 0 {
-		t.Fatalf("fresh tracker should report zero values; got (%v, %v, %v)", cpu, mem, io)
+	if cpu != 0 || mem != 0 || io != 0 || disk != 0 {
+		t.Fatalf("fresh tracker should report zero values; got (%v, %v, %v, %v)", cpu, mem, io, disk)
 	}
 }

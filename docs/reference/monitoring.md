@@ -251,13 +251,17 @@ The `/metrics` endpoint exposes only the current values; a completed workflow ha
 - `ListWorkerStatsHistory` — raw samples matching a filter (workflow_id / worker_id / step_id / time range). Series-shaped output; suitable for plotting or identifying WHEN a spike happened.
 - `GetWorkerStatsSummary` — per-worker aggregation over the same filter: max_cpu / max_mem / max_iowait, plus averages, sample count, first/last sample epoch. The natural answer to sizing questions.
 
-Both surface the same fields as the live `WorkerStats` (cpu%, mem%, iowait%, effective_concurrency, running_tasks, last_throttle_at), plus `peak_cpu_percent`, `peak_mem_percent`, `peak_iowait_percent` — the maximum values observed by the client's 1 Hz sampler between the previous ping and the ping being recorded. The peaks catch sub-ping-interval spikes (a 500 ms memory allocation, a 2 s iowait burst) that the raw ping-time values miss. `GetWorkerStatsSummary` uses `GREATEST(peak_*, current_*)` when aggregating, so a worker running an older client that doesn't send peaks still contributes its ping-time gauges to the max.
+Both surface the same fields as the live `WorkerStats` (cpu%, mem%, iowait%, effective_concurrency, running_tasks, last_throttle_at), plus `peak_cpu_percent`, `peak_mem_percent`, `peak_iowait_percent`, and `peak_disk_percent` — the maximum values observed by the client's 1 Hz sampler between the previous ping and the ping being recorded. The peaks catch sub-ping-interval spikes (a 500 ms memory allocation, a 2 s iowait burst) that the raw ping-time values miss. `peak_disk_percent` is the MAX across every disk the worker reports, aggregated once per tick so the summary answers "did any disk approach full?" without a per-disk time series. `GetWorkerStatsSummary` uses `GREATEST(peak_*, current_*)` when aggregating, so a worker running an older client that doesn't send peaks still contributes its ping-time gauges to the max.
 
-MCP exposes both as `get_worker_stats_peak` (summary — the common case) and `get_worker_stats_history` (raw series).
+MCP exposes both as `get_worker_stats_peak` (summary — the common case) and `get_worker_stats_history` (raw series). When a filter matches nothing, both endpoints return `entries: []` (or `samples: []`) plus a `reason` string — `no_samples`, `unknown_worker`, `unknown_step`, or `unknown_workflow` — so an operator can tell "your filter is fine but the window is empty" from "you typed the id wrong". The feature-disabled case returns `FailedPrecondition` earlier and never reaches the empty-result path.
+
+`sampled_at`, `first_sample_at`, and `last_sample_at` are **unix milliseconds**, not seconds. Two pings within the same second would otherwise collide in the returned key and read as one row with mixed peak-yes / peak-no values; ms disambiguates cleanly. Callers assuming seconds must divide by 1000.
 
 Retention is capped by `scitq.worker_stats_retention_hours` (default 168 h = 7 days). Setting it to `0` disables the feature entirely: no rows are written, no sweep goroutine runs, and both RPCs return `FailedPrecondition`. At the default a fleet of 20 workers pinging every 5 s produces about a million rows in the window (~100 MB); the hourly sweep keeps that steady.
 
 Peaks are max-of-1Hz-samples between pings, not hardware peaks: a 200 ms allocation that never straddles a sampler tick is invisible. Increase the sampler cadence in `client/iothrottle/sampler.go` if that resolution matters.
+
+Because stats aggregate per-worker, a worker running N concurrent tasks reports the union of what those tasks did — `max_running_tasks` in the summary tells you the divisor, but attributing a peak to a specific task requires per-task cgroup accounting (not shipped today).
 
 ## Adding a metric
 

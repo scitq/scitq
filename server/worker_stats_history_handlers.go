@@ -104,12 +104,17 @@ func (s *taskQueueServer) ListWorkerStatsHistory(ctx context.Context, req *pb.Wo
 
 	join, where, args := buildHistoryWhere(req)
 	args = append(args, limit+1) // +1 so we can detect truncation
+	// sampled_at is returned as unix MILLIseconds so two pings within
+	// the same second don't collide in the returned key. The underlying
+	// TIMESTAMP has microsecond precision; ms is a workable middle
+	// ground (enough to disambiguate, still comfortably int64).
 	query := `
 		SELECT h.worker_id, w.worker_name,
-		       EXTRACT(EPOCH FROM h.sampled_at)::bigint,
+		       (EXTRACT(EPOCH FROM h.sampled_at) * 1000)::bigint AS sampled_at_ms,
 		       h.step_id,
 		       h.cpu_percent, h.mem_percent, h.iowait_percent,
 		       h.peak_cpu_percent, h.peak_mem_percent, h.peak_iowait_percent,
+		       h.peak_disk_percent,
 		       h.effective_concurrency, h.running_tasks,
 		       COALESCE(EXTRACT(EPOCH FROM h.last_throttle_at)::bigint, 0)
 		  FROM worker_stats_history h
@@ -130,17 +135,17 @@ func (s *taskQueueServer) ListWorkerStatsHistory(ctx context.Context, req *pb.Wo
 		var (
 			workerID                                          int32
 			workerName                                        string
-			sampledAt                                         int64
+			sampledAtMs                                       int64
 			stepID                                            sql.NullInt32
 			cpu, mem, iowait                                  sql.NullFloat64
-			peakCPU, peakMem, peakIowait                      sql.NullFloat64
+			peakCPU, peakMem, peakIowait, peakDisk            sql.NullFloat64
 			effConc, running                                  sql.NullInt32
 			lastThrottle                                      int64
 		)
 		if err := rows.Scan(
-			&workerID, &workerName, &sampledAt, &stepID,
+			&workerID, &workerName, &sampledAtMs, &stepID,
 			&cpu, &mem, &iowait,
-			&peakCPU, &peakMem, &peakIowait,
+			&peakCPU, &peakMem, &peakIowait, &peakDisk,
 			&effConc, &running, &lastThrottle,
 		); err != nil {
 			continue
@@ -152,7 +157,7 @@ func (s *taskQueueServer) ListWorkerStatsHistory(ctx context.Context, req *pb.Wo
 		sample := &pb.WorkerStatsHistorySample{
 			WorkerId:   workerID,
 			WorkerName: workerName,
-			SampledAt:  sampledAt,
+			SampledAt:  sampledAtMs,
 		}
 		if stepID.Valid {
 			v := stepID.Int32
@@ -182,6 +187,10 @@ func (s *taskQueueServer) ListWorkerStatsHistory(ctx context.Context, req *pb.Wo
 			v := float32(peakIowait.Float64)
 			sample.PeakIowaitPercent = &v
 		}
+		if peakDisk.Valid {
+			v := float32(peakDisk.Float64)
+			sample.PeakDiskPercent = &v
+		}
 		if effConc.Valid {
 			v := effConc.Int32
 			sample.EffectiveConcurrency = &v
@@ -194,6 +203,14 @@ func (s *taskQueueServer) ListWorkerStatsHistory(ctx context.Context, req *pb.Wo
 			sample.LastThrottleAt = &lastThrottle
 		}
 		res.Samples = append(res.Samples, sample)
+	}
+	// Empty result: tell the caller WHY. Distinguishes "no samples in
+	// window" from "the id filter matched nothing that exists" — the
+	// latter is usually a typo or a filter that predates the retention
+	// window.
+	if len(res.Samples) == 0 {
+		reason := s.diagnoseEmptyHistory(ctx, req)
+		res.Reason = &reason
 	}
 	return res, nil
 }
@@ -217,8 +234,8 @@ func (s *taskQueueServer) GetWorkerStatsSummary(ctx context.Context, req *pb.Wor
 	query := `
 		SELECT h.worker_id, w.worker_name,
 		       COUNT(*),
-		       EXTRACT(EPOCH FROM MIN(h.sampled_at))::bigint,
-		       EXTRACT(EPOCH FROM MAX(h.sampled_at))::bigint,
+		       (EXTRACT(EPOCH FROM MIN(h.sampled_at)) * 1000)::bigint,
+		       (EXTRACT(EPOCH FROM MAX(h.sampled_at)) * 1000)::bigint,
 		       -- The peak columns are the primary max source. When a
 		       -- client didn't send peaks (older build, or the sampler
 		       -- hadn't run yet), the current-value gauge is used as a
@@ -227,6 +244,11 @@ func (s *taskQueueServer) GetWorkerStatsSummary(ctx context.Context, req *pb.Wor
 		       MAX(GREATEST(COALESCE(h.peak_cpu_percent,    0), COALESCE(h.cpu_percent,    0))),
 		       MAX(GREATEST(COALESCE(h.peak_mem_percent,    0), COALESCE(h.mem_percent,    0))),
 		       MAX(GREATEST(COALESCE(h.peak_iowait_percent, 0), COALESCE(h.iowait_percent, 0))),
+		       -- Disk has no current-value column on the history row
+		       -- (the live gauge is a per-disk list, not a scalar);
+		       -- the sampler's per-tick MAX is the only source. Older
+		       -- clients without a disk sampler yield NULL here.
+		       MAX(h.peak_disk_percent),
 		       AVG(h.cpu_percent), AVG(h.mem_percent), AVG(h.iowait_percent),
 		       MAX(h.running_tasks)
 		  FROM worker_stats_history h
@@ -242,20 +264,22 @@ func (s *taskQueueServer) GetWorkerStatsSummary(ctx context.Context, req *pb.Wor
 	}
 	defer rows.Close()
 
-	res := &pb.WorkerStatsSummary{}
+	res := &pb.WorkerStatsSummary{
+		Entries: make([]*pb.WorkerStatsSummaryEntry, 0, 4),
+	}
 	for rows.Next() {
 		var (
-			workerID                       int32
-			workerName                     string
-			count                          int32
-			firstEpoch, lastEpoch          int64
-			maxCPU, maxMem, maxIowait      sql.NullFloat64
-			avgCPU, avgMem, avgIowait      sql.NullFloat64
-			maxRunning                     sql.NullInt32
+			workerID                            int32
+			workerName                          string
+			count                               int32
+			firstEpoch, lastEpoch               int64
+			maxCPU, maxMem, maxIowait, maxDisk  sql.NullFloat64
+			avgCPU, avgMem, avgIowait           sql.NullFloat64
+			maxRunning                          sql.NullInt32
 		)
 		if err := rows.Scan(
 			&workerID, &workerName, &count, &firstEpoch, &lastEpoch,
-			&maxCPU, &maxMem, &maxIowait,
+			&maxCPU, &maxMem, &maxIowait, &maxDisk,
 			&avgCPU, &avgMem, &avgIowait,
 			&maxRunning,
 		); err != nil {
@@ -277,6 +301,7 @@ func (s *taskQueueServer) GetWorkerStatsSummary(ctx context.Context, req *pb.Wor
 		setF(&entry.MaxCpuPercent, maxCPU)
 		setF(&entry.MaxMemPercent, maxMem)
 		setF(&entry.MaxIowaitPercent, maxIowait)
+		setF(&entry.MaxDiskPercent, maxDisk)
 		setF(&entry.AvgCpuPercent, avgCPU)
 		setF(&entry.AvgMemPercent, avgMem)
 		setF(&entry.AvgIowaitPercent, avgIowait)
@@ -286,6 +311,51 @@ func (s *taskQueueServer) GetWorkerStatsSummary(ctx context.Context, req *pb.Wor
 		}
 		res.Entries = append(res.Entries, entry)
 	}
+	if len(res.Entries) == 0 {
+		reason := s.diagnoseEmptyHistory(ctx, req)
+		res.Reason = &reason
+	}
 	return res, nil
+}
+
+// diagnoseEmptyHistory explains why history / summary came back empty.
+// The distinction matters — an operator misdiagnoses "no samples" as
+// "the feature doesn't work here" when the real cause is a typo'd
+// worker_id or a filter that predates the retention window.
+//
+// Runs one small existence probe per id-shaped filter. Cheap: the
+// probe is a single indexed lookup per id, only fires on empty
+// results, and only when at least one id filter was set. Returns
+// "no_samples" as the default — the filter parsed fine but nothing
+// matched the time predicate.
+func (s *taskQueueServer) diagnoseEmptyHistory(ctx context.Context, req *pb.WorkerStatsHistoryFilter) string {
+	if req.WorkerId != nil {
+		var exists bool
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM worker WHERE worker_id = $1)`, *req.WorkerId,
+		).Scan(&exists)
+		if !exists {
+			return "unknown_worker"
+		}
+	}
+	if req.StepId != nil {
+		var exists bool
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM step WHERE step_id = $1)`, *req.StepId,
+		).Scan(&exists)
+		if !exists {
+			return "unknown_step"
+		}
+	}
+	if req.WorkflowId != nil {
+		var exists bool
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM workflow WHERE workflow_id = $1)`, *req.WorkflowId,
+		).Scan(&exists)
+		if !exists {
+			return "unknown_workflow"
+		}
+	}
+	return "no_samples"
 }
 

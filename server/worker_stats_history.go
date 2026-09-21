@@ -32,6 +32,7 @@ func (s *taskQueueServer) persistWorkerStatsSample(workerID int32, stats *pb.Wor
 	cpuP := nullFloat32ForStats(stats.PeakCpuPercent)
 	memP := nullFloat32ForStats(stats.PeakMemPercent)
 	ioP := nullFloat32ForStats(stats.PeakIowaitPercent)
+	diskP := nullFloat32ForStats(stats.PeakDiskPercent)
 	// Current values are proto scalars, not optional — 0 is a valid
 	// reading (idle worker) so we always write them. A client that
 	// doesn't send stats never reaches here (guarded by the caller).
@@ -63,17 +64,20 @@ func (s *taskQueueServer) persistWorkerStatsSample(workerID int32, stats *pb.Wor
 				worker_id, sampled_at, step_id,
 				cpu_percent, mem_percent, iowait_percent,
 				peak_cpu_percent, peak_mem_percent, peak_iowait_percent,
+				peak_disk_percent,
 				effective_concurrency, running_tasks, last_throttle_at
 			) VALUES (
 				$1, NOW(), $2,
 				$3, $4, $5,
 				$6, $7, $8,
-				$9, $10, $11
+				$9,
+				$10, $11, $12
 			)
 		`,
 			workerID, stepID,
 			cpu, mem, iowait,
 			cpuP, memP, ioP,
+			diskP,
 			effConc, running, throttleArg,
 		)
 		if err != nil {

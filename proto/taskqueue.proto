@@ -1335,6 +1335,11 @@ message WorkerStats {
     optional float peak_cpu_percent    = 12;
     optional float peak_mem_percent    = 13;
     optional float peak_iowait_percent = 14;
+    // Peak disk usage percent across every disk the worker reports,
+    // over the same ping interval. Answers "did any disk approach
+    // full during this workflow?" — the source of the prefetch-vs-
+    // disk sizing question that a per-worker average obscures.
+    optional float peak_disk_percent   = 15;
 }
 
 message DiskUsage {
@@ -1384,7 +1389,7 @@ message WorkerStatsHistoryFilter {
 message WorkerStatsHistorySample {
     int32 worker_id                 = 1;
     string worker_name              = 2;   // denormalised for readability
-    int64 sampled_at                = 3;   // unix seconds
+    int64 sampled_at                = 3;   // unix MILLIseconds — a client that assumed seconds must divide by 1000
     optional int32 step_id          = 4;
     optional float cpu_percent      = 5;
     optional float mem_percent      = 6;
@@ -1394,7 +1399,8 @@ message WorkerStatsHistorySample {
     optional float peak_iowait_percent = 10;
     optional int32 effective_concurrency = 11;
     optional int32 running_tasks    = 12;
-    optional int64 last_throttle_at = 13;
+    optional int64 last_throttle_at = 13;   // unix seconds — coarse marker, unchanged
+    optional float peak_disk_percent   = 14;
 }
 
 message WorkerStatsHistoryList {
@@ -1402,6 +1408,15 @@ message WorkerStatsHistoryList {
     // If truncated by the row limit, the caller can retry with a tighter
     // time range. A non-zero value means "some samples were dropped".
     int32 dropped = 2;
+    // Explains an empty samples list so the caller can distinguish
+    // "no data for this window" from "unknown worker/step/workflow"
+    // from "filter matched but window predated the retention start".
+    // Empty string on non-empty results. Populated values:
+    //   "no_samples"     — filter parses fine but no rows match
+    //   "unknown_worker" — worker_id was set but not found in worker
+    //   "unknown_step"   — step_id was set but not found in step
+    //   "unknown_workflow" — workflow_id was set but not found in workflow
+    optional string reason = 3;
 }
 
 // Aggregated view: one row per worker over the filter window. This is
@@ -1410,8 +1425,8 @@ message WorkerStatsSummaryEntry {
     int32 worker_id              = 1;
     string worker_name           = 2;
     int32 sample_count           = 3;
-    int64 first_sample_at        = 4;   // unix seconds
-    int64 last_sample_at         = 5;
+    int64 first_sample_at        = 4;   // unix MILLIseconds — matches WorkerStatsHistorySample.sampled_at
+    int64 last_sample_at         = 5;   // unix MILLIseconds
     optional float max_cpu_percent    = 6;
     optional float max_mem_percent    = 7;
     optional float max_iowait_percent = 8;
@@ -1419,10 +1434,18 @@ message WorkerStatsSummaryEntry {
     optional float avg_mem_percent    = 10;
     optional float avg_iowait_percent = 11;
     optional int32 max_running_tasks  = 12;
+    // MAX across all disks × all samples in the window. Answers the
+    // "did any disk approach full during this workflow?" sizing question.
+    optional float max_disk_percent   = 13;
 }
 
 message WorkerStatsSummary {
     repeated WorkerStatsSummaryEntry entries = 1;
+    // Same reason semantics as WorkerStatsHistoryList.reason. Empty
+    // string when entries is non-empty; explains an empty result
+    // otherwise. Values: no_samples / unknown_worker / unknown_step /
+    // unknown_workflow.
+    optional string reason = 2;
 }
 
 message FetchListRequest {

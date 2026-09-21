@@ -8100,8 +8100,13 @@ type WorkerStats struct {
 	PeakCpuPercent    *float32 `protobuf:"fixed32,12,opt,name=peak_cpu_percent,json=peakCpuPercent,proto3,oneof" json:"peak_cpu_percent,omitempty"`
 	PeakMemPercent    *float32 `protobuf:"fixed32,13,opt,name=peak_mem_percent,json=peakMemPercent,proto3,oneof" json:"peak_mem_percent,omitempty"`
 	PeakIowaitPercent *float32 `protobuf:"fixed32,14,opt,name=peak_iowait_percent,json=peakIowaitPercent,proto3,oneof" json:"peak_iowait_percent,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Peak disk usage percent across every disk the worker reports,
+	// over the same ping interval. Answers "did any disk approach
+	// full during this workflow?" — the source of the prefetch-vs-
+	// disk sizing question that a per-worker average obscures.
+	PeakDiskPercent *float32 `protobuf:"fixed32,15,opt,name=peak_disk_percent,json=peakDiskPercent,proto3,oneof" json:"peak_disk_percent,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *WorkerStats) Reset() {
@@ -8228,6 +8233,13 @@ func (x *WorkerStats) GetPeakMemPercent() float32 {
 func (x *WorkerStats) GetPeakIowaitPercent() float32 {
 	if x != nil && x.PeakIowaitPercent != nil {
 		return *x.PeakIowaitPercent
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetPeakDiskPercent() float32 {
+	if x != nil && x.PeakDiskPercent != nil {
+		return *x.PeakDiskPercent
 	}
 	return 0
 }
@@ -8600,7 +8612,7 @@ type WorkerStatsHistorySample struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	WorkerId             int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	WorkerName           string                 `protobuf:"bytes,2,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"` // denormalised for readability
-	SampledAt            int64                  `protobuf:"varint,3,opt,name=sampled_at,json=sampledAt,proto3" json:"sampled_at,omitempty"`   // unix seconds
+	SampledAt            int64                  `protobuf:"varint,3,opt,name=sampled_at,json=sampledAt,proto3" json:"sampled_at,omitempty"`   // unix MILLIseconds — a client that assumed seconds must divide by 1000
 	StepId               *int32                 `protobuf:"varint,4,opt,name=step_id,json=stepId,proto3,oneof" json:"step_id,omitempty"`
 	CpuPercent           *float32               `protobuf:"fixed32,5,opt,name=cpu_percent,json=cpuPercent,proto3,oneof" json:"cpu_percent,omitempty"`
 	MemPercent           *float32               `protobuf:"fixed32,6,opt,name=mem_percent,json=memPercent,proto3,oneof" json:"mem_percent,omitempty"`
@@ -8610,7 +8622,8 @@ type WorkerStatsHistorySample struct {
 	PeakIowaitPercent    *float32               `protobuf:"fixed32,10,opt,name=peak_iowait_percent,json=peakIowaitPercent,proto3,oneof" json:"peak_iowait_percent,omitempty"`
 	EffectiveConcurrency *int32                 `protobuf:"varint,11,opt,name=effective_concurrency,json=effectiveConcurrency,proto3,oneof" json:"effective_concurrency,omitempty"`
 	RunningTasks         *int32                 `protobuf:"varint,12,opt,name=running_tasks,json=runningTasks,proto3,oneof" json:"running_tasks,omitempty"`
-	LastThrottleAt       *int64                 `protobuf:"varint,13,opt,name=last_throttle_at,json=lastThrottleAt,proto3,oneof" json:"last_throttle_at,omitempty"`
+	LastThrottleAt       *int64                 `protobuf:"varint,13,opt,name=last_throttle_at,json=lastThrottleAt,proto3,oneof" json:"last_throttle_at,omitempty"` // unix seconds — coarse marker, unchanged
+	PeakDiskPercent      *float32               `protobuf:"fixed32,14,opt,name=peak_disk_percent,json=peakDiskPercent,proto3,oneof" json:"peak_disk_percent,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -8736,12 +8749,29 @@ func (x *WorkerStatsHistorySample) GetLastThrottleAt() int64 {
 	return 0
 }
 
+func (x *WorkerStatsHistorySample) GetPeakDiskPercent() float32 {
+	if x != nil && x.PeakDiskPercent != nil {
+		return *x.PeakDiskPercent
+	}
+	return 0
+}
+
 type WorkerStatsHistoryList struct {
 	state   protoimpl.MessageState      `protogen:"open.v1"`
 	Samples []*WorkerStatsHistorySample `protobuf:"bytes,1,rep,name=samples,proto3" json:"samples,omitempty"`
 	// If truncated by the row limit, the caller can retry with a tighter
 	// time range. A non-zero value means "some samples were dropped".
-	Dropped       int32 `protobuf:"varint,2,opt,name=dropped,proto3" json:"dropped,omitempty"`
+	Dropped int32 `protobuf:"varint,2,opt,name=dropped,proto3" json:"dropped,omitempty"`
+	// Explains an empty samples list so the caller can distinguish
+	// "no data for this window" from "unknown worker/step/workflow"
+	// from "filter matched but window predated the retention start".
+	// Empty string on non-empty results. Populated values:
+	//
+	//	"no_samples"     — filter parses fine but no rows match
+	//	"unknown_worker" — worker_id was set but not found in worker
+	//	"unknown_step"   — step_id was set but not found in step
+	//	"unknown_workflow" — workflow_id was set but not found in workflow
+	Reason        *string `protobuf:"bytes,3,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8790,6 +8820,13 @@ func (x *WorkerStatsHistoryList) GetDropped() int32 {
 	return 0
 }
 
+func (x *WorkerStatsHistoryList) GetReason() string {
+	if x != nil && x.Reason != nil {
+		return *x.Reason
+	}
+	return ""
+}
+
 // Aggregated view: one row per worker over the filter window. This is
 // the answer to "what did this workflow actually need?".
 type WorkerStatsSummaryEntry struct {
@@ -8797,8 +8834,8 @@ type WorkerStatsSummaryEntry struct {
 	WorkerId         int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	WorkerName       string                 `protobuf:"bytes,2,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"`
 	SampleCount      int32                  `protobuf:"varint,3,opt,name=sample_count,json=sampleCount,proto3" json:"sample_count,omitempty"`
-	FirstSampleAt    int64                  `protobuf:"varint,4,opt,name=first_sample_at,json=firstSampleAt,proto3" json:"first_sample_at,omitempty"` // unix seconds
-	LastSampleAt     int64                  `protobuf:"varint,5,opt,name=last_sample_at,json=lastSampleAt,proto3" json:"last_sample_at,omitempty"`
+	FirstSampleAt    int64                  `protobuf:"varint,4,opt,name=first_sample_at,json=firstSampleAt,proto3" json:"first_sample_at,omitempty"` // unix MILLIseconds — matches WorkerStatsHistorySample.sampled_at
+	LastSampleAt     int64                  `protobuf:"varint,5,opt,name=last_sample_at,json=lastSampleAt,proto3" json:"last_sample_at,omitempty"`    // unix MILLIseconds
 	MaxCpuPercent    *float32               `protobuf:"fixed32,6,opt,name=max_cpu_percent,json=maxCpuPercent,proto3,oneof" json:"max_cpu_percent,omitempty"`
 	MaxMemPercent    *float32               `protobuf:"fixed32,7,opt,name=max_mem_percent,json=maxMemPercent,proto3,oneof" json:"max_mem_percent,omitempty"`
 	MaxIowaitPercent *float32               `protobuf:"fixed32,8,opt,name=max_iowait_percent,json=maxIowaitPercent,proto3,oneof" json:"max_iowait_percent,omitempty"`
@@ -8806,8 +8843,11 @@ type WorkerStatsSummaryEntry struct {
 	AvgMemPercent    *float32               `protobuf:"fixed32,10,opt,name=avg_mem_percent,json=avgMemPercent,proto3,oneof" json:"avg_mem_percent,omitempty"`
 	AvgIowaitPercent *float32               `protobuf:"fixed32,11,opt,name=avg_iowait_percent,json=avgIowaitPercent,proto3,oneof" json:"avg_iowait_percent,omitempty"`
 	MaxRunningTasks  *int32                 `protobuf:"varint,12,opt,name=max_running_tasks,json=maxRunningTasks,proto3,oneof" json:"max_running_tasks,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// MAX across all disks × all samples in the window. Answers the
+	// "did any disk approach full during this workflow?" sizing question.
+	MaxDiskPercent *float32 `protobuf:"fixed32,13,opt,name=max_disk_percent,json=maxDiskPercent,proto3,oneof" json:"max_disk_percent,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkerStatsSummaryEntry) Reset() {
@@ -8924,9 +8964,21 @@ func (x *WorkerStatsSummaryEntry) GetMaxRunningTasks() int32 {
 	return 0
 }
 
+func (x *WorkerStatsSummaryEntry) GetMaxDiskPercent() float32 {
+	if x != nil && x.MaxDiskPercent != nil {
+		return *x.MaxDiskPercent
+	}
+	return 0
+}
+
 type WorkerStatsSummary struct {
-	state         protoimpl.MessageState     `protogen:"open.v1"`
-	Entries       []*WorkerStatsSummaryEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	state   protoimpl.MessageState     `protogen:"open.v1"`
+	Entries []*WorkerStatsSummaryEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	// Same reason semantics as WorkerStatsHistoryList.reason. Empty
+	// string when entries is non-empty; explains an empty result
+	// otherwise. Values: no_samples / unknown_worker / unknown_step /
+	// unknown_workflow.
+	Reason        *string `protobuf:"bytes,2,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8966,6 +9018,13 @@ func (x *WorkerStatsSummary) GetEntries() []*WorkerStatsSummaryEntry {
 		return x.Entries
 	}
 	return nil
+}
+
+func (x *WorkerStatsSummary) GetReason() string {
+	if x != nil && x.Reason != nil {
+		return *x.Reason
+	}
+	return ""
 }
 
 type FetchListRequest struct {
@@ -13176,7 +13235,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\v_start_timeB\v\n" +
 	"\t_end_time\"?\n" +
 	"\x11StepStatsResponse\x12*\n" +
-	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xa8\x05\n" +
+	"\x05stats\x18\x01 \x03(\v2\x14.taskqueue.StepStatsR\x05stats\"\xef\x05\n" +
 	"\vWorkerStats\x12*\n" +
 	"\x11cpu_usage_percent\x18\x01 \x01(\x02R\x0fcpuUsagePercent\x12*\n" +
 	"\x11mem_usage_percent\x18\x02 \x01(\x02R\x0fmemUsagePercent\x12\x1b\n" +
@@ -13192,10 +13251,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\rrunning_tasks\x18\v \x01(\x05R\frunningTasks\x12-\n" +
 	"\x10peak_cpu_percent\x18\f \x01(\x02H\x00R\x0epeakCpuPercent\x88\x01\x01\x12-\n" +
 	"\x10peak_mem_percent\x18\r \x01(\x02H\x01R\x0epeakMemPercent\x88\x01\x01\x123\n" +
-	"\x13peak_iowait_percent\x18\x0e \x01(\x02H\x02R\x11peakIowaitPercent\x88\x01\x01B\x13\n" +
+	"\x13peak_iowait_percent\x18\x0e \x01(\x02H\x02R\x11peakIowaitPercent\x88\x01\x01\x12/\n" +
+	"\x11peak_disk_percent\x18\x0f \x01(\x02H\x03R\x0fpeakDiskPercent\x88\x01\x01B\x13\n" +
 	"\x11_peak_cpu_percentB\x13\n" +
 	"\x11_peak_mem_percentB\x16\n" +
-	"\x14_peak_iowait_percent\"Q\n" +
+	"\x14_peak_iowait_percentB\x14\n" +
+	"\x12_peak_disk_percent\"Q\n" +
 	"\tDiskUsage\x12\x1f\n" +
 	"\vdevice_name\x18\x01 \x01(\tR\n" +
 	"deviceName\x12#\n" +
@@ -13236,7 +13297,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_start_epochB\f\n" +
 	"\n" +
 	"_end_epochB\b\n" +
-	"\x06_limit\"\xf5\x05\n" +
+	"\x06_limit\"\xbc\x06\n" +
 	"\x18WorkerStatsHistorySample\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x1f\n" +
 	"\vworker_name\x18\x02 \x01(\tR\n" +
@@ -13255,7 +13316,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	" \x01(\x02H\x06R\x11peakIowaitPercent\x88\x01\x01\x128\n" +
 	"\x15effective_concurrency\x18\v \x01(\x05H\aR\x14effectiveConcurrency\x88\x01\x01\x12(\n" +
 	"\rrunning_tasks\x18\f \x01(\x05H\bR\frunningTasks\x88\x01\x01\x12-\n" +
-	"\x10last_throttle_at\x18\r \x01(\x03H\tR\x0elastThrottleAt\x88\x01\x01B\n" +
+	"\x10last_throttle_at\x18\r \x01(\x03H\tR\x0elastThrottleAt\x88\x01\x01\x12/\n" +
+	"\x11peak_disk_percent\x18\x0e \x01(\x02H\n" +
+	"R\x0fpeakDiskPercent\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_idB\x0e\n" +
 	"\f_cpu_percentB\x0e\n" +
@@ -13266,10 +13329,13 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x14_peak_iowait_percentB\x18\n" +
 	"\x16_effective_concurrencyB\x10\n" +
 	"\x0e_running_tasksB\x13\n" +
-	"\x11_last_throttle_at\"q\n" +
+	"\x11_last_throttle_atB\x14\n" +
+	"\x12_peak_disk_percent\"\x99\x01\n" +
 	"\x16WorkerStatsHistoryList\x12=\n" +
 	"\asamples\x18\x01 \x03(\v2#.taskqueue.WorkerStatsHistorySampleR\asamples\x12\x18\n" +
-	"\adropped\x18\x02 \x01(\x05R\adropped\"\xa7\x05\n" +
+	"\adropped\x18\x02 \x01(\x05R\adropped\x12\x1b\n" +
+	"\x06reason\x18\x03 \x01(\tH\x00R\x06reason\x88\x01\x01B\t\n" +
+	"\a_reason\"\xeb\x05\n" +
 	"\x17WorkerStatsSummaryEntry\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x1f\n" +
 	"\vworker_name\x18\x02 \x01(\tR\n" +
@@ -13284,16 +13350,20 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0favg_mem_percent\x18\n" +
 	" \x01(\x02H\x04R\ravgMemPercent\x88\x01\x01\x121\n" +
 	"\x12avg_iowait_percent\x18\v \x01(\x02H\x05R\x10avgIowaitPercent\x88\x01\x01\x12/\n" +
-	"\x11max_running_tasks\x18\f \x01(\x05H\x06R\x0fmaxRunningTasks\x88\x01\x01B\x12\n" +
+	"\x11max_running_tasks\x18\f \x01(\x05H\x06R\x0fmaxRunningTasks\x88\x01\x01\x12-\n" +
+	"\x10max_disk_percent\x18\r \x01(\x02H\aR\x0emaxDiskPercent\x88\x01\x01B\x12\n" +
 	"\x10_max_cpu_percentB\x12\n" +
 	"\x10_max_mem_percentB\x15\n" +
 	"\x13_max_iowait_percentB\x12\n" +
 	"\x10_avg_cpu_percentB\x12\n" +
 	"\x10_avg_mem_percentB\x15\n" +
 	"\x13_avg_iowait_percentB\x14\n" +
-	"\x12_max_running_tasks\"R\n" +
+	"\x12_max_running_tasksB\x13\n" +
+	"\x11_max_disk_percent\"z\n" +
 	"\x12WorkerStatsSummary\x12<\n" +
-	"\aentries\x18\x01 \x03(\v2\".taskqueue.WorkerStatsSummaryEntryR\aentries\"$\n" +
+	"\aentries\x18\x01 \x03(\v2\".taskqueue.WorkerStatsSummaryEntryR\aentries\x12\x1b\n" +
+	"\x06reason\x18\x02 \x01(\tH\x00R\x06reason\x88\x01\x01B\t\n" +
+	"\a_reason\"$\n" +
 	"\x10FetchListRequest\x12\x10\n" +
 	"\x03uri\x18\x01 \x01(\tR\x03uri\")\n" +
 	"\x11FetchListResponse\x12\x14\n" +
@@ -14224,7 +14294,9 @@ func file_taskqueue_proto_init() {
 	file_taskqueue_proto_msgTypes[102].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[108].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[109].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[110].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[111].OneofWrappers = []any{}
+	file_taskqueue_proto_msgTypes[112].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[116].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[117].OneofWrappers = []any{}
 	file_taskqueue_proto_msgTypes[118].OneofWrappers = []any{}

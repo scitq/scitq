@@ -3041,6 +3041,15 @@ export interface WorkerStats {
      * @generated from protobuf field: optional float peak_iowait_percent = 14
      */
     peakIowaitPercent?: number;
+    /**
+     * Peak disk usage percent across every disk the worker reports,
+     * over the same ping interval. Answers "did any disk approach
+     * full during this workflow?" — the source of the prefetch-vs-
+     * disk sizing question that a per-worker average obscures.
+     *
+     * @generated from protobuf field: optional float peak_disk_percent = 15
+     */
+    peakDiskPercent?: number;
 }
 /**
  * @generated from protobuf message taskqueue.DiskUsage
@@ -3171,7 +3180,7 @@ export interface WorkerStatsHistorySample {
     /**
      * @generated from protobuf field: int64 sampled_at = 3
      */
-    sampledAt: string; // unix seconds
+    sampledAt: string; // unix MILLIseconds — a client that assumed seconds must divide by 1000
     /**
      * @generated from protobuf field: optional int32 step_id = 4
      */
@@ -3211,7 +3220,11 @@ export interface WorkerStatsHistorySample {
     /**
      * @generated from protobuf field: optional int64 last_throttle_at = 13
      */
-    lastThrottleAt?: string;
+    lastThrottleAt?: string; // unix seconds — coarse marker, unchanged
+    /**
+     * @generated from protobuf field: optional float peak_disk_percent = 14
+     */
+    peakDiskPercent?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkerStatsHistoryList
@@ -3228,6 +3241,19 @@ export interface WorkerStatsHistoryList {
      * @generated from protobuf field: int32 dropped = 2
      */
     dropped: number;
+    /**
+     * Explains an empty samples list so the caller can distinguish
+     * "no data for this window" from "unknown worker/step/workflow"
+     * from "filter matched but window predated the retention start".
+     * Empty string on non-empty results. Populated values:
+     *   "no_samples"     — filter parses fine but no rows match
+     *   "unknown_worker" — worker_id was set but not found in worker
+     *   "unknown_step"   — step_id was set but not found in step
+     *   "unknown_workflow" — workflow_id was set but not found in workflow
+     *
+     * @generated from protobuf field: optional string reason = 3
+     */
+    reason?: string;
 }
 /**
  * Aggregated view: one row per worker over the filter window. This is
@@ -3251,11 +3277,11 @@ export interface WorkerStatsSummaryEntry {
     /**
      * @generated from protobuf field: int64 first_sample_at = 4
      */
-    firstSampleAt: string; // unix seconds
+    firstSampleAt: string; // unix MILLIseconds — matches WorkerStatsHistorySample.sampled_at
     /**
      * @generated from protobuf field: int64 last_sample_at = 5
      */
-    lastSampleAt: string;
+    lastSampleAt: string; // unix MILLIseconds
     /**
      * @generated from protobuf field: optional float max_cpu_percent = 6
      */
@@ -3284,6 +3310,13 @@ export interface WorkerStatsSummaryEntry {
      * @generated from protobuf field: optional int32 max_running_tasks = 12
      */
     maxRunningTasks?: number;
+    /**
+     * MAX across all disks × all samples in the window. Answers the
+     * "did any disk approach full during this workflow?" sizing question.
+     *
+     * @generated from protobuf field: optional float max_disk_percent = 13
+     */
+    maxDiskPercent?: number;
 }
 /**
  * @generated from protobuf message taskqueue.WorkerStatsSummary
@@ -3293,6 +3326,15 @@ export interface WorkerStatsSummary {
      * @generated from protobuf field: repeated taskqueue.WorkerStatsSummaryEntry entries = 1
      */
     entries: WorkerStatsSummaryEntry[];
+    /**
+     * Same reason semantics as WorkerStatsHistoryList.reason. Empty
+     * string when entries is non-empty; explains an empty result
+     * otherwise. Values: no_samples / unknown_worker / unknown_step /
+     * unknown_workflow.
+     *
+     * @generated from protobuf field: optional string reason = 2
+     */
+    reason?: string;
 }
 /**
  * @generated from protobuf message taskqueue.FetchListRequest
@@ -12366,7 +12408,8 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
             { no: 11, name: "running_tasks", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 12, name: "peak_cpu_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 13, name: "peak_mem_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 14, name: "peak_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 14, name: "peak_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 15, name: "peak_disk_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStats>): WorkerStats {
@@ -12431,6 +12474,9 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
                 case /* optional float peak_iowait_percent */ 14:
                     message.peakIowaitPercent = reader.float();
                     break;
+                case /* optional float peak_disk_percent */ 15:
+                    message.peakDiskPercent = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12485,6 +12531,9 @@ class WorkerStats$Type extends MessageType<WorkerStats> {
         /* optional float peak_iowait_percent = 14; */
         if (message.peakIowaitPercent !== undefined)
             writer.tag(14, WireType.Bit32).float(message.peakIowaitPercent);
+        /* optional float peak_disk_percent = 15; */
+        if (message.peakDiskPercent !== undefined)
+            writer.tag(15, WireType.Bit32).float(message.peakDiskPercent);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12911,7 +12960,8 @@ class WorkerStatsHistorySample$Type extends MessageType<WorkerStatsHistorySample
             { no: 10, name: "peak_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 11, name: "effective_concurrency", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 12, name: "running_tasks", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 13, name: "last_throttle_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ }
+            { no: 13, name: "last_throttle_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
+            { no: 14, name: "peak_disk_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStatsHistorySample>): WorkerStatsHistorySample {
@@ -12967,6 +13017,9 @@ class WorkerStatsHistorySample$Type extends MessageType<WorkerStatsHistorySample
                 case /* optional int64 last_throttle_at */ 13:
                     message.lastThrottleAt = reader.int64().toString();
                     break;
+                case /* optional float peak_disk_percent */ 14:
+                    message.peakDiskPercent = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13018,6 +13071,9 @@ class WorkerStatsHistorySample$Type extends MessageType<WorkerStatsHistorySample
         /* optional int64 last_throttle_at = 13; */
         if (message.lastThrottleAt !== undefined)
             writer.tag(13, WireType.Varint).int64(message.lastThrottleAt);
+        /* optional float peak_disk_percent = 14; */
+        if (message.peakDiskPercent !== undefined)
+            writer.tag(14, WireType.Bit32).float(message.peakDiskPercent);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13033,7 +13089,8 @@ class WorkerStatsHistoryList$Type extends MessageType<WorkerStatsHistoryList> {
     constructor() {
         super("taskqueue.WorkerStatsHistoryList", [
             { no: 1, name: "samples", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => WorkerStatsHistorySample },
-            { no: 2, name: "dropped", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 2, name: "dropped", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "reason", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStatsHistoryList>): WorkerStatsHistoryList {
@@ -13055,6 +13112,9 @@ class WorkerStatsHistoryList$Type extends MessageType<WorkerStatsHistoryList> {
                 case /* int32 dropped */ 2:
                     message.dropped = reader.int32();
                     break;
+                case /* optional string reason */ 3:
+                    message.reason = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13073,6 +13133,9 @@ class WorkerStatsHistoryList$Type extends MessageType<WorkerStatsHistoryList> {
         /* int32 dropped = 2; */
         if (message.dropped !== 0)
             writer.tag(2, WireType.Varint).int32(message.dropped);
+        /* optional string reason = 3; */
+        if (message.reason !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.reason);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13098,7 +13161,8 @@ class WorkerStatsSummaryEntry$Type extends MessageType<WorkerStatsSummaryEntry> 
             { no: 9, name: "avg_cpu_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 10, name: "avg_mem_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 11, name: "avg_iowait_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 12, name: "max_running_tasks", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 12, name: "max_running_tasks", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 13, name: "max_disk_percent", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStatsSummaryEntry>): WorkerStatsSummaryEntry {
@@ -13153,6 +13217,9 @@ class WorkerStatsSummaryEntry$Type extends MessageType<WorkerStatsSummaryEntry> 
                 case /* optional int32 max_running_tasks */ 12:
                     message.maxRunningTasks = reader.int32();
                     break;
+                case /* optional float max_disk_percent */ 13:
+                    message.maxDiskPercent = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13201,6 +13268,9 @@ class WorkerStatsSummaryEntry$Type extends MessageType<WorkerStatsSummaryEntry> 
         /* optional int32 max_running_tasks = 12; */
         if (message.maxRunningTasks !== undefined)
             writer.tag(12, WireType.Varint).int32(message.maxRunningTasks);
+        /* optional float max_disk_percent = 13; */
+        if (message.maxDiskPercent !== undefined)
+            writer.tag(13, WireType.Bit32).float(message.maxDiskPercent);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13215,7 +13285,8 @@ export const WorkerStatsSummaryEntry = new WorkerStatsSummaryEntry$Type();
 class WorkerStatsSummary$Type extends MessageType<WorkerStatsSummary> {
     constructor() {
         super("taskqueue.WorkerStatsSummary", [
-            { no: 1, name: "entries", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => WorkerStatsSummaryEntry }
+            { no: 1, name: "entries", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => WorkerStatsSummaryEntry },
+            { no: 2, name: "reason", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStatsSummary>): WorkerStatsSummary {
@@ -13233,6 +13304,9 @@ class WorkerStatsSummary$Type extends MessageType<WorkerStatsSummary> {
                 case /* repeated taskqueue.WorkerStatsSummaryEntry entries */ 1:
                     message.entries.push(WorkerStatsSummaryEntry.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional string reason */ 2:
+                    message.reason = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13248,6 +13322,9 @@ class WorkerStatsSummary$Type extends MessageType<WorkerStatsSummary> {
         /* repeated taskqueue.WorkerStatsSummaryEntry entries = 1; */
         for (let i = 0; i < message.entries.length; i++)
             WorkerStatsSummaryEntry.internalBinaryWrite(message.entries[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional string reason = 2; */
+        if (message.reason !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.reason);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
