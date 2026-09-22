@@ -428,7 +428,33 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
         // directly instead of maintaining a rolling sum locally.
         if (snap.successRun) step.successRunStats = { average: snap.successRun.average, min: snap.successRun.min, max: snap.successRun.max };
         if (snap.failedRun)  step.failedRunStats  = { average: snap.failedRun.average,  min: snap.failedRun.min,  max: snap.failedRun.max };
-        if (snap.runningRun) step.currentRunStats = { average: snap.runningRun.average, min: snap.runningRun.min, max: snap.runningRun.max };
+        // Sync the running-task SET from the snapshot; do NOT overwrite
+        // step.currentRunStats from snap.runningRun. The local 1 s timer
+        // (recomputeRunningStats) is the single writer of currentRunStats
+        // — otherwise its wall-clock values and the server heartbeat's
+        // (2 s cadence, server clock) race and the display flickers up
+        // and down. The snapshot's runningTaskStarts keeps the set fresh
+        // so that timer's computation reflects R transitions after mount.
+        const nextStarts = Array.isArray(snap.runningTaskStarts) ? snap.runningTaskStarts : [];
+        const m = new Map<number, number>();
+        for (const rt of nextStarts) {
+          if (typeof rt?.taskId === 'number' && typeof rt?.runStartedEpoch === 'number') {
+            m.set(rt.taskId, rt.runStartedEpoch);
+          }
+        }
+        if (m.size > 0) {
+          runningByStep.set(snap.stepId, m);
+        } else {
+          runningByStep.delete(snap.stepId);
+          // No running tasks left for this step: reflect that in the
+          // display immediately (the timer's fallback path would do the
+          // same but only on its next tick, and it stops itself when
+          // nothing is running).
+          step.currentRunStats = { average: 0, min: 0, max: 0 };
+        }
+        if (hasAnyRunning()) {
+          ensureRunningTimer();
+        }
         if (snap.startTime != null) step.startTime = snap.startTime;
         if (snap.endTime != null)   step.endTime   = snap.endTime;
       }

@@ -630,8 +630,14 @@ type StepCounterSnapshot struct {
 	RunningRun stepRunStats `json:"runningRun"`
 	Download   stepRunStats `json:"download"`
 	Upload     stepRunStats `json:"upload"`
-	StartTime  *int64       `json:"startTime,omitempty"`
-	EndTime    *int64       `json:"endTime,omitempty"`
+	// RunningTaskStarts is the raw set of running tasks (task_id +
+	// run_started_at as fractional epoch seconds). The client rebuilds
+	// its local runningByStep map from this list on every snapshot so
+	// its 1 s timer computes min/avg/max from an up-to-date set — R
+	// transitions after mount are no longer stale.
+	RunningTaskStarts []stepRunningTask `json:"runningTaskStarts"`
+	StartTime         *int64            `json:"startTime,omitempty"`
+	EndTime           *int64            `json:"endTime,omitempty"`
 }
 
 type stepRunStats struct {
@@ -639,6 +645,18 @@ type stepRunStats struct {
 	Average float32 `json:"average"`
 	Min     float32 `json:"min"`
 	Max     float32 `json:"max"`
+}
+
+// stepRunningTask is one entry in the snapshot's runningTaskStarts list:
+// a task id and its run-start time as fractional epoch seconds. The
+// client uses this list to rebuild its own per-step runningByStep map
+// and then computes the wall-clock "Running: min/avg/max" locally on a
+// 1 s timer. Shipping the raw set with every snapshot keeps the client
+// authoritative on the ticking display, while the server heartbeat only
+// keeps the SET in sync — the two clocks never race on the same value.
+type stepRunningTask struct {
+	TaskId          int32   `json:"taskId"`
+	RunStartedEpoch float64 `json:"runStartedEpoch"`
 }
 
 func snapshotFromAgg(stepID int32, agg *StepAgg, now time.Time) StepCounterSnapshot {
@@ -664,11 +682,16 @@ func snapshotFromAgg(stepID int32, agg *StepAgg, now time.Time) StepCounterSnaps
 		EndTime:           agg.EndTime,
 	}
 	// RunningRun is derived from RunningTasks (start times → current
-	// elapsed durations). Matches the existing GetStepStats logic.
+	// elapsed durations). Matches the existing GetStepStats logic. Kept
+	// on the wire for callers that read snapshots without a local ticker
+	// (e.g. non-UI subscribers); the browser UI ignores this field and
+	// re-derives the same numbers from RunningTaskStarts on its own 1 s
+	// timer so the two clocks never race on the display.
 	if len(agg.RunningTasks) > 0 {
 		var sum, minV, maxV float64
 		minV = math.MaxFloat64
-		for _, start := range agg.RunningTasks {
+		starts := make([]stepRunningTask, 0, len(agg.RunningTasks))
+		for tid, start := range agg.RunningTasks {
 			d := now.Sub(start).Seconds()
 			if d < 0 {
 				d = 0
@@ -680,10 +703,13 @@ func snapshotFromAgg(stepID int32, agg *StepAgg, now time.Time) StepCounterSnaps
 			if d > maxV {
 				maxV = d
 			}
+			epoch := float64(start.Unix()) + float64(start.Nanosecond())/1e9
+			starts = append(starts, stepRunningTask{TaskId: tid, RunStartedEpoch: epoch})
 		}
 		count := int32(len(agg.RunningTasks))
 		avg := float32(sum / float64(count))
 		snap.RunningRun = stepRunStats{Count: count, Average: avg, Min: float32(minV), Max: float32(maxV)}
+		snap.RunningTaskStarts = starts
 	}
 	return snap
 }
