@@ -24,10 +24,11 @@
 
 [✅] show worker event in UI
 [✅] step view stats in UI
-[◒] fix web sockets
+[✅] fix web sockets
   [✅] Fix concurrent-write hazard (writer pump per connection)
-  [ ] Add event envelope with monotonic event_id + server ring buffer (to replay missed events)
-  [ ] wsClient.ts small upgrades: lastEventId tracking/since, single dispatcher -> route by msg.type
+  [✅] Add event envelope with monotonic event_id + server ring buffer (to replay missed events)
+  [✅] wsClient.ts: lastEventId tracking + ?since= on reconnect, reset marker on gap
+  [ ] wsClient.ts small upgrades: single dispatcher -> route by msg.type
 [✅] implement download/execution/upload timeout in client (using either config setting or database content for the task)
 [✅] add access to timeout in python DSL
 [✅] add run duration measurement

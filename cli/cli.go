@@ -370,7 +370,7 @@ type Attr struct {
 			TemplateId    *int32  `arg:"--id" help:"ID of the template to run (either name or id is required)"`
 			Name          *string `arg:"--name" help:"Name of the template to run (either name or id is required)"`
 			Version       *string `arg:"--ver" help:"Optional version, e.g. 1.0.0 or 'latest' (default: latest)"`
-			ParamPairs    *string `arg:"--param" help:"Comma-separated key=value pairs (e.g. a=1,b=2)"`
+			ParamPairs    []string `arg:"--param,separate" help:"Set one params entry as key=value. Repeatable: '--param a=1 --param b=2'. A value may contain commas verbatim ('--param depth=1x1,2,3') because a single --param is treated as one pair whenever any comma-split part lacks '='. Legacy comma-separated form ('--param a=1,b=2') still works when every part is key=value shaped; quote comma-containing values under that form ('--param k=\"1,2,3\",n=4'). Later entries override earlier on key collision."`
 			NoRecruiters  bool    `arg:"--no-recruiters" help:"Create workflow without recruiters"`
 			ExtendWorkflow *int32 `arg:"--extend-workflow" help:"Extend an existing workflow (by id) instead of creating a new one: steps are found-or-created by name, tasks found-or-referenced by (step, tag), and drifted tasks edit-and-retried with cascade. See specs/workflow_extend.md."`
 			Continue       bool   `arg:"--continue" help:"Extend your most recent workflow run of this template (same template name, any version, matching params) — resolves the workflow automatically instead of passing --extend-workflow. Mutually exclusive with --extend-workflow."`
@@ -2192,18 +2192,67 @@ func stripMatchedQuotes(s string) string {
 	return s
 }
 
-func parseCommaSeparatedParams(input string) (string, error) {
+// parseParamEntries merges one or more --param arguments into a single
+// JSON object. Each entry may be either:
+//
+//   - a single key=value pair (value can contain commas — `depth=1x1,2,3`
+//     is preserved verbatim), or
+//   - legacy comma-separated pairs `k1=v1,k2=v2` where a value with a
+//     literal comma must be quoted (`k_list="1,2,3",n=4`).
+//
+// The two forms are distinguished per entry: if every comma-split part
+// looks like `key=value`, we take the legacy shape; if any part lacks
+// `=`, we treat the whole entry as one pair (the comma is inside the
+// value). Later entries override earlier ones on key collision.
+//
+// See the --param help on template run for the user-facing spec.
+func parseParamEntries(entries []string) (string, error) {
 	paramMap := make(map[string]string)
-	pairs, err := splitCommaQuoted(input)
+	for _, entry := range entries {
+		if err := applyParamEntry(entry, paramMap); err != nil {
+			return "", err
+		}
+	}
+	jsonBytes, err := json.Marshal(paramMap)
 	if err != nil {
 		return "", err
 	}
-	for _, pair := range pairs {
-		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
-		if len(parts) != 2 {
-			return "", fmt.Errorf("invalid param: %q (expected key=value)", pair)
+	return string(jsonBytes), nil
+}
+
+// applyParamEntry decodes one --param entry into paramMap. The
+// single-pair vs legacy-comma detection happens here — see
+// parseParamEntries's doc for the rule.
+func applyParamEntry(entry string, paramMap map[string]string) error {
+	parts, err := splitCommaQuoted(entry)
+	if err != nil {
+		return err
+	}
+	// Legacy multi-pair form iff more than one comma-split part AND
+	// every one of them contains `=`. Anything else falls back to
+	// "the entire entry is one key=value" — that's what makes a value
+	// like `depth=1x1,2,3` survive without quoting.
+	legacyMultiPair := len(parts) > 1
+	for _, p := range parts {
+		if !strings.Contains(strings.TrimSpace(p), "=") {
+			legacyMultiPair = false
+			break
 		}
-		key, val := parts[0], parts[1]
+	}
+	if !legacyMultiPair {
+		parts = []string{entry}
+	}
+	for _, pair := range parts {
+		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(kv) != 2 {
+			return fmt.Errorf("invalid param: %q (expected key=value)", pair)
+		}
+		key, val := kv[0], kv[1]
+		// Strip outer matched quotes so `samples="@/path"` and
+		// `k="1,2,3"` reach the @file / comma-split logic below with
+		// their bracketing quotes gone. Only strips a pair at the
+		// very start and end, so a value that merely CONTAINS a quote
+		// (`he said "hi"`) is untouched.
 		val = stripMatchedQuotes(strings.TrimSpace(val))
 		// `@/path/to/file` shorthand: substitute the file content. Lets
 		// templates with `type: text` (and any other string-shaped param)
@@ -2214,7 +2263,7 @@ func parseCommaSeparatedParams(input string) (string, error) {
 			path := strings.TrimPrefix(val, "@")
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return "", fmt.Errorf("@file shorthand on param %q: %w", key, err)
+				return fmt.Errorf("@file shorthand on param %q: %w", key, err)
 			}
 			val = string(data)
 		} else if strings.HasPrefix(val, `\@`) {
@@ -2222,11 +2271,15 @@ func parseCommaSeparatedParams(input string) (string, error) {
 		}
 		paramMap[key] = val
 	}
-	jsonBytes, err := json.Marshal(paramMap)
-	if err != nil {
-		return "", err
-	}
-	return string(jsonBytes), nil
+	return nil
+}
+
+// parseCommaSeparatedParams is a single-entry wrapper preserved for
+// existing tests + callers that pass one already-joined string.
+// Internally delegates to parseParamEntries, so its behaviour matches
+// the multi-entry form exactly.
+func parseCommaSeparatedParams(input string) (string, error) {
+	return parseParamEntries([]string{input})
 }
 
 func (c *CLI) TemplateRun() error {
@@ -2258,8 +2311,8 @@ func (c *CLI) TemplateRun() error {
 	var paramJSON string
 	var err error
 
-	if c.Attr.Template.Run.ParamPairs != nil {
-		paramJSON, err = parseCommaSeparatedParams(*c.Attr.Template.Run.ParamPairs)
+	if len(c.Attr.Template.Run.ParamPairs) > 0 {
+		paramJSON, err = parseParamEntries(c.Attr.Template.Run.ParamPairs)
 		if err != nil {
 			return err
 		}

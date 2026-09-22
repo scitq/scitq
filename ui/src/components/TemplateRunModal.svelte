@@ -61,10 +61,10 @@
 
   /**
    * Render the full `scitq template run …` invocation for this run.
-   * One --param per line so a value that itself contains commas (like
-   * the depth field `1x1,2,3,...`) doesn't confuse the CLI's
-   * comma-separated ParamPairs parser. Multi-line and unusual values
-   * are safe by single-quoting alone; text-typed params are noted so
+   * One --param per line — a single --param carries exactly one
+   * key=value pair, so comma-containing values (like the depth field
+   * `1x1,2,3`) survive without quoting. Multi-line and unusual values
+   * are made safe by single-quoting; text-typed params are noted so
    * the operator knows a --values-file might be preferable.
    */
   let commandLine = $derived((() => {

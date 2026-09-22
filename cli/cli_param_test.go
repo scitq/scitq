@@ -170,3 +170,102 @@ func assertEqual(t *testing.T, got, want map[string]string) {
 		}
 	}
 }
+
+// -- Repeatable --param form -------------------------------------------------
+
+// TestParseParamEntries_RepeatablePairs — the new preferred shape:
+// `--param a=1 --param b=2 --param c=3` produces the same map as the
+// legacy single-string form. Verifies each entry is treated as one
+// key=value.
+func TestParseParamEntries_RepeatablePairs(t *testing.T) {
+	js, err := parseParamEntries([]string{"a=1", "b=hello", "c=s3://bucket/path"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mustUnmarshal(t, js)
+	want := map[string]string{"a": "1", "b": "hello", "c": "s3://bucket/path"}
+	assertEqual(t, got, want)
+}
+
+// TestParseParamEntries_CommaInSingleValue — the key motivation for
+// repeatability: a value that itself contains commas ('depth=1x1,2,3')
+// must survive without quoting when it's the only pair in the entry.
+// The old comma-separated parser would have split this into three
+// invalid pairs.
+func TestParseParamEntries_CommaInSingleValue(t *testing.T) {
+	js, err := parseParamEntries([]string{"depth=1x1,2,3,4"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mustUnmarshal(t, js)
+	if got["depth"] != "1x1,2,3,4" {
+		t.Errorf("comma-in-value not preserved: got %q", got["depth"])
+	}
+}
+
+// TestParseParamEntries_LaterOverridesEarlier — repeatable --param
+// wants "last one wins" for key collisions so a script can layer a
+// defaults block then override a specific key. Locks the semantic in.
+func TestParseParamEntries_LaterOverridesEarlier(t *testing.T) {
+	js, err := parseParamEntries([]string{"env=staging", "env=prod"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mustUnmarshal(t, js)
+	if got["env"] != "prod" {
+		t.Errorf("last-wins broken: got env=%q, want prod", got["env"])
+	}
+}
+
+// TestParseParamEntries_MixedForms — one entry is a legacy
+// comma-separated batch, another is a single pair. Both merge into the
+// same output map. Locks in that the two forms coexist safely.
+func TestParseParamEntries_MixedForms(t *testing.T) {
+	js, err := parseParamEntries([]string{"a=1,b=2", "c=3,4,5"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mustUnmarshal(t, js)
+	want := map[string]string{"a": "1", "b": "2", "c": "3,4,5"}
+	assertEqual(t, got, want)
+}
+
+// TestParseParamEntries_FileShorthandPerEntry — @file expansion still
+// works when the entry is a single pair (not just the legacy shape),
+// so `--param samples=@/path/to.list` reads the file as expected.
+func TestParseParamEntries_FileShorthandPerEntry(t *testing.T) {
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "samples.txt")
+	if err := os.WriteFile(fp, []byte("A\nB\nC\n"), 0o644); err != nil {
+		t.Fatalf("write tmp file: %v", err)
+	}
+	js, err := parseParamEntries([]string{"samples=@" + fp, "n=42"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mustUnmarshal(t, js)
+	if got["samples"] != "A\nB\nC\n" {
+		t.Errorf("@file on single-pair entry not expanded: got %q", got["samples"])
+	}
+	if got["n"] != "42" {
+		t.Errorf("second entry lost: got %q", got["n"])
+	}
+}
+
+// TestParseParamEntries_LegacySingleEntryStillWorks — the old
+// single-string form (one --param carrying multiple k=v pairs) still
+// parses through the repeatable-slice API. Guards against a regression
+// where the legacy shape gets treated as one pair with a comma-carrying
+// value.
+func TestParseParamEntries_LegacySingleEntryStillWorks(t *testing.T) {
+	js, err := parseParamEntries([]string{`a=x,k_list="21,41,61",numa=1`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mustUnmarshal(t, js)
+	want := map[string]string{"a": "x", "k_list": "21,41,61", "numa": "1"}
+	assertEqual(t, got, want)
+}
+
+// -- ensure the imported strings package stays used across the file --
+var _ = strings.Split

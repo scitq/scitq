@@ -13,6 +13,12 @@ function createWebSocketStore() {
   let pingInterval: ReturnType<typeof setInterval> | null = null;
   let shouldReconnect = true;
 
+  // Last event_id observed on any incoming WS message. Passed back to
+  // the server as ?since=<id> on reconnect so we replay anything that
+  // arrived while the socket was dead. 0 means "no prior state" — a
+  // fresh connect that skips replay. See server/websocket/websocket.go.
+  let lastEventId = 0;
+
   const handlers = new Set<MessageHandler>();
 
   // Per-event subscription cache:
@@ -153,7 +159,14 @@ function createWebSocketStore() {
   function connect() {
     if (socket && socket.readyState === WebSocket.OPEN) return;
 
-    socket = new WebSocket(`${CONFIG.apiWs}/ws`);
+    // Ask the server for a replay of anything emitted since our last
+    // observed event_id. On a truly fresh boot lastEventId is 0 and the
+    // server sends no replay — normal live connect.
+    const url = new URL(`${CONFIG.apiWs}/ws`);
+    if (lastEventId > 0) {
+      url.searchParams.set('since', String(lastEventId));
+    }
+    socket = new WebSocket(url.toString());
 
     socket.onopen = () => {
       console.log('✅ WebSocket connected');
@@ -182,6 +195,24 @@ function createWebSocketStore() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'pong') return;
+
+        // Track the highest event_id seen so a reconnect can ?since=
+        // it. event_id === 0 is either the "reset" system marker
+        // (which we handle below without advancing) or an
+        // older-than-envelope message we shouldn't count.
+        if (typeof data.event_id === 'number' && data.event_id > lastEventId) {
+          lastEventId = data.event_id;
+        }
+
+        // Reset marker: the server couldn't replay far enough and is
+        // telling us we may have missed events. Consumers should
+        // re-fetch state from REST; we pass it through as an ordinary
+        // message so each subscriber decides. Do NOT reset
+        // lastEventId — future live messages resume the sequence
+        // from wherever the server is now.
+        if (data.type === 'system' && data.action === 'reset') {
+          console.warn('⚠️ WebSocket reset: missed messages, consumers should re-fetch');
+        }
 
         // Count every WS message before dispatch — gives us per-second
         // rates by (type, action), the ring buffer of recent events, and

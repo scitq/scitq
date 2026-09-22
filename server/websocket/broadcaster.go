@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -115,6 +116,46 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		conn: conn,
 		send: make(chan []byte, 256),       // buffered to absorb bursts
 		subs: map[string][]int32{"*": nil}, // default: receive all events, all ids
+	}
+
+	// Replay-on-reconnect: the client passes ?since=<lastEventId> if it
+	// wants to catch up on messages emitted while its previous socket
+	// was dead. Enqueue the replay BEFORE registering the client with
+	// the global broadcaster so nothing new interleaves ahead of the
+	// replayed stream. When since is 0 (or absent), the client is
+	// declaring "I have no prior state; start me on live" — no replay.
+	//
+	// If the requested since is older than the ring buffer's oldest
+	// entry the caller gets a "reset" marker and whatever's currently
+	// buffered. The UI reacts to reset by re-fetching state from the
+	// REST endpoints; live continues normally afterwards.
+	var replayed int
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		if since, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			msgs, covered := replaySince(since)
+			if !covered {
+				select {
+				case c.send <- resetMarker():
+				default:
+					// send buffer full on first message = very slow
+					// client; will close on the next non-replay write.
+				}
+			}
+			for _, m := range msgs {
+				select {
+				case c.send <- m:
+					replayed++
+				default:
+					log.Printf("WS replay: send buffer full at %d/%d messages; client too slow", replayed, len(msgs))
+					break
+				}
+			}
+			if replayed > 0 || !covered {
+				log.Printf("🔁 WS replay: since=%d, delivered %d message(s), covered=%v", since, replayed, covered)
+			}
+		} else {
+			log.Printf("⚠️ WS ?since= is not a uint64: %q", raw)
+		}
 	}
 
 	// Register client
