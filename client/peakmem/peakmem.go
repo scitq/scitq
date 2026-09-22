@@ -21,6 +21,7 @@ package peakmem
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -35,30 +36,56 @@ import (
 // display id. Callers typically get it from `docker inspect` or the
 // output of `docker run --cidfile <path>`.
 func ReadDockerPeakMB(containerID string) int32 {
+	peak, _ := ReadDockerPeakMBWithDiag(containerID)
+	return peak
+}
+
+// ReadDockerPeakMBWithDiag is ReadDockerPeakMB plus a per-candidate
+// diagnostic summary. Used by the executor to emit a worker_event when
+// the read fails, so an operator can pinpoint the layout mismatch
+// (missing path? path exists but reads 0? kernel too old for
+// memory.peak?) without SSH-ing to the worker.
+func ReadDockerPeakMBWithDiag(containerID string) (int32, []string) {
 	if containerID == "" {
-		return 0
+		return 0, nil
 	}
-	// cgroup v2 (systemd cgroup driver — the modern default). Two
-	// path shapes cover the systemd and cgroupfs drivers; we try
-	// both.
-	for _, path := range []string{
+	// Full set of candidate paths, ordered from most-common (systemd
+	// cgroup driver, v2, kernel >= 5.19) to least-common (cgroupfs
+	// driver, v1). memory.current isn't a peak — kept as a last-ditch
+	// signal so a caller at least learns which cgroup layout exists.
+	paths := []string{
 		"/sys/fs/cgroup/system.slice/docker-" + containerID + ".scope/memory.peak",
 		"/sys/fs/cgroup/docker/" + containerID + "/memory.peak",
-	} {
-		if mb := readBytesFileAsMB(path); mb > 0 {
-			return mb
-		}
-	}
-	// cgroup v1 fallback.
-	for _, path := range []string{
 		"/sys/fs/cgroup/memory/docker/" + containerID + "/memory.max_usage_in_bytes",
 		"/sys/fs/cgroup/memory/system.slice/docker-" + containerID + ".scope/memory.max_usage_in_bytes",
-	} {
+	}
+	tried := make([]string, 0, len(paths))
+	for _, path := range paths {
 		if mb := readBytesFileAsMB(path); mb > 0 {
-			return mb
+			return mb, nil
+		}
+		// Record whether the path existed at all — helps distinguish
+		// "wrong layout" (no path exists) from "kernel too old for
+		// memory.peak / v2 without a peak counter" (path exists but
+		// reads 0 or "max").
+		if _, err := os.Stat(path); err == nil {
+			tried = append(tried, path+"=present-but-zero")
+		} else if os.IsNotExist(err) {
+			tried = append(tried, path+"=missing")
+		} else {
+			tried = append(tried, fmt.Sprintf("%s=%v", path, err))
 		}
 	}
-	return 0
+	// One-shot log per task terminal — we don't want to spam a worker's
+	// log with a stanza per task on a broken host. Truncate CID so the
+	// log line stays under a terminal width.
+	shortCID := containerID
+	if len(shortCID) > 12 {
+		shortCID = shortCID[:12]
+	}
+	log.Printf("ℹ️ peakmem: no cgroup peak found for cid=%s (tried: %s)",
+		shortCID, strings.Join(tried, ", "))
+	return 0, tried
 }
 
 // ReadProcessPeakMB parses /proc/<pid>/status for VmHWM (peak resident

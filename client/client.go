@@ -715,11 +715,28 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	// still populated (the deferred docker rm hasn't run yet). Best-
 	// effort — 0 on any failure lands as NULL server-side, which the
 	// MCP surface omits. See client/peakmem for the fallback chain.
+	//
+	// Reports each outcome as a worker_event so an operator diagnosing
+	// "why is peak_mem_mb NULL?" can see the reason via
+	// `scitq worker-event list` without SSH-ing to the worker.
 	if !isBare && containerName != "" {
-		if cid := dockerInspectContainerID(containerName); cid != "" {
-			if peak := peakmem.ReadDockerPeakMB(cid); peak > 0 {
-				task.PeakMemMb = &peak
-			}
+		cid := dockerInspectContainerID(containerName)
+		if cid == "" {
+			log.Printf("ℹ️ peakmem: task %d: docker inspect returned no CID for %s (container gone?)",
+				task.TaskId, containerName)
+			reporter.Event("W", "peakmem", "docker inspect returned no CID", map[string]any{
+				"task_id":        task.TaskId,
+				"container_name": containerName,
+			})
+		} else if peak, tried := peakmem.ReadDockerPeakMBWithDiag(cid); peak > 0 {
+			task.PeakMemMb = &peak
+			log.Printf("📊 peakmem: task %d container hit %d MB", task.TaskId, peak)
+		} else {
+			reporter.Event("W", "peakmem", "no cgroup peak found", map[string]any{
+				"task_id":   task.TaskId,
+				"container": cid[:12],
+				"tried":     tried,
+			})
 		}
 	}
 

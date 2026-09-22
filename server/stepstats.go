@@ -93,6 +93,14 @@ type StepStatsAgg struct {
 	// via MarkDirty. See specs/task_transitions.md for the design
 	// (snapshot dispatch replacing per-transition deltas).
 	dirty map[stepKey]struct{}
+	// lastRunningTick is the wall-clock time of the last "running
+	// heartbeat" — a slow tick that marks every step with a running
+	// task dirty so its RunningRun (avg/min/max elapsed) re-emits and
+	// the UI sees a live counter. Without the heartbeat, a step with
+	// running tasks whose state doesn't change would keep its old
+	// snapshot forever on the client — the "Running: 6m57s" that
+	// stays frozen instead of ticking up.
+	lastRunningTick time.Time
 }
 
 // NewStepStatsAgg creates a new StepStatsAgg with initialized internal maps.
@@ -163,8 +171,14 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 
 			-- running tasks as separate arrays (NOT hidden, same reason as
 			-- the running counter above — a hidden R task is a ghost).
+			-- run_started_at is projected as double precision (fractional
+			-- epoch seconds) so tasks starting within the same wall-clock
+			-- second still get distinguishable durations downstream. The
+			-- previous bigint cast truncated all such starts to the same
+			-- integer and the UI then reported min=max=avg for whole
+			-- assignment bursts.
 			array_agg(t.task_id) FILTER (WHERE t.status = 'R' AND NOT t.hidden AND t.run_started_at IS NOT NULL) AS running_task_ids,
-			array_agg(EXTRACT(EPOCH FROM t.run_started_at)::bigint) FILTER (WHERE t.status = 'R' AND NOT t.hidden AND t.run_started_at IS NOT NULL) AS running_task_times,
+			array_agg(EXTRACT(EPOCH FROM t.run_started_at)::double precision) FILTER (WHERE t.status = 'R' AND NOT t.hidden AND t.run_started_at IS NOT NULL) AS running_task_times,
 
 			-- in-flight retry clones so RetryingSet can decrement Retrying when they finish
 			COALESCE(array_agg(t.task_id) FILTER (WHERE NOT t.hidden AND t.previous_task_id IS NOT NULL AND t.status NOT IN ('S','F')), '{}') AS retrying_task_ids
@@ -192,7 +206,7 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			runFSum, runFMin, runFMax                             float64
 			startEpoch, endEpoch                                  sql.NullInt64
 			runningIDs                                            pq.Int64Array
-			runningTimes                                          pq.Int64Array
+			runningTimes                                          pq.Float64Array
 			retryingIDs                                           pq.Int64Array
 		)
 		if err := rows.Scan(
@@ -248,16 +262,20 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			StartTime:    startPtr,
 			EndTime:      endPtr,
 		}
-		// Populate RunningTasks from returned arrays (task_id[], epoch[])
+		// Populate RunningTasks from returned arrays (task_id[], epoch[]).
+		// epoch is a float (fractional seconds since 1970-01-01 UTC) so
+		// two tasks started 200 ms apart don't collapse to the same
+		// integer. time.Unix takes (sec, nsec) so we split the fraction
+		// out to preserve microseconds through the map.
 		if len(runningIDs) > 0 && len(runningIDs) == len(runningTimes) {
 			for i := range runningIDs {
-				// runningIDs and runningTimes may contain zero values if SQL returned NULLs; skip zeros
 				if runningIDs[i] == 0 || runningTimes[i] == 0 {
 					continue
 				}
 				tid := int32(runningIDs[i])
-				startedAt := time.Unix(int64(runningTimes[i]), 0).UTC()
-				sagg.RunningTasks[tid] = startedAt
+				sec := int64(runningTimes[i])
+				nsec := int64((runningTimes[i] - float64(sec)) * 1e9)
+				sagg.RunningTasks[tid] = time.Unix(sec, nsec).UTC()
 			}
 		}
 		agg.data[workflowID][stepID] = sagg
@@ -732,7 +750,37 @@ func (a *StepStatsAgg) FlushOnce() {
 	}
 }
 
+// runningHeartbeatInterval is the cadence for re-marking steps with
+// running tasks as dirty so their wall-clock RunningRun stats
+// re-emit even when no task actually transitioned. 2 s is fast enough
+// that a browser reader sees the counter advance visibly, slow enough
+// that the extra emit volume is trivial (one snapshot per running
+// step every 2 s, versus per-transition otherwise).
+const runningHeartbeatInterval = 2 * time.Second
+
+// markRunningStepsDirty scans data for any step whose RunningTasks
+// map is non-empty and adds it to the dirty set. Caller holds a.mu.
+// Returns the number of steps marked so a caller-facing log can note
+// heartbeat activity.
+func (a *StepStatsAgg) markRunningStepsDirtyLocked() int {
+	marked := 0
+	for wfID, steps := range a.data {
+		for stepID, agg := range steps {
+			if agg == nil || len(agg.RunningTasks) == 0 {
+				continue
+			}
+			a.markDirtyLocked(wfID, stepID)
+			marked++
+		}
+	}
+	return marked
+}
+
 // FlushLoop drives FlushOnce on a fixed cadence. Caller wires stop.
+// Also runs the "running heartbeat" every runningHeartbeatInterval so
+// steps with active tasks re-emit their RunningRun stats and the UI
+// sees a live wall-clock counter rather than a frozen last-transition
+// value.
 func (a *StepStatsAgg) FlushLoop(interval time.Duration, stop <-chan struct{}) {
 	if a == nil {
 		return
@@ -742,6 +790,17 @@ func (a *StepStatsAgg) FlushLoop(interval time.Duration, stop <-chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
+			// Heartbeat pass: at most once per runningHeartbeatInterval,
+			// mark every step with a running task as dirty. FlushOnce
+			// below then emits their fresh snapshot. Order matters —
+			// mark BEFORE FlushOnce so the same tick delivers the
+			// heartbeat updates.
+			a.mu.Lock()
+			if time.Since(a.lastRunningTick) >= runningHeartbeatInterval {
+				a.markRunningStepsDirtyLocked()
+				a.lastRunningTick = time.Now()
+			}
+			a.mu.Unlock()
 			a.FlushOnce()
 		case <-stop:
 			// Final flush on shutdown so anything pending gets one

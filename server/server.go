@@ -1059,7 +1059,11 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	var stepID sql.NullInt32
 	var workflowID sql.NullInt32
 	var prevRunStartedAt sql.NullTime
-	var runStartedEpoch sql.NullInt64
+	// Fractional epoch seconds (float) so multiple tasks starting within
+	// the same wall-clock second still get distinguishable timestamps
+	// in stepAgg.RunningTasks. bigint truncation caused the UI to show
+	// min=max=avg for whole assignment bursts.
+	var runStartedEpoch sql.NullFloat64
 	var dlDur, runDur, upDur sql.NullInt32
 	var startEpoch, endEpoch sql.NullInt64
 	var wasHidden bool
@@ -1134,7 +1138,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			u.step_id,
 			s.workflow_id,
 			p.run_started_at AS prev_run_started_at,
-			EXTRACT(EPOCH FROM u.run_started_at)::bigint AS run_started_epoch,
+			EXTRACT(EPOCH FROM u.run_started_at)::double precision AS run_started_epoch,
 			COALESCE(u.download_duration,0) AS dl_dur,
 			COALESCE(u.run_duration,0)      AS run_dur,
 			COALESCE(u.upload_duration,0)   AS up_dur,
@@ -1267,14 +1271,17 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			stepAgg.Retrying--
 		}
 
-		// RunningTasks map using DB runStartedEpoch
+		// RunningTasks map using DB runStartedEpoch (fractional seconds
+		// so sub-second sibling starts don't collide — see the
+		// runStartedEpoch declaration above).
 		if req.NewStatus == "R" {
 			if stepAgg.RunningTasks == nil {
 				stepAgg.RunningTasks = make(map[int32]time.Time)
 			}
 			if runStartedEpoch.Valid {
-				t := time.Unix(runStartedEpoch.Int64, 0).UTC()
-				stepAgg.RunningTasks[req.TaskId] = t
+				sec := int64(runStartedEpoch.Float64)
+				nsec := int64((runStartedEpoch.Float64 - float64(sec)) * 1e9)
+				stepAgg.RunningTasks[req.TaskId] = time.Unix(sec, nsec).UTC()
 			} else {
 				log.Printf("⚠️ warning: task %d entered 'R' state but run_started_at is NULL", req.TaskId)
 				stepAgg.RunningTasks[req.TaskId] = time.Now().UTC()

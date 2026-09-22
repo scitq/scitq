@@ -256,6 +256,18 @@ func runCLICommand(c cli.CLI, args []string) (string, error) {
 
 // startServerForTest boots a Postgres testcontainer and starts the scitq server.
 // It returns the gRPC address, the worker token, admin credentials, and a cleanup func.
+// isAddrInUse reports whether err is a bind failure of the "address
+// already in use" kind. server.Serve wraps its Listen error before
+// returning it, so we match on the substring rather than importing
+// syscall — the same message text is used by both darwin and linux
+// net.OpError.Err.
+func isAddrInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "address already in use")
+}
+
 func startServerForTest(t *testing.T, override *config.Config) (serverAddr, workerToken, adminUser, adminPassword string, cleanup func()) {
 	t.Helper()
 	serverStartMu.Lock()
@@ -325,32 +337,6 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 	})
 	tempPythonEnv := sharedPythonVenv
 
-	// Pick two independent free ports — one for gRPC, one for the HTTP
-	// companion server. The naive "ask for one, use port+1 for HTTP"
-	// pattern races on a busy CI runner: while test A is reserving N,
-	// test B (running in parallel after the mutex releases) can pick
-	// up N+1 for its OWN gRPC, and now A's HTTP companion N+1 collides
-	// with B's gRPC. Reserving the two ports independently and passing
-	// both via config eliminates the +1 assumption. There's still a
-	// small TOCTOU window between Close() and server.Serve's net.Listen
-	// (the kernel can in principle hand the same number to another
-	// concurrent net.Listen) but it's far narrower than the +1 race.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("cannot grab free port: %v", err)
-	}
-	serverPort := ln.Addr().(*net.TCPAddr).Port
-
-	ln2, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		_ = ln.Close()
-		t.Fatalf("cannot grab second free port: %v", err)
-	}
-	httpPort := ln2.Addr().(*net.TCPAddr).Port
-
-	_ = ln.Close()
-	_ = ln2.Close()
-
 	// Generate secrets
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
@@ -365,44 +351,108 @@ func startServerForTest(t *testing.T, override *config.Config) (serverAddr, work
 		t.Fatalf("Failed to generate admin hashed password: %v", err)
 	}
 
+	// Pick two independent free ports — one for gRPC, one for the HTTP
+	// companion server. The naive "ask for one, use port+1 for HTTP"
+	// pattern races on a busy CI runner: while test A is reserving N,
+	// test B (running in parallel after the mutex releases) can pick
+	// up N+1 for its OWN gRPC, and now A's HTTP companion N+1 collides
+	// with B's gRPC. Reserving the two ports independently and passing
+	// both via config eliminates the +1 assumption.
+	//
+	// There is still a TOCTOU window between Close() and server.Serve's
+	// own net.Listen: the kernel can hand the same number to another
+	// concurrent net.Listen. When that happens Serve() returns "address
+	// already in use". We watch the server goroutine for that specific
+	// error during startup and retry with a fresh port pair — up to a
+	// small budget — before giving up. Any other failure (or an
+	// address-in-use after the startup window) is fatal for the test.
+	pickPorts := func() (int, int, error) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return 0, 0, fmt.Errorf("grab free port: %w", err)
+		}
+		p1 := ln.Addr().(*net.TCPAddr).Port
+		ln2, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			_ = ln.Close()
+			return 0, 0, fmt.Errorf("grab second free port: %w", err)
+		}
+		p2 := ln2.Addr().(*net.TCPAddr).Port
+		_ = ln.Close()
+		_ = ln2.Close()
+		return p1, p2, nil
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Start server
-	go func() {
-		var cfg config.Config
-
-		if override != nil {
-			cfg = *override
+	var serverPort, httpPort int
+	const maxBindAttempts = 5
+	for attempt := 1; ; attempt++ {
+		p1, p2, err := pickPorts()
+		if err != nil {
+			cancel()
+			t.Fatalf("%v", err)
 		}
+		serverPort, httpPort = p1, p2
 
-		cfg.Scitq.DBURL = dbURL
-		cfg.Scitq.Port = serverPort
-		cfg.Scitq.HTTPPort = httpPort
-		cfg.Scitq.ServerFQDN = "localhost"
-		cfg.Scitq.LogLevel = "debug"
-		cfg.Scitq.LogRoot = tempLogRoot
-		cfg.Scitq.WorkerToken = workerToken
-		cfg.Scitq.JwtSecret = jwtSecret
-		cfg.Scitq.ScriptRoot = tempScriptRoot
-		cfg.Scitq.ModulesRoot = tempModulesRoot
-		cfg.Scitq.ScriptVenv = tempPythonEnv
-		cfg.Scitq.RecruitmentInterval = 2
-		cfg.Scitq.AdminUser = adminUser
-		cfg.Scitq.AdminHashedPassword = string(adminHashedPassword)
-		cfg.Scitq.DisableHTTPS = true
-		cfg.Scitq.DisableGRPCWeb = true
-		defaults.Set(&cfg)
-		if err := server.Serve(cfg, ctx, cancel); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Println("🛑 Serve() exited normally due to context cancellation")
-			} else {
-				log.Fatalf("Server failed: %v", err)
+		errCh := make(chan error, 1)
+		go func() {
+			var cfg config.Config
+			if override != nil {
+				cfg = *override
 			}
-		}
-	}()
+			cfg.Scitq.DBURL = dbURL
+			cfg.Scitq.Port = serverPort
+			cfg.Scitq.HTTPPort = httpPort
+			cfg.Scitq.ServerFQDN = "localhost"
+			cfg.Scitq.LogLevel = "debug"
+			cfg.Scitq.LogRoot = tempLogRoot
+			cfg.Scitq.WorkerToken = workerToken
+			cfg.Scitq.JwtSecret = jwtSecret
+			cfg.Scitq.ScriptRoot = tempScriptRoot
+			cfg.Scitq.ModulesRoot = tempModulesRoot
+			cfg.Scitq.ScriptVenv = tempPythonEnv
+			cfg.Scitq.RecruitmentInterval = 2
+			cfg.Scitq.AdminUser = adminUser
+			cfg.Scitq.AdminHashedPassword = string(adminHashedPassword)
+			cfg.Scitq.DisableHTTPS = true
+			cfg.Scitq.DisableGRPCWeb = true
+			defaults.Set(&cfg)
+			errCh <- server.Serve(cfg, ctx, cancel)
+		}()
 
-	// allow server to start
-	time.Sleep(2 * time.Second)
+		// Watch for early bind failure. Give the server two seconds to
+		// pass its two net.Listen calls; that's the same window the old
+		// code already spent on time.Sleep before probing.
+		select {
+		case err := <-errCh:
+			if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				cancel()
+				t.Fatalf("server exited during startup: %v", err)
+			}
+			if isAddrInUse(err) && attempt < maxBindAttempts {
+				log.Printf("⚠️ bind race on ports %d/%d (attempt %d/%d): %v — retrying with fresh ports",
+					serverPort, httpPort, attempt, maxBindAttempts, err)
+				continue
+			}
+			cancel()
+			t.Fatalf("Server failed: %v", err)
+		case <-time.After(2 * time.Second):
+			// Server passed the bind stage. Spawn a drain goroutine so
+			// a later Serve() error is logged (not swallowed) without
+			// killing the process the way log.Fatalf would.
+			go func() {
+				if err := <-errCh; err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						log.Println("🛑 Serve() exited normally due to context cancellation")
+					} else {
+						log.Printf("⚠️ Serve() returned late error: %v", err)
+					}
+				}
+			}()
+		}
+		break
+	}
 
 	serverAddr = fmt.Sprintf("localhost:%d", serverPort)
 	// Record DB URL for tests that need direct DB access. See
