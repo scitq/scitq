@@ -217,6 +217,188 @@ func TestWorkerStatsHistory_ReasonFieldOnEmptyResult(t *testing.T) {
 	require.Equal(t, "no_samples", *hist.Reason)
 }
 
+// TestWorkerStatsHistory_BucketAggregation exercises the bucket_seconds
+// downsampling: 30 pings landed close together with rising peak_mem
+// values, grouped into buckets. Verifies (a) the row count drops per
+// the bucket width, (b) each bucket's returned peak_mem is the MAX of
+// the pings it aggregated (peaks stay peaks, never averaged), and
+// (c) the current-value gauge is the AVG of the pings in each bucket.
+//
+// The peer's MCP payload-cap issue (2026-09-21 review) is what this
+// endpoint is meant to fix; this test locks in the fix's semantics.
+func TestWorkerStatsHistory_BucketAggregation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
+	defer cleanup()
+
+	var c cli.CLI
+	c.Attr.Server = serverAddr
+	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
+	require.NoError(t, err)
+	token := extractToken(out)
+
+	qclient, err := lib.CreateClient(serverAddr, token)
+	require.NoError(t, err)
+	defer qclient.Close()
+	qc := qclient.Client
+
+	db, err := sql.Open("postgres", dbURLForAddr(t, serverAddr))
+	require.NoError(t, err)
+	defer db.Close()
+
+	var workerID int32
+	require.NoError(t, db.QueryRow(`
+		INSERT INTO worker (worker_name, status, is_permanent)
+		VALUES ('bucket-agg-test', 'R', TRUE)
+		RETURNING worker_id
+	`).Scan(&workerID))
+
+	// Fire 30 pings with peak_mem rising from 10 to 39. Current-value
+	// mem_percent tracks alongside as a distinct series so we can
+	// verify AVG vs MAX aggregation behave differently.
+	for i := 0; i < 30; i++ {
+		peak := float32(10 + i)
+		current := float32(i) // 0..29
+		_, err := qc.PingAndTakeNewTasks(ctx, &pb.PingAndGetNewTasksRequest{
+			WorkerId: workerID,
+			Stats: &pb.WorkerStats{
+				MemUsagePercent: current,
+				PeakMemPercent:  &peak,
+				RunningTasks:    0,
+			},
+		})
+		require.NoError(t, err)
+	}
+
+	// Poll for all 30 samples to land in history (fire-and-forget INSERT).
+	require.Eventually(t, func() bool {
+		var n int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM worker_stats_history WHERE worker_id=$1`,
+			workerID).Scan(&n)
+		return n >= 30
+	}, 5*time.Second, 100*time.Millisecond, "30 history rows never landed")
+
+	// The 30 pings all land within a second or two of each other under
+	// this test harness. To exercise the bucket code path meaningfully
+	// we spread them across ~30 seconds of *stored* timestamps by
+	// rewriting sampled_at in the DB. Bucket size 10 s → we expect 3
+	// output rows covering ping index [0..9], [10..19], [20..29].
+	//
+	// Rewriting via SQL keeps this fast; nothing else touches these
+	// rows so there's no race concern.
+	_, err = db.Exec(`
+		WITH ordered AS (
+			SELECT ctid, ROW_NUMBER() OVER (ORDER BY sampled_at) - 1 AS rn
+			  FROM worker_stats_history WHERE worker_id = $1
+		)
+		UPDATE worker_stats_history h
+		   SET sampled_at = to_timestamp(0) + (o.rn * interval '1 second')
+		  FROM ordered o
+		 WHERE h.ctid = o.ctid
+	`, workerID)
+	require.NoError(t, err)
+
+	// Bucketed query: 10 s buckets.
+	bucket := int32(10)
+	res, err := qc.ListWorkerStatsHistory(ctx, &pb.WorkerStatsHistoryFilter{
+		WorkerId:      &workerID,
+		BucketSeconds: &bucket,
+	})
+	require.NoError(t, err)
+	require.Len(t, res.Samples, 3, "30 pings at 1 Hz → 3 buckets at 10 s each")
+
+	// Bucket 0: pings 0..9 → peak_mem MAX = 19, mem AVG = 4.5
+	// Bucket 1: pings 10..19 → peak_mem MAX = 29, mem AVG = 14.5
+	// Bucket 2: pings 20..29 → peak_mem MAX = 39, mem AVG = 24.5
+	wantMaxPeaks := []float32{19, 29, 39}
+	wantAvgMems := []float32{4.5, 14.5, 24.5}
+	for i, s := range res.Samples {
+		require.NotNil(t, s.PeakMemPercent, "bucket %d must carry peak_mem", i)
+		require.InDelta(t, wantMaxPeaks[i], *s.PeakMemPercent, 0.001,
+			"bucket %d: peak_mem should be MAX of the ping window", i)
+		require.NotNil(t, s.MemPercent, "bucket %d must carry mem", i)
+		require.InDelta(t, wantAvgMems[i], *s.MemPercent, 0.001,
+			"bucket %d: mem should be AVG of the ping window", i)
+	}
+}
+
+// TestWorkerStatsHistory_FieldsSelectorTrimsPayload verifies the fields
+// selector: only the named field is emitted; the rest stay unset. The
+// step_id column is force-on regardless (locators are always useful).
+func TestWorkerStatsHistory_FieldsSelectorTrimsPayload(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
+	defer cleanup()
+
+	var c cli.CLI
+	c.Attr.Server = serverAddr
+	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
+	require.NoError(t, err)
+	token := extractToken(out)
+
+	qclient, err := lib.CreateClient(serverAddr, token)
+	require.NoError(t, err)
+	defer qclient.Close()
+	qc := qclient.Client
+
+	db, err := sql.Open("postgres", dbURLForAddr(t, serverAddr))
+	require.NoError(t, err)
+	defer db.Close()
+
+	var workerID int32
+	require.NoError(t, db.QueryRow(`
+		INSERT INTO worker (worker_name, status, is_permanent)
+		VALUES ('fields-selector-test', 'R', TRUE)
+		RETURNING worker_id
+	`).Scan(&workerID))
+
+	// One ping with every value populated.
+	peak := float32(42)
+	_, err = qc.PingAndTakeNewTasks(ctx, &pb.PingAndGetNewTasksRequest{
+		WorkerId: workerID,
+		Stats: &pb.WorkerStats{
+			CpuUsagePercent:   10,
+			MemUsagePercent:   20,
+			IowaitPercent:     5,
+			PeakCpuPercent:    &peak,
+			PeakMemPercent:    &peak,
+			PeakIowaitPercent: &peak,
+			PeakDiskPercent:   &peak,
+			RunningTasks:      3,
+		},
+	})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		res, err := qc.ListWorkerStatsHistory(ctx, &pb.WorkerStatsHistoryFilter{
+			WorkerId: &workerID,
+		})
+		return err == nil && len(res.Samples) >= 1
+	}, 5*time.Second, 100*time.Millisecond, "one sample never landed")
+
+	// Ask for only peak_mem.
+	res, err := qc.ListWorkerStatsHistory(ctx, &pb.WorkerStatsHistoryFilter{
+		WorkerId: &workerID,
+		Fields:   []string{"peak_mem"},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Samples)
+	s := res.Samples[0]
+	require.NotNil(t, s.PeakMemPercent, "selector included peak_mem, must be emitted")
+	require.InDelta(t, 42, *s.PeakMemPercent, 0.001)
+	// Everything else the selector didn't ask for must be nil.
+	require.Nil(t, s.CpuPercent, "cpu not selected")
+	require.Nil(t, s.MemPercent, "mem not selected")
+	require.Nil(t, s.PeakCpuPercent, "peak_cpu not selected")
+	require.Nil(t, s.PeakIowaitPercent, "peak_iowait not selected")
+	require.Nil(t, s.PeakDiskPercent, "peak_disk not selected")
+	require.Nil(t, s.RunningTasks, "running_tasks not selected")
+}
+
 // TestWorkerStatsHistory_FilterlessQueryRejected: an empty filter would
 // page the whole retention window across the whole fleet — almost
 // certainly not what an operator wants. The handler rejects it at the

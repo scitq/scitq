@@ -699,8 +699,14 @@ type Task struct {
 	MinDiskShared   *float32  `protobuf:"fixed32,48,opt,name=min_disk_shared,json=minDiskShared,proto3,oneof" json:"min_disk_shared,omitempty"`
 	MemSharedCurve  []float32 `protobuf:"fixed32,49,rep,packed,name=mem_shared_curve,json=memSharedCurve,proto3" json:"mem_shared_curve,omitempty"`
 	DiskSharedCurve []float32 `protobuf:"fixed32,50,rep,packed,name=disk_shared_curve,json=diskSharedCurve,proto3" json:"disk_shared_curve,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Kernel-tracked peak resident memory the task actually used, in
+	// MB. Reported by the worker at task terminal via
+	// TaskStatusUpdate.peak_mem_mb; the server persists it on the
+	// task row (migration 000050). NULL / unset when the worker
+	// couldn't read the counter.
+	PeakMemMb     *int32 `protobuf:"varint,51,opt,name=peak_mem_mb,json=peakMemMb,proto3,oneof" json:"peak_mem_mb,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -1081,6 +1087,13 @@ func (x *Task) GetDiskSharedCurve() []float32 {
 		return x.DiskSharedCurve
 	}
 	return nil
+}
+
+func (x *Task) GetPeakMemMb() int32 {
+	if x != nil && x.PeakMemMb != nil {
+		return *x.PeakMemMb
+	}
+	return 0
 }
 
 type TaskList struct {
@@ -2694,7 +2707,16 @@ type TaskStatusUpdate struct {
 	//	             worker watchdog reaped)
 	//	"network"  — transient connectivity failure (uploads, downloads)
 	//	"other"    — anything else (script exit non-zero, segfault, …)
-	FailureClass  *string `protobuf:"bytes,5,opt,name=failure_class,json=failureClass,proto3,oneof" json:"failure_class,omitempty"`
+	FailureClass *string `protobuf:"bytes,5,opt,name=failure_class,json=failureClass,proto3,oneof" json:"failure_class,omitempty"`
+	// Kernel-tracked peak resident memory the task actually used, in MB
+	// (integer, rounded down). Sourced from cgroup memory.peak on v2
+	// hosts, memory.max_usage_in_bytes on v1, /proc/<pid>/status:VmHWM
+	// for bare tasks. Answers "which task drove the mem peak" without
+	// having to divide the per-worker aggregate. Absent when the
+	// worker couldn't read the counter (missing cgroup file, unsupported
+	// kernel, task that never ran); the server persists NULL and the
+	// MCP surface omits the field.
+	PeakMemMb     *int32 `protobuf:"varint,6,opt,name=peak_mem_mb,json=peakMemMb,proto3,oneof" json:"peak_mem_mb,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2762,6 +2784,13 @@ func (x *TaskStatusUpdate) GetFailureClass() string {
 		return *x.FailureClass
 	}
 	return ""
+}
+
+func (x *TaskStatusUpdate) GetPeakMemMb() int32 {
+	if x != nil && x.PeakMemMb != nil {
+		return *x.PeakMemMb
+	}
+	return 0
 }
 
 type TaskLog struct {
@@ -8531,7 +8560,23 @@ type WorkerStatsHistoryFilter struct {
 	StartEpoch *int64 `protobuf:"varint,4,opt,name=start_epoch,json=startEpoch,proto3,oneof" json:"start_epoch,omitempty"`
 	EndEpoch   *int64 `protobuf:"varint,5,opt,name=end_epoch,json=endEpoch,proto3,oneof" json:"end_epoch,omitempty"`
 	// Cap returned rows (safety net for series). Default 10000 when unset.
-	Limit         *int32 `protobuf:"varint,6,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	Limit *int32 `protobuf:"varint,6,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	// Server-side downsampling: when set (>= 1 and <= 3600), rows are
+	// GROUPed by (worker_id, floor(sampled_at / bucket_seconds)) and
+	// aggregated as MAX for every peak_* field + AVG for every
+	// current-value gauge. Answers "plot this metric over the last
+	// 12 h without pulling 8k samples". sampled_at on each returned
+	// row is the bucket's start (unix ms). Unset → raw per-ping shape.
+	BucketSeconds *int32 `protobuf:"varint,7,opt,name=bucket_seconds,json=bucketSeconds,proto3,oneof" json:"bucket_seconds,omitempty"`
+	// Field selector. When non-empty, only the named fields are set
+	// on each returned sample; everything else stays at its zero /
+	// unset value. Reduces payload materially when plotting a single
+	// metric. Accepted names: cpu, mem, iowait, disk, peak_cpu,
+	// peak_mem, peak_iowait, peak_disk, effective_concurrency,
+	// running_tasks, last_throttle_at. Unknown names are ignored
+	// silently; the request never fails on typos — it just returns
+	// fewer fields than expected.
+	Fields        []string `protobuf:"bytes,8,rep,name=fields,proto3" json:"fields,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8606,6 +8651,20 @@ func (x *WorkerStatsHistoryFilter) GetLimit() int32 {
 		return *x.Limit
 	}
 	return 0
+}
+
+func (x *WorkerStatsHistoryFilter) GetBucketSeconds() int32 {
+	if x != nil && x.BucketSeconds != nil {
+		return *x.BucketSeconds
+	}
+	return 0
+}
+
+func (x *WorkerStatsHistoryFilter) GetFields() []string {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
 }
 
 type WorkerStatsHistorySample struct {
@@ -12340,7 +12399,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_gpu_allB\x0f\n" +
 	"\r_publish_modeB\x11\n" +
 	"\x0f_min_mem_sharedB\x12\n" +
-	"\x10_min_disk_shared\"\xea\x11\n" +
+	"\x10_min_disk_shared\"\x9f\x12\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -12400,7 +12459,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0emin_mem_shared\x18/ \x01(\x02H R\fminMemShared\x88\x01\x01\x12+\n" +
 	"\x0fmin_disk_shared\x180 \x01(\x02H!R\rminDiskShared\x88\x01\x01\x12(\n" +
 	"\x10mem_shared_curve\x181 \x03(\x02R\x0ememSharedCurve\x12*\n" +
-	"\x11disk_shared_curve\x182 \x03(\x02R\x0fdiskSharedCurveB\b\n" +
+	"\x11disk_shared_curve\x182 \x03(\x02R\x0fdiskSharedCurve\x12#\n" +
+	"\vpeak_mem_mb\x183 \x01(\x05H\"R\tpeakMemMb\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -12443,7 +12503,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0e_failure_classB\x0f\n" +
 	"\r_publish_modeB\x11\n" +
 	"\x0f_min_mem_sharedB\x12\n" +
-	"\x10_min_disk_shared\"1\n" +
+	"\x10_min_disk_sharedB\x0e\n" +
+	"\f_peak_mem_mb\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +
@@ -12642,7 +12703,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
 	"\fgrace_period\x18\x03 \x01(\x05H\x00R\vgracePeriod\x88\x01\x01B\x0f\n" +
-	"\r_grace_period\"\xe7\x01\n" +
+	"\r_grace_period\"\x9c\x02\n" +
 	"\x10TaskStatusUpdate\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\n" +
@@ -12650,10 +12711,12 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bduration\x18\x03 \x01(\x05H\x00R\bduration\x88\x01\x01\x12\"\n" +
 	"\n" +
 	"free_retry\x18\x04 \x01(\bH\x01R\tfreeRetry\x88\x01\x01\x12(\n" +
-	"\rfailure_class\x18\x05 \x01(\tH\x02R\ffailureClass\x88\x01\x01B\v\n" +
+	"\rfailure_class\x18\x05 \x01(\tH\x02R\ffailureClass\x88\x01\x01\x12#\n" +
+	"\vpeak_mem_mb\x18\x06 \x01(\x05H\x03R\tpeakMemMb\x88\x01\x01B\v\n" +
 	"\t_durationB\r\n" +
 	"\v_free_retryB\x10\n" +
-	"\x0e_failure_class\"X\n" +
+	"\x0e_failure_classB\x0e\n" +
+	"\f_peak_mem_mb\"X\n" +
 	"\aTaskLog\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x19\n" +
 	"\blog_type\x18\x02 \x01(\tR\alogType\x12\x19\n" +
@@ -13279,7 +13342,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\fworker_stats\x18\x01 \x03(\v22.taskqueue.GetWorkerStatsResponse.WorkerStatsEntryR\vworkerStats\x1aV\n" +
 	"\x10WorkerStatsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.taskqueue.WorkerStatsR\x05value:\x028\x01\"\xb5\x02\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.taskqueue.WorkerStatsR\x05value:\x028\x01\"\x8c\x03\n" +
 	"\x18WorkerStatsHistoryFilter\x12$\n" +
 	"\vworkflow_id\x18\x01 \x01(\x05H\x00R\n" +
 	"workflowId\x88\x01\x01\x12 \n" +
@@ -13288,7 +13351,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\vstart_epoch\x18\x04 \x01(\x03H\x03R\n" +
 	"startEpoch\x88\x01\x01\x12 \n" +
 	"\tend_epoch\x18\x05 \x01(\x03H\x04R\bendEpoch\x88\x01\x01\x12\x19\n" +
-	"\x05limit\x18\x06 \x01(\x05H\x05R\x05limit\x88\x01\x01B\x0e\n" +
+	"\x05limit\x18\x06 \x01(\x05H\x05R\x05limit\x88\x01\x01\x12*\n" +
+	"\x0ebucket_seconds\x18\a \x01(\x05H\x06R\rbucketSeconds\x88\x01\x01\x12\x16\n" +
+	"\x06fields\x18\b \x03(\tR\x06fieldsB\x0e\n" +
 	"\f_workflow_idB\f\n" +
 	"\n" +
 	"_worker_idB\n" +
@@ -13297,7 +13362,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\f_start_epochB\f\n" +
 	"\n" +
 	"_end_epochB\b\n" +
-	"\x06_limit\"\xbc\x06\n" +
+	"\x06_limitB\x11\n" +
+	"\x0f_bucket_seconds\"\xbc\x06\n" +
 	"\x18WorkerStatsHistorySample\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x1f\n" +
 	"\vworker_name\x18\x02 \x01(\tR\n" +

@@ -348,6 +348,9 @@ optimize:
     depth: {type: int, low: 1, high: 10}
 ` + "`" + `
 
+### Per-task peak memory
+Each task carries a ` + "`peak_mem_mb`" + ` field populated by the worker at task terminal — the kernel-tracked peak resident memory the task actually used, in MB. Sourced from cgroup memory.peak on v2 hosts, memory.max_usage_in_bytes on v1, or ` + "`/proc/<pid>/status:VmHWM`" + ` for bare tasks. Answers "which task drove the mem peak" — the per-task complement to ` + "`get_worker_stats_peak`" + ` (which reports the worker-wide MAX across all co-running tasks on that worker). NULL / omitted when the worker couldn't read the counter or ran under an older client. Visible in ` + "`list_tasks`" + ` output.
+
 ### Auto-cleanup of intermediate data
 Add ` + "`" + `lifetime: workflow` + "`" + ` (sibling of the named globs) inside a step's ` + "`" + `outputs:` + "`" + ` block to have the server sweep this step's workspace copies when the workflow reaches S. Publish destinations are never touched. Fires only on workflow S (never F/D); best-effort — a backend hiccup logs a warning and moves on. Use for intermediate data (e.g. trimmed reads that only exist to feed the next step). Only ` + "`" + `workflow` + "`" + ` is accepted today; ` + "`" + `task` + "`" + ` is reserved.
 ` + "`" + `yaml
@@ -520,15 +523,17 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "get_worker_stats_history",
-			Description: "Raw historical worker stats samples (one row per ping). Same fields as get_worker_stats plus peak_cpu_percent / peak_mem_percent / peak_iowait_percent / peak_disk_percent (max in the 1 Hz sampler window since the previous ping). sampled_at is unix MILLIseconds — divide by 1000 for seconds. Filter by any of workflow_id / worker_id / step_id / hours_back — at least one is required. Capped at 10000 samples by default (payload can be very large through MCP; set limit smaller or narrow the window); response.dropped is non-zero when the cap was hit. Returns {samples:[], dropped:0, reason:'...'} when empty. Use get_worker_stats_peak first for the common 'what were the peaks' question; reach for this only when you need the time series (plotting, identifying WHEN the peak happened).",
+			Description: "Historical worker stats samples (one row per ping, or one per bucket when downsampled). Same fields as get_worker_stats plus peak_cpu_percent / peak_mem_percent / peak_iowait_percent / peak_disk_percent (max in the 1 Hz sampler window since the previous ping). sampled_at is unix MILLIseconds — divide by 1000 for seconds. Filter by any of workflow_id / worker_id / step_id / hours_back — at least one is required. When plotting more than a few hundred samples, pass bucket_seconds to downsample server-side (MAX for peaks, AVG for current gauges); this is the fix for the MCP payload cap. Pass `fields` to restrict which metrics are returned (10x-smaller payload for single-metric plots). Capped at 10000 samples by default; response.dropped is non-zero when the cap was hit. Returns {samples:[], dropped:0, reason:'...'} when empty.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"workflow_id": {Type: "integer", Description: "Samples where the worker was serving a step of this workflow."},
-					"worker_id":   {Type: "integer", Description: "Single worker."},
-					"step_id":     {Type: "integer", Description: "Single step."},
-					"hours_back":  {Type: "integer", Description: "Only samples in the last N hours."},
-					"limit":       {Type: "integer", Description: "Max samples returned (default 10000, hard cap 200000)."},
+					"workflow_id":    {Type: "integer", Description: "Samples where the worker was serving a step of this workflow."},
+					"worker_id":      {Type: "integer", Description: "Single worker."},
+					"step_id":        {Type: "integer", Description: "Single step."},
+					"hours_back":     {Type: "integer", Description: "Only samples in the last N hours."},
+					"limit":          {Type: "integer", Description: "Max samples returned (default 10000, hard cap 200000)."},
+					"bucket_seconds": {Type: "integer", Description: "Downsample: group samples into buckets of this many seconds, aggregate MAX for peaks + AVG for current gauges. Clamped to [1, 3600]. Absent = raw per-ping shape."},
+					"fields":         {Type: "array", Description: "Restrict returned fields. Accepted: cpu, mem, iowait, disk, peak_cpu, peak_mem, peak_iowait, peak_disk, effective_concurrency, running_tasks, last_throttle_at. Unknown names are ignored."},
 				},
 			},
 		},
@@ -1264,6 +1269,13 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		MinDiskShared    *float32  `json:"min_disk_shared,omitempty"`
 		MemSharedCurve   []float32 `json:"mem_shared_curve,omitempty"`
 		DiskSharedCurve  []float32 `json:"disk_shared_curve,omitempty"`
+		// Kernel-tracked peak resident memory the task actually used
+		// (MB). Populated at task terminal via TaskStatusUpdate; NULL
+		// on tasks that never ran, that ran under an older client
+		// without the peakmem reader, or where the cgroup file wasn't
+		// readable. Answers "which task drove the peak" without a
+		// per-worker divide.
+		PeakMemMb        *int32    `json:"peak_mem_mb,omitempty"`
 	}
 	summaries := make([]taskSummary, 0, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -1304,6 +1316,7 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		if t.MinDiskShared != nil { s.MinDiskShared = t.MinDiskShared }
 		if len(t.MemSharedCurve) > 1 { s.MemSharedCurve = t.MemSharedCurve }
 		if len(t.DiskSharedCurve) > 1 { s.DiskSharedCurve = t.DiskSharedCurve }
+		if t.PeakMemMb != nil && *t.PeakMemMb > 0 { s.PeakMemMb = t.PeakMemMb }
 		summaries = append(summaries, s)
 	}
 	return jsonResult(summaries), nil
@@ -1440,11 +1453,13 @@ func (h *mcpHandler) toolGetWorkerStats(ctx context.Context, args json.RawMessag
 // convenience is resolved to a concrete start_epoch here so callers
 // don't have to build epoch timestamps themselves.
 type mcpHistoryFilter struct {
-	WorkflowID int32 `json:"workflow_id"`
-	WorkerID   int32 `json:"worker_id"`
-	StepID     int32 `json:"step_id"`
-	HoursBack  int32 `json:"hours_back"`
-	Limit      int32 `json:"limit"`
+	WorkflowID    int32    `json:"workflow_id"`
+	WorkerID      int32    `json:"worker_id"`
+	StepID        int32    `json:"step_id"`
+	HoursBack     int32    `json:"hours_back"`
+	Limit         int32    `json:"limit"`
+	BucketSeconds int32    `json:"bucket_seconds"`
+	Fields        []string `json:"fields"`
 }
 
 func (mhf mcpHistoryFilter) toPB() *pb.WorkerStatsHistoryFilter {
@@ -1464,6 +1479,12 @@ func (mhf mcpHistoryFilter) toPB() *pb.WorkerStatsHistoryFilter {
 	}
 	if mhf.Limit > 0 {
 		f.Limit = &mhf.Limit
+	}
+	if mhf.BucketSeconds > 0 {
+		f.BucketSeconds = &mhf.BucketSeconds
+	}
+	if len(mhf.Fields) > 0 {
+		f.Fields = mhf.Fields
 	}
 	return f
 }

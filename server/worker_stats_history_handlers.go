@@ -101,28 +101,74 @@ func (s *taskQueueServer) ListWorkerStatsHistory(ctx context.Context, req *pb.Wo
 	if limit > maxWorkerStatsHistoryLimit {
 		limit = maxWorkerStatsHistoryLimit
 	}
+	// bucket_seconds triggers server-side downsampling: rows are
+	// GROUPed by (worker_id, floor(sampled_at / bucket_seconds))
+	// with MAX over peaks + AVG over current gauges. Clamp to a
+	// sensible range so a wrong-scale value (0, seconds-as-hours)
+	// doesn't produce a useless output.
+	bucket := int32(0)
+	if req.BucketSeconds != nil && *req.BucketSeconds > 0 {
+		bucket = *req.BucketSeconds
+		if bucket < 1 {
+			bucket = 1
+		}
+		if bucket > 3600 {
+			bucket = 3600
+		}
+	}
+	// fields selector: mask enforced at pb assembly time so SQL stays
+	// symmetric; empty/nil mask means "everything".
+	mask := parseHistoryFieldMask(req.Fields)
 
 	join, where, args := buildHistoryWhere(req)
 	args = append(args, limit+1) // +1 so we can detect truncation
-	// sampled_at is returned as unix MILLIseconds so two pings within
-	// the same second don't collide in the returned key. The underlying
-	// TIMESTAMP has microsecond precision; ms is a workable middle
-	// ground (enough to disambiguate, still comfortably int64).
-	query := `
-		SELECT h.worker_id, w.worker_name,
-		       (EXTRACT(EPOCH FROM h.sampled_at) * 1000)::bigint AS sampled_at_ms,
-		       h.step_id,
-		       h.cpu_percent, h.mem_percent, h.iowait_percent,
-		       h.peak_cpu_percent, h.peak_mem_percent, h.peak_iowait_percent,
-		       h.peak_disk_percent,
-		       h.effective_concurrency, h.running_tasks,
-		       COALESCE(EXTRACT(EPOCH FROM h.last_throttle_at)::bigint, 0)
-		  FROM worker_stats_history h
-		  JOIN worker w ON w.worker_id = h.worker_id
-	` + join + where + fmt.Sprintf(`
-		 ORDER BY h.sampled_at ASC
-		 LIMIT $%d
-	`, len(args))
+	var query string
+	if bucket > 0 {
+		// Bucketed shape: sampled_at reports the bucket's start.
+		// to_timestamp(floor(epoch / bucket) * bucket) gives a stable
+		// bucket boundary regardless of clock skew. peak_* use MAX
+		// (peaks are the whole point of the feature — they must not
+		// be diluted by AVG); current gauges use AVG for meaningful
+		// plots; running_tasks + effective_concurrency use MAX; step_id
+		// and last_throttle_at aggregate to MAX as a stable choice
+		// (both are per-worker markers, not values that average
+		// naturally).
+		query = fmt.Sprintf(`
+			SELECT h.worker_id, w.worker_name,
+			       (EXTRACT(EPOCH FROM date_bin(interval '%d seconds', h.sampled_at, to_timestamp(0))) * 1000)::bigint AS bucket_ms,
+			       MAX(h.step_id),
+			       AVG(h.cpu_percent), AVG(h.mem_percent), AVG(h.iowait_percent),
+			       MAX(h.peak_cpu_percent), MAX(h.peak_mem_percent), MAX(h.peak_iowait_percent),
+			       MAX(h.peak_disk_percent),
+			       MAX(h.effective_concurrency), MAX(h.running_tasks),
+			       COALESCE(MAX(EXTRACT(EPOCH FROM h.last_throttle_at))::bigint, 0)
+			  FROM worker_stats_history h
+			  JOIN worker w ON w.worker_id = h.worker_id
+		`, bucket) + join + where + fmt.Sprintf(`
+			 GROUP BY h.worker_id, w.worker_name, bucket_ms
+			 ORDER BY h.worker_id, bucket_ms ASC
+			 LIMIT $%d
+		`, len(args))
+	} else {
+		// Raw per-ping shape. sampled_at is unix MILLIseconds so two
+		// pings within the same second don't collide in the returned
+		// key.
+		query = `
+			SELECT h.worker_id, w.worker_name,
+			       (EXTRACT(EPOCH FROM h.sampled_at) * 1000)::bigint AS sampled_at_ms,
+			       h.step_id,
+			       h.cpu_percent, h.mem_percent, h.iowait_percent,
+			       h.peak_cpu_percent, h.peak_mem_percent, h.peak_iowait_percent,
+			       h.peak_disk_percent,
+			       h.effective_concurrency, h.running_tasks,
+			       COALESCE(EXTRACT(EPOCH FROM h.last_throttle_at)::bigint, 0)
+			  FROM worker_stats_history h
+			  JOIN worker w ON w.worker_id = h.worker_id
+		` + join + where + fmt.Sprintf(`
+			 ORDER BY h.sampled_at ASC
+			 LIMIT $%d
+		`, len(args))
+	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -159,47 +205,47 @@ func (s *taskQueueServer) ListWorkerStatsHistory(ctx context.Context, req *pb.Wo
 			WorkerName: workerName,
 			SampledAt:  sampledAtMs,
 		}
-		if stepID.Valid {
+		if stepID.Valid && mask.step {
 			v := stepID.Int32
 			sample.StepId = &v
 		}
-		if cpu.Valid {
+		if cpu.Valid && mask.cpu {
 			v := float32(cpu.Float64)
 			sample.CpuPercent = &v
 		}
-		if mem.Valid {
+		if mem.Valid && mask.mem {
 			v := float32(mem.Float64)
 			sample.MemPercent = &v
 		}
-		if iowait.Valid {
+		if iowait.Valid && mask.iowait {
 			v := float32(iowait.Float64)
 			sample.IowaitPercent = &v
 		}
-		if peakCPU.Valid {
+		if peakCPU.Valid && mask.peakCPU {
 			v := float32(peakCPU.Float64)
 			sample.PeakCpuPercent = &v
 		}
-		if peakMem.Valid {
+		if peakMem.Valid && mask.peakMem {
 			v := float32(peakMem.Float64)
 			sample.PeakMemPercent = &v
 		}
-		if peakIowait.Valid {
+		if peakIowait.Valid && mask.peakIowait {
 			v := float32(peakIowait.Float64)
 			sample.PeakIowaitPercent = &v
 		}
-		if peakDisk.Valid {
+		if peakDisk.Valid && mask.peakDisk {
 			v := float32(peakDisk.Float64)
 			sample.PeakDiskPercent = &v
 		}
-		if effConc.Valid {
+		if effConc.Valid && mask.effConc {
 			v := effConc.Int32
 			sample.EffectiveConcurrency = &v
 		}
-		if running.Valid {
+		if running.Valid && mask.running {
 			v := running.Int32
 			sample.RunningTasks = &v
 		}
-		if lastThrottle > 0 {
+		if lastThrottle > 0 && mask.lastThrottle {
 			sample.LastThrottleAt = &lastThrottle
 		}
 		res.Samples = append(res.Samples, sample)
@@ -316,6 +362,85 @@ func (s *taskQueueServer) GetWorkerStatsSummary(ctx context.Context, req *pb.Wor
 		res.Reason = &reason
 	}
 	return res, nil
+}
+
+// historyFieldMask lists which fields should be populated on each
+// returned sample. "step" gates step_id, "lastThrottle" gates
+// last_throttle_at, others match the sample field names. All-true is
+// the default when the caller sends no fields (backwards compat).
+type historyFieldMask struct {
+	step         bool
+	cpu          bool
+	mem          bool
+	iowait       bool
+	disk         bool
+	peakCPU      bool
+	peakMem      bool
+	peakIowait   bool
+	peakDisk     bool
+	effConc      bool
+	running      bool
+	lastThrottle bool
+}
+
+func (m historyFieldMask) allTrue() historyFieldMask {
+	return historyFieldMask{
+		step: true, cpu: true, mem: true, iowait: true, disk: true,
+		peakCPU: true, peakMem: true, peakIowait: true, peakDisk: true,
+		effConc: true, running: true, lastThrottle: true,
+	}
+}
+
+// parseHistoryFieldMask turns the request's `fields` selector into a
+// mask. Empty / nil input → all-true (existing behaviour). Unknown
+// names are silently ignored so a typo on the client side never fails
+// the request — it just yields a smaller response, which is easy to
+// spot. `step` and `worker_id`/`worker_name`/`sampled_at` are always
+// present (identity/time fields have no useful "off" semantics).
+func parseHistoryFieldMask(fields []string) historyFieldMask {
+	if len(fields) == 0 {
+		return historyFieldMask{}.allTrue()
+	}
+	m := historyFieldMask{}
+	// step_id, worker_name, sampled_at aren't gated — they're always on.
+	// The peak_* aliases mirror the JSON field names on
+	// WorkerStatsHistorySample; the "disk" plain form covers the
+	// (not yet present) current-value disk column so the API doesn't
+	// need to change when it lands.
+	for _, f := range fields {
+		switch f {
+		case "step", "step_id":
+			m.step = true
+		case "cpu", "cpu_percent":
+			m.cpu = true
+		case "mem", "mem_percent":
+			m.mem = true
+		case "iowait", "iowait_percent":
+			m.iowait = true
+		case "disk", "disk_percent":
+			m.disk = true
+		case "peak_cpu", "peak_cpu_percent":
+			m.peakCPU = true
+		case "peak_mem", "peak_mem_percent":
+			m.peakMem = true
+		case "peak_iowait", "peak_iowait_percent":
+			m.peakIowait = true
+		case "peak_disk", "peak_disk_percent":
+			m.peakDisk = true
+		case "effective_concurrency":
+			m.effConc = true
+		case "running_tasks":
+			m.running = true
+		case "last_throttle_at":
+			m.lastThrottle = true
+		}
+	}
+	// step_id is a locator, not a "value" — if a caller went to the
+	// trouble of naming any field, they probably still want to know
+	// which step the sample belonged to. Force-on so the reduced
+	// payload stays useful for any workflow-scoped query.
+	m.step = true
+	return m
 }
 
 // diagnoseEmptyHistory explains why history / summary came back empty.

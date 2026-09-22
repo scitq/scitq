@@ -248,7 +248,15 @@ func (um *UploadManager) watchCompletions(activeTasks *sync.Map) {
 			if task.Status == "F" && task.FailureClass != nil {
 				fc = *task.FailureClass
 			}
-			um.reporter.UpdateTaskAsync(taskID, task.Status, "", &secs, fc)
+			// Kernel-tracked peak (MB), captured by executeTask right
+			// after cmd.Wait — see the peakmem.ReadDockerPeakMB call in
+			// client.go. 0 means "not observed" and is not sent on the
+			// wire; the server persists NULL in that case.
+			var peak int32
+			if task.PeakMemMb != nil {
+				peak = *task.PeakMemMb
+			}
+			um.reporter.UpdateTaskAsyncWithPeaks(taskID, task.Status, "", &secs, fc, peak)
 			cleanupTaskWorkingDir(um.Store, taskID, um.reporter)
 			activeTasks.Delete(taskID)
 		} else {

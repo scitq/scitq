@@ -1110,7 +1110,17 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				-- update (the clone-creation path). Non-F transitions clear
 				-- any prior class so success / re-run doesn't carry stale
 				-- metadata. Spec: addition_from_nextflow.md A.
-				failure_class     = CASE WHEN $1 = 'F' THEN $5::TEXT ELSE NULL END
+				failure_class     = CASE WHEN $1 = 'F' THEN $5::TEXT ELSE NULL END,
+				-- Peak resident memory the task actually used (MB). The
+				-- worker samples it on the terminal transition (uploader
+				-- path); non-terminal updates don't carry the field, so
+				-- COALESCE keeps whatever we've already recorded. NULL /
+				-- 0 in the payload means "not observed" and preserves
+				-- the current value too.
+				peak_mem_mb       = CASE
+					WHEN $6::INT IS NOT NULL AND $6::INT > 0 THEN $6::INT
+					ELSE peak_mem_mb
+				END
 			WHERE task_id = $2
 			AND status <> $1
 			AND NOT hidden
@@ -1153,7 +1163,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		LEFT JOIN step s  ON u.step_id = s.step_id
     `,
 		req.NewStatus, req.TaskId, req.Duration, (req.FreeRetry != nil && *req.FreeRetry),
-		req.FailureClass,
+		req.FailureClass, req.PeakMemMb,
 	).Scan(
 		&workerID, &oldStatus, &curRetry, &stepID, &workflowID, &prevRunStartedAt,
 		&runStartedEpoch, &dlDur, &runDur, &upDur, &startEpoch, &endEpoch,
@@ -4862,6 +4872,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			t.cpu_curve, t.mem_curve, t.disk_curve,
 			t.min_mem_shared, t.min_disk_shared,
 			t.mem_shared_curve, t.disk_shared_curve,
+			t.peak_mem_mb,
 			EXTRACT(EPOCH FROM t.created_at)::bigint AS created_epoch,
 			EXTRACT(EPOCH FROM t.modified_at)::bigint AS modified_epoch
         FROM task t
@@ -4917,6 +4928,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			cpuCurve, memCurve, diskCurve                                     pq.Float64Array
 			minMemShared, minDiskShared                                       sql.NullFloat64
 			memSharedCurve, diskSharedCurve                                   pq.Float64Array
+			peakMemMB                                                         sql.NullInt32
 			retryCount                                                        int32
 			hidden                                                            bool
 			createdEpoch, modifiedEpoch                                       sql.NullInt64
@@ -4960,6 +4972,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&minDiskShared,
 			&memSharedCurve,
 			&diskSharedCurve,
+			&peakMemMB,
 			&createdEpoch,
 			&modifiedEpoch,
 		); err != nil {
@@ -5029,6 +5042,10 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		}
 		task.MemSharedCurve = curveFromPG(memSharedCurve)
 		task.DiskSharedCurve = curveFromPG(diskSharedCurve)
+		if peakMemMB.Valid && peakMemMB.Int32 > 0 {
+			v := peakMemMB.Int32
+			task.PeakMemMb = &v
+		}
 
 		tasks = append(tasks, &task)
 	}

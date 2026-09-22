@@ -26,6 +26,7 @@ import (
 	"github.com/scitq/scitq/client/event"
 	"github.com/scitq/scitq/client/install"
 	"github.com/scitq/scitq/client/iothrottle"
+	"github.com/scitq/scitq/client/peakmem"
 	"github.com/scitq/scitq/client/workerstats"
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
 	"github.com/scitq/scitq/internal/version"
@@ -710,6 +711,18 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		}
 	}
 
+	// Kernel-tracked peak memory: read once, now, while the cgroup is
+	// still populated (the deferred docker rm hasn't run yet). Best-
+	// effort — 0 on any failure lands as NULL server-side, which the
+	// MCP surface omits. See client/peakmem for the fallback chain.
+	if !isBare && containerName != "" {
+		if cid := dockerInspectContainerID(containerName); cid != "" {
+			if peak := peakmem.ReadDockerPeakMB(cid); peak > 0 {
+				task.PeakMemMb = &peak
+			}
+		}
+	}
+
 	// **UPDATE TASK STATUS BASED ON SUCCESS/FAILURE**
 	sec := int32(time.Since(runStart).Seconds())
 	if err != nil {
@@ -731,6 +744,26 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		task.Status = "S" // Mark as success
 		reporter.UpdateTaskAsync(task.TaskId, "U", "", &sec, "")
 	}
+}
+
+// dockerInspectContainerID returns the full 64-char container id for
+// the given container name, or "" on any failure. Used by the peak-mem
+// path to construct the cgroup file path; a failure here just means
+// peak_mem_mb ends up unset (NULL server-side, omitted in MCP).
+//
+// Runs after cmd.Wait but before the deferred docker rm, so the
+// container is still known to the daemon.
+func dockerInspectContainerID(containerName string) string {
+	if containerName == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.Id}}", containerName).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // classifyExecFailure inspects a cmd.Wait error and the recovery hooks to

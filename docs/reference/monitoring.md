@@ -255,13 +255,33 @@ Both surface the same fields as the live `WorkerStats` (cpu%, mem%, iowait%, eff
 
 MCP exposes both as `get_worker_stats_peak` (summary — the common case) and `get_worker_stats_history` (raw series). When a filter matches nothing, both endpoints return `entries: []` (or `samples: []`) plus a `reason` string — `no_samples`, `unknown_worker`, `unknown_step`, or `unknown_workflow` — so an operator can tell "your filter is fine but the window is empty" from "you typed the id wrong". The feature-disabled case returns `FailedPrecondition` earlier and never reaches the empty-result path.
 
+**Downsampling for plots.** Pulling raw per-ping samples for a multi-hour window can easily overshoot the 10k-row default cap (and the MCP payload cap). Pass `bucket_seconds` (1–3600) to have the server aggregate per bucket per worker: **MAX** for every `peak_*` field (peaks stay peaks), **AVG** for the current-value gauges (`cpu_percent`, `mem_percent`, `iowait_percent`). Returned `sampled_at` is the bucket's start (unix ms). Absent `bucket_seconds` returns the raw per-ping shape.
+
+**Field selector.** Pass `fields` (a list of column names) to restrict the returned payload to what you actually plot. Accepted names: `cpu`, `mem`, `iowait`, `disk`, `peak_cpu`, `peak_mem`, `peak_iowait`, `peak_disk`, `effective_concurrency`, `running_tasks`, `last_throttle_at`. Unknown names are ignored silently — a typo yields fewer fields, not a request failure. `step_id`, `worker_id`, `worker_name`, and `sampled_at` are always present.
+
 `sampled_at`, `first_sample_at`, and `last_sample_at` are **unix milliseconds**, not seconds. Two pings within the same second would otherwise collide in the returned key and read as one row with mixed peak-yes / peak-no values; ms disambiguates cleanly. Callers assuming seconds must divide by 1000.
 
 Retention is capped by `scitq.worker_stats_retention_hours` (default 168 h = 7 days). Setting it to `0` disables the feature entirely: no rows are written, no sweep goroutine runs, and both RPCs return `FailedPrecondition`. At the default a fleet of 20 workers pinging every 5 s produces about a million rows in the window (~100 MB); the hourly sweep keeps that steady.
 
 Peaks are max-of-1Hz-samples between pings, not hardware peaks: a 200 ms allocation that never straddles a sampler tick is invisible. Increase the sampler cadence in `client/iothrottle/sampler.go` if that resolution matters.
 
-Because stats aggregate per-worker, a worker running N concurrent tasks reports the union of what those tasks did — `max_running_tasks` in the summary tells you the divisor, but attributing a peak to a specific task requires per-task cgroup accounting (not shipped today).
+Because stats aggregate per-worker, a worker running N concurrent tasks reports the union of what those tasks did — `max_running_tasks` in the summary tells you the divisor. For per-task attribution, see `peak_mem_mb` below.
+
+### Per-task peak memory (`peak_mem_mb`)
+
+Each task row carries `peak_mem_mb`, the kernel-tracked peak resident memory the task actually used (in MB). Populated by the worker at task terminal from `memory.peak` (cgroup v2), `memory.max_usage_in_bytes` (cgroup v1), or `/proc/<pid>/status:VmHWM` for bare tasks. One-shot at task end — no per-second sampling, the kernel has been tracking the peak all along.
+
+`peak_mem_mb` is the per-task complement to the workflow-scoped peak summary: when a worker's `max_mem_percent` was high but you don't know which of its co-running tasks drove it, sort that step's tasks by `peak_mem_mb` and the answer is immediate.
+
+NULL / unset when:
+
+- the task never ran (`W`/`P`/`A` etc.);
+- the worker ran under an older client that doesn't sample `peak_mem_mb`;
+- the cgroup file wasn't readable (kernel too old for `memory.peak` and no v1 fallback found).
+
+Retries: each attempt tracks its own peak — the retry-clone SQL leaves `peak_mem_mb` at NULL on the fresh clone rather than copying the parent's value.
+
+Visible in `list_tasks` (both gRPC and MCP), rendered on the task detail view in the UI.
 
 ## Adding a metric
 

@@ -348,6 +348,12 @@ message Task {
     optional float min_disk_shared    = 48;
     repeated float mem_shared_curve   = 49;
     repeated float disk_shared_curve  = 50;
+    // Kernel-tracked peak resident memory the task actually used, in
+    // MB. Reported by the worker at task terminal via
+    // TaskStatusUpdate.peak_mem_mb; the server persists it on the
+    // task row (migration 000050). NULL / unset when the worker
+    // couldn't read the counter.
+    optional int32 peak_mem_mb        = 51;
 }
 
 message TaskList {
@@ -636,6 +642,15 @@ message TaskStatusUpdate {
     //   "network"  — transient connectivity failure (uploads, downloads)
     //   "other"    — anything else (script exit non-zero, segfault, …)
     optional string failure_class = 5;
+    // Kernel-tracked peak resident memory the task actually used, in MB
+    // (integer, rounded down). Sourced from cgroup memory.peak on v2
+    // hosts, memory.max_usage_in_bytes on v1, /proc/<pid>/status:VmHWM
+    // for bare tasks. Answers "which task drove the mem peak" without
+    // having to divide the per-worker aggregate. Absent when the
+    // worker couldn't read the counter (missing cgroup file, unsupported
+    // kernel, task that never ran); the server persists NULL and the
+    // MCP surface omits the field.
+    optional int32 peak_mem_mb = 6;
 }
 
 message TaskLog {
@@ -1384,6 +1399,22 @@ message WorkerStatsHistoryFilter {
     optional int64 end_epoch    = 5;
     // Cap returned rows (safety net for series). Default 10000 when unset.
     optional int32 limit        = 6;
+    // Server-side downsampling: when set (>= 1 and <= 3600), rows are
+    // GROUPed by (worker_id, floor(sampled_at / bucket_seconds)) and
+    // aggregated as MAX for every peak_* field + AVG for every
+    // current-value gauge. Answers "plot this metric over the last
+    // 12 h without pulling 8k samples". sampled_at on each returned
+    // row is the bucket's start (unix ms). Unset → raw per-ping shape.
+    optional int32 bucket_seconds = 7;
+    // Field selector. When non-empty, only the named fields are set
+    // on each returned sample; everything else stays at its zero /
+    // unset value. Reduces payload materially when plotting a single
+    // metric. Accepted names: cpu, mem, iowait, disk, peak_cpu,
+    // peak_mem, peak_iowait, peak_disk, effective_concurrency,
+    // running_tasks, last_throttle_at. Unknown names are ignored
+    // silently; the request never fails on typos — it just returns
+    // fewer fields than expected.
+    repeated string fields = 8;
 }
 
 message WorkerStatsHistorySample {

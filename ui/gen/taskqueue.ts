@@ -536,6 +536,16 @@ export interface Task {
      * @generated from protobuf field: repeated float disk_shared_curve = 50
      */
     diskSharedCurve: number[];
+    /**
+     * Kernel-tracked peak resident memory the task actually used, in
+     * MB. Reported by the worker at task terminal via
+     * TaskStatusUpdate.peak_mem_mb; the server persists it on the
+     * task row (migration 000050). NULL / unset when the worker
+     * couldn't read the counter.
+     *
+     * @generated from protobuf field: optional int32 peak_mem_mb = 51
+     */
+    peakMemMb?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -1190,6 +1200,19 @@ export interface TaskStatusUpdate {
      * @generated from protobuf field: optional string failure_class = 5
      */
     failureClass?: string;
+    /**
+     * Kernel-tracked peak resident memory the task actually used, in MB
+     * (integer, rounded down). Sourced from cgroup memory.peak on v2
+     * hosts, memory.max_usage_in_bytes on v1, /proc/<pid>/status:VmHWM
+     * for bare tasks. Answers "which task drove the mem peak" without
+     * having to divide the per-worker aggregate. Absent when the
+     * worker couldn't read the counter (missing cgroup file, unsupported
+     * kernel, task that never ran); the server persists NULL and the
+     * MCP surface omits the field.
+     *
+     * @generated from protobuf field: optional int32 peak_mem_mb = 6
+     */
+    peakMemMb?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskLog
@@ -3164,6 +3187,30 @@ export interface WorkerStatsHistoryFilter {
      * @generated from protobuf field: optional int32 limit = 6
      */
     limit?: number;
+    /**
+     * Server-side downsampling: when set (>= 1 and <= 3600), rows are
+     * GROUPed by (worker_id, floor(sampled_at / bucket_seconds)) and
+     * aggregated as MAX for every peak_* field + AVG for every
+     * current-value gauge. Answers "plot this metric over the last
+     * 12 h without pulling 8k samples". sampled_at on each returned
+     * row is the bucket's start (unix ms). Unset → raw per-ping shape.
+     *
+     * @generated from protobuf field: optional int32 bucket_seconds = 7
+     */
+    bucketSeconds?: number;
+    /**
+     * Field selector. When non-empty, only the named fields are set
+     * on each returned sample; everything else stays at its zero /
+     * unset value. Reduces payload materially when plotting a single
+     * metric. Accepted names: cpu, mem, iowait, disk, peak_cpu,
+     * peak_mem, peak_iowait, peak_disk, effective_concurrency,
+     * running_tasks, last_throttle_at. Unknown names are ignored
+     * silently; the request never fails on typos — it just returns
+     * fewer fields than expected.
+     *
+     * @generated from protobuf field: repeated string fields = 8
+     */
+    fields: string[];
 }
 /**
  * @generated from protobuf message taskqueue.WorkerStatsHistorySample
@@ -5004,7 +5051,8 @@ class Task$Type extends MessageType<Task> {
             { no: 47, name: "min_mem_shared", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 48, name: "min_disk_shared", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 49, name: "mem_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 50, name: "disk_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ }
+            { no: 50, name: "disk_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 51, name: "peak_mem_mb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -5204,6 +5252,9 @@ class Task$Type extends MessageType<Task> {
                     else
                         message.diskSharedCurve.push(reader.float());
                     break;
+                case /* optional int32 peak_mem_mb */ 51:
+                    message.peakMemMb = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5386,6 +5437,9 @@ class Task$Type extends MessageType<Task> {
                 writer.float(message.diskSharedCurve[i]);
             writer.join();
         }
+        /* optional int32 peak_mem_mb = 51; */
+        if (message.peakMemMb !== undefined)
+            writer.tag(51, WireType.Varint).int32(message.peakMemMb);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6958,7 +7012,8 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
             { no: 2, name: "new_status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "free_retry", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 5, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "peak_mem_mb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<TaskStatusUpdate>): TaskStatusUpdate {
@@ -6989,6 +7044,9 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
                 case /* optional string failure_class */ 5:
                     message.failureClass = reader.string();
                     break;
+                case /* optional int32 peak_mem_mb */ 6:
+                    message.peakMemMb = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7016,6 +7074,9 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
         /* optional string failure_class = 5; */
         if (message.failureClass !== undefined)
             writer.tag(5, WireType.LengthDelimited).string(message.failureClass);
+        /* optional int32 peak_mem_mb = 6; */
+        if (message.peakMemMb !== undefined)
+            writer.tag(6, WireType.Varint).int32(message.peakMemMb);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12872,11 +12933,14 @@ class WorkerStatsHistoryFilter$Type extends MessageType<WorkerStatsHistoryFilter
             { no: 3, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "start_epoch", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
             { no: 5, name: "end_epoch", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
-            { no: 6, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 6, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "bucket_seconds", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "fields", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerStatsHistoryFilter>): WorkerStatsHistoryFilter {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.fields = [];
         if (value !== undefined)
             reflectionMergePartial<WorkerStatsHistoryFilter>(this, message, value);
         return message;
@@ -12903,6 +12967,12 @@ class WorkerStatsHistoryFilter$Type extends MessageType<WorkerStatsHistoryFilter
                     break;
                 case /* optional int32 limit */ 6:
                     message.limit = reader.int32();
+                    break;
+                case /* optional int32 bucket_seconds */ 7:
+                    message.bucketSeconds = reader.int32();
+                    break;
+                case /* repeated string fields */ 8:
+                    message.fields.push(reader.string());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -12934,6 +13004,12 @@ class WorkerStatsHistoryFilter$Type extends MessageType<WorkerStatsHistoryFilter
         /* optional int32 limit = 6; */
         if (message.limit !== undefined)
             writer.tag(6, WireType.Varint).int32(message.limit);
+        /* optional int32 bucket_seconds = 7; */
+        if (message.bucketSeconds !== undefined)
+            writer.tag(7, WireType.Varint).int32(message.bucketSeconds);
+        /* repeated string fields = 8; */
+        for (let i = 0; i < message.fields.length; i++)
+            writer.tag(8, WireType.LengthDelimited).string(message.fields[i]);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -1,0 +1,1 @@
+ALTER TABLE task DROP COLUMN IF EXISTS peak_mem_mb;
