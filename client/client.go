@@ -577,6 +577,19 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		return
 	}
 
+	// Kernel-tracked peak-memory sampler. Reading the cgroup counter
+	// one-shot after cmd.Wait is unreliable on cgroup v2 with the
+	// systemd driver: systemd tears down docker-<CID>.scope as soon
+	// as the container process exits, well before this executor gets
+	// to look, even though `docker inspect` still returns metadata.
+	// The sampler polls memory.peak while the container is alive and
+	// remembers the max; the post-Wait path stops it and reads the
+	// value. Best-effort — 0 lands as NULL server-side.
+	var peakSampler *peakmem.Sampler
+	if !isBare && containerName != "" {
+		peakSampler = peakmem.NewDockerSampler(containerName, time.Second, 30*time.Second)
+	}
+
 	// Track bare processes for signal handling (keyed by workerName:taskID to avoid cross-test collisions)
 	bareKey := fmt.Sprintf("%s:%d", workerName, task.TaskId)
 	if isBare && cmd.Process != nil {
@@ -711,31 +724,26 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		}
 	}
 
-	// Kernel-tracked peak memory: read once, now, while the cgroup is
-	// still populated (the deferred docker rm hasn't run yet). Best-
-	// effort — 0 on any failure lands as NULL server-side, which the
-	// MCP surface omits. See client/peakmem for the fallback chain.
+	// Kernel-tracked peak memory: stop the background sampler and read
+	// its accumulated max. The sampler polled memory.peak while the
+	// container was alive, so the counter is available even if the
+	// docker-<CID>.scope has already been torn down by systemd. Best-
+	// effort — 0 lands as NULL server-side, which the MCP surface omits.
+	// See client/peakmem for the sampler and its fallback path list.
 	//
-	// Reports each outcome as a worker_event so an operator diagnosing
+	// Reports the outcome as a worker_event so an operator diagnosing
 	// "why is peak_mem_mb NULL?" can see the reason via
 	// `scitq worker-event list` without SSH-ing to the worker.
-	if !isBare && containerName != "" {
-		cid := dockerInspectContainerID(containerName)
-		if cid == "" {
-			log.Printf("ℹ️ peakmem: task %d: docker inspect returned no CID for %s (container gone?)",
-				task.TaskId, containerName)
-			reporter.Event("W", "peakmem", "docker inspect returned no CID", map[string]any{
-				"task_id":        task.TaskId,
-				"container_name": containerName,
-			})
-		} else if peak, tried := peakmem.ReadDockerPeakMBWithDiag(cid); peak > 0 {
+	if peakSampler != nil {
+		peak := peakSampler.Stop()
+		if peak > 0 {
 			task.PeakMemMb = &peak
 			log.Printf("📊 peakmem: task %d container hit %d MB", task.TaskId, peak)
 		} else {
 			reporter.Event("W", "peakmem", "no cgroup peak found", map[string]any{
 				"task_id":   task.TaskId,
-				"container": cid[:12],
-				"tried":     tried,
+				"container": containerName,
+				"tried":     peakSampler.Diag(),
 			})
 		}
 	}
