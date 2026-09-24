@@ -29,8 +29,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Node is only needed on the build job: `go build ./...` triggers
+      # //go:embed all:public in server/http.go, and server/public is
+      # .gitignored — it lives on disk after `make ui-embed` (vite build)
+      # regenerates it from ui/. Test jobs don't hit the UI so they skip
+      # this and stay fast on Go-only runners.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
       - name: Build Go project
-        run: make copy-docs && go build ./...
+        run: make ui-embed copy-docs && go build ./...
 
   test-core:
     needs: build
@@ -133,11 +144,12 @@ jobs:
 
       - name: Run uncovered tests (catch-all for new tests)
         run: |
-          # Rebuild the embedded Python tarball (//go:embed python-src.tgz) so
+          # `copy-docs` now depends on `tgz-python-src` (see the Makefile
+          # comment on that target), so the embedded Python tarball
+          # (//go:embed python-src.tgz) is rebuilt automatically before
           # tests that upload+run a real template (e.g. TestExtendWorkflowE2E)
-          # exercise the *current* DSL source, not a stale committed tarball.
-          # Pure shell + tar, no Python interpreter needed.
-          make tgz-python-src copy-docs
+          # exercise the DSL source. No separate call needed here.
+          make copy-docs
           COVERED="TestIntegration|TestTaskDependency|TestWorkflowStatus|TestFreeWorkers|TestRetryClonesHiddenParent|TestRetryCLI|TestMCPEndToEnd|TestTaskStdoutStderr|TestReuse|TestSkipIfExists|TestForceRunTask|TestPublishOnly|TestEditAndRetry|TestEditStepCommand|TestQualityScoring|TestMultiObjectiveQuality|TestOptunaLoop|TestSignalStop|TestEnvVars|TestWorkflowCounters|TestFetchIntegration|TestRecruitmentCycle|TestLongRecruiter|TestLiveQualityMonitoring|TestPermanentWorkerProtection"
           ALL=$(cd tests/integration && grep -h '^func Test' *_test.go | sed 's/func \(Test[a-zA-Z0-9_]*\).*/\1/' | sort -u)
           UNCOVERED=""

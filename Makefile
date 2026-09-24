@@ -127,7 +127,15 @@ $(BINARY_DIR):
 build-server: tgz-python-src copy-docs | $(BINARY_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_SERVER) $(SRC_SERVER)
 
-copy-docs:
+# `copy-docs` also depends on `tgz-python-src` because python-src.tgz is a
+# //go:embed input (python/embed.go) that is .gitignored and regenerated
+# by `make install`. Every place that runs `go build ./...` — including
+# CI — invokes `make copy-docs` first, so folding the tarball rebuild in
+# here means the tarball is always fresh without each caller having to
+# remember to add `tgz-python-src` by hand. Pure shell + tar; no
+# interpreter needed, safe on CI. The server/public/ side (vite build)
+# is handled separately in CI's build job since it costs an npm install.
+copy-docs: tgz-python-src
 	@mkdir -p server/docs
 	@cp docs/usage/cli.md docs/usage/yaml-templates.md docs/usage/dsl.md docs/usage/ai-integration.md docs/usage/ui.md docs/usage/optimization.md docs/reference/configuration.md docs/reference/monitoring.md server/docs/
 
