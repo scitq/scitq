@@ -29,6 +29,64 @@ type AzureProvider struct {
 	name             string
 }
 
+// resolveAzureDiskSKU maps the recruiter's extra_storage_type string
+// to an Azure StorageAccountTypes value. The input accepts either a
+// short alias ("standard" / "standardssd" / "ssd" / "premium" /
+// "premiumv2" / "ultra" / "premium_zrs" / "standardssd_zrs") or the
+// Azure SKU name directly ("Standard_LRS", "Premium_LRS", …).
+// Empty / nil → Standard_LRS (the cheapest option, matches what you
+// get when creating a disk via the Portal without choosing a tier).
+// An unknown value returns an error so the recruiter sees a clear
+// failure at Create time rather than ARM rejecting the request with a
+// cryptic "SKU invalid" response.
+func resolveAzureDiskSKU(wanted *string) (armcompute.StorageAccountTypes, error) {
+	if wanted == nil || *wanted == "" {
+		return armcompute.StorageAccountTypesStandardLRS, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(*wanted)) {
+	case "standard", "standard_lrs", "hdd":
+		return armcompute.StorageAccountTypesStandardLRS, nil
+	case "standardssd", "ssd", "standardssd_lrs":
+		return armcompute.StorageAccountTypesStandardSSDLRS, nil
+	case "standardssd_zrs":
+		return armcompute.StorageAccountTypesStandardSSDZRS, nil
+	case "premium", "premium_lrs":
+		return armcompute.StorageAccountTypesPremiumLRS, nil
+	case "premium_zrs":
+		return armcompute.StorageAccountTypesPremiumZRS, nil
+	case "premiumv2", "premiumv2_lrs":
+		return armcompute.StorageAccountTypesPremiumV2LRS, nil
+	case "ultra", "ultrassd", "ultrassd_lrs":
+		return armcompute.StorageAccountTypesUltraSSDLRS, nil
+	}
+	return "", fmt.Errorf("azure: unknown extra_storage_type %q (want: standard | standardssd | premium | premiumv2 | ultra | or the full Azure SKU name)", *wanted)
+}
+
+// buildAzureDataDisks returns the DataDisks slice to attach to the VM
+// at Create time. Empty (nil) when no extra storage was requested so
+// the VM's StorageProfile stays byte-identical to the pre-feature
+// shape — ARM is particular about empty-vs-nil slice behaviour, and
+// nil is the "no change" signal. When extraGB > 0 we attach exactly
+// one empty data disk at LUN 0, which the cloud-init prelude mounts
+// via the stable /dev/disk/azure/scsi1/lun0 symlink.
+func buildAzureDataDisks(extraGB int32, diskName string, sku armcompute.StorageAccountTypes) []*armcompute.DataDisk {
+	if extraGB <= 0 {
+		return nil
+	}
+	return []*armcompute.DataDisk{
+		{
+			Lun:          to.Ptr[int32](0),
+			Name:         to.Ptr(diskName),
+			CreateOption: to.Ptr(armcompute.DiskCreateOptionTypesEmpty),
+			DeleteOption: to.Ptr(armcompute.DiskDeleteOptionTypesDelete),
+			DiskSizeGB:   to.Ptr(extraGB),
+			ManagedDisk: &armcompute.ManagedDiskParameters{
+				StorageAccountType: to.Ptr(sku),
+			},
+		},
+	}
+}
+
 // expandPath expands a leading ~ in a file path to the user's home directory.
 func expandPath(path string) (string, error) {
 	if len(path) > 0 && path[0] == '~' {
@@ -309,15 +367,10 @@ func planForImageRef(ref *armcompute.ImageReference) *armcompute.Plan {
 }
 
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
+// When params.ExtraStorageGB > 0, inlines a managed data disk at LUN 0 of
+// the VM's StorageProfile. DeleteOption=Delete ties the disk's lifecycle
+// to the VM so the normal RG-level teardown drops both; no janitor needed.
 func (ap *AzureProvider) Create(params providers.CreateParams) (providers.CreateResult, error) {
-	// Azure provider doesn't support the extra-storage feature yet.
-	// Fail fast and loudly rather than silently ignoring the request —
-	// the user would otherwise see no error at recruit time and only
-	// discover the missing volume as a /scratch-full task failure
-	// hours later.
-	if params.ExtraStorageGB != nil && *params.ExtraStorageGB > 0 {
-		return providers.CreateResult{}, fmt.Errorf("extra_storage_gb is not supported for the Azure provider yet (requested %d GB)", *params.ExtraStorageGB)
-	}
 	workerName := params.WorkerName
 	flavor := params.Flavor
 	location := params.Location
@@ -326,12 +379,31 @@ func (ap *AzureProvider) Create(params providers.CreateParams) (providers.Create
 	gpuImage := params.GPUImage
 	jobId := params.JobID
 	swapProportion := params.SwapProportion
+	extraGB := int32(0)
+	if params.ExtraStorageGB != nil {
+		extraGB = *params.ExtraStorageGB
+	}
+	// Resolve the disk SKU up-front so an invalid extra_storage_type
+	// is caught before we touch any Azure resources — otherwise ARM
+	// would reject the whole VM-create with a less-pointed message.
+	diskSKU, err := resolveAzureDiskSKU(params.ExtraStorageType)
+	if err != nil {
+		return providers.CreateResult{}, err
+	}
+	// Managed data disks have a per-disk 32 TiB cap on Azure, but
+	// scitq's recruiter plumbing uses int32 GB. The practical cap for
+	// a single data disk is 32 767 GB; anything larger would need a
+	// multi-disk striped volume (not implemented).
+	if extraGB > 32767 {
+		return providers.CreateResult{}, fmt.Errorf("azure: extra_storage_gb=%d exceeds Azure's 32 767 GB single-disk cap", extraGB)
+	}
+	diskName := workerName + "-data0"
 	var ipAddress string
 	var pubIPID string
 
 	log.Printf("Creating VM for worker %s", workerName)
 
-	err := retry(func() error {
+	err = retry(func() error {
 		vmName := workerName
 		rgName := ap.resourceGroupName(workerName)
 
@@ -374,8 +446,35 @@ func (ap *AzureProvider) Create(params providers.CreateParams) (providers.Create
 			// no opinion about which toolchain runs on top.
 			gpuPrep = "\n  - modprobe nvidia || true\n  - >-\n      nvidia-smi -L || echo WARN nvidia-smi failed after modprobe -- GPU driver missing on host image"
 		}
+		// Extra-storage prelude. Azure exposes data disks at
+		// predictable, stable symlinks under /dev/disk/azure/scsi1/,
+		// one per LUN. We only ever attach LUN 0, so lun0 is the
+		// one to format and mount. This avoids OpenStack's lsblk
+		// probe (where sda / sdb / sdc assignment is non-deterministic
+		// — Azure's temp disk sits on sdb, which would false-match a
+		// generic "first non-root" probe). cloud-init runs each
+		// runcmd in its own shell; `set -e` scopes to that block.
+		extraPrelude := ""
+		if extraGB > 0 {
+			extraPrelude = `
+  - |
+    set -e
+    for i in $(seq 1 60); do
+      [ -e /dev/disk/azure/scsi1/lun0 ] && break
+      sleep 2
+    done
+    if [ ! -e /dev/disk/azure/scsi1/lun0 ]; then
+      echo "scitq extra_storage: /dev/disk/azure/scsi1/lun0 did not appear in 120s" >&2
+      exit 1
+    fi
+    d=$(readlink -f /dev/disk/azure/scsi1/lun0)
+    mkfs.ext4 -F "$d"
+    mkdir -p /scratch
+    mount "$d" /scratch
+    echo "$d /scratch ext4 defaults,nofail 0 0" >> /etc/fstab`
+		}
 		cloudInit := fmt.Sprintf(`#cloud-config
-runcmd:%s
+runcmd:%s%s
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
   - curl -ksSL https://%s/scitq-cli?token=%s -o /usr/local/bin/scitq || true
@@ -383,6 +482,7 @@ runcmd:%s
   - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d -provider "%s" -region "%s"
   - systemctl start scitq-client`,
 			gpuPrep,
+			extraPrelude,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
@@ -492,6 +592,14 @@ runcmd:%s
 				},
 				StorageProfile: &armcompute.StorageProfile{
 					ImageReference: imageRef,
+					// DataDisks inlined at VM-create time so the disk's
+					// lifecycle is bound to the VM via DeleteOption=Delete
+					// — RG-level teardown then drops both without needing
+					// a separate orphan-volume janitor on Azure (contrast
+					// with OpenStack, where the cloud-init prelude
+					// matches on the metadata-tagged device because
+					// Cinder volumes outlive their server by default).
+					DataDisks: buildAzureDataDisks(extraGB, diskName, diskSKU),
 				},
 				OSProfile: &armcompute.OSProfile{
 					ComputerName:  to.Ptr(vmName),
@@ -549,7 +657,15 @@ runcmd:%s
 	}
 
 	log.Printf("VM %s created successfully with IP address %s", workerName, ipAddress)
-	return providers.CreateResult{IP: ipAddress}, nil
+	result := providers.CreateResult{IP: ipAddress}
+	if extraGB > 0 {
+		// Stamp the disk name on the worker row so operators can
+		// cross-reference it with Azure Portal / `az disk list`. The
+		// delete path doesn't need this (RG-delete cascades), but
+		// visibility matters for debugging a stuck disk.
+		result.ExtraVolumeID = diskName
+	}
+	return result, nil
 }
 
 // createDefaultNICWithPubIP creates a new NIC with a public IP and returns both IDs.
