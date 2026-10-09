@@ -1611,9 +1611,16 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 				log.Printf("🔁 Server returned duplicate task %d — already active; ignoring", task.TaskId)
 				continue
 			}
-			if dm != nil && dm.EnqueuedTasks != nil && dm.EnqueuedTasks[task.TaskId] {
-				log.Printf("🔁 Server returned duplicate task %d — already scheduled for downloads; ignoring", task.TaskId)
-				continue
+			if dm != nil {
+				// EnqueuedTasks is a sync.Map; the Load is safe
+				// against concurrent writes from the DownloadManager's
+				// dispatch loop (which is what tripped the race before:
+				// a plain map read vs a concurrent map write panicked
+				// the worker binary).
+				if _, dup := dm.EnqueuedTasks.Load(task.TaskId); dup {
+					log.Printf("🔁 Server returned duplicate task %d — already scheduled for downloads; ignoring", task.TaskId)
+					continue
+				}
 			}
 
 			task.Status = "C" // Accepted

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/scitq/scitq/client/event"
@@ -82,8 +83,16 @@ type DownloadManager struct {
 	FailedQueue     chan *DownloadFailure // Tasks that failed during downloads (centralized reporting)
 	Store           string
 	reporter        *event.Reporter
-	// Tracks tasks currently being scheduled for downloads to ensure idempotency at the boundary.
-	EnqueuedTasks map[int32]bool
+	// Tracks tasks currently being scheduled for downloads to ensure
+	// idempotency at the boundary. All WRITES happen inside the
+	// DownloadManager's single dispatch loop (handleNewTask /
+	// handleFileCompletion), but client.workerLoop reads it from
+	// another goroutine to drop server-side duplicates — a plain
+	// map there panics with "concurrent map read and map write".
+	// sync.Map is the right shape: write-mostly from one goroutine,
+	// cheap presence-check Load from another. Value is struct{} since
+	// only the key's presence matters.
+	EnqueuedTasks sync.Map
 	// Per-task chrono map for download durations
 	DownloadStart map[int32]time.Time
 	// Per-task pending set for download items
@@ -103,7 +112,7 @@ func NewDownloadManager(store string, reporter *event.Reporter, rcloneRemotes *p
 		FailedQueue:       make(chan *DownloadFailure, maxQueueSize),
 		Store:             store,
 		reporter:          reporter,
-		EnqueuedTasks:     make(map[int32]bool),
+		// EnqueuedTasks is a sync.Map with a usable zero value, no init needed.
 		DownloadStart:     make(map[int32]time.Time),
 		TaskPending:       make(map[int32]map[string]bool),
 		RcloneRemotes:     rcloneRemotes,
@@ -286,12 +295,15 @@ func (dm *DownloadManager) ProcessDownloads() {
 // handleNewTask enqueues necessary downloads.
 func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 	log.Printf("📝 Processing new task %d for downloads", task.TaskId)
-	// Idempotency boundary: if we've already started scheduling this task, ignore duplicates.
-	if dm.EnqueuedTasks[task.TaskId] {
+	// Idempotency boundary: if we've already started scheduling this
+	// task, ignore duplicates. LoadOrStore is the atomic form of the
+	// previous check-then-set, which matters only in theory here
+	// (writes are single-goroutine) but is also strictly cheaper on a
+	// sync.Map than two separate calls.
+	if _, loaded := dm.EnqueuedTasks.LoadOrStore(task.TaskId, struct{}{}); loaded {
 		log.Printf("🔁 Task %d already scheduled for downloads — ignoring duplicate", task.TaskId)
 		return
 	}
-	dm.EnqueuedTasks[task.TaskId] = true
 	// Start chrono for download duration
 	if _, seen := dm.DownloadStart[task.TaskId]; !seen {
 		dm.DownloadStart[task.TaskId] = time.Now()
@@ -454,7 +466,7 @@ func (dm *DownloadManager) handleNewTask(task *pb.Task) {
 
 	if len(pending) == 0 {
 		log.Printf("🚀 Task %d ready for execution (no downloads needed)", task.TaskId)
-		delete(dm.EnqueuedTasks, task.TaskId)
+		dm.EnqueuedTasks.Delete(task.TaskId)
 		dm.ExecQueue <- task
 	} else {
 		log.Printf("📝 Task %d waiting for %d item(s)", task.TaskId, len(pending))
@@ -495,7 +507,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 				}
 				if len(set) == 0 {
 					delete(dm.TaskPending, fm.TaskId)
-					delete(dm.EnqueuedTasks, fm.TaskId)
+					dm.EnqueuedTasks.Delete(fm.TaskId)
 					if fm.Task.Status != "F" {
 						if start, ok := dm.DownloadStart[fm.TaskId]; ok {
 							secs := int32(time.Since(start).Seconds())
@@ -525,7 +537,7 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 				default:
 					log.Printf("⚠️ FailedQueue full; could not enqueue failure for task %d", fm.TaskId)
 				}
-				delete(dm.EnqueuedTasks, fm.TaskId)
+				dm.EnqueuedTasks.Delete(fm.TaskId)
 				delete(dm.DownloadStart, fm.TaskId)
 			}
 		}
@@ -567,13 +579,13 @@ func (dm *DownloadManager) handleFileCompletion(fileMeta *FileMetadata) {
 						default:
 							log.Printf("⚠️ FailedQueue full; could not enqueue failure for task %d", task.TaskId)
 						}
-						delete(dm.EnqueuedTasks, task.TaskId)
+						dm.EnqueuedTasks.Delete(task.TaskId)
 						delete(dm.DownloadStart, task.TaskId)
 					}
 					if tset != nil {
 						if len(tset) == 0 {
 							delete(dm.TaskPending, task.TaskId)
-							delete(dm.EnqueuedTasks, task.TaskId)
+							dm.EnqueuedTasks.Delete(task.TaskId)
 							if task.Status != "F" {
 								if start, ok := dm.DownloadStart[task.TaskId]; ok {
 									secs := int32(time.Since(start).Seconds())
