@@ -3748,8 +3748,8 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		var stepName sql.NullString
 
 		err = tx.QueryRow(`WITH insertquery AS (
-			INSERT INTO worker (step_id, worker_name, concurrency, prefetch, flavor_id, region_id, is_permanent, status)
-			VALUES (NULLIF($1,0), $6 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, $5, FALSE, 'I')
+			INSERT INTO worker (step_id, worker_name, concurrency, prefetch, flavor_id, region_id, is_permanent, status, swap_proportion, extra_storage_gb, extra_storage_type)
+			VALUES (NULLIF($1,0), $6 || 'worker' || CURRVAL('worker_worker_id_seq'), $2, $3, $4, $5, FALSE, 'I', $7, $8, $9)
 			RETURNING worker_id, worker_name, region_id, flavor_id, step_id
 		)
 		SELECT iq.worker_id, iq.worker_name, r.provider_id, p.provider_name||'.'||p.config_name, r.region_name, f.flavor_name, f.cpu, f.mem, f.gpu_count, s.step_name
@@ -3758,7 +3758,7 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		JOIN flavor f ON iq.flavor_id = f.flavor_id
 		JOIN provider p ON r.provider_id = p.provider_id
 		LEFT JOIN step s ON s.step_id = iq.step_id`,
-			req.StepId, req.Concurrency, req.Prefetch, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName).Scan(
+			req.StepId, req.Concurrency, req.Prefetch, req.FlavorId, req.RegionId, s.cfg.Scitq.ServerName, req.SwapProportion, req.ExtraStorageGb, req.ExtraStorageType).Scan(
 			&workerID, &workerName, &providerID, &provider, &regionName, &flavorName, &cpu, &memory, &gpuCount, &stepName)
 		if err != nil {
 			tx.Rollback()
@@ -3777,19 +3777,22 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		s.qm.RegisterLaunch(regionName, provider, cpu, memory)
 
 		job := Job{
-			JobID:        jobID,
-			WorkerID:     workerID,
-			WorkerName:   workerName,
-			ProviderID:   providerID,
-			ProviderName: provider,
-			Region:       regionName,
-			Flavor:       flavorName,
-			HasGPU:       gpuCount.Valid && gpuCount.Int32 > 0,
-			Image:        req.Image,
-			GPUImage:     req.GpuImage,
-			Action:       'C',
-			Retry:        defaultJobRetry,
-			Timeout:      defaultJobTimeout,
+			JobID:            jobID,
+			WorkerID:         workerID,
+			WorkerName:       workerName,
+			ProviderID:       providerID,
+			ProviderName:     provider,
+			Region:           regionName,
+			Flavor:           flavorName,
+			HasGPU:           gpuCount.Valid && gpuCount.Int32 > 0,
+			Image:            req.Image,
+			GPUImage:         req.GpuImage,
+			SwapProportion:   req.SwapProportion,
+			ExtraStorageGB:   req.ExtraStorageGb,
+			ExtraStorageType: req.ExtraStorageType,
+			Action:           'C',
+			Retry:            defaultJobRetry,
+			Timeout:          defaultJobTimeout,
 		}
 		jobs = append(jobs, job)
 
@@ -5487,7 +5490,9 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 			 WHERE we.worker_id = w.worker_id
 			   AND we.level = 'W'
 			   AND we.acknowledged_at IS NULL
-			) AS pending_warnings
+			) AS pending_warnings,
+			w.swap_proportion,
+			w.extra_storage_gb, w.extra_storage_type, w.extra_storage_volume_id
 		FROM worker w
 		LEFT JOIN region r ON r.region_id = w.region_id
 		LEFT JOIN provider p ON r.provider_id = p.provider_id
@@ -5526,13 +5531,18 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		var stepName, workflowName sql.NullString
 		var workerVersion, workerCommit, workerArch, upgradeReq sql.NullString
 		var recentFailures, pendingWarnings int32
+		var swapProportion sql.NullFloat64
+		var extraStorageGB sql.NullInt32
+		var extraStorageType, extraStorageVolumeID sql.NullString
 
 		err := rows.Scan(&worker.WorkerId, &worker.Name, &worker.Concurrency, &worker.Prefetch, &worker.Status,
 			&worker.Ipv4, &worker.Ipv6, &worker.Region, &worker.Provider, &worker.Flavor,
 			&flavorCpu, &flavorMem, &flavorDisk, &flavorGpuCount,
 			&stepId, &stepName,
 			&worker.IsPermanent, &worker.RecyclableScope, &workflowId, &workflowName,
-			&workerVersion, &workerCommit, &workerArch, &upgradeReq, &recentFailures, &pendingWarnings)
+			&workerVersion, &workerCommit, &workerArch, &upgradeReq, &recentFailures, &pendingWarnings,
+			&swapProportion,
+			&extraStorageGB, &extraStorageType, &extraStorageVolumeID)
 		if err != nil {
 			log.Printf("⚠️ Failed to scan worker: %v", err)
 			continue
@@ -5550,6 +5560,19 @@ func (s *taskQueueServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRe
 		}
 		if flavorGpuCount.Valid {
 			worker.FlavorGpuCount = &flavorGpuCount.Int32
+		}
+		if swapProportion.Valid {
+			v := float32(swapProportion.Float64)
+			worker.SwapProportion = &v
+		}
+		if extraStorageGB.Valid {
+			worker.ExtraStorageGb = &extraStorageGB.Int32
+		}
+		if extraStorageType.Valid {
+			worker.ExtraStorageType = &extraStorageType.String
+		}
+		if extraStorageVolumeID.Valid {
+			worker.ExtraStorageVolumeId = &extraStorageVolumeID.String
 		}
 		if stepId.Valid {
 			worker.StepId = &stepId.Int32
@@ -6169,7 +6192,9 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 		image, gpu_image,
 		prefetch_percent, concurrency_min, concurrency_max,
 		memory_shared_per_task, disk_shared_per_task,
-		prefetch_percent_ceil
+		prefetch_percent_ceil,
+		swap_proportion,
+		extra_storage_gb, extra_storage_type
 		FROM recruiter`
 
 	args := []interface{}{}
@@ -6196,6 +6221,9 @@ func (s *taskQueueServer) ListRecruiters(ctx context.Context, req *pb.RecruiterF
 			&recruiter.PrefetchPercent, &recruiter.ConcurrencyMin, &recruiter.ConcurrencyMax,
 			&recruiter.MemorySharedPerTask, &recruiter.DiskSharedPerTask,
 			&recruiter.PrefetchPercentCeil,
+			&recruiter.SwapProportion,
+			&recruiter.ExtraStorageGb,
+			&recruiter.ExtraStorageType,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan recruiter: %w", err)
 		}
@@ -6241,7 +6269,9 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				image, gpu_image,
 				prefetch_percent, concurrency_min, concurrency_max,
 				memory_shared_per_task, disk_shared_per_task,
-				prefetch_percent_ceil
+				prefetch_percent_ceil,
+				swap_proportion,
+				extra_storage_gb, extra_storage_type
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7,
@@ -6249,7 +6279,9 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				$12, $13,
 				$14, $15, $16,
 				$17, $18,
-				$19
+				$19,
+				$20,
+				$21, $22
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
@@ -6259,6 +6291,8 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 			req.MemorySharedPerTask, req.DiskSharedPerTask,
 			prefetchCeil,
+			req.SwapProportion,
+			req.ExtraStorageGb, req.ExtraStorageType,
 		)
 	} else {
 		_, err = s.db.ExecContext(ctx, `
@@ -6269,7 +6303,9 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				image, gpu_image,
 				prefetch_percent, concurrency_min, concurrency_max,
 				memory_shared_per_task, disk_shared_per_task,
-				prefetch_percent_ceil
+				prefetch_percent_ceil,
+				swap_proportion,
+				extra_storage_gb, extra_storage_type
 			) VALUES (
 				$1, $2, $3,
 				$4, $5, $6, $7, $8,
@@ -6277,7 +6313,9 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 				$13, $14,
 				$15, $16, $17,
 				$18, $19,
-				$20
+				$20,
+				$21,
+				$22, $23
 			)
 		`,
 			req.StepId, req.Rank, req.Protofilter,
@@ -6287,6 +6325,8 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 			req.PrefetchPercent, req.ConcurrencyMin, req.ConcurrencyMax,
 			req.MemorySharedPerTask, req.DiskSharedPerTask,
 			prefetchCeil,
+			req.SwapProportion,
+			req.ExtraStorageGb, req.ExtraStorageType,
 		)
 	}
 
@@ -6431,6 +6471,18 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 	if req.PrefetchPercentCeil != nil {
 		clauses = append(clauses, fmt.Sprintf("prefetch_percent_ceil = $%d", len(args)+1))
 		args = append(args, *req.PrefetchPercentCeil)
+	}
+	if req.SwapProportion != nil {
+		clauses = append(clauses, fmt.Sprintf("swap_proportion = $%d", len(args)+1))
+		args = append(args, *req.SwapProportion)
+	}
+	if req.ExtraStorageGb != nil {
+		clauses = append(clauses, fmt.Sprintf("extra_storage_gb = $%d", len(args)+1))
+		args = append(args, *req.ExtraStorageGb)
+	}
+	if req.ExtraStorageType != nil {
+		clauses = append(clauses, fmt.Sprintf("extra_storage_type = $%d", len(args)+1))
+		args = append(args, *req.ExtraStorageType)
 	}
 
 	if len(clauses) == 0 {
@@ -6918,7 +6970,7 @@ func (s *taskQueueServer) DebugRecruitStep(ctx context.Context, req *pb.DebugRec
 		return nil, status.Error(codes.InvalidArgument, "step does not belong to workflow")
 	}
 
-	if err := recruitment.DebugRecruitStep(ctx, s.db, &s.qm, s, req.StepId); err != nil {
+	if err := recruitment.DebugRecruitStep(ctx, s.db, &s.qm, s, req.StepId, s.cfg.Scitq.SwapProportion); err != nil {
 		return nil, fmt.Errorf("failed to run debug recruitment: %w", err)
 	}
 	return &pb.Ack{Success: true}, nil
@@ -7978,7 +8030,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		if err := s.qm.ReconcileFromDB(s.db); err != nil {
 			log.Printf("⚠️ QuotaManager reconcile from DB failed: %v (starting with empty usage)", err)
 		}
-		recruitment.StartRecruiterLoop(s.ctx, s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval)
+		recruitment.StartRecruiterLoop(s.ctx, s.db, &s.qm, s, cfg.Scitq.RecruitmentInterval, cfg.Scitq.SwapProportion)
 
 		if err := s.checkProviders(); err != nil {
 			log.Fatalf("failed to check providers: %v", err)
@@ -8018,6 +8070,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 		s.startFlavorStatsJobs()
 		s.startOrphanCleanup()
 		s.startStuckDeleteCleanup()
+		s.startOrphanVolumeCleanup()
 		pb.RegisterTaskQueueServer(grpcServer, s)
 
 		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Scitq.Port))

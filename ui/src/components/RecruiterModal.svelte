@@ -64,6 +64,17 @@
       // actually land if the user just clicks Save.
       rounds: '10',
       timeout: '300',
+      // Per-recruiter /scratch swap override. '' means "fall back to
+      // server config default" (typically 0.10). An explicit '0' here
+      // disables swap on this recruiter's workers; distinguishable from
+      // '' thanks to the string→number conversion in formToFields.
+      swapProportion: '',
+      // Per-recruiter extra /scratch block volume (OVH only for now).
+      // '' = no extra volume. >0 = GB size. extraStorageType is the
+      // provider's volume class (OVH: classic / high-speed /
+      // high-speed-gen2); empty = provider default.
+      extraStorageGb: '',
+      extraStorageType: '',
     };
   }
 
@@ -81,6 +92,9 @@
       maxWorkers: r.maxWorkers != null ? String(r.maxWorkers) : '',
       rounds: r.rounds != null ? String(r.rounds) : '10',
       timeout: r.timeout != null ? String(r.timeout) : '300',
+      swapProportion: r.swapProportion != null ? String(r.swapProportion) : '',
+      extraStorageGb: r.extraStorageGb != null ? String(r.extraStorageGb) : '',
+      extraStorageType: r.extraStorageType ?? '',
     };
   }
 
@@ -106,6 +120,9 @@
       maxWorkers: numOrUndef(form.maxWorkers),
       rounds: numOrUndef(form.rounds),
       timeout: numOrUndef(form.timeout),
+      swapProportion: numOrUndef(form.swapProportion),
+      extraStorageGb: numOrUndef(form.extraStorageGb),
+      extraStorageType: form.extraStorageType || undefined,
     };
   }
 
@@ -293,7 +310,21 @@
             <input type="number" min="1" step="1" bind:value={form.timeout}
                    disabled={saving} />
           </label>
-          <span></span>
+          <label>
+            Swap proportion
+            <input type="number" min="0" max="1" step="0.05" bind:value={form.swapProportion}
+                   placeholder="server default (~0.10)" disabled={saving} />
+          </label>
+          <label>
+            Extra /scratch (GB)
+            <input type="number" min="0" step="1" bind:value={form.extraStorageGb}
+                   placeholder="OVH only; blank = none" disabled={saving} />
+          </label>
+          <label>
+            Extra /scratch class
+            <input type="text" bind:value={form.extraStorageType}
+                   placeholder="OVH: classic / high-speed" disabled={saving} />
+          </label>
         </div>
 
         <h3 class="recruiter-section">Per-task resources <span class="recruiter-hint">(alternative to fixed concurrency — server derives it adaptively)</span></h3>

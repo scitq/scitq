@@ -44,7 +44,9 @@ import (
 
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/keypairs"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/volumeattach"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/images"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
@@ -54,6 +56,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/pagination"
 	"github.com/scitq/scitq/server/config"
+	"github.com/scitq/scitq/server/providers"
 )
 
 // Provider implements basic OpenStack interactions.
@@ -129,7 +132,14 @@ func getenvAny(keys ...string) string {
 
 // effectiveUserData returns explicit user-data if set; otherwise builds a default cloud-init
 // snippet from cfg.Scitq (like Azure) to install and start scitq-client.
-func (p *Provider) effectiveUserData(jobId int32, region string) []byte {
+// swapProportion is the per-recruiter override; nil = cfg.Scitq.SwapProportion.
+// extraStorage true inserts a prelude that waits for the attached
+// Cinder volume's block device to appear, formats it ext4, and mounts
+// it at /scratch BEFORE scitq-client installs. Fails the install fast
+// (exit 1 propagates through cloud-init runcmd) if the device never
+// shows up — a half-formatted worker whose /scratch isn't the volume
+// is strictly worse than a failed-fast one.
+func (p *Provider) effectiveUserData(jobId int32, region string, swapProportion *float32, extraStorage bool) []byte {
 	if len(p.UserData) > 0 {
 		return p.UserData
 	}
@@ -139,8 +149,40 @@ func (p *Provider) effectiveUserData(jobId int32, region string) []byte {
 		return nil
 	}
 
+	// Prelude for extra block storage. The device name assigned by the
+	// hypervisor isn't predictable across OVH shapes (vdb, sdb, etc.),
+	// so the probe loop walks lsblk for the first disk that isn't the
+	// root disk ("vda"/"sda"). cloud-init runs each runcmd entry in a
+	// separate shell, so the discovered name is written to a tmpfile
+	// that the mkfs/mount steps read back. The polling bound (120 s)
+	// is generous — attach latency is normally seconds, but a sluggish
+	// hypervisor pass can take up to a minute.
+	extraPrelude := ""
+	if extraStorage {
+		extraPrelude = `
+  - |
+    set -e
+    for i in $(seq 1 60); do
+      d=$(lsblk -no NAME,TYPE | awk '$2=="disk" && $1!~"^vda$" && $1!~"^sda$" && $1!~"^xvda$" {print $1; exit}')
+      [ -n "$d" ] && break
+      sleep 2
+    done
+    if [ -z "$d" ]; then
+      echo "scitq extra_storage: no new block device appeared in 120s" >&2
+      exit 1
+    fi
+    echo "/dev/$d" > /run/scitq-extra-dev
+  - |
+    set -e
+    d=$(cat /run/scitq-extra-dev)
+    mkfs.ext4 -F "$d"
+    mkdir -p /scratch
+    mount "$d" /scratch
+    echo "$d /scratch ext4 defaults,nofail 0 0" >> /etc/fstab`
+	}
+
 	cloudInit := fmt.Sprintf(`#cloud-config
-runcmd:
+runcmd:%s
   - curl -ksSL https://%s/scitq-client?token=%s -o /usr/local/bin/scitq-client
   - chmod a+x /usr/local/bin/scitq-client
   - curl -ksSL https://%s/scitq-cli?token=%s -o /usr/local/bin/scitq || true
@@ -148,13 +190,14 @@ runcmd:
   - /usr/local/bin/scitq-client -server %s:%d -install -swap "%f" -token "%s" -job %d -provider "%s" -region "%s"
   - systemctl start scitq-client
 `,
+		extraPrelude,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.ClientDownloadToken,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.ClientDownloadToken,
 		p.cfg.Scitq.ServerFQDN,
 		p.cfg.Scitq.Port,
-		p.cfg.Scitq.SwapProportion,
+		providers.ResolveSwapProportion(swapProportion, p.cfg.Scitq.SwapProportion),
 		p.cfg.Scitq.WorkerToken,
 		jobId,
 		p.Name,
@@ -230,29 +273,87 @@ func (p *Provider) networkClient(region string) (*gophercloud.ServiceClient, err
 	return openstack.NewNetworkV2(pc, gophercloud.EndpointOpts{Region: region})
 }
 
+// blockStorageClient returns a Cinder v3 client scoped to region. Only
+// needed when the Create call requests an extra volume; constructed on
+// demand so unused regions / providers pay nothing.
+func (p *Provider) blockStorageClient(region string) (*gophercloud.ServiceClient, error) {
+	pc, err := p.newProviderClient(region)
+	if err != nil {
+		return nil, err
+	}
+	return openstack.NewBlockStorageV3(pc, gophercloud.EndpointOpts{Region: region})
+}
+
+// extraVolumeMetadataKey is the Cinder metadata key the provider
+// stamps onto every extra volume it creates. Delete lists volumes
+// filtered on this key to find and clean up what belongs to a given
+// worker; the orphan-volume janitor uses the same key to sweep
+// volumes whose worker row no longer exists.
+const extraVolumeMetadataKey = "scitq_worker"
+
+// waitForVolumeStatus polls the volume until it reaches `want` or
+// `timeout` elapses. Needed because Create and attach are both
+// asynchronous on OpenStack: the API returns 202 and the object takes
+// a few seconds to transition. Cheap: 1 s poll, bounded by timeout.
+func waitForVolumeStatus(bc *gophercloud.ServiceClient, volumeID, want string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		v, err := volumes.Get(bc, volumeID).Extract()
+		if err != nil {
+			return fmt.Errorf("volume %s get: %w", volumeID, err)
+		}
+		if v.Status == want {
+			return nil
+		}
+		if v.Status == "error" || v.Status == "error_deleting" {
+			return fmt.Errorf("volume %s entered terminal status %q", volumeID, v.Status)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("volume %s did not reach %q within %v (last status: %q)", volumeID, want, timeout, v.Status)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // ===== implementation of providers.Provider =====
 
 // Create boots a VM and attaches a floating IP when an external network is available.
 // Returns the chosen public IP, or a private IP if no FIP could be allocated.
-func (p *Provider) Create(workerName, flavorName, location string, hasGPU bool, image, gpuImage string, jobId int32) (string, error) {
+// When params.ExtraStorageGB > 0, also provisions a Cinder volume of that
+// size, attaches it to the instance, and persists its ID on the result so
+// the server can later detach+destroy it on delete.
+func (p *Provider) Create(params providers.CreateParams) (providers.CreateResult, error) {
+	workerName := params.WorkerName
+	flavorName := params.Flavor
+	location := params.Location
+	hasGPU := params.HasGPU
+	image := params.Image
+	gpuImage := params.GPUImage
+	jobId := params.JobID
+	swapProportion := params.SwapProportion
+	extraGB := int32(0)
+	if params.ExtraStorageGB != nil {
+		extraGB = *params.ExtraStorageGB
+	}
+
 	region := firstNonEmpty(location, p.DefaultRegion)
 	if region == "" {
-		return "", errors.New("region is required (pass location or set DefaultRegion in OpenstackConfig)")
+		return providers.CreateResult{}, errors.New("region is required (pass location or set DefaultRegion in OpenstackConfig)")
 	}
 
 	cc, err := p.computeClient(region)
 	if err != nil {
-		return "", fmt.Errorf("compute client: %w", err)
+		return providers.CreateResult{}, fmt.Errorf("compute client: %w", err)
 	}
 	nc, err := p.networkClient(region)
 	if err != nil {
-		return "", fmt.Errorf("network client: %w", err)
+		return providers.CreateResult{}, fmt.Errorf("network client: %w", err)
 	}
 
 	// Resolve flavor ID
 	flvID, err := p.findFlavorID(cc, flavorName)
 	if err != nil {
-		return "", err
+		return providers.CreateResult{}, err
 	}
 
 	// Image precedence: per-recruiter gpu_image (when hasGPU) >
@@ -271,7 +372,7 @@ func (p *Provider) Create(workerName, flavorName, location string, hasGPU bool, 
 	}
 	imgID, err := p.findImageID(cc, imageRef)
 	if err != nil {
-		return "", err
+		return providers.CreateResult{}, err
 	}
 
 	// Resolve tenant network ID to plug NIC
@@ -279,13 +380,13 @@ func (p *Provider) Create(workerName, flavorName, location string, hasGPU bool, 
 	if p.NetworkID != "" {
 		id, err := p.resolveNetworkID(nc, p.NetworkID)
 		if err != nil {
-			return "", err
+			return providers.CreateResult{}, err
 		}
 		netID = id
 	} else {
 		id, err := p.findPreferredTenantNetworkID(nc)
 		if err != nil {
-			return "", err
+			return providers.CreateResult{}, err
 		}
 		netID = id
 	}
@@ -306,7 +407,7 @@ func (p *Provider) Create(workerName, flavorName, location string, hasGPU bool, 
 		Networks:  nics,
 		Metadata:  metadata,
 	}
-	if ud := p.effectiveUserData(jobId, location); len(ud) > 0 {
+	if ud := p.effectiveUserData(jobId, location, swapProportion, extraGB > 0); len(ud) > 0 {
 		createOpts.UserData = ud
 	}
 
@@ -322,18 +423,67 @@ func (p *Provider) Create(workerName, flavorName, location string, hasGPU bool, 
 	// Create instance
 	server, err := servers.Create(cc, createBuilder).Extract()
 	if err != nil {
-		return "", fmt.Errorf("create server: %w", err)
+		return providers.CreateResult{}, fmt.Errorf("create server: %w", err)
 	}
 
 	// Wait for ACTIVE
 	if err := waitForStatus(cc, server.ID, "ACTIVE", 600*time.Second); err != nil {
-		return "", err
+		return providers.CreateResult{}, err
+	}
+
+	// Extra block storage: create the volume, wait for it to become
+	// available, then attach it to the instance. The cloud-init prelude
+	// (see effectiveUserData's ExtraStorage branch) waits for the new
+	// block device to appear, mkfs's it, and mounts it at /scratch
+	// BEFORE scitq-client -install runs. Any failure here must roll
+	// back the server — we can't leave a half-provisioned worker whose
+	// /scratch mount will never succeed.
+	volumeID := ""
+	if extraGB > 0 {
+		bc, bsErr := p.blockStorageClient(region)
+		if bsErr != nil {
+			_ = servers.Delete(cc, server.ID).ExtractErr()
+			return providers.CreateResult{}, fmt.Errorf("blockstorage client: %w", bsErr)
+		}
+		vopts := volumes.CreateOpts{
+			Size:        int(extraGB),
+			Name:        workerName + "-extra",
+			Description: fmt.Sprintf("scitq extra /scratch volume for %s", workerName),
+			Metadata:    map[string]string{extraVolumeMetadataKey: workerName},
+		}
+		if params.ExtraStorageType != nil && *params.ExtraStorageType != "" {
+			vopts.VolumeType = *params.ExtraStorageType
+		}
+		vol, vErr := volumes.Create(bc, vopts).Extract()
+		if vErr != nil {
+			_ = servers.Delete(cc, server.ID).ExtractErr()
+			return providers.CreateResult{}, fmt.Errorf("create extra volume: %w", vErr)
+		}
+		volumeID = vol.ID
+		if err := waitForVolumeStatus(bc, vol.ID, "available", 300*time.Second); err != nil {
+			_ = volumes.Delete(bc, vol.ID, volumes.DeleteOpts{}).ExtractErr()
+			_ = servers.Delete(cc, server.ID).ExtractErr()
+			return providers.CreateResult{}, fmt.Errorf("wait for extra volume ready: %w", err)
+		}
+		if _, aErr := volumeattach.Create(cc, server.ID, volumeattach.CreateOpts{VolumeID: vol.ID}).Extract(); aErr != nil {
+			_ = volumes.Delete(bc, vol.ID, volumes.DeleteOpts{}).ExtractErr()
+			_ = servers.Delete(cc, server.ID).ExtractErr()
+			return providers.CreateResult{}, fmt.Errorf("attach extra volume: %w", aErr)
+		}
+		if err := waitForVolumeStatus(bc, vol.ID, "in-use", 300*time.Second); err != nil {
+			// Attach returned 2xx but the volume never flipped to
+			// in-use — treat as a soft failure, keep going so the
+			// install at least has a chance (the cloud-init device
+			// probe will time out and fail install if the volume
+			// really isn't there). Log the warning either way.
+			log.Printf("⚠️ extra volume %s did not reach in-use for %s: %v", vol.ID, workerName, err)
+		}
 	}
 
 	// If NIC is already on an external network (e.g., OVH Ext-Net), don't allocate a FIP—return that IP.
 	if ext, ip := p.externalIPv4IfOnExternal(nc, cc, server.ID); ext {
 		if ip != "" {
-			return ip, nil
+			return providers.CreateResult{IP: ip, ExtraVolumeID: volumeID}, nil
 		}
 		// if external but no IPv4 found, continue to try FIP or IPv4 discovery
 	}
@@ -349,14 +499,14 @@ func (p *Provider) Create(workerName, flavorName, location string, hasGPU bool, 
 	}
 
 	if pubIP != "" {
-		return pubIP, nil
+		return providers.CreateResult{IP: pubIP, ExtraVolumeID: volumeID}, nil
 	}
 
 	// Fallback: return first IPv4 (private or public)
 	if ip, err := p.firstIPv4(cc, server.ID); err == nil && ip != "" {
-		return ip, nil
+		return providers.CreateResult{IP: ip, ExtraVolumeID: volumeID}, nil
 	}
-	return "", errors.New("instance created but no IP address could be determined")
+	return providers.CreateResult{ExtraVolumeID: volumeID}, errors.New("instance created but no IP address could be determined")
 }
 
 // List returns a map of server name -> preferred IP (public if available, else private).
@@ -425,7 +575,143 @@ func (p *Provider) Delete(workerName, location string) error {
 	}
 
 	_ = p.detachAndDeleteFIPs(nc, cc, s.ID) // best effort
+	// Detach and destroy any extra volumes tagged for this worker.
+	// Best-effort: a failure here is logged and the janitor sweeps on
+	// its next tick (see server.orphanVolumeJanitor). We MUST do this
+	// before servers.Delete when possible — some OpenStack deployments
+	// (OVH's Public Cloud included) leave in-use volumes dangling if
+	// the server is destroyed while the attachment is live.
+	_ = p.deleteWorkerVolumes(region, workerName, s.ID)
 	return servers.Delete(cc, s.ID).ExtractErr()
+}
+
+// deleteWorkerVolumes finds every Cinder volume tagged with
+// scitq_worker=<workerName>, detaches it from serverID (if still
+// attached), waits for `available`, and deletes it. All failures are
+// swallowed and logged — the orphan-volume janitor is the net under
+// this helper.
+func (p *Provider) deleteWorkerVolumes(region, workerName, serverID string) error {
+	bc, err := p.blockStorageClient(region)
+	if err != nil {
+		log.Printf("⚠️ deleteWorkerVolumes: blockstorage client for %s: %v", workerName, err)
+		return err
+	}
+	cc, err := p.computeClient(region)
+	if err != nil {
+		log.Printf("⚠️ deleteWorkerVolumes: compute client for %s: %v", workerName, err)
+		return err
+	}
+	vols, err := p.listWorkerVolumes(bc, workerName)
+	if err != nil {
+		log.Printf("⚠️ deleteWorkerVolumes: list for %s: %v", workerName, err)
+		return err
+	}
+	for _, v := range vols {
+		for _, att := range v.Attachments {
+			if serverID != "" && att.ServerID != serverID {
+				continue
+			}
+			if err := volumeattach.Delete(cc, att.ServerID, v.ID).ExtractErr(); err != nil {
+				log.Printf("⚠️ detach volume %s from %s: %v", v.ID, att.ServerID, err)
+			}
+		}
+		_ = waitForVolumeStatus(bc, v.ID, "available", 120*time.Second)
+		if err := volumes.Delete(bc, v.ID, volumes.DeleteOpts{}).ExtractErr(); err != nil {
+			log.Printf("⚠️ delete volume %s (worker %s): %v", v.ID, workerName, err)
+		}
+	}
+	return nil
+}
+
+// listWorkerVolumes returns all volumes whose metadata key
+// scitq_worker matches the given worker name. Cinder's ListOpts has
+// no first-class metadata filter so we page and filter client-side —
+// acceptable because the volume count is small (one per worker).
+func (p *Provider) listWorkerVolumes(bc *gophercloud.ServiceClient, workerName string) ([]volumes.Volume, error) {
+	var out []volumes.Volume
+	err := volumes.List(bc, volumes.ListOpts{}).EachPage(func(page pagination.Page) (bool, error) {
+		list, err := volumes.ExtractVolumes(page)
+		if err != nil {
+			return false, err
+		}
+		for _, v := range list {
+			if v.Metadata[extraVolumeMetadataKey] == workerName {
+				out = append(out, v)
+			}
+		}
+		return true, nil
+	})
+	return out, err
+}
+
+// ListOrphanVolumes returns every Cinder volume in region whose
+// scitq_worker metadata is set but whose worker name is NOT in the
+// liveNames set. The server's orphan-volume janitor passes the names
+// of workers that are still live or recently-deleted (so we don't race
+// with an in-flight Delete). Returned volumes are ready to be fed back
+// into DeleteOrphanVolume one at a time.
+func (p *Provider) ListOrphanVolumes(region string, liveNames map[string]struct{}) ([]OrphanVolume, error) {
+	bc, err := p.blockStorageClient(region)
+	if err != nil {
+		return nil, err
+	}
+	var out []OrphanVolume
+	err = volumes.List(bc, volumes.ListOpts{}).EachPage(func(page pagination.Page) (bool, error) {
+		list, extractErr := volumes.ExtractVolumes(page)
+		if extractErr != nil {
+			return false, extractErr
+		}
+		for _, v := range list {
+			worker, ok := v.Metadata[extraVolumeMetadataKey]
+			if !ok || worker == "" {
+				continue
+			}
+			if _, live := liveNames[worker]; live {
+				continue
+			}
+			out = append(out, OrphanVolume{
+				ID:         v.ID,
+				Name:       v.Name,
+				WorkerName: worker,
+				Region:     region,
+				SizeGB:     v.Size,
+			})
+		}
+		return true, nil
+	})
+	return out, err
+}
+
+// DeleteOrphanVolume destroys a single volume by ID, detaching any
+// stale attachments first. Used by the orphan-volume janitor.
+func (p *Provider) DeleteOrphanVolume(region, volumeID string) error {
+	bc, err := p.blockStorageClient(region)
+	if err != nil {
+		return err
+	}
+	cc, err := p.computeClient(region)
+	if err != nil {
+		return err
+	}
+	v, err := volumes.Get(bc, volumeID).Extract()
+	if err != nil {
+		return err
+	}
+	for _, att := range v.Attachments {
+		_ = volumeattach.Delete(cc, att.ServerID, v.ID).ExtractErr()
+	}
+	_ = waitForVolumeStatus(bc, v.ID, "available", 60*time.Second)
+	return volumes.Delete(bc, v.ID, volumes.DeleteOpts{}).ExtractErr()
+}
+
+// OrphanVolume is the shape the janitor consumes: enough to decide
+// whether to delete, log the decision, and emit a worker_event.
+type OrphanVolume struct {
+	ID         string
+	Name       string
+	WorkerName string
+	Region     string
+	SizeGB     int
 }
 
 // ===== internal helpers =====

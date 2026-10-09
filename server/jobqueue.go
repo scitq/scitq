@@ -37,6 +37,16 @@ type Job struct {
 	// gpu_image (if HasGPU) > image > scitq.yaml default.
 	Image         *string
 	GPUImage      *string
+	// Per-recruiter swapfile sizing override (see Recruiter.swap_proportion).
+	// NULL = provider.Create falls back to cfg.Scitq.SwapProportion.
+	// Carried through so the provider's cloud-init can bake the right
+	// `-swap` value into the worker's install command.
+	SwapProportion *float32
+	// Per-recruiter extra block storage (see Recruiter.extra_storage_gb /
+	// extra_storage_type). NULL / 0 = no extra volume. OVH only for now;
+	// the Azure provider returns an error when ExtraStorageGB > 0.
+	ExtraStorageGB   *int32
+	ExtraStorageType *string
 	Action        rune // "C", "D", "R"
 	Retry         int
 	Timeout       time.Duration
@@ -330,11 +340,33 @@ func (s *taskQueueServer) processJob(job Job) error {
 		if job.GPUImage != nil {
 			gpuImage = *job.GPUImage
 		}
-		IPaddress, err := s.providers[job.ProviderID].Create(job.WorkerName, job.Flavor, job.Region, job.HasGPU, image, gpuImage, job.JobID)
+		res, err := s.providers[job.ProviderID].Create(providers.CreateParams{
+			WorkerName:       job.WorkerName,
+			Flavor:           job.Flavor,
+			Location:         job.Region,
+			HasGPU:           job.HasGPU,
+			Image:            image,
+			GPUImage:         gpuImage,
+			JobID:            job.JobID,
+			SwapProportion:   job.SwapProportion,
+			ExtraStorageGB:   job.ExtraStorageGB,
+			ExtraStorageType: job.ExtraStorageType,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to create worker %s: %w", job.WorkerName, err)
 		}
-		_, err = s.db.Exec("UPDATE worker SET ipv4=$1, status='I' WHERE worker_id=$2 AND deleted_at IS NULL", IPaddress, job.WorkerID)
+		// Stash both IP and the extra volume handle on the worker row.
+		// The volume_id is what the delete path and the orphan-volume
+		// janitor use to detach/destroy, so we must persist it even if
+		// the IP update fails (missing it is a cost leak).
+		if res.ExtraVolumeID != "" {
+			if _, err := s.db.Exec(
+				"UPDATE worker SET extra_storage_volume_id=$1 WHERE worker_id=$2",
+				res.ExtraVolumeID, job.WorkerID); err != nil {
+				log.Printf("⚠️ failed to persist extra_storage_volume_id for worker %s: %v", job.WorkerName, err)
+			}
+		}
+		_, err = s.db.Exec("UPDATE worker SET ipv4=$1, status='I' WHERE worker_id=$2 AND deleted_at IS NULL", res.IP, job.WorkerID)
 		if err != nil {
 			return fmt.Errorf("worker created but db update failed %s: %v", job.WorkerName, err)
 		}

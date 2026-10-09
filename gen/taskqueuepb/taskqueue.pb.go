@@ -1847,8 +1847,21 @@ type Worker struct {
 	// The UI lights the warn badge (⚠) when this > 0 OR when
 	// recent_failures >= 2. Cleared via ResetWorkerCounters.
 	PendingWarnings *int32 `protobuf:"varint,26,opt,name=pending_warnings,json=pendingWarnings,proto3,oneof" json:"pending_warnings,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Swap sizing the worker was deployed with (see
+	// Recruiter.swap_proportion). NULL = deployed with the server
+	// config default. Used by the recruiter's recycling eligibility
+	// check so a worker whose swap sizing doesn't match the
+	// requesting recruiter is not recyclable.
+	SwapProportion *float32 `protobuf:"fixed32,28,opt,name=swap_proportion,json=swapProportion,proto3,oneof" json:"swap_proportion,omitempty"`
+	// Extra block storage the worker was deployed with. See
+	// Recruiter.extra_storage_gb / extra_storage_type. The volume_id
+	// is the provider's handle (Cinder UUID) that Delete and the
+	// orphan-volume janitor use to detach/destroy the volume.
+	ExtraStorageGb       *int32  `protobuf:"varint,29,opt,name=extra_storage_gb,json=extraStorageGb,proto3,oneof" json:"extra_storage_gb,omitempty"`
+	ExtraStorageType     *string `protobuf:"bytes,30,opt,name=extra_storage_type,json=extraStorageType,proto3,oneof" json:"extra_storage_type,omitempty"`
+	ExtraStorageVolumeId *string `protobuf:"bytes,31,opt,name=extra_storage_volume_id,json=extraStorageVolumeId,proto3,oneof" json:"extra_storage_volume_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Worker) Reset() {
@@ -2068,6 +2081,34 @@ func (x *Worker) GetPendingWarnings() int32 {
 		return *x.PendingWarnings
 	}
 	return 0
+}
+
+func (x *Worker) GetSwapProportion() float32 {
+	if x != nil && x.SwapProportion != nil {
+		return *x.SwapProportion
+	}
+	return 0
+}
+
+func (x *Worker) GetExtraStorageGb() int32 {
+	if x != nil && x.ExtraStorageGb != nil {
+		return *x.ExtraStorageGb
+	}
+	return 0
+}
+
+func (x *Worker) GetExtraStorageType() string {
+	if x != nil && x.ExtraStorageType != nil {
+		return *x.ExtraStorageType
+	}
+	return ""
+}
+
+func (x *Worker) GetExtraStorageVolumeId() string {
+	if x != nil && x.ExtraStorageVolumeId != nil {
+		return *x.ExtraStorageVolumeId
+	}
+	return ""
 }
 
 type WorkersList struct {
@@ -3706,10 +3747,18 @@ type WorkerRequest struct {
 	// Per-recruiter cloud image overrides. See Recruiter.image /
 	// Recruiter.gpu_image. The recruiter forwards them here so
 	// CreateWorker can stamp them on the job row.
-	Image         *string `protobuf:"bytes,8,opt,name=image,proto3,oneof" json:"image,omitempty"`
-	GpuImage      *string `protobuf:"bytes,9,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Image    *string `protobuf:"bytes,8,opt,name=image,proto3,oneof" json:"image,omitempty"`
+	GpuImage *string `protobuf:"bytes,9,opt,name=gpu_image,json=gpuImage,proto3,oneof" json:"gpu_image,omitempty"`
+	// See Recruiter.swap_proportion. The recruiter forwards its own
+	// value here so CreateWorker can stamp it on the job row (and on
+	// the worker row for the recycling eligibility check).
+	SwapProportion *float32 `protobuf:"fixed32,10,opt,name=swap_proportion,json=swapProportion,proto3,oneof" json:"swap_proportion,omitempty"`
+	// See Recruiter.extra_storage_gb / extra_storage_type. Same
+	// forward-through pattern — recruiter → request → job → provider.
+	ExtraStorageGb   *int32  `protobuf:"varint,11,opt,name=extra_storage_gb,json=extraStorageGb,proto3,oneof" json:"extra_storage_gb,omitempty"`
+	ExtraStorageType *string `protobuf:"bytes,12,opt,name=extra_storage_type,json=extraStorageType,proto3,oneof" json:"extra_storage_type,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *WorkerRequest) Reset() {
@@ -3801,6 +3850,27 @@ func (x *WorkerRequest) GetImage() string {
 func (x *WorkerRequest) GetGpuImage() string {
 	if x != nil && x.GpuImage != nil {
 		return *x.GpuImage
+	}
+	return ""
+}
+
+func (x *WorkerRequest) GetSwapProportion() float32 {
+	if x != nil && x.SwapProportion != nil {
+		return *x.SwapProportion
+	}
+	return 0
+}
+
+func (x *WorkerRequest) GetExtraStorageGb() int32 {
+	if x != nil && x.ExtraStorageGb != nil {
+		return *x.ExtraStorageGb
+	}
+	return 0
+}
+
+func (x *WorkerRequest) GetExtraStorageType() string {
+	if x != nil && x.ExtraStorageType != nil {
+		return *x.ExtraStorageType
 	}
 	return ""
 }
@@ -5872,8 +5942,25 @@ type Recruiter struct {
 	// — today's behaviour. TRUE picks ceil, so a positive percent always
 	// yields at least one prefetch slot on small workers.
 	PrefetchPercentCeil *bool `protobuf:"varint,20,opt,name=prefetch_percent_ceil,json=prefetchPercentCeil,proto3,oneof" json:"prefetch_percent_ceil,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Per-recruiter swapfile sizing override. NULL (unset) = use the
+	// server-wide scitq.swap_proportion config (default 0.10). 0 =
+	// disable swap entirely on this recruiter's workers. >0 = that
+	// fraction of /scratch dedicated to the swapfile at install time.
+	// Useful on huge-RAM nodes where /scratch is tight and the default
+	// 10% is pure waste.
+	SwapProportion *float32 `protobuf:"fixed32,21,opt,name=swap_proportion,json=swapProportion,proto3,oneof" json:"swap_proportion,omitempty"`
+	// Per-recruiter extra block storage (OVH / OpenStack only for now;
+	// Azure returns an error if requested). NULL or 0 = no extra
+	// volume; >0 = provision a Cinder volume of that size and mount it
+	// at /scratch BEFORE scitq-client installs. Workers born with
+	// different sizes are not recyclable across recruiters.
+	ExtraStorageGb *int32 `protobuf:"varint,22,opt,name=extra_storage_gb,json=extraStorageGb,proto3,oneof" json:"extra_storage_gb,omitempty"`
+	// Provider-specific volume class (OVH: "classic" / "high-speed" /
+	// "high-speed-gen2"). NULL = provider default. Passed through
+	// verbatim to the OpenStack API; validation happens there.
+	ExtraStorageType *string `protobuf:"bytes,23,opt,name=extra_storage_type,json=extraStorageType,proto3,oneof" json:"extra_storage_type,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Recruiter) Reset() {
@@ -6046,6 +6133,27 @@ func (x *Recruiter) GetPrefetchPercentCeil() bool {
 	return false
 }
 
+func (x *Recruiter) GetSwapProportion() float32 {
+	if x != nil && x.SwapProportion != nil {
+		return *x.SwapProportion
+	}
+	return 0
+}
+
+func (x *Recruiter) GetExtraStorageGb() int32 {
+	if x != nil && x.ExtraStorageGb != nil {
+		return *x.ExtraStorageGb
+	}
+	return 0
+}
+
+func (x *Recruiter) GetExtraStorageType() string {
+	if x != nil && x.ExtraStorageType != nil {
+		return *x.ExtraStorageType
+	}
+	return ""
+}
+
 type RecruiterUpdate struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	StepId          int32                  `protobuf:"varint,1,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
@@ -6070,8 +6178,13 @@ type RecruiterUpdate struct {
 	DiskSharedPerTask   *float32 `protobuf:"fixed32,19,opt,name=disk_shared_per_task,json=diskSharedPerTask,proto3,oneof" json:"disk_shared_per_task,omitempty"`
 	// See Recruiter.prefetch_percent_ceil.
 	PrefetchPercentCeil *bool `protobuf:"varint,20,opt,name=prefetch_percent_ceil,json=prefetchPercentCeil,proto3,oneof" json:"prefetch_percent_ceil,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// See Recruiter.swap_proportion.
+	SwapProportion *float32 `protobuf:"fixed32,21,opt,name=swap_proportion,json=swapProportion,proto3,oneof" json:"swap_proportion,omitempty"`
+	// See Recruiter.extra_storage_gb / extra_storage_type.
+	ExtraStorageGb   *int32  `protobuf:"varint,22,opt,name=extra_storage_gb,json=extraStorageGb,proto3,oneof" json:"extra_storage_gb,omitempty"`
+	ExtraStorageType *string `protobuf:"bytes,23,opt,name=extra_storage_type,json=extraStorageType,proto3,oneof" json:"extra_storage_type,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RecruiterUpdate) Reset() {
@@ -6242,6 +6355,27 @@ func (x *RecruiterUpdate) GetPrefetchPercentCeil() bool {
 		return *x.PrefetchPercentCeil
 	}
 	return false
+}
+
+func (x *RecruiterUpdate) GetSwapProportion() float32 {
+	if x != nil && x.SwapProportion != nil {
+		return *x.SwapProportion
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetExtraStorageGb() int32 {
+	if x != nil && x.ExtraStorageGb != nil {
+		return *x.ExtraStorageGb
+	}
+	return 0
+}
+
+func (x *RecruiterUpdate) GetExtraStorageType() string {
+	if x != nil && x.ExtraStorageType != nil {
+		return *x.ExtraStorageType
+	}
+	return ""
 }
 
 type RecruiterList struct {
@@ -12594,7 +12728,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x17EditStepCommandResponse\x12!\n" +
 	"\fedited_count\x18\x01 \x01(\x05R\veditedCount\x12 \n" +
 	"\fnew_task_ids\x18\x02 \x03(\x05R\n" +
-	"newTaskIds\"\x91\t\n" +
+	"newTaskIds\"\xb9\v\n" +
 	"\x06Worker\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -12629,7 +12763,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0eupgrade_status\x18\x17 \x01(\tH\vR\rupgradeStatus\x88\x01\x01\x120\n" +
 	"\x11upgrade_requested\x18\x18 \x01(\tH\fR\x10upgradeRequested\x88\x01\x01\x12,\n" +
 	"\x0frecent_failures\x18\x19 \x01(\x05H\rR\x0erecentFailures\x88\x01\x01\x12.\n" +
-	"\x10pending_warnings\x18\x1a \x01(\x05H\x0eR\x0fpendingWarnings\x88\x01\x01B\n" +
+	"\x10pending_warnings\x18\x1a \x01(\x05H\x0eR\x0fpendingWarnings\x88\x01\x01\x12,\n" +
+	"\x0fswap_proportion\x18\x1c \x01(\x02H\x0fR\x0eswapProportion\x88\x01\x01\x12-\n" +
+	"\x10extra_storage_gb\x18\x1d \x01(\x05H\x10R\x0eextraStorageGb\x88\x01\x01\x121\n" +
+	"\x12extra_storage_type\x18\x1e \x01(\tH\x11R\x10extraStorageType\x88\x01\x01\x12:\n" +
+	"\x17extra_storage_volume_id\x18\x1f \x01(\tH\x12R\x14extraStorageVolumeId\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_idB\f\n" +
 	"\n" +
@@ -12647,7 +12785,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0f_upgrade_statusB\x14\n" +
 	"\x12_upgrade_requestedB\x12\n" +
 	"\x10_recent_failuresB\x13\n" +
-	"\x11_pending_warnings\":\n" +
+	"\x11_pending_warningsB\x12\n" +
+	"\x10_swap_proportionB\x13\n" +
+	"\x11_extra_storage_gbB\x15\n" +
+	"\x13_extra_storage_typeB\x1a\n" +
+	"\x18_extra_storage_volume_id\":\n" +
 	"\vWorkersList\x12+\n" +
 	"\aworkers\x18\x01 \x03(\v2\x11.taskqueue.WorkerR\aworkers\"J\n" +
 	"\x12ListWorkersRequest\x12$\n" +
@@ -12790,7 +12932,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\a_offsetB\x0e\n" +
 	"\f_show_hiddenB\x12\n" +
 	"\x10_compact_commandB\x16\n" +
-	"\x14_compact_command_max\"\xbf\x02\n" +
+	"\x14_compact_command_max\"\x8f\x04\n" +
 	"\rWorkerRequest\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\x05R\n" +
 	"providerId\x12\x1b\n" +
@@ -12801,12 +12943,19 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\bprefetch\x18\x06 \x01(\x05R\bprefetch\x12\x1c\n" +
 	"\astep_id\x18\a \x01(\x05H\x00R\x06stepId\x88\x01\x01\x12\x19\n" +
 	"\x05image\x18\b \x01(\tH\x01R\x05image\x88\x01\x01\x12 \n" +
-	"\tgpu_image\x18\t \x01(\tH\x02R\bgpuImage\x88\x01\x01B\n" +
+	"\tgpu_image\x18\t \x01(\tH\x02R\bgpuImage\x88\x01\x01\x12,\n" +
+	"\x0fswap_proportion\x18\n" +
+	" \x01(\x02H\x03R\x0eswapProportion\x88\x01\x01\x12-\n" +
+	"\x10extra_storage_gb\x18\v \x01(\x05H\x04R\x0eextraStorageGb\x88\x01\x01\x121\n" +
+	"\x12extra_storage_type\x18\f \x01(\tH\x05R\x10extraStorageType\x88\x01\x01B\n" +
 	"\n" +
 	"\b_step_idB\b\n" +
 	"\x06_imageB\f\n" +
 	"\n" +
-	"_gpu_image\"\xe5\x01\n" +
+	"_gpu_imageB\x12\n" +
+	"\x10_swap_proportionB\x13\n" +
+	"\x11_extra_storage_gbB\x15\n" +
+	"\x13_extra_storage_type\"\xe5\x01\n" +
 	"\x19CreateWorkerByNameRequest\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x16\n" +
@@ -13000,7 +13149,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_step_id\":\n" +
 	"\vRecruiterId\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
-	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xa8\b\n" +
+	"\x04rank\x18\x02 \x01(\x05R\x04rank\"\xf8\t\n" +
 	"\tRecruiter\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12 \n" +
@@ -13026,7 +13175,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tgpu_image\x18\x11 \x01(\tH\vR\bgpuImage\x88\x01\x01\x128\n" +
 	"\x16memory_shared_per_task\x18\x12 \x01(\x02H\fR\x13memorySharedPerTask\x88\x01\x01\x124\n" +
 	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\rR\x11diskSharedPerTask\x88\x01\x01\x127\n" +
-	"\x15prefetch_percent_ceil\x18\x14 \x01(\bH\x0eR\x13prefetchPercentCeil\x88\x01\x01B\x0e\n" +
+	"\x15prefetch_percent_ceil\x18\x14 \x01(\bH\x0eR\x13prefetchPercentCeil\x88\x01\x01\x12,\n" +
+	"\x0fswap_proportion\x18\x15 \x01(\x02H\x0fR\x0eswapProportion\x88\x01\x01\x12-\n" +
+	"\x10extra_storage_gb\x18\x16 \x01(\x05H\x10R\x0eextraStorageGb\x88\x01\x01\x121\n" +
+	"\x12extra_storage_type\x18\x17 \x01(\tH\x11R\x10extraStorageType\x88\x01\x01B\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
 	"\f_max_workersB\x0f\n" +
@@ -13042,7 +13194,11 @@ const file_taskqueue_proto_rawDesc = "" +
 	"_gpu_imageB\x19\n" +
 	"\x17_memory_shared_per_taskB\x17\n" +
 	"\x15_disk_shared_per_taskB\x18\n" +
-	"\x16_prefetch_percent_ceil\"\xe4\b\n" +
+	"\x16_prefetch_percent_ceilB\x12\n" +
+	"\x10_swap_proportionB\x13\n" +
+	"\x11_extra_storage_gbB\x15\n" +
+	"\x13_extra_storage_type\"\xb4\n" +
+	"\n" +
 	"\x0fRecruiterUpdate\x12\x17\n" +
 	"\astep_id\x18\x01 \x01(\x05R\x06stepId\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x05R\x04rank\x12%\n" +
@@ -13068,7 +13224,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\tgpu_image\x18\x11 \x01(\tH\x0eR\bgpuImage\x88\x01\x01\x128\n" +
 	"\x16memory_shared_per_task\x18\x12 \x01(\x02H\x0fR\x13memorySharedPerTask\x88\x01\x01\x124\n" +
 	"\x14disk_shared_per_task\x18\x13 \x01(\x02H\x10R\x11diskSharedPerTask\x88\x01\x01\x127\n" +
-	"\x15prefetch_percent_ceil\x18\x14 \x01(\bH\x11R\x13prefetchPercentCeil\x88\x01\x01B\x0e\n" +
+	"\x15prefetch_percent_ceil\x18\x14 \x01(\bH\x11R\x13prefetchPercentCeil\x88\x01\x01\x12,\n" +
+	"\x0fswap_proportion\x18\x15 \x01(\x02H\x12R\x0eswapProportion\x88\x01\x01\x12-\n" +
+	"\x10extra_storage_gb\x18\x16 \x01(\x05H\x13R\x0eextraStorageGb\x88\x01\x01\x121\n" +
+	"\x12extra_storage_type\x18\x17 \x01(\tH\x14R\x10extraStorageType\x88\x01\x01B\x0e\n" +
 	"\f_protofilterB\x0e\n" +
 	"\f_concurrencyB\v\n" +
 	"\t_prefetchB\x0e\n" +
@@ -13088,7 +13247,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"_gpu_imageB\x19\n" +
 	"\x17_memory_shared_per_taskB\x17\n" +
 	"\x15_disk_shared_per_taskB\x18\n" +
-	"\x16_prefetch_percent_ceil\"E\n" +
+	"\x16_prefetch_percent_ceilB\x12\n" +
+	"\x10_swap_proportionB\x13\n" +
+	"\x11_extra_storage_gbB\x15\n" +
+	"\x13_extra_storage_type\"E\n" +
 	"\rRecruiterList\x124\n" +
 	"\n" +
 	"recruiters\x18\x01 \x03(\v2\x14.taskqueue.RecruiterR\n" +

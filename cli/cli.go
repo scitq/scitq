@@ -237,6 +237,9 @@ type Attr struct {
 			MaxWorkers      *int32   `arg:"--max-workers" help:"Maximum number of workers"`
 			Rounds          int      `arg:"--rounds" help:"Number of rounds"`
 			Timeout         int      `arg:"--timeout" default:"10" help:"Timeout in seconds"`
+			SwapProportion  *float32 `arg:"--swap-proportion" help:"Override /scratch swapfile fraction for this recruiter's workers (0 disables swap; unset = server config default)"`
+			ExtraStorageGb   *int32  `arg:"--extra-storage-gb" help:"Attach an extra block volume of this size (GB) to each recruited worker, mounted at /scratch (OVH only)"`
+			ExtraStorageType *string `arg:"--extra-storage-type" help:"Volume class for --extra-storage-gb (OVH: classic/high-speed/high-speed-gen2); unset = provider default"`
 		} `arg:"subcommand:create" help:"Create a new recruiter"`
 		Update *struct {
 			StepId          int32    `arg:"--step-id,required" help:"Step ID"`
@@ -253,6 +256,9 @@ type Attr struct {
 			MaxWorkers      *int32   `arg:"--max-workers" help:"Updated max workers"`
 			Rounds          *int32   `arg:"--rounds" help:"Updated rounds"`
 			Timeout         *int32   `arg:"--timeout" help:"Updated timeout (seconds)"`
+			SwapProportion  *float32 `arg:"--swap-proportion" help:"Updated /scratch swapfile fraction (0 disables)"`
+			ExtraStorageGb   *int32  `arg:"--extra-storage-gb" help:"Updated extra /scratch volume size in GB (OVH only)"`
+			ExtraStorageType *string `arg:"--extra-storage-type" help:"Updated extra volume class (OVH: classic/high-speed/high-speed-gen2)"`
 		} `arg:"subcommand:update" help:"Update a recruiter"`
 		Delete *struct {
 			StepId int32 `arg:"--step-id,required" help:"Step ID to delete"`
@@ -1652,6 +1658,9 @@ func (c *CLI) RecruiterCreate() error {
 		MaxWorkers:      c.Attr.Recruiter.Create.MaxWorkers,
 		Rounds:          int32(c.Attr.Recruiter.Create.Rounds),
 		Timeout:         int32(c.Attr.Recruiter.Create.Timeout),
+		SwapProportion:   c.Attr.Recruiter.Create.SwapProportion,
+		ExtraStorageGb:   c.Attr.Recruiter.Create.ExtraStorageGb,
+		ExtraStorageType: c.Attr.Recruiter.Create.ExtraStorageType,
 	}
 
 	_, err := c.QC.Client.CreateRecruiter(ctx, req)
@@ -1700,6 +1709,9 @@ func (c *CLI) RecruiterUpdate() error {
 		PrefetchPercent: u.PrefetchPercent,
 		ConcurrencyMin:  u.ConcurrencyMin,
 		ConcurrencyMax:  u.ConcurrencyMax,
+		SwapProportion:   u.SwapProportion,
+		ExtraStorageGb:   u.ExtraStorageGb,
+		ExtraStorageType: u.ExtraStorageType,
 	}
 
 	_, err := c.QC.Client.UpdateRecruiter(ctx, req)

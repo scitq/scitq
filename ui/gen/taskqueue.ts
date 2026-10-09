@@ -963,6 +963,33 @@ export interface Worker {
      * @generated from protobuf field: optional int32 pending_warnings = 26
      */
     pendingWarnings?: number;
+    /**
+     * Swap sizing the worker was deployed with (see
+     * Recruiter.swap_proportion). NULL = deployed with the server
+     * config default. Used by the recruiter's recycling eligibility
+     * check so a worker whose swap sizing doesn't match the
+     * requesting recruiter is not recyclable.
+     *
+     * @generated from protobuf field: optional float swap_proportion = 28
+     */
+    swapProportion?: number;
+    /**
+     * Extra block storage the worker was deployed with. See
+     * Recruiter.extra_storage_gb / extra_storage_type. The volume_id
+     * is the provider's handle (Cinder UUID) that Delete and the
+     * orphan-volume janitor use to detach/destroy the volume.
+     *
+     * @generated from protobuf field: optional int32 extra_storage_gb = 29
+     */
+    extraStorageGb?: number;
+    /**
+     * @generated from protobuf field: optional string extra_storage_type = 30
+     */
+    extraStorageType?: string;
+    /**
+     * @generated from protobuf field: optional string extra_storage_volume_id = 31
+     */
+    extraStorageVolumeId?: string;
 }
 /**
  * @generated from protobuf message taskqueue.WorkersList
@@ -1509,6 +1536,25 @@ export interface WorkerRequest {
      * @generated from protobuf field: optional string gpu_image = 9
      */
     gpuImage?: string;
+    /**
+     * See Recruiter.swap_proportion. The recruiter forwards its own
+     * value here so CreateWorker can stamp it on the job row (and on
+     * the worker row for the recycling eligibility check).
+     *
+     * @generated from protobuf field: optional float swap_proportion = 10
+     */
+    swapProportion?: number;
+    /**
+     * See Recruiter.extra_storage_gb / extra_storage_type. Same
+     * forward-through pattern — recruiter → request → job → provider.
+     *
+     * @generated from protobuf field: optional int32 extra_storage_gb = 11
+     */
+    extraStorageGb?: number;
+    /**
+     * @generated from protobuf field: optional string extra_storage_type = 12
+     */
+    extraStorageType?: string;
 }
 /**
  * @generated from protobuf message taskqueue.CreateWorkerByNameRequest
@@ -2241,6 +2287,35 @@ export interface Recruiter {
      * @generated from protobuf field: optional bool prefetch_percent_ceil = 20
      */
     prefetchPercentCeil?: boolean;
+    /**
+     * Per-recruiter swapfile sizing override. NULL (unset) = use the
+     * server-wide scitq.swap_proportion config (default 0.10). 0 =
+     * disable swap entirely on this recruiter's workers. >0 = that
+     * fraction of /scratch dedicated to the swapfile at install time.
+     * Useful on huge-RAM nodes where /scratch is tight and the default
+     * 10% is pure waste.
+     *
+     * @generated from protobuf field: optional float swap_proportion = 21
+     */
+    swapProportion?: number;
+    /**
+     * Per-recruiter extra block storage (OVH / OpenStack only for now;
+     * Azure returns an error if requested). NULL or 0 = no extra
+     * volume; >0 = provision a Cinder volume of that size and mount it
+     * at /scratch BEFORE scitq-client installs. Workers born with
+     * different sizes are not recyclable across recruiters.
+     *
+     * @generated from protobuf field: optional int32 extra_storage_gb = 22
+     */
+    extraStorageGb?: number;
+    /**
+     * Provider-specific volume class (OVH: "classic" / "high-speed" /
+     * "high-speed-gen2"). NULL = provider default. Passed through
+     * verbatim to the OpenStack API; validation happens there.
+     *
+     * @generated from protobuf field: optional string extra_storage_type = 23
+     */
+    extraStorageType?: string;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterUpdate
@@ -2330,6 +2405,22 @@ export interface RecruiterUpdate {
      * @generated from protobuf field: optional bool prefetch_percent_ceil = 20
      */
     prefetchPercentCeil?: boolean;
+    /**
+     * See Recruiter.swap_proportion.
+     *
+     * @generated from protobuf field: optional float swap_proportion = 21
+     */
+    swapProportion?: number;
+    /**
+     * See Recruiter.extra_storage_gb / extra_storage_type.
+     *
+     * @generated from protobuf field: optional int32 extra_storage_gb = 22
+     */
+    extraStorageGb?: number;
+    /**
+     * @generated from protobuf field: optional string extra_storage_type = 23
+     */
+    extraStorageType?: string;
 }
 /**
  * @generated from protobuf message taskqueue.RecruiterList
@@ -6134,7 +6225,11 @@ class Worker$Type extends MessageType<Worker> {
             { no: 23, name: "upgrade_status", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 24, name: "upgrade_requested", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 25, name: "recent_failures", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 26, name: "pending_warnings", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 26, name: "pending_warnings", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 28, name: "swap_proportion", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 29, name: "extra_storage_gb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 30, name: "extra_storage_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 31, name: "extra_storage_volume_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Worker>): Worker {
@@ -6241,6 +6336,18 @@ class Worker$Type extends MessageType<Worker> {
                 case /* optional int32 pending_warnings */ 26:
                     message.pendingWarnings = reader.int32();
                     break;
+                case /* optional float swap_proportion */ 28:
+                    message.swapProportion = reader.float();
+                    break;
+                case /* optional int32 extra_storage_gb */ 29:
+                    message.extraStorageGb = reader.int32();
+                    break;
+                case /* optional string extra_storage_type */ 30:
+                    message.extraStorageType = reader.string();
+                    break;
+                case /* optional string extra_storage_volume_id */ 31:
+                    message.extraStorageVolumeId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6334,6 +6441,18 @@ class Worker$Type extends MessageType<Worker> {
         /* optional int32 flavor_gpu_count = 27; */
         if (message.flavorGpuCount !== undefined)
             writer.tag(27, WireType.Varint).int32(message.flavorGpuCount);
+        /* optional float swap_proportion = 28; */
+        if (message.swapProportion !== undefined)
+            writer.tag(28, WireType.Bit32).float(message.swapProportion);
+        /* optional int32 extra_storage_gb = 29; */
+        if (message.extraStorageGb !== undefined)
+            writer.tag(29, WireType.Varint).int32(message.extraStorageGb);
+        /* optional string extra_storage_type = 30; */
+        if (message.extraStorageType !== undefined)
+            writer.tag(30, WireType.LengthDelimited).string(message.extraStorageType);
+        /* optional string extra_storage_volume_id = 31; */
+        if (message.extraStorageVolumeId !== undefined)
+            writer.tag(31, WireType.LengthDelimited).string(message.extraStorageVolumeId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8053,7 +8172,10 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
             { no: 6, name: "prefetch", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 7, name: "step_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 8, name: "image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 9, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 9, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "swap_proportion", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 11, name: "extra_storage_gb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 12, name: "extra_storage_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerRequest>): WorkerRequest {
@@ -8100,6 +8222,15 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
                 case /* optional string gpu_image */ 9:
                     message.gpuImage = reader.string();
                     break;
+                case /* optional float swap_proportion */ 10:
+                    message.swapProportion = reader.float();
+                    break;
+                case /* optional int32 extra_storage_gb */ 11:
+                    message.extraStorageGb = reader.int32();
+                    break;
+                case /* optional string extra_storage_type */ 12:
+                    message.extraStorageType = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8139,6 +8270,15 @@ class WorkerRequest$Type extends MessageType<WorkerRequest> {
         /* optional string gpu_image = 9; */
         if (message.gpuImage !== undefined)
             writer.tag(9, WireType.LengthDelimited).string(message.gpuImage);
+        /* optional float swap_proportion = 10; */
+        if (message.swapProportion !== undefined)
+            writer.tag(10, WireType.Bit32).float(message.swapProportion);
+        /* optional int32 extra_storage_gb = 11; */
+        if (message.extraStorageGb !== undefined)
+            writer.tag(11, WireType.Varint).int32(message.extraStorageGb);
+        /* optional string extra_storage_type = 12; */
+        if (message.extraStorageType !== undefined)
+            writer.tag(12, WireType.LengthDelimited).string(message.extraStorageType);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10276,7 +10416,10 @@ class Recruiter$Type extends MessageType<Recruiter> {
             { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 18, name: "memory_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 20, name: "prefetch_percent_ceil", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 20, name: "prefetch_percent_ceil", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 21, name: "swap_proportion", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 22, name: "extra_storage_gb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 23, name: "extra_storage_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Recruiter>): Recruiter {
@@ -10355,6 +10498,15 @@ class Recruiter$Type extends MessageType<Recruiter> {
                 case /* optional bool prefetch_percent_ceil */ 20:
                     message.prefetchPercentCeil = reader.bool();
                     break;
+                case /* optional float swap_proportion */ 21:
+                    message.swapProportion = reader.float();
+                    break;
+                case /* optional int32 extra_storage_gb */ 22:
+                    message.extraStorageGb = reader.int32();
+                    break;
+                case /* optional string extra_storage_type */ 23:
+                    message.extraStorageType = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10427,6 +10579,15 @@ class Recruiter$Type extends MessageType<Recruiter> {
         /* optional bool prefetch_percent_ceil = 20; */
         if (message.prefetchPercentCeil !== undefined)
             writer.tag(20, WireType.Varint).bool(message.prefetchPercentCeil);
+        /* optional float swap_proportion = 21; */
+        if (message.swapProportion !== undefined)
+            writer.tag(21, WireType.Bit32).float(message.swapProportion);
+        /* optional int32 extra_storage_gb = 22; */
+        if (message.extraStorageGb !== undefined)
+            writer.tag(22, WireType.Varint).int32(message.extraStorageGb);
+        /* optional string extra_storage_type = 23; */
+        if (message.extraStorageType !== undefined)
+            writer.tag(23, WireType.LengthDelimited).string(message.extraStorageType);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10460,7 +10621,10 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
             { no: 17, name: "gpu_image", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 18, name: "memory_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 19, name: "disk_shared_per_task", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 20, name: "prefetch_percent_ceil", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 20, name: "prefetch_percent_ceil", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 21, name: "swap_proportion", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 22, name: "extra_storage_gb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 23, name: "extra_storage_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<RecruiterUpdate>): RecruiterUpdate {
@@ -10536,6 +10700,15 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
                 case /* optional bool prefetch_percent_ceil */ 20:
                     message.prefetchPercentCeil = reader.bool();
                     break;
+                case /* optional float swap_proportion */ 21:
+                    message.swapProportion = reader.float();
+                    break;
+                case /* optional int32 extra_storage_gb */ 22:
+                    message.extraStorageGb = reader.int32();
+                    break;
+                case /* optional string extra_storage_type */ 23:
+                    message.extraStorageType = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10608,6 +10781,15 @@ class RecruiterUpdate$Type extends MessageType<RecruiterUpdate> {
         /* optional bool prefetch_percent_ceil = 20; */
         if (message.prefetchPercentCeil !== undefined)
             writer.tag(20, WireType.Varint).bool(message.prefetchPercentCeil);
+        /* optional float swap_proportion = 21; */
+        if (message.swapProportion !== undefined)
+            writer.tag(21, WireType.Bit32).float(message.swapProportion);
+        /* optional int32 extra_storage_gb = 22; */
+        if (message.extraStorageGb !== undefined)
+            writer.tag(22, WireType.Varint).int32(message.extraStorageGb);
+        /* optional string extra_storage_type = 23; */
+        if (message.extraStorageType !== undefined)
+            writer.tag(23, WireType.LengthDelimited).string(message.extraStorageType);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

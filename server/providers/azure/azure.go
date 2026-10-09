@@ -309,7 +309,23 @@ func planForImageRef(ref *armcompute.ImageReference) *armcompute.Plan {
 }
 
 // Create provisions a new VM for a worker with retry logic and returns the IP address.
-func (ap *AzureProvider) Create(workerName, flavor, location string, hasGPU bool, image, gpuImage string, jobId int32) (string, error) {
+func (ap *AzureProvider) Create(params providers.CreateParams) (providers.CreateResult, error) {
+	// Azure provider doesn't support the extra-storage feature yet.
+	// Fail fast and loudly rather than silently ignoring the request —
+	// the user would otherwise see no error at recruit time and only
+	// discover the missing volume as a /scratch-full task failure
+	// hours later.
+	if params.ExtraStorageGB != nil && *params.ExtraStorageGB > 0 {
+		return providers.CreateResult{}, fmt.Errorf("extra_storage_gb is not supported for the Azure provider yet (requested %d GB)", *params.ExtraStorageGB)
+	}
+	workerName := params.WorkerName
+	flavor := params.Flavor
+	location := params.Location
+	hasGPU := params.HasGPU
+	image := params.Image
+	gpuImage := params.GPUImage
+	jobId := params.JobID
+	swapProportion := params.SwapProportion
 	var ipAddress string
 	var pubIPID string
 
@@ -370,7 +386,7 @@ runcmd:%s
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.ClientDownloadToken,
 			ap.cfg.Scitq.ServerFQDN, ap.cfg.Scitq.Port,
-			ap.cfg.Scitq.SwapProportion, ap.cfg.Scitq.WorkerToken,
+			providers.ResolveSwapProportion(swapProportion, ap.cfg.Scitq.SwapProportion), ap.cfg.Scitq.WorkerToken,
 			jobId,
 			ap.name,
 			location,
@@ -529,11 +545,11 @@ runcmd:%s
 		return nil
 	}, 3, 5*time.Second)
 	if err != nil {
-		return "", err
+		return providers.CreateResult{}, err
 	}
 
 	log.Printf("VM %s created successfully with IP address %s", workerName, ipAddress)
-	return ipAddress, nil
+	return providers.CreateResult{IP: ipAddress}, nil
 }
 
 // createDefaultNICWithPubIP creates a new NIC with a public IP and returns both IDs.

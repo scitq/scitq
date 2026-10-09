@@ -21,7 +21,7 @@
 |  | DockerRegistry | `scitq.docker_registry` | `` | `string` | DockerRegistry specifies the default container registry URL for pulling images. |
 |  | DockerAuthentication | `scitq.docker_authentication` | `` | `string` | DockerAuthentication holds the authentication token or credentials for the default Docker registry. |
 |  | DockerCredentials | `scitq.docker_credentials` | `` | `[]DockerCredential` | DockerCredentials contains multiple registry→secret pairs for authenticating to container registries. Used by clients to access private registries. |
-|  | SwapProportion | `scitq.swap_proportion` | `0.1` | `float32` | SwapProportion defines the proportion of disk space dedicated to swap on worker automated deploy. |
+|  | SwapProportion | `scitq.swap_proportion` | `0.1` | `float32` | SwapProportion defines the fraction of /scratch dedicated to swap on worker automated deploy. Default 0.10. A recruiter can override this per step via its own swap_proportion (0 disables swap entirely on that recruiter's workers). |
 |  | WorkerToken | `scitq.worker_token` | `` | `string` | WorkerToken is a secret token used to authenticate worker nodes. |
 |  | JwtSecret | `scitq.jwt_secret` | `` | `string` | JwtSecret is the secret key used to sign JWT tokens. |
 |  | RecruitmentInterval | `scitq.recruiter_interval` | `5` | `int` | RecruitmentInterval sets the interval in seconds for recruiting new workers. |

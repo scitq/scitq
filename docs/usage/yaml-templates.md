@@ -1041,6 +1041,9 @@ worker_pool:
   max_recruited: 10                # Maximum workers to recruit
   task_batches: 2                  # How many batches of tasks per worker
   prefetch: 1                      # Tasks to download in advance per worker
+  swap_proportion: 0               # Override /scratch swap sizing — see below
+  extra_storage_gb: 500            # Attach a 500 GB Cinder volume, mount at /scratch (OVH only)
+  extra_storage_type: high-speed   # Volume class (OVH: classic / high-speed / high-speed-gen2)
 ```
 
 The `prefetch` setting controls how many tasks a worker prepares in advance while executing its current tasks. This is key for performance: without prefetch, there's idle time between tasks while inputs are downloaded. With `prefetch: 1`, the next task's inputs are downloaded during the current task's execution. Higher values help for very fast tasks with large inputs. See the [CLI recruiter documentation](cli.md#recruiter-create) for details on tuning prefetch.
@@ -1111,6 +1114,40 @@ Defaults shipped with scitq (when neither field is set):
 
 - **Azure** — `Canonical/UbuntuServer/24.04-LTS/latest` (CPU), `microsoft-dsvm/ubuntu-hpc/2204/latest` (GPU, NC family).
 - **OVH** — config-defined default, `NVIDIA GPU Cloud (NGC)` for GPU flavors.
+
+#### `swap_proportion:` — override the /scratch swapfile size
+
+Each worker reserves a slice of `/scratch` for swap at install time; the server-wide default is `scitq.swap_proportion: 0.10` (10 %). On huge-RAM nodes where `/scratch` is tight and the swapfile will never page, that 10 % is pure waste. Set `swap_proportion` on the worker pool to override:
+
+```yaml
+worker_pool:
+  flavor: "Standard_M64s_v3"   # 1 TiB RAM
+  swap_proportion: 0           # don't carve a swapfile at all
+```
+
+Values: `0` disables swap entirely; `0.0 < x <= 1.0` is that fraction of `/scratch`. Omit the field (or leave it empty) to fall back to the server default.
+
+Recycling respects the override — a worker deployed with one `swap_proportion` is not eligible for a recruiter that asks for a different value, so you get fresh workers rather than silently reusing the wrong profile.
+
+#### `extra_storage_gb:` / `extra_storage_type:` — attach extra /scratch (OVH only)
+
+Some flavors ship a small root disk (OVH Compute SKUs often give 50–80 GB) but have the RAM / CPU for workloads that write hundreds of GB to `/scratch`. The worker pool can ask for an extra Cinder volume that is created, attached to the VM, formatted ext4 and mounted at `/scratch` *before* `scitq-client` installs:
+
+```yaml
+worker_pool:
+  provider: openstack.ovh
+  cpu: ">= 32"
+  mem: ">= 120"
+  extra_storage_gb: 500            # 500 GB extra for /scratch
+  extra_storage_type: high-speed   # omit for OVH default (classic)
+```
+
+Caveats:
+
+- **OVH only for now.** The Azure provider returns a clear error at recruit time if `extra_storage_gb > 0`; the implementation will land in a follow-up.
+- **Recycling matches on both fields.** A worker born with 500 GB `high-speed` is not eligible for a later recruiter that asks for 1000 GB (or `classic`) — volumes can't be reshaped in place, so the recruiter deploys a fresh worker.
+- **The volume is a paid resource.** It's destroyed on worker termination, and an orphan-volume janitor sweeps every 10 min for volumes whose worker row is gone (as a net under a stuck delete). Watch for log lines starting with `🧹 orphan-volume:` if you ever see unexpected charges.
+- **Install fails fast if the volume doesn't appear within 120 s** of the server reaching ACTIVE. Better to have a worker fail install loudly than to silently fall back to the root disk and run out of space mid-task.
 
 ### Workspace
 

@@ -118,7 +118,10 @@ class WorkerPool:
     """
     
     def __init__(self, *match: FieldExpr, max_recruited: Optional[int] = None, task_batches: int = 1, timeout: int = DEFAULT_RECRUITER_TIMEOUT,
-                 image: Optional[str] = None, gpu_image: Optional[str] = None):
+                 image: Optional[str] = None, gpu_image: Optional[str] = None,
+                 swap_proportion: Optional[float] = None,
+                 extra_storage_gb: Optional[int] = None,
+                 extra_storage_type: Optional[str] = None):
         self.match = set(match)
         self.extra_options = {}
         if max_recruited is not None:
@@ -136,6 +139,25 @@ class WorkerPool:
             self.extra_options["image"] = image
         if gpu_image is not None:
             self.extra_options["gpu_image"] = gpu_image
+        # Per-pool /scratch swapfile sizing override. None = fall back to
+        # the server's scitq.swap_proportion config (default 0.10). 0 =
+        # disable swap entirely on this pool's workers. >0 = that
+        # fraction of /scratch. Useful on huge-RAM nodes where /scratch
+        # is tight and the default 10% is wasted on a swapfile that will
+        # never page.
+        if swap_proportion is not None:
+            self.extra_options["swap_proportion"] = swap_proportion
+        # Per-pool extra block storage (OVH / OpenStack only for now;
+        # Azure returns an error if extra_storage_gb > 0). None or 0 =
+        # no extra volume. >0 = provision a Cinder volume of that size,
+        # attach it, mount at /scratch BEFORE scitq-client installs.
+        # extra_storage_type is the provider's volume class name
+        # ("classic" / "high-speed" / "high-speed-gen2" on OVH); None =
+        # provider default.
+        if extra_storage_gb is not None:
+            self.extra_options["extra_storage_gb"] = extra_storage_gb
+        if extra_storage_type is not None:
+            self.extra_options["extra_storage_type"] = extra_storage_type
 
     @property
     def task_batches(self):
@@ -308,7 +330,10 @@ class WorkerPool:
     
     def clone_with(self, *match: FieldExpr, max_recruited: Optional[int] = None, task_batches: Optional[int] = None,
                     timeout: Optional[int] = None,
-                    image: Optional[str] = None, gpu_image: Optional[str] = None) -> "WorkerPool":
+                    image: Optional[str] = None, gpu_image: Optional[str] = None,
+                    swap_proportion: Optional[float] = None,
+                    extra_storage_gb: Optional[int] = None,
+                    extra_storage_type: Optional[str] = None) -> "WorkerPool":
         """
         Returns a copy of the current WorkerPool with optionally overridden fields.
         Any provided arguments override the corresponding fields in the original pool.
@@ -319,7 +344,10 @@ class WorkerPool:
                           task_batches=task_batches if task_batches is not None else self.task_batches,
                           timeout=timeout if timeout is not None else self.timeout,
                           image=image if image is not None else self.extra_options.get("image"),
-                          gpu_image=gpu_image if gpu_image is not None else self.extra_options.get("gpu_image"))
+                          gpu_image=gpu_image if gpu_image is not None else self.extra_options.get("gpu_image"),
+                          swap_proportion=swap_proportion if swap_proportion is not None else self.extra_options.get("swap_proportion"),
+                          extra_storage_gb=extra_storage_gb if extra_storage_gb is not None else self.extra_options.get("extra_storage_gb"),
+                          extra_storage_type=extra_storage_type if extra_storage_type is not None else self.extra_options.get("extra_storage_type"))
     
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, WorkerPool):

@@ -896,6 +896,8 @@ WORKER_POOL_KEYS = {
     'provider', 'region', 'cpu', 'mem', 'disk', 'gpu', 'gpumem',
     'flavor', 'max_recruited', 'task_batches',
     'image', 'gpu_image',
+    'swap_proportion',
+    'extra_storage_gb', 'extra_storage_type',
 }
 
 PARAM_ENTRY_KEYS = {
@@ -1540,6 +1542,36 @@ def _build_worker_pool(wp_def: dict, params, extra_vars: Optional[Dict] = None) 
             val = _resolve_field(wp_def[key], params, extra_vars=extra_vars)
             if val is not None and str(val) != '':
                 kwargs[key] = str(val)
+    # Per-pool /scratch swap override. 0 is a legal value ("disable
+    # swap"), so we only skip when the key is absent or resolves to
+    # None — not when it resolves to the integer 0.
+    if 'swap_proportion' in wp_def:
+        val = _resolve_field(wp_def['swap_proportion'], params, extra_vars=extra_vars)
+        if val is not None:
+            try:
+                kwargs['swap_proportion'] = float(val)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"worker_pool.swap_proportion: cannot parse {val!r} as float (0 disables swap; 0.0..1.0 = fraction of /scratch)")
+    # Per-pool extra /scratch block volume. extra_storage_gb is the
+    # size in GB (int). extra_storage_type is a provider-specific
+    # volume class string (OVH: "classic" / "high-speed" /
+    # "high-speed-gen2"); omitted → provider default. Only OVH
+    # (openstack.*) supports this today; the Azure provider will
+    # return a clear error at recruit time if the step picks a
+    # non-matching flavor.
+    if 'extra_storage_gb' in wp_def:
+        val = _resolve_field(wp_def['extra_storage_gb'], params, extra_vars=extra_vars)
+        if val is not None:
+            try:
+                kwargs['extra_storage_gb'] = int(val)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"worker_pool.extra_storage_gb: cannot parse {val!r} as int (volume size in GB)")
+    if 'extra_storage_type' in wp_def:
+        val = _resolve_field(wp_def['extra_storage_type'], params, extra_vars=extra_vars)
+        if val is not None and str(val) != '':
+            kwargs['extra_storage_type'] = str(val)
     return WorkerPool(*filters, **kwargs)
 
 

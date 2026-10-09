@@ -985,6 +985,17 @@ export interface RecruiterFields {
   maxWorkers?: number;
   rounds?: number;
   timeout?: number;
+  // Per-recruiter /scratch swapfile fraction. Undefined = fall back to
+  // the server config default (typically 0.10). 0 = disable swap
+  // entirely on this recruiter's workers.
+  swapProportion?: number;
+  // Per-recruiter extra block storage (OVH only for now). Undefined
+  // or 0 = no extra volume. >0 = provision a Cinder volume of that
+  // many GB, mount at /scratch BEFORE scitq-client installs.
+  extraStorageGb?: number;
+  // Provider-specific volume class (OVH: "classic", "high-speed",
+  // "high-speed-gen2"). Undefined = provider default.
+  extraStorageType?: string;
 }
 
 /**
@@ -1024,6 +1035,9 @@ export async function createRecruiter(stepId: number, rank: number, fields: Recr
       maxWorkers: fields.maxWorkers,
       rounds: fields.rounds ?? 10,
       timeout: fields.timeout ?? 300,
+      swapProportion: fields.swapProportion,
+      extraStorageGb: fields.extraStorageGb,
+      extraStorageType: fields.extraStorageType,
     }, await callOptionsUserToken());
   } catch (error) {
     console.error("Error creating recruiter:", error);
@@ -1052,6 +1066,9 @@ export async function updateRecruiter(stepId: number, rank: number, fields: Recr
       maxWorkers: fields.maxWorkers,
       rounds: fields.rounds,
       timeout: fields.timeout,
+      swapProportion: fields.swapProportion,
+      extraStorageGb: fields.extraStorageGb,
+      extraStorageType: fields.extraStorageType,
     }, await callOptionsUserToken());
   } catch (error) {
     console.error("Error updating recruiter:", error);

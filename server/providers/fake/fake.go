@@ -32,6 +32,12 @@ type FakeProvider struct {
 	Name        string
 
 	cancels map[string]context.CancelFunc
+
+	// attachedVolumes maps workerName → GB size for workers whose
+	// Create call included ExtraStorageGB > 0. Lets integration tests
+	// assert the attach happened (and that the delete path reaches
+	// out to the volume) without needing a real backend.
+	attachedVolumes map[string]int32
 }
 
 // New returns a new empty FakeProvider with a single "default" region.
@@ -62,10 +68,19 @@ func NewFromConfig(name string, cfg config.Config, config config.FakeProviderCon
 }
 
 // Create records a new worker in the specified region and returns a fake IP address.
-// hasGPU and the per-recruiter image / gpuImage strings are part of
-// the Provider interface contract but the fake backend has no VM
-// image concept, so they're accepted and ignored.
-func (f *FakeProvider) Create(workerName, flavor, location string, hasGPU bool, image, gpuImage string, jobId int32) (string, error) {
+// hasGPU, the per-recruiter image / gpuImage strings, and swapProportion
+// are part of the Provider interface contract but the fake backend has
+// no VM image concept and no cloud-init, so they're accepted and
+// ignored (the recorded worker's swap sizing is captured on the server
+// side via the worker row for the recycling-eligibility check).
+//
+// ExtraStorageGB > 0 is honoured enough to return a synthetic volume
+// id ("fake-vol-<workerName>") so integration tests can assert the
+// server persisted it on the worker row and the delete path cleaned
+// it up. Also recorded in attachedVolumes for cross-test inspection.
+func (f *FakeProvider) Create(params providers.CreateParams) (providers.CreateResult, error) {
+	workerName := params.WorkerName
+	location := params.Location
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -77,13 +92,27 @@ func (f *FakeProvider) Create(workerName, flavor, location string, hasGPU bool, 
 		f.regions[region] = make(map[string]string)
 	}
 	if workerName == "" {
-		return "", errors.New("workerName required")
+		return providers.CreateResult{}, errors.New("workerName required")
 	}
 	if _, exists := f.regions[region][workerName]; exists {
-		return "", fmt.Errorf("worker %s already exists", workerName)
+		return providers.CreateResult{}, fmt.Errorf("worker %s already exists", workerName)
 	}
 	ip := fmt.Sprintf("10.0.0.%d", len(f.regions[region])+1)
 	f.regions[region][workerName] = ip
+
+	// Record a synthetic volume id when extra storage was requested
+	// so integration tests can assert the server persisted it on the
+	// worker row and later detached+deleted it. Nothing hits a real
+	// backend; attachedVolumes is just an in-memory map keyed by
+	// worker name.
+	var volumeID string
+	if params.ExtraStorageGB != nil && *params.ExtraStorageGB > 0 {
+		volumeID = "fake-vol-" + workerName
+		if f.attachedVolumes == nil {
+			f.attachedVolumes = make(map[string]int32)
+		}
+		f.attachedVolumes[workerName] = *params.ExtraStorageGB
+	}
 
 	if f.AutoLaunch {
 		if f.ServerAddr != "" && f.WorkerToken != "" {
@@ -125,7 +154,16 @@ func (f *FakeProvider) Create(workerName, flavor, location string, hasGPU bool, 
 		}
 	}
 
-	return ip, nil
+	return providers.CreateResult{IP: ip, ExtraVolumeID: volumeID}, nil
+}
+
+// AttachedVolumeSize returns the GB size recorded for the given
+// worker when the Create call provisioned an extra volume, or 0 when
+// none was recorded. Test-only helper.
+func (f *FakeProvider) AttachedVolumeSize(workerName string) int32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.attachedVolumes[workerName]
 }
 
 // List returns all currently known workers with their fake IPs across all regions.
@@ -190,6 +228,10 @@ func (f *FakeProvider) Delete(workerName, location string) error {
 		return fmt.Errorf("worker %s not found", workerName)
 	}
 	delete(workers, workerName)
+	// Mirror the OpenStack cleanup: when a Create recorded an extra
+	// volume for this worker, Delete must drop it. Lets tests assert
+	// the end-to-end lifecycle.
+	delete(f.attachedVolumes, workerName)
 
 	if cancel, exists := f.cancels[workerName]; exists {
 		cancel()

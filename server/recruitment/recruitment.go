@@ -91,6 +91,20 @@ type Recruiter struct {
 	// which guarantees at least 1 prefetch slot on small workers where
 	// the floor would round down to 0.
 	PrefetchPercentCeil   bool
+	// Per-recruiter swapfile sizing override forwarded to CreateWorker
+	// and stamped on the deploy job. NULL = use cfg.Scitq.SwapProportion
+	// (today's behaviour, default 0.10). 0 = disable swap. >0 = that
+	// fraction of /scratch. Also used by the recycling eligibility check
+	// (a worker whose swap_proportion doesn't match is not recyclable).
+	SwapProportion        *float32
+	// Per-recruiter extra block storage (OVH / OpenStack only for now;
+	// Azure returns an error when ExtraStorageGB > 0). NULL / 0 = no
+	// extra volume. The recruiter forwards both to CreateWorker; the
+	// provider creates the Cinder volume, attaches it, and the
+	// cloud-init prelude mounts it at /scratch. Recycling rejects a
+	// worker whose extra_storage_gb / extra_storage_type doesn't match.
+	ExtraStorageGB        *int32
+	ExtraStorageType      *string
 	// GPU devices the step's task_spec asked for, per task. When
 	// set, computeConcurrencyForRecruiterWorker adds
 	// flavor.gpu_count / gpu_per_task to the min-of-ratios
@@ -177,6 +191,9 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.memory_shared_per_task,
             r.disk_shared_per_task,
             r.prefetch_percent_ceil,
+            r.swap_proportion,
+            r.extra_storage_gb,
+            r.extra_storage_type,
             r.maximum_workers AS step_maximum,
             COALESCE(wagg.current_workers, 0) AS current_workers,
             wf.workflow_id,
@@ -205,6 +222,9 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             r.memory_shared_per_task, r.disk_shared_per_task,
             r.prefetch_percent_ceil,
+            r.swap_proportion,
+            r.extra_storage_gb,
+            r.extra_storage_type,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
@@ -246,6 +266,9 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 			&r.MemorySharedPerTask,
 			&r.DiskSharedPerTask,
 			&r.PrefetchPercentCeil,
+			&r.SwapProportion,
+			&r.ExtraStorageGB,
+			&r.ExtraStorageType,
 			&r.MaximumWorkers,
 			&r.CurrentWorkers,
 			&r.WorkflowID,
@@ -352,6 +375,9 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.memory_shared_per_task,
             r.disk_shared_per_task,
             r.prefetch_percent_ceil,
+            r.swap_proportion,
+            r.extra_storage_gb,
+            r.extra_storage_type,
             r.maximum_workers AS step_maximum,
             COALESCE(wagg.current_workers, 0) AS current_workers,
             wf.workflow_id,
@@ -382,6 +408,9 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
             r.prefetch_percent, r.concurrency_min, r.concurrency_max,
             r.memory_shared_per_task, r.disk_shared_per_task,
             r.prefetch_percent_ceil,
+            r.swap_proportion,
+            r.extra_storage_gb,
+            r.extra_storage_type,
             wf.workflow_id, pa.pending, aa.active_taskrate, wagg.current_workers, wagg.free_taskrate
         HAVING
             CEIL(pa.pending * 1.0 / r.rounds) > COALESCE(wagg.free_taskrate, 0)
@@ -418,6 +447,9 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
 			&r.MemorySharedPerTask,
 			&r.DiskSharedPerTask,
 			&r.PrefetchPercentCeil,
+			&r.SwapProportion,
+			&r.ExtraStorageGB,
+			&r.ExtraStorageType,
 			&r.MaximumWorkers,
 			&r.CurrentWorkers,
 			&r.WorkflowID,
@@ -578,6 +610,19 @@ type RecyclableWorker struct {
 	// alongside Cpu/Memory/Disk.
 	GpuCount    *int32
 	Occupation  float64
+	// Swap sizing the worker was deployed with (worker.swap_proportion).
+	// Compared against the requesting recruiter's effective value
+	// (resolved against cfg default) in recycleWorkers; a mismatch
+	// disqualifies the worker from reuse.
+	SwapProportion *float64
+	// Extra block storage the worker was deployed with
+	// (worker.extra_storage_gb / worker.extra_storage_type). Compared
+	// against the requesting recruiter's values in
+	// selectWorkersForRecruiter; a size or type mismatch disqualifies
+	// the worker because the volume is static and we can't re-mount a
+	// different one mid-flight.
+	ExtraStorageGB   *int32
+	ExtraStorageType *string
 }
 
 // Note: This function now returns each worker's recyclability scope ('G' or 'W') and
@@ -610,7 +655,10 @@ func findRecyclableWorkers(
 			f.cpu,
 			f.mem,
 			f.disk,
-			f.gpu_count
+			f.gpu_count,
+			w.swap_proportion,
+			w.extra_storage_gb,
+			w.extra_storage_type
 		FROM
 			worker w
 		LEFT JOIN
@@ -627,7 +675,7 @@ func findRecyclableWorkers(
 			AND w.recyclable_scope IN ('G','W')
 		GROUP BY
 			w.worker_id, w.flavor_id, w.region_id, w.concurrency, w.step_id, w.recyclable_scope, s.workflow_id,
-    		f.cpu, f.mem, f.disk, f.gpu_count
+    		f.cpu, f.mem, f.disk, f.gpu_count, w.swap_proportion, w.extra_storage_gb, w.extra_storage_type
 		HAVING
 			-- Free capacity on the current step, OR genuinely idle. The
 			-- idle branch covers operator-parked workers (concurrency=0,
@@ -647,8 +695,9 @@ func findRecyclableWorkers(
 	var stepFreeSlots = make(map[int32]int) // step_id -> free slots
 	for rows.Next() {
 		var w RecyclableWorker
-		var stepIDproxy, workflowIDProxy, cpu, gpuCount sql.NullInt32
-		var memory, disk sql.NullFloat64
+		var stepIDproxy, workflowIDProxy, cpu, gpuCount, extraGB sql.NullInt32
+		var memory, disk, swapProp sql.NullFloat64
+		var extraType sql.NullString
 		if err := rows.Scan(
 			&w.WorkerID,
 			&w.FlavorID,
@@ -662,6 +711,9 @@ func findRecyclableWorkers(
 			&memory,
 			&disk,
 			&gpuCount,
+			&swapProp,
+			&extraGB,
+			&extraType,
 		); err != nil {
 			rows.Close()
 			return nil, err
@@ -676,6 +728,12 @@ func findRecyclableWorkers(
 		w.Memory = utils.NullFloat64ToPtr(memory)
 		w.Disk = utils.NullFloat64ToPtr(disk)
 		w.GpuCount = utils.NullInt32ToPtr(gpuCount)
+		w.SwapProportion = utils.NullFloat64ToPtr(swapProp)
+		w.ExtraStorageGB = utils.NullInt32ToPtr(extraGB)
+		if extraType.Valid {
+			s := extraType.String
+			w.ExtraStorageType = &s
+		}
 
 		// Compute occupation
 		log.Printf("[DEBUG] Worker %d: occupation %.2f", w.WorkerID, w.Occupation)
@@ -1031,7 +1089,32 @@ func selectWorkersForRecruiter(
 	recruiterStepID int32,
 	recruiterWorkflowID int32,
 	r Recruiter,
+	cfgDefaultSwap float32,
 ) []int32 {
+	// Resolve the recruiter's effective swap_proportion against the
+	// server config default. A worker whose own effective value differs
+	// is not recyclable (its /scratch is sized for a different workload
+	// profile; re-mounting mid-flight isn't attempted).
+	//
+	// Values ride float32 wire types (proto) and float64 DB types
+	// (sql.NullFloat64) so cross-width conversions introduce
+	// representation noise — 0.10 as float32 becomes 0.10000000149…
+	// as float64. The equality check uses a 1e-4 tolerance so swap
+	// sizings that are the same to four decimal places (far finer than
+	// anyone would ever configure) count as a match.
+	recruiterSwap := float64(cfgDefaultSwap)
+	if r.SwapProportion != nil {
+		recruiterSwap = float64(*r.SwapProportion)
+	}
+	const swapEpsilon = 1e-4
+	swapMatches := func(a, b float64) bool {
+		d := a - b
+		if d < 0 {
+			d = -d
+		}
+		return d < swapEpsilon
+	}
+
 	selected := make([]int32, 0)
 	totalTaskrate := 0
 	for _, w := range recyclable {
@@ -1051,6 +1134,39 @@ func selectWorkersForRecruiter(
 			}
 		}
 		if w.StepID != nil && *w.StepID == recruiterStepID {
+			continue
+		}
+		workerSwap := float64(cfgDefaultSwap)
+		if w.SwapProportion != nil {
+			workerSwap = *w.SwapProportion
+		}
+		if !swapMatches(workerSwap, recruiterSwap) {
+			continue
+		}
+		// Extra block storage match. Both the size (GB) and the
+		// volume type must agree; unset on either side is treated as
+		// 0 / empty string. Volume type comparison is literal because
+		// provider-specific class names are opaque — "classic" vs
+		// "high-speed" is a real difference the operator opted into.
+		var recruiterGB int32
+		if r.ExtraStorageGB != nil {
+			recruiterGB = *r.ExtraStorageGB
+		}
+		var workerGB int32
+		if w.ExtraStorageGB != nil {
+			workerGB = *w.ExtraStorageGB
+		}
+		if recruiterGB != workerGB {
+			continue
+		}
+		var recruiterType, workerType string
+		if r.ExtraStorageType != nil {
+			recruiterType = *r.ExtraStorageType
+		}
+		if w.ExtraStorageType != nil {
+			workerType = *w.ExtraStorageType
+		}
+		if recruiterType != workerType {
 			continue
 		}
 		selected = append(selected, w.WorkerID)
@@ -1138,15 +1254,18 @@ func deployWorkers(
 		newPrefetch := computePrefetchForRecruiterWorker(recruiter, newConcurrency)
 
 		_, err := creator.CreateWorker(ctx, &pb.WorkerRequest{
-			FlavorId:    selected.FlavorID,
-			ProviderId:  regionInfo.ProviderID,
-			RegionId:    selected.RegionID,
-			StepId:      &recruiter.StepID,
-			Number:      1,
-			Concurrency: int32(newConcurrency),
-			Prefetch:    int32(newPrefetch),
-			Image:       recruiter.Image,
-			GpuImage:    recruiter.GPUImage,
+			FlavorId:         selected.FlavorID,
+			ProviderId:       regionInfo.ProviderID,
+			RegionId:         selected.RegionID,
+			StepId:           &recruiter.StepID,
+			Number:           1,
+			Concurrency:      int32(newConcurrency),
+			Prefetch:         int32(newPrefetch),
+			Image:            recruiter.Image,
+			GpuImage:         recruiter.GPUImage,
+			SwapProportion:   recruiter.SwapProportion,
+			ExtraStorageGb:   recruiter.ExtraStorageGB,
+			ExtraStorageType: recruiter.ExtraStorageType,
 		})
 		if err != nil {
 			log.Printf("⚠️ Failed to create worker (flavor %d region %d): %v", selected.FlavorID, selected.RegionID, err)
@@ -1183,6 +1302,7 @@ func RecruiterCycle(
 	recruiterTimers map[RecruiterKey]RecruiterState,
 	workflowCounterMemory map[int32]WorkflowCounter,
 	now time.Time,
+	cfgDefaultSwap float32,
 ) error {
 
 	err := getWorkflowCounters(db, workflowCounterMemory)
@@ -1261,7 +1381,7 @@ func RecruiterCycle(
 
 		if hasRecyclableWorkers {
 			// Try recycling first (select workers to fill the throughput gap)
-			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, remainingTaskrate, recruiter.StepID, recruiter.WorkflowID, recruiter)
+			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, remainingTaskrate, recruiter.StepID, recruiter.WorkflowID, recruiter, cfgDefaultSwap)
 			if len(selectedWorkerIDs) > 0 {
 				// Calculate total taskrate being recycled
 				newConcurrencyByWorkerID := make(map[int32]int)
@@ -1378,6 +1498,7 @@ func DebugRecruitStep(
 	qm *QuotaManager,
 	creator WorkerCreator,
 	stepID int32,
+	cfgDefaultSwap float32,
 ) error {
 	workflowCounterMemory := make(map[int32]WorkflowCounter)
 	if err := getWorkflowCounters(db, workflowCounterMemory); err != nil {
@@ -1447,7 +1568,7 @@ func DebugRecruitStep(
 		}
 
 		if hasRecyclableWorkers {
-			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, remainingTaskrate, recruiter.StepID, recruiter.WorkflowID, recruiter)
+			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, remainingTaskrate, recruiter.StepID, recruiter.WorkflowID, recruiter, cfgDefaultSwap)
 			if len(selectedWorkerIDs) > 0 {
 				newConcurrencyByWorkerID := make(map[int32]int)
 				newPrefetchByWorkerID := make(map[int32]int)
@@ -1556,6 +1677,7 @@ func StartRecruiterLoop(
 	qm *QuotaManager,
 	creator WorkerCreator,
 	recruiterInterval int,
+	cfgDefaultSwap float32,
 ) {
 	go func() {
 		ticker := time.NewTicker(time.Duration(recruiterInterval) * time.Second)
@@ -1574,7 +1696,7 @@ func StartRecruiterLoop(
 				return
 
 			case now := <-ticker.C:
-				err := RecruiterCycle(ctx, db, qm, creator, recruiterTimers, workflowCounterMemory, now)
+				err := RecruiterCycle(ctx, db, qm, creator, recruiterTimers, workflowCounterMemory, now, cfgDefaultSwap)
 				if err != nil {
 					log.Printf("⚠️ Recruiter cycle failed: %v", err)
 				}

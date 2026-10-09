@@ -536,6 +536,19 @@ message Worker {
     // The UI lights the warn badge (⚠) when this > 0 OR when
     // recent_failures >= 2. Cleared via ResetWorkerCounters.
     optional int32 pending_warnings = 26;
+    // Swap sizing the worker was deployed with (see
+    // Recruiter.swap_proportion). NULL = deployed with the server
+    // config default. Used by the recruiter's recycling eligibility
+    // check so a worker whose swap sizing doesn't match the
+    // requesting recruiter is not recyclable.
+    optional float swap_proportion = 28;
+    // Extra block storage the worker was deployed with. See
+    // Recruiter.extra_storage_gb / extra_storage_type. The volume_id
+    // is the provider's handle (Cinder UUID) that Delete and the
+    // orphan-volume janitor use to detach/destroy the volume.
+    optional int32 extra_storage_gb = 29;
+    optional string extra_storage_type = 30;
+    optional string extra_storage_volume_id = 31;
 }
 
 
@@ -766,6 +779,14 @@ message WorkerRequest {
     // CreateWorker can stamp them on the job row.
     optional string image = 8;
     optional string gpu_image = 9;
+    // See Recruiter.swap_proportion. The recruiter forwards its own
+    // value here so CreateWorker can stamp it on the job row (and on
+    // the worker row for the recycling eligibility check).
+    optional float swap_proportion = 10;
+    // See Recruiter.extra_storage_gb / extra_storage_type. Same
+    // forward-through pattern — recruiter → request → job → provider.
+    optional int32 extra_storage_gb = 11;
+    optional string extra_storage_type = 12;
 }
 
 message CreateWorkerByNameRequest {
@@ -1041,6 +1062,23 @@ message Recruiter {
     // — today's behaviour. TRUE picks ceil, so a positive percent always
     // yields at least one prefetch slot on small workers.
     optional bool  prefetch_percent_ceil  = 20;
+    // Per-recruiter swapfile sizing override. NULL (unset) = use the
+    // server-wide scitq.swap_proportion config (default 0.10). 0 =
+    // disable swap entirely on this recruiter's workers. >0 = that
+    // fraction of /scratch dedicated to the swapfile at install time.
+    // Useful on huge-RAM nodes where /scratch is tight and the default
+    // 10% is pure waste.
+    optional float swap_proportion        = 21;
+    // Per-recruiter extra block storage (OVH / OpenStack only for now;
+    // Azure returns an error if requested). NULL or 0 = no extra
+    // volume; >0 = provision a Cinder volume of that size and mount it
+    // at /scratch BEFORE scitq-client installs. Workers born with
+    // different sizes are not recyclable across recruiters.
+    optional int32 extra_storage_gb       = 22;
+    // Provider-specific volume class (OVH: "classic" / "high-speed" /
+    // "high-speed-gen2"). NULL = provider default. Passed through
+    // verbatim to the OpenStack API; validation happens there.
+    optional string extra_storage_type    = 23;
 }
 
 message RecruiterUpdate {
@@ -1066,6 +1104,11 @@ message RecruiterUpdate {
   optional float disk_shared_per_task   = 19;
   // See Recruiter.prefetch_percent_ceil.
   optional bool  prefetch_percent_ceil  = 20;
+  // See Recruiter.swap_proportion.
+  optional float swap_proportion        = 21;
+  // See Recruiter.extra_storage_gb / extra_storage_type.
+  optional int32 extra_storage_gb       = 22;
+  optional string extra_storage_type    = 23;
 }
 
 message RecruiterList {

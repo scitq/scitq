@@ -821,15 +821,18 @@ func (h *mcpHandler) listTools() []mcpTool {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"step_id":      {Type: "integer", Description: "Step ID"},
-					"protofilter":  {Type: "string", Description: "Worker filter (e.g. cpu>=32:mem>=120:provider=azure.primary)"},
-					"rank":         {Type: "integer", Description: "Rank (default: 1)"},
-					"max_workers":  {Type: "integer", Description: "Maximum workers to recruit"},
-					"concurrency":  {Type: "integer", Description: "Static concurrency per worker"},
-					"prefetch":     {Type: "integer", Description: "Prefetch count"},
-					"cpu_per_task": {Type: "integer", Description: "CPU per task (dynamic concurrency)"},
-					"rounds":       {Type: "integer", Description: "Recruitment rounds (default: 1)"},
-					"timeout":      {Type: "integer", Description: "Timeout in seconds"},
+					"step_id":         {Type: "integer", Description: "Step ID"},
+					"protofilter":     {Type: "string", Description: "Worker filter (e.g. cpu>=32:mem>=120:provider=azure.primary)"},
+					"rank":            {Type: "integer", Description: "Rank (default: 1)"},
+					"max_workers":     {Type: "integer", Description: "Maximum workers to recruit"},
+					"concurrency":     {Type: "integer", Description: "Static concurrency per worker"},
+					"prefetch":        {Type: "integer", Description: "Prefetch count"},
+					"cpu_per_task":    {Type: "integer", Description: "CPU per task (dynamic concurrency)"},
+					"rounds":          {Type: "integer", Description: "Recruitment rounds (default: 1)"},
+					"timeout":         {Type: "integer", Description: "Timeout in seconds"},
+					"swap_proportion":    {Type: "number", Description: "Override /scratch swapfile fraction (0 disables swap; unset = server config default, typically 0.10)"},
+					"extra_storage_gb":   {Type: "integer", Description: "Attach an extra block volume of this size (GB) to each worker, mounted at /scratch (OVH only; Azure returns an error)"},
+					"extra_storage_type": {Type: "string", Description: "Volume class for extra_storage_gb (OVH: classic/high-speed/high-speed-gen2); unset = provider default"},
 				},
 				Required: []string{"step_id", "protofilter"},
 			},
@@ -840,13 +843,16 @@ func (h *mcpHandler) listTools() []mcpTool {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"step_id":      {Type: "integer", Description: "Step ID"},
-					"rank":         {Type: "integer", Description: "Rank"},
-					"protofilter":  {Type: "string", Description: "Updated worker filter"},
-					"max_workers":  {Type: "integer", Description: "Updated max workers"},
-					"concurrency":  {Type: "integer", Description: "Updated concurrency"},
-					"prefetch":     {Type: "integer", Description: "Updated prefetch"},
-					"cpu_per_task": {Type: "integer", Description: "Updated CPU per task"},
+					"step_id":         {Type: "integer", Description: "Step ID"},
+					"rank":            {Type: "integer", Description: "Rank"},
+					"protofilter":     {Type: "string", Description: "Updated worker filter"},
+					"max_workers":     {Type: "integer", Description: "Updated max workers"},
+					"concurrency":     {Type: "integer", Description: "Updated concurrency"},
+					"prefetch":        {Type: "integer", Description: "Updated prefetch"},
+					"cpu_per_task":    {Type: "integer", Description: "Updated CPU per task"},
+					"swap_proportion":    {Type: "number", Description: "Updated /scratch swapfile fraction (0 disables swap)"},
+					"extra_storage_gb":   {Type: "integer", Description: "Updated extra /scratch volume size in GB (OVH only)"},
+					"extra_storage_type": {Type: "string", Description: "Updated extra volume class (OVH: classic/high-speed/high-speed-gen2)"},
 				},
 				Required: []string{"step_id", "rank"},
 			},
@@ -1983,26 +1989,36 @@ func (h *mcpHandler) toolListRecruiters(ctx context.Context, args json.RawMessag
 }
 
 func (h *mcpHandler) toolCreateRecruiter(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	// SwapProportion is *float32 (not plain float32) because 0 is a
+	// meaningful value — "disable swap" — distinct from "field unset
+	// so fall back to the server config default". The JSON unmarshal
+	// stays nil when the caller omitted the key.
 	var p struct {
-		StepID      int32  `json:"step_id"`
-		Protofilter string `json:"protofilter"`
-		Rank        int32  `json:"rank"`
-		MaxWorkers  int32  `json:"max_workers"`
-		Concurrency int32  `json:"concurrency"`
-		Prefetch    int32  `json:"prefetch"`
-		CpuPerTask  int32  `json:"cpu_per_task"`
-		Rounds      int32  `json:"rounds"`
-		Timeout     int32  `json:"timeout"`
+		StepID           int32    `json:"step_id"`
+		Protofilter      string   `json:"protofilter"`
+		Rank             int32    `json:"rank"`
+		MaxWorkers       int32    `json:"max_workers"`
+		Concurrency      int32    `json:"concurrency"`
+		Prefetch         int32    `json:"prefetch"`
+		CpuPerTask       int32    `json:"cpu_per_task"`
+		Rounds           int32    `json:"rounds"`
+		Timeout          int32    `json:"timeout"`
+		SwapProportion   *float32 `json:"swap_proportion"`
+		ExtraStorageGb   *int32   `json:"extra_storage_gb"`
+		ExtraStorageType *string  `json:"extra_storage_type"`
 	}
 	json.Unmarshal(args, &p)
 	if p.Rank == 0 { p.Rank = 1 }
 	if p.Rounds == 0 { p.Rounds = 1 }
 	req := &pb.Recruiter{
-		StepId:      p.StepID,
-		Rank:        p.Rank,
-		Protofilter: p.Protofilter,
-		Rounds:      p.Rounds,
-		Timeout:     p.Timeout,
+		StepId:           p.StepID,
+		Rank:             p.Rank,
+		Protofilter:      p.Protofilter,
+		Rounds:           p.Rounds,
+		Timeout:          p.Timeout,
+		SwapProportion:   p.SwapProportion,
+		ExtraStorageGb:   p.ExtraStorageGb,
+		ExtraStorageType: p.ExtraStorageType,
 	}
 	if p.MaxWorkers != 0 { req.MaxWorkers = &p.MaxWorkers }
 	if p.Concurrency != 0 { req.Concurrency = &p.Concurrency }
@@ -2016,19 +2032,26 @@ func (h *mcpHandler) toolCreateRecruiter(ctx context.Context, args json.RawMessa
 }
 
 func (h *mcpHandler) toolUpdateRecruiter(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	// SwapProportion is a nullable override; see toolCreateRecruiter.
 	var p struct {
-		StepID      int32  `json:"step_id"`
-		Rank        int32  `json:"rank"`
-		Protofilter string `json:"protofilter"`
-		MaxWorkers  int32  `json:"max_workers"`
-		Concurrency int32  `json:"concurrency"`
-		Prefetch    int32  `json:"prefetch"`
-		CpuPerTask  int32  `json:"cpu_per_task"`
+		StepID           int32    `json:"step_id"`
+		Rank             int32    `json:"rank"`
+		Protofilter      string   `json:"protofilter"`
+		MaxWorkers       int32    `json:"max_workers"`
+		Concurrency      int32    `json:"concurrency"`
+		Prefetch         int32    `json:"prefetch"`
+		CpuPerTask       int32    `json:"cpu_per_task"`
+		SwapProportion   *float32 `json:"swap_proportion"`
+		ExtraStorageGb   *int32   `json:"extra_storage_gb"`
+		ExtraStorageType *string  `json:"extra_storage_type"`
 	}
 	json.Unmarshal(args, &p)
 	req := &pb.RecruiterUpdate{
-		StepId: p.StepID,
-		Rank:   p.Rank,
+		StepId:           p.StepID,
+		Rank:             p.Rank,
+		SwapProportion:   p.SwapProportion,
+		ExtraStorageGb:   p.ExtraStorageGb,
+		ExtraStorageType: p.ExtraStorageType,
 	}
 	if p.Protofilter != "" { req.Protofilter = &p.Protofilter }
 	if p.MaxWorkers != 0 { req.MaxWorkers = &p.MaxWorkers }

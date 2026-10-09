@@ -88,7 +88,9 @@ type Config struct {
 		// Used by clients to access private registries.
 		DockerCredentials []DockerCredential `yaml:"docker_credentials"`
 
-		// SwapProportion defines the proportion of disk space dedicated to swap on worker automated deploy.
+		// SwapProportion defines the fraction of /scratch dedicated to swap on worker automated deploy.
+		// Default 0.10. A recruiter can override this per step via its own swap_proportion
+		// (0 disables swap entirely on that recruiter's workers; see Recruiter.swap_proportion).
 		SwapProportion float32 `yaml:"swap_proportion" default:"0.1"`
 
 		// WorkerToken is a secret token used to authenticate worker nodes.
