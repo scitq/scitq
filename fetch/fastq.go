@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +11,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/rclone/rclone/fs"
 )
@@ -17,6 +20,173 @@ import (
 var defaultOptions = []string{"ena-ftp", "sra-aws", "sra-tools"}
 
 var fastqParity = regexp.MustCompile(`.*(1|2)\.f.*q(\.gz)?$`)
+
+// Per-URL retry policy inside downloadFastqs. Three attempts (base
+// delays 10 s / 30 s / 90 s) give a transient hiccup (TCP reset,
+// slow-start timeout on a congested FTP server) a chance to clear
+// without burning the whole method-level fallback budget. A
+// permanent error (404, auth) breaks out immediately via
+// errPermanent.
+const (
+	fetchMaxAttempts = 3
+	fetchBackoff1    = 10 * time.Second
+	fetchBackoff2    = 30 * time.Second
+	fetchBackoff3    = 90 * time.Second
+)
+
+// errPermanent wraps a fetch error that should NOT be retried. The
+// retry loop checks errors.Is(err, errPermanent) and bails out
+// immediately so a 404 or auth failure doesn't waste the full retry
+// budget. Transient wrapper for the kind of error — the underlying
+// error is still joined for logging/display.
+var errPermanent = errors.New("permanent fetch failure (no retry)")
+
+// permanentStatusRe matches HTTP 4xx codes (except 408/429, which
+// are retryable) and 410, as whole numbers in the error string. We
+// use a regex rather than space-bordered substring matches because
+// error strings may put the code at the end ("returned 403") or
+// embedded in a longer phrase.
+var permanentStatusRe = regexp.MustCompile(`\b(400|401|403|404|410)\b`)
+
+// classifyFetchError returns errPermanent when the underlying error
+// is non-retryable (HTTP 4xx that isn't 408/429, parse errors,
+// malformed URL). Everything else (timeout, connection reset, 5xx,
+// EOF mid-stream, MD5 mismatch after a complete-looking download)
+// is treated as retryable — the next attempt may succeed.
+func classifyFetchError(err error) error {
+	if err == nil {
+		return nil
+	}
+	s := strings.ToLower(err.Error())
+	// Phrase-based permanent signals.
+	permanentNeedles := []string{
+		"not found", "forbidden", "unauthorized",
+		"malformed", "invalid url",
+	}
+	for _, n := range permanentNeedles {
+		if strings.Contains(s, n) {
+			return fmt.Errorf("%w: %v", errPermanent, err)
+		}
+	}
+	// Status-code permanent signals (word-bounded).
+	if permanentStatusRe.MatchString(s) {
+		return fmt.Errorf("%w: %v", errPermanent, err)
+	}
+	// Everything else — timeout, connection reset, EOF, 500/502/503/504,
+	// MD5 mismatch, "temporary failure in name resolution" — stays
+	// retryable so the next attempt gets a shot.
+	return err
+}
+
+// retryFetchURL runs attempt() up to fetchMaxAttempts times, sleeping
+// between retries, and short-circuits on a permanent error.
+// errPermanent is unwrapped and the underlying error returned so the
+// caller's log line reads naturally.
+func retryFetchURL(method, url string, attempt func() error) error {
+	backoffs := []time.Duration{fetchBackoff1, fetchBackoff2, fetchBackoff3}
+	var lastErr error
+	for i := 0; i < fetchMaxAttempts; i++ {
+		if i > 0 {
+			d := backoffs[i-1]
+			log.Printf("↩️  %s retry %d/%d for %s in %s (previous: %v)", method, i+1, fetchMaxAttempts, url, d, lastErr)
+			time.Sleep(d)
+		}
+		err := attempt()
+		if err == nil {
+			return nil
+		}
+		classified := classifyFetchError(err)
+		if errors.Is(classified, errPermanent) {
+			return err
+		}
+		lastErr = err
+	}
+	return fmt.Errorf("%s failed after %d attempts: %w", method, fetchMaxAttempts, lastErr)
+}
+
+// Per-worker circuit breaker. Each channel ("ena-ftp", "ena-aspera",
+// "sra-aws", "sra-tools") carries a consecutive-failure counter and a
+// demoted flag. After channelDemoteThreshold consecutive failures on
+// this worker (process), the channel is reordered to the END of the
+// options list for subsequent runs — further runs still try the
+// others first. A single success resets both counter and demotion.
+//
+// Scoped per-worker DELIBERATELY: reliability of EBI vs NCBI depends
+// on the worker's network path (region, firewall, DNS), so one
+// unlucky worker's demotion must not propagate to healthy workers.
+// A global server-side demotion would do exactly that; it's wrong.
+const channelDemoteThreshold = 3
+
+var channelBreaker struct {
+	mu       sync.Mutex
+	failures map[string]int
+	demoted  map[string]bool
+	warned   map[string]bool
+}
+
+func init() {
+	channelBreaker.failures = make(map[string]int)
+	channelBreaker.demoted = make(map[string]bool)
+	channelBreaker.warned = make(map[string]bool)
+}
+
+func recordChannelFailure(channel string) {
+	channelBreaker.mu.Lock()
+	defer channelBreaker.mu.Unlock()
+	channelBreaker.failures[channel]++
+	if channelBreaker.failures[channel] >= channelDemoteThreshold && !channelBreaker.demoted[channel] {
+		channelBreaker.demoted[channel] = true
+		log.Printf("⚠️ fetch channel %q demoted after %d consecutive failures on this worker; subsequent fetches will try other channels first",
+			channel, channelBreaker.failures[channel])
+	}
+}
+
+func recordChannelSuccess(channel string) {
+	channelBreaker.mu.Lock()
+	defer channelBreaker.mu.Unlock()
+	if channelBreaker.demoted[channel] {
+		log.Printf("✅ fetch channel %q restored to normal priority after a successful fetch", channel)
+	}
+	channelBreaker.failures[channel] = 0
+	channelBreaker.demoted[channel] = false
+}
+
+// reorderOptionsForBreaker moves every demoted channel to the END of
+// the options list while preserving relative order inside each
+// group. The caller's slice is NOT mutated.
+func reorderOptionsForBreaker(options []string) []string {
+	channelBreaker.mu.Lock()
+	defer channelBreaker.mu.Unlock()
+	if len(channelBreaker.demoted) == 0 {
+		return options
+	}
+	healthy := make([]string, 0, len(options))
+	demoted := make([]string, 0, len(options))
+	for _, o := range options {
+		if channelBreaker.demoted[o] {
+			demoted = append(demoted, o)
+		} else {
+			healthy = append(healthy, o)
+		}
+	}
+	return append(healthy, demoted...)
+}
+
+// warnAsperaOnce emits a one-shot deprecation warning the first time
+// a caller explicitly opts into ena-aspera on this worker. ENA's
+// aspera endpoint has rejected authentication for years in practice
+// (verified 2026-10-09 against ERR527141 with both DSA and RSA
+// bypass keys on ascli 4.27.5): every attempt wastes ~75 s on auth
+// retries before falling through to the next method.
+func warnAsperaOnce() {
+	channelBreaker.mu.Lock()
+	defer channelBreaker.mu.Unlock()
+	if channelBreaker.warned["ena-aspera"] {
+		return
+	}
+	channelBreaker.warned["ena-aspera"] = true
+	log.Printf("⚠️ ena-aspera is unmaintained at ENA; auth consistently fails in practice. Use ena-ftp or sra-aws / sra-tools instead. Keeping the attempt for backward compat.")
+}
 
 // FastqBackend handles downloading FASTQ files using FTP, Aspera, or SRA.
 type FastqBackend struct{}
@@ -58,6 +228,9 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			log.Printf("Rejecting option %s as dst is not local\n", option)
 			continue
 		}
+		if option == "ena-aspera" {
+			warnAsperaOnce()
+		}
 		srcOptions = append(srcOptions, option)
 	}
 
@@ -70,6 +243,13 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 	if len(options) == 0 {
 		return fmt.Errorf("no more options remain for FastqBackend, try using less restrictive conditions")
 	}
+
+	// Reorder options to push circuit-breaker-demoted channels to the
+	// end of the list. New callers still try the healthy channels
+	// first; a worker whose EBI path is sick (3 consecutive failures)
+	// skips to NCBI immediately instead of burning the per-URL retry
+	// budget on EBI first every time.
+	options = reorderOptionsForBreaker(options)
 
 	// preparing items for option loop
 	runAccession := src.Component
@@ -84,8 +264,10 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			err := fb.fetchFromSRA_sratool(runAccession, absPath, onlyRead1)
 			sraToolTested = true
 			if err == nil {
+				recordChannelSuccess(option)
 				return nil
 			} else {
+				recordChannelFailure(option)
 				log.Printf("FastqBackend failed on SRA sra-tools : %v", err)
 				continue
 			}
@@ -95,8 +277,10 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			err := fb.fetchFromSRA_AWS(runAccession, absPath, onlyRead1)
 			sraToolTested = true
 			if err == nil {
+				recordChannelSuccess(option)
 				return nil
 			} else {
+				recordChannelFailure(option)
 				log.Printf("FastqBackend failed on SRA AWS : %v", err)
 				continue
 			}
@@ -163,9 +347,10 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 		urlList := strings.Split(urls, ";")
 		success := fb.downloadFastqs(method, urlList, md5s, dst, otherFs, onlyRead1)
 		if success {
+			recordChannelSuccess(option)
 			return nil
 		}
-
+		recordChannelFailure(option)
 		log.Printf("Download failed with method: %s, trying next method...", method)
 	}
 
@@ -204,84 +389,102 @@ func (fb *FastqBackend) downloadFastqs(method string, urls, md5s []string, folde
 		dst := folderDst
 		md5 := md5s[i]
 
+		// Each per-URL transfer runs under retryFetchURL: up to 3
+		// attempts with 10 s / 30 s / 90 s backoff. The attempt closure
+		// does the actual transfer plus the MD5 verification — MD5
+		// mismatch is treated as a retryable transfer failure (the
+		// bytes made it to disk but the content is wrong, usually
+		// because the TCP connection reset mid-stream).
+		var transferErr error
 		switch method {
 		case "fastq_ftp":
-			{
-				// err = fetchFTP(url, destFile)
+			transferErr = retryFetchURL(method, url, func() error {
 				ftpURI, err := ParseURI("ftp://" + url)
 				if err != nil {
-					log.Printf("ftp URL seems broken %s: %v", url, err)
-					return false
+					// Malformed URL — permanent, don't retry.
+					return fmt.Errorf("invalid url %s: %w", url, err)
 				}
 				ftpFs, err := ftpURI.fs()
 				if err != nil {
-					log.Printf("Could not open ftp transmission on %s: %v", url, err)
-					return false
+					return fmt.Errorf("could not open ftp transmission on %s: %w", url, err)
 				}
 
 				if dst.File == "" {
 					dst.File = ftpURI.File
 				}
 
-				err = ftpFs.fs.Copy(dstFs, *ftpURI, dst, true)
-				if err != nil {
-					log.Printf("ftp transmission failed for %s: %v", url, err)
-					return false
+				if err := ftpFs.fs.Copy(dstFs, *ftpURI, dst, true); err != nil {
+					return fmt.Errorf("ftp transmission failed for %s: %w", url, err)
 				}
-			}
+				return verifyFastqMD5(dstFs, dst, md5)
+			})
 		case "fastq_aspera":
-			{
-				// err = fetchAspera(url, destFile)
-				url = "fasp://era-fasp@" + url
-				faspURI, err := ParseURI(url)
+			transferErr = retryFetchURL(method, url, func() error {
+				faspURL := "fasp://era-fasp@" + url
+				faspURI, err := ParseURI(faspURL)
 				if err != nil {
-					log.Printf("Aspera URL seems broken %s: %v", url, err)
-					return false
+					return fmt.Errorf("invalid url %s: %w", faspURL, err)
 				}
 				faspFs, err := faspURI.fs()
 				if err != nil {
-					log.Printf("Could not open Aspera transmission on %s: %v", url, err)
-					return false
+					return fmt.Errorf("could not open Aspera transmission on %s: %w", faspURL, err)
 				}
 
 				if dst.File == "" {
 					dst.File = faspURI.File
 				}
 
-				err = faspFs.fs.Copy(dstFs, *faspURI, dst, true)
-				log.Printf("**** Aspera copy %s -> %s ****", *faspURI, dst)
-				if err != nil {
-					log.Printf("Aspera transmission failed for %s: %v", url, err)
-					return false
+				if err := faspFs.fs.Copy(dstFs, *faspURI, dst, true); err != nil {
+					return fmt.Errorf("aspera transmission failed for %s: %w", faspURL, err)
 				}
-			}
-
+				log.Printf("**** Aspera copy %s -> %s ****", *faspURI, dst)
+				return verifyFastqMD5(dstFs, dst, md5)
+			})
 		default:
 			continue
 		}
 
-		// Check MD5 hash
-		obj, err := dstFs.Info(dst.CompletePath())
-		if err != nil {
-			log.Printf("Backend is not MD5 capable, could not check MD5 for file %s (for %s), hoping for the best: %v", dst, dst.CompletePath(), err)
-		} else {
-			o, ok := obj.(fs.Object)
-			if !ok {
-				log.Printf("ERROR : Destination file %s seems to be a folder", dst)
-				return false
-			}
-			objectMd5, err := getMD5(o)
-			if err != nil {
-				log.Printf("ERROR : Could not obtain MD5 for file %s: %v", dst, err)
-			}
-			if objectMd5 != md5 {
-				log.Printf("MD5 mismatch for %s", dst)
-				return false
-			}
-
+		if transferErr != nil {
+			log.Printf("fetch %s %s: %v", method, url, transferErr)
+			return false
 		}
 	}
 	return true
+}
+
+// verifyFastqMD5 checks the downloaded file's MD5 against the one
+// ENA's filereport API gave us. Semantics:
+//   - expectedMD5 == "" (study-dependent: ENA sometimes returns no
+//     md5): emit a visible warning and accept, matching the previous
+//     "hoping for the best" posture.
+//   - expectedMD5 != "" and Info/getMD5 can't produce one: HARD FAIL
+//     — before this change the retry path silently accepted a
+//     possibly-truncated file in these branches; that's exactly how
+//     "incomplete samples" slip through.
+//   - expectedMD5 mismatches the file's MD5: hard fail (and retryable
+//     from retryFetchURL's perspective — a mid-stream reset can
+//     produce complete-looking garbage).
+func verifyFastqMD5(dstFs FileSystemInterface, dst URI, expectedMD5 string) error {
+	if expectedMD5 == "" {
+		log.Printf("⚠️ fastq: no MD5 provided by ENA for %s — accepting without integrity check", dst)
+		return nil
+	}
+	obj, err := dstFs.Info(dst.CompletePath())
+	if err != nil {
+		return fmt.Errorf("md5 verification: backend Info failed for %s (expected md5=%s): %w", dst, expectedMD5, err)
+	}
+	o, ok := obj.(fs.Object)
+	if !ok {
+		return fmt.Errorf("md5 verification: destination %s is not a file (expected md5=%s)", dst, expectedMD5)
+	}
+	objectMd5, err := getMD5(o)
+	if err != nil {
+		return fmt.Errorf("md5 verification: getMD5 failed for %s (expected md5=%s): %w", dst, expectedMD5, err)
+	}
+	if objectMd5 != expectedMD5 {
+		return fmt.Errorf("md5 mismatch for %s: expected %s, got %s", dst, expectedMD5, objectMd5)
+	}
+	return nil
 }
 
 func (fb *FastqBackend) fetchFromSRA(runAccession, destination string, onlyRead1 bool) error {
