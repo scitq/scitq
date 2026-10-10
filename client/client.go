@@ -683,11 +683,19 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 
 	// Function to send logs
 	var logWg sync.WaitGroup
-	sendLogs := func(reader io.Reader, stream pb.TaskQueue_SendTaskLogsClient, logType string) {
+	// Keep a bounded tail of stderr for the definitive-failure
+	// classifier (task.DefinitivePattern). The classifier only needs
+	// the tail, so 4 KiB is enough: longer transfers cycle through
+	// the ring. Nil for stdout — the policy only reads stderr.
+	stderrTail := newStderrTail(4096)
+	sendLogs := func(reader io.Reader, stream pb.TaskQueue_SendTaskLogsClient, logType string, tail *stderrTailBuf) {
 		defer logWg.Done()
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := scanner.Text()
+			if tail != nil {
+				tail.appendLine(line)
+			}
 			if err := stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: logType, LogText: line}); err != nil {
 				log.Printf("⚠️ Failed to send log line for task %d: %v", task.TaskId, err)
 				break
@@ -697,8 +705,8 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 
 	// Stream logs concurrently
 	logWg.Add(2)
-	go sendLogs(stdout, stream, "stdout")
-	go sendLogs(stderr, stream, "stderr")
+	go sendLogs(stdout, stream, "stdout", nil)
+	go sendLogs(stderr, stream, "stderr", stderrTail)
 
 	// Wait for log goroutines to finish reading stdout/stderr BEFORE cmd.Wait(),
 	// because cmd.Wait() closes the pipe read ends (Go docs: "It is thus incorrect
@@ -760,8 +768,13 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		task.Status = "F"
 		// Classify so the eventual terminal F (sent by the uploader) can
 		// carry the right failure_class for the server's retry-decision
-		// path (spec: addition_from_nextflow.md A).
-		fc := classifyExecFailure(err, hooks)
+		// path. "definitive" takes precedence when the step's policy
+		// matches — the server's retry gate skips the clone, saving
+		// retries for failures that could actually recover.
+		fc := classifyDefinitive(err, hooks, task, stderrTail)
+		if fc == "" {
+			fc = classifyExecFailure(err, hooks)
+		}
 		task.FailureClass = &fc
 		reporter.UpdateTaskAsync(task.TaskId, "V", "", &sec, "") // Mark as failed
 	} else {

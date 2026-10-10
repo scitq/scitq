@@ -354,6 +354,15 @@ message Task {
     // task row (migration 000050). NULL / unset when the worker
     // couldn't read the counter.
     optional int32 peak_mem_mb        = 51;
+    // Per-step "definitive failure" policy copied from the Step row
+    // so the worker can classify a failure without a round-trip. When
+    // the task's exit code is in definitive_exit_codes, OR the tail of
+    // stderr matches definitive_pattern (regex), the worker sets
+    // TaskStatusUpdate.failure_class="definitive" and the server retry
+    // gate skips the clone. Both empty / unset = today's behaviour,
+    // every failure is retryable up to task.retry.
+    repeated int32 definitive_exit_codes = 52;
+    optional string definitive_pattern    = 53;
 }
 
 message TaskList {
@@ -1287,6 +1296,9 @@ message Step {
     int32 workflow_id = 3;
     string name = 4;
     optional string quality_definition = 5; // JSON: {"variables": {...}, "formula": "..."}
+    // See StepRequest.definitive_exit_codes / definitive_pattern.
+    repeated int32 definitive_exit_codes = 6;
+    optional string definitive_pattern    = 7;
 }
 message StepRequest {
     optional string workflow_name = 1;
@@ -1300,6 +1312,16 @@ message StepRequest {
     // outputs are untouched). Anything else is rejected server-side.
     // See migration 000045_step_output_lifetime.
     optional string output_lifetime = 5;
+    // Per-step "definitive failure" policy. definitive_exit_codes is
+    // the list of exit codes meaning "this failure won't be fixed by
+    // retrying" — the worker stamps task.failure_class="definitive"
+    // and the server retry gate skips the clone. definitive_pattern
+    // is the regex matched against the tail of stderr for the same
+    // outcome, useful when the underlying tool exits 1 regardless of
+    // cause. Both opt-in; empty / unset preserves today's "every
+    // failure is retryable up to task.retry" behaviour.
+    repeated int32 definitive_exit_codes = 6;
+    optional string definitive_pattern    = 7;
 }
 message StepList {
     repeated Step steps = 1;

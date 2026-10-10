@@ -326,9 +326,11 @@ type Attr struct {
 			WorkflowId int32 `arg:"--workflow-id,required" help:"Workflow ID to list steps for"`
 		} `arg:"subcommand:list" help:"List steps for a workflow"`
 		Create *struct {
-			WorkflowId   int32  `arg:"--workflow-id" help:"Workflow ID"`
-			WorkflowName string `arg:"--workflow-name" help:"Workflow name (alternative to ID)"`
-			Name         string `arg:"--name,required" help:"Step name"`
+			WorkflowId          int32   `arg:"--workflow-id" help:"Workflow ID"`
+			WorkflowName        string  `arg:"--workflow-name" help:"Workflow name (alternative to ID)"`
+			Name                string  `arg:"--name,required" help:"Step name"`
+			DefinitiveExitCodes []int32 `arg:"--definitive-exit-code,separate" help:"Exit code that marks a failure as definitive (no retry). Repeatable."`
+			DefinitivePattern   string  `arg:"--definitive-pattern" help:"Regex matched against stderr tail; a match marks the failure as definitive (no retry)"`
 		} `arg:"subcommand:create" help:"Create a step"`
 		Delete *struct {
 			StepId int32 `arg:"--id,required" help:"Step ID to delete"`
@@ -1882,9 +1884,13 @@ func (c *CLI) StepCreate() error {
 	defer cancel()
 
 	req := &pb.StepRequest{
-		Name:         c.Attr.Step.Create.Name,
-		WorkflowName: &c.Attr.Step.Create.WorkflowName,
-		WorkflowId:   &c.Attr.Step.Create.WorkflowId,
+		Name:                c.Attr.Step.Create.Name,
+		WorkflowName:        &c.Attr.Step.Create.WorkflowName,
+		WorkflowId:          &c.Attr.Step.Create.WorkflowId,
+		DefinitiveExitCodes: c.Attr.Step.Create.DefinitiveExitCodes,
+	}
+	if c.Attr.Step.Create.DefinitivePattern != "" {
+		req.DefinitivePattern = &c.Attr.Step.Create.DefinitivePattern
 	}
 
 	res, err := c.QC.Client.CreateStep(ctx, req)

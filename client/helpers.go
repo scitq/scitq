@@ -113,6 +113,18 @@ _retry() {
   done
 }
 
+# _fail_definitive <message...>: exit with code 2, prefixing stderr with
+# a marker the server's definitive-failure classifier picks up. Use it
+# from inside your task when you detect a condition that retry can't fix
+# (missing reference, corrupt input, unsupported option). Requires the
+# step's task_spec to list exit code 2 in definitive_exit_codes OR to set
+# a definitive_pattern that matches the SCITQ_DEFINITIVE marker; without
+# that, the exit is treated as a plain F and retried per task.retry.
+_fail_definitive() {
+  echo "SCITQ_DEFINITIVE: $*" >&2
+  exit 2
+}
+
 _strict`
 
 const bioSh = `

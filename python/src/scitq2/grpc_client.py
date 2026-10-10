@@ -280,7 +280,9 @@ class Scitq2Client:
 
     def create_step(self, workflow_id: int, name: str,
                     quality_definition: Optional[str] = None,
-                    output_lifetime: Optional[str] = None) -> int:
+                    output_lifetime: Optional[str] = None,
+                    definitive_exit_codes: Optional[list] = None,
+                    definitive_pattern: Optional[str] = None) -> int:
         """
         Creates a new step associated with a given workflow.
 
@@ -291,6 +293,14 @@ class Scitq2Client:
         - output_lifetime (str, optional): "workflow" to have the server sweep
           this step's workspace outputs when the workflow reaches S. None /
           omitted keeps the pre-feature behaviour (outputs persist).
+        - definitive_exit_codes (list[int], optional): exit codes meaning
+          "won't be fixed by retrying". The worker stamps the failed task's
+          failure_class='definitive' and the server retry gate skips the
+          clone. Pair with the `_fail_definitive` builtin shell helper.
+        - definitive_pattern (str, optional): regex matched against the
+          tail of stderr for the same outcome. Useful when the underlying
+          tool exits 1 regardless of cause and only the message
+          distinguishes "input-corrupt" from "transient failure".
 
         Returns:
         - int: The step ID
@@ -300,6 +310,10 @@ class Scitq2Client:
             request.quality_definition = quality_definition
         if output_lifetime is not None:
             request.output_lifetime = output_lifetime
+        if definitive_exit_codes:
+            request.definitive_exit_codes.extend(int(c) for c in definitive_exit_codes)
+        if definitive_pattern is not None:
+            request.definitive_pattern = definitive_pattern
         response = self.stub.CreateStep(request)
         return response.step_id
 

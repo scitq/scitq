@@ -711,7 +711,9 @@ class TaskSpec:
     def __init__(self, *, cpu=None, mem=None, disk=None, gpu=None,
                  concurrency: Optional[int]=None, prefetch: Optional[Union[str,int]]=None,
                  scitq_auth: bool=False, numa: Optional[int]=None,
-                 mem_shared=None, disk_shared=None):
+                 mem_shared=None, disk_shared=None,
+                 definitive_exit_codes: Optional[list]=None,
+                 definitive_pattern: Optional[str]=None):
         # cpu / mem / disk: either a scalar or a non-empty monotonically
         # non-decreasing list ("curve") of per-attempt resource requirements
         # (spec: addition_from_nextflow.md A — Retry with resource escalation).
@@ -788,6 +790,24 @@ class TaskSpec:
         # express (multiple destinations per file, asymmetric paths).
         self.scitq_auth = bool(scitq_auth)
         self.numa = numa
+        # Definitive-failure policy — opt-in classification that the
+        # worker consults at task terminal. When the exit code is in
+        # definitive_exit_codes OR the stderr tail matches
+        # definitive_pattern (regex), failure_class='definitive' is
+        # stamped and the server retry gate skips the clone. Both
+        # unset preserves today's "every failure retryable up to
+        # task.retry" behaviour.
+        if definitive_exit_codes is not None:
+            try:
+                definitive_exit_codes = [int(c) for c in definitive_exit_codes]
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"TaskSpec(definitive_exit_codes=...) must be a list of ints; got {definitive_exit_codes!r}")
+        self.definitive_exit_codes = definitive_exit_codes
+        if definitive_pattern is not None and not isinstance(definitive_pattern, str):
+            raise ValueError(
+                f"TaskSpec(definitive_pattern=...) must be a string regex; got {type(definitive_pattern).__name__}")
+        self.definitive_pattern = definitive_pattern
         # GPU is integer-valued (count of devices) and has no per-attempt
         # curve — a workload either needs GPUs or it doesn't, the
         # number doesn't escalate on retry. Accept int, bool (True→1),
@@ -1141,9 +1161,19 @@ class Step:
             self.step_id = ext.step_ids[self.name]
             step_existed = True
         else:
+            # Pull the definitive-failure policy from task_spec. Both
+            # fields are nullable; a step without a task_spec passes
+            # None/None and the server stores NULL.
+            def_codes = None
+            def_pattern = None
+            if self.task_spec is not None:
+                def_codes = getattr(self.task_spec, 'definitive_exit_codes', None)
+                def_pattern = getattr(self.task_spec, 'definitive_pattern', None)
             self.step_id = client.create_step(self.workflow.workflow_id, self.name,
                                               quality_definition=quality_json,
-                                              output_lifetime=self.output_lifetime)
+                                              output_lifetime=self.output_lifetime,
+                                              definitive_exit_codes=def_codes,
+                                              definitive_pattern=def_pattern)
             if ext is not None:
                 ext.step_ids[self.name] = self.step_id
 

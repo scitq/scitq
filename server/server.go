@@ -1108,7 +1108,16 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				download_duration = CASE WHEN $3::INT IS NOT NULL AND $1 = 'O' THEN $3::INT ELSE download_duration END,
 				run_duration      = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('U','V') THEN $3::INT ELSE run_duration END,
 				upload_duration   = CASE WHEN $3::INT IS NOT NULL AND $1 IN ('S','F') THEN $3::INT ELSE upload_duration END,
-				retry             = CASE WHEN $1 = 'F' AND $4::BOOL IS TRUE THEN retry + 1 ELSE retry END,
+				retry             = CASE
+				                      -- Definitive failures won't be retried (see the
+				                      -- gate below that skips the clone); the dependency-
+				                      -- release condition reads t.retry = 0 to decide
+				                      -- whether a dependent with accept_failure=TRUE can
+				                      -- unblock. Zero it on the same UPDATE so the
+				                      -- cascade fires without a window.
+				                      WHEN $1 = 'F' AND $5::TEXT = 'definitive' THEN 0
+				                      WHEN $1 = 'F' AND $4::BOOL IS TRUE          THEN retry + 1
+				                      ELSE retry END,
 				-- Persist failure classification when transitioning to F so
 				-- the retry-decision path can read it on the *next* status
 				-- update (the clone-creation path). Non-F transitions clear
@@ -1514,7 +1523,17 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	if req.FreeRetry != nil && *req.FreeRetry {
 		effectiveRetry++
 	}
-	if req.NewStatus == "F" && effectiveRetry > 0 {
+	// Definitive-failure gate: when the worker classified this failure
+	// as "definitive" (exit code in step.definitive_exit_codes, or
+	// stderr tail matches step.definitive_pattern), the retry clone is
+	// a waste of cluster time — the next attempt would hit the same
+	// input-level problem. Skip the clone and leave the task at F.
+	// failure_class is already persisted on the task row via the SET
+	// clause above (CASE WHEN $1 = 'F' THEN $5::TEXT ELSE NULL END),
+	// so the UI / `scitq task list` can show *why* retry was skipped.
+	if req.NewStatus == "F" && req.FailureClass != nil && *req.FailureClass == "definitive" {
+		log.Printf("🚫 task %d failed with definitive classification — skipping retry", req.TaskId)
+	} else if req.NewStatus == "F" && effectiveRetry > 0 {
 		log.Printf("🔄 retrying task %d (status: %s, retry count: %d)", req.TaskId, req.NewStatus, effectiveRetry)
 		tx, txErr := s.db.BeginTx(ctx, nil)
 		if txErr == nil {
@@ -5215,14 +5234,22 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 	// clearing its status/worker_id, so a hidden 'A' task would keep being
 	// returned on every ping, trapping the client in a no-sleep loop.
 	rows, err := s.db.Query(`
-		SELECT task_id, command, shell, container, container_options,
-			input, resource, output, retry, is_final, uses_cache,
-			download_timeout, running_timeout, upload_timeout,
-			status, weight, publish, scitq_auth, numa, step_id, publish_mode,
-			min_gpu
-		FROM task
-		WHERE worker_id = $1
-		  AND NOT hidden
+		SELECT t.task_id, t.command, t.shell, t.container, t.container_options,
+			t.input, t.resource, t.output, t.retry, t.is_final, t.uses_cache,
+			t.download_timeout, t.running_timeout, t.upload_timeout,
+			t.status, t.weight, t.publish, t.scitq_auth, t.numa, t.step_id, t.publish_mode,
+			t.min_gpu,
+			-- Step-level definitive-failure policy carried on the Task so
+			-- the worker can classify a failure without an extra round-
+			-- trip. NULL arrays / strings land as empty on the proto
+			-- side, which the client treats as "no policy, every failure
+			-- is retryable".
+			COALESCE(s.definitive_exit_codes, '{}'::int[]) AS definitive_exit_codes,
+			s.definitive_pattern
+		FROM task t
+		LEFT JOIN step s ON s.step_id = t.step_id
+		WHERE t.worker_id = $1
+		  AND NOT t.hidden
 		  -- 'O' (on-hold: downloaded-ahead via prefetch, waiting for an
 		  -- execution slot) MUST be included. The worker's local active set
 		  -- is {A,C,D,O,R}; omitting 'O' here means an on-hold task is absent
@@ -5231,7 +5258,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		  -- report) spuriously kills it after the 3s debounce — racing the
 		  -- task's own completion and stranding it (observed: tasks pinned in
 		  -- 'U' with output already in object storage).
-		  AND status IN ('A', 'C', 'D', 'O', 'R', 'U', 'V')
+		  AND t.status IN ('A', 'C', 'D', 'O', 'R', 'U', 'V')
 	`, req.WorkerId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch assigned/running tasks: %w", err)
@@ -5256,16 +5283,27 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		// addition_from_nextflow.md A (the GPU dimension extends the
 		// per-task resource floors to a fourth axis).
 		var minGpu sql.NullInt32
+		var definitiveExitCodes pq.Int32Array
+		var definitivePattern sql.NullString
 		if err := rows.Scan(&task.TaskId, &task.Command, &shell, &task.Container, &task.ContainerOptions,
 			&input, &resource, &task.Output, &task.Retry, &task.IsFinal, &task.UsesCache,
 			&task.DownloadTimeout, &task.RunningTimeout, &task.UploadTimeout, &status, &weight, &publishNull, &scitqAuth, &numa, &stepID, &publishModeNull,
-			&minGpu); err != nil {
+			&minGpu, &definitiveExitCodes, &definitivePattern); err != nil {
 			log.Printf("⚠️ Task decode error: %v", err)
 			continue
 		}
 		if minGpu.Valid && minGpu.Int32 > 0 {
 			v := minGpu.Int32
 			task.MinGpu = &v
+		}
+		// Step's definitive-failure policy — nil / empty = "every failure
+		// is retryable", matching the pre-feature default.
+		if len(definitiveExitCodes) > 0 {
+			task.DefinitiveExitCodes = make([]int32, len(definitiveExitCodes))
+			copy(task.DefinitiveExitCodes, definitiveExitCodes)
+		}
+		if definitivePattern.Valid && definitivePattern.String != "" {
+			task.DefinitivePattern = &definitivePattern.String
 		}
 		task.PublishMode = utils.NullStringToPtr(publishModeNull)
 		if scitqAuth {
@@ -7255,21 +7293,40 @@ func (s *taskQueueServer) CreateStep(ctx context.Context, req *pb.StepRequest) (
 		}
 	}
 
+	// Definitive-failure policy: list of exit codes and/or a stderr
+	// regex that the worker consults to classify a failure as
+	// "won't be fixed by retrying". Both nullable; empty / unset
+	// preserves the pre-feature behaviour (every failure retryable).
+	var definitiveCodes interface{} = nil
+	if len(req.DefinitiveExitCodes) > 0 {
+		definitiveCodes = pq.Array(req.DefinitiveExitCodes)
+	}
+	var definitivePattern interface{} = nil
+	if req.DefinitivePattern != nil && *req.DefinitivePattern != "" {
+		// Compile check so a bad regex surfaces at step create instead
+		// of silently failing on every task's failure classification.
+		if _, reErr := regexp.Compile(*req.DefinitivePattern); reErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"invalid definitive_pattern regex %q: %v", *req.DefinitivePattern, reErr)
+		}
+		definitivePattern = *req.DefinitivePattern
+	}
+
 	if req.WorkflowId != nil && *req.WorkflowId != 0 {
 		err = s.db.QueryRow(`
-			INSERT INTO step (step_name, workflow_id, quality_definition, output_lifetime)
-			VALUES ($1, $2, $3::jsonb, $4)
+			INSERT INTO step (step_name, workflow_id, quality_definition, output_lifetime, definitive_exit_codes, definitive_pattern)
+			VALUES ($1, $2, $3::jsonb, $4, $5, $6)
 			RETURNING step_id, workflow_id
-		`, req.Name, *req.WorkflowId, qualityDef, outputLifetime).Scan(&stepID, &workflowID)
+		`, req.Name, *req.WorkflowId, qualityDef, outputLifetime, definitiveCodes, definitivePattern).Scan(&stepID, &workflowID)
 	} else if req.WorkflowName != nil {
 		err = s.db.QueryRow(`
 			WITH wf AS (
 				SELECT w.workflow_id FROM workflow w WHERE w.workflow_name = $1
 			)
-			INSERT INTO step (step_name, workflow_id, quality_definition, output_lifetime)
-			SELECT $2, wf.workflow_id, $3::jsonb, $4 FROM wf
+			INSERT INTO step (step_name, workflow_id, quality_definition, output_lifetime, definitive_exit_codes, definitive_pattern)
+			SELECT $2, wf.workflow_id, $3::jsonb, $4, $5, $6 FROM wf
 			RETURNING step_id, workflow_id
-		`, *req.WorkflowName, req.Name, qualityDef, outputLifetime).Scan(&stepID, &workflowID)
+		`, *req.WorkflowName, req.Name, qualityDef, outputLifetime, definitiveCodes, definitivePattern).Scan(&stepID, &workflowID)
 	} else {
 		return nil, fmt.Errorf("either workflow_id or workflow_name must be provided")
 	}

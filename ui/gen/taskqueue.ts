@@ -546,6 +546,22 @@ export interface Task {
      * @generated from protobuf field: optional int32 peak_mem_mb = 51
      */
     peakMemMb?: number;
+    /**
+     * Per-step "definitive failure" policy copied from the Step row
+     * so the worker can classify a failure without a round-trip. When
+     * the task's exit code is in definitive_exit_codes, OR the tail of
+     * stderr matches definitive_pattern (regex), the worker sets
+     * TaskStatusUpdate.failure_class="definitive" and the server retry
+     * gate skips the clone. Both empty / unset = today's behaviour,
+     * every failure is retryable up to task.retry.
+     *
+     * @generated from protobuf field: repeated int32 definitive_exit_codes = 52
+     */
+    definitiveExitCodes: number[];
+    /**
+     * @generated from protobuf field: optional string definitive_pattern = 53
+     */
+    definitivePattern?: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -2897,6 +2913,16 @@ export interface Step {
      * @generated from protobuf field: optional string quality_definition = 5
      */
     qualityDefinition?: string; // JSON: {"variables": {...}, "formula": "..."}
+    /**
+     * See StepRequest.definitive_exit_codes / definitive_pattern.
+     *
+     * @generated from protobuf field: repeated int32 definitive_exit_codes = 6
+     */
+    definitiveExitCodes: number[];
+    /**
+     * @generated from protobuf field: optional string definitive_pattern = 7
+     */
+    definitivePattern?: string;
 }
 /**
  * @generated from protobuf message taskqueue.StepRequest
@@ -2929,6 +2955,23 @@ export interface StepRequest {
      * @generated from protobuf field: optional string output_lifetime = 5
      */
     outputLifetime?: string;
+    /**
+     * Per-step "definitive failure" policy. definitive_exit_codes is
+     * the list of exit codes meaning "this failure won't be fixed by
+     * retrying" — the worker stamps task.failure_class="definitive"
+     * and the server retry gate skips the clone. definitive_pattern
+     * is the regex matched against the tail of stderr for the same
+     * outcome, useful when the underlying tool exits 1 regardless of
+     * cause. Both opt-in; empty / unset preserves today's "every
+     * failure is retryable up to task.retry" behaviour.
+     *
+     * @generated from protobuf field: repeated int32 definitive_exit_codes = 6
+     */
+    definitiveExitCodes: number[];
+    /**
+     * @generated from protobuf field: optional string definitive_pattern = 7
+     */
+    definitivePattern?: string;
 }
 /**
  * @generated from protobuf message taskqueue.StepList
@@ -5143,7 +5186,9 @@ class Task$Type extends MessageType<Task> {
             { no: 48, name: "min_disk_shared", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
             { no: 49, name: "mem_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 50, name: "disk_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
-            { no: 51, name: "peak_mem_mb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 51, name: "peak_mem_mb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 52, name: "definitive_exit_codes", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
+            { no: 53, name: "definitive_pattern", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -5164,6 +5209,7 @@ class Task$Type extends MessageType<Task> {
         message.modifiedAt = "0";
         message.memSharedCurve = [];
         message.diskSharedCurve = [];
+        message.definitiveExitCodes = [];
         if (value !== undefined)
             reflectionMergePartial<Task>(this, message, value);
         return message;
@@ -5345,6 +5391,16 @@ class Task$Type extends MessageType<Task> {
                     break;
                 case /* optional int32 peak_mem_mb */ 51:
                     message.peakMemMb = reader.int32();
+                    break;
+                case /* repeated int32 definitive_exit_codes */ 52:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.definitiveExitCodes.push(reader.int32());
+                    else
+                        message.definitiveExitCodes.push(reader.int32());
+                    break;
+                case /* optional string definitive_pattern */ 53:
+                    message.definitivePattern = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -5531,6 +5587,16 @@ class Task$Type extends MessageType<Task> {
         /* optional int32 peak_mem_mb = 51; */
         if (message.peakMemMb !== undefined)
             writer.tag(51, WireType.Varint).int32(message.peakMemMb);
+        /* repeated int32 definitive_exit_codes = 52; */
+        if (message.definitiveExitCodes.length) {
+            writer.tag(52, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.definitiveExitCodes.length; i++)
+                writer.int32(message.definitiveExitCodes[i]);
+            writer.join();
+        }
+        /* optional string definitive_pattern = 53; */
+        if (message.definitivePattern !== undefined)
+            writer.tag(53, WireType.LengthDelimited).string(message.definitivePattern);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12078,7 +12144,9 @@ class Step$Type extends MessageType<Step> {
             { no: 2, name: "workflow_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "workflow_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "quality_definition", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "quality_definition", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "definitive_exit_codes", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "definitive_pattern", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Step>): Step {
@@ -12087,6 +12155,7 @@ class Step$Type extends MessageType<Step> {
         message.workflowName = "";
         message.workflowId = 0;
         message.name = "";
+        message.definitiveExitCodes = [];
         if (value !== undefined)
             reflectionMergePartial<Step>(this, message, value);
         return message;
@@ -12110,6 +12179,16 @@ class Step$Type extends MessageType<Step> {
                     break;
                 case /* optional string quality_definition */ 5:
                     message.qualityDefinition = reader.string();
+                    break;
+                case /* repeated int32 definitive_exit_codes */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.definitiveExitCodes.push(reader.int32());
+                    else
+                        message.definitiveExitCodes.push(reader.int32());
+                    break;
+                case /* optional string definitive_pattern */ 7:
+                    message.definitivePattern = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -12138,6 +12217,16 @@ class Step$Type extends MessageType<Step> {
         /* optional string quality_definition = 5; */
         if (message.qualityDefinition !== undefined)
             writer.tag(5, WireType.LengthDelimited).string(message.qualityDefinition);
+        /* repeated int32 definitive_exit_codes = 6; */
+        if (message.definitiveExitCodes.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.definitiveExitCodes.length; i++)
+                writer.int32(message.definitiveExitCodes[i]);
+            writer.join();
+        }
+        /* optional string definitive_pattern = 7; */
+        if (message.definitivePattern !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.definitivePattern);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12156,12 +12245,15 @@ class StepRequest$Type extends MessageType<StepRequest> {
             { no: 2, name: "workflow_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "quality_definition", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "output_lifetime", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "output_lifetime", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "definitive_exit_codes", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "definitive_pattern", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<StepRequest>): StepRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.name = "";
+        message.definitiveExitCodes = [];
         if (value !== undefined)
             reflectionMergePartial<StepRequest>(this, message, value);
         return message;
@@ -12185,6 +12277,16 @@ class StepRequest$Type extends MessageType<StepRequest> {
                     break;
                 case /* optional string output_lifetime */ 5:
                     message.outputLifetime = reader.string();
+                    break;
+                case /* repeated int32 definitive_exit_codes */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.definitiveExitCodes.push(reader.int32());
+                    else
+                        message.definitiveExitCodes.push(reader.int32());
+                    break;
+                case /* optional string definitive_pattern */ 7:
+                    message.definitivePattern = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -12213,6 +12315,16 @@ class StepRequest$Type extends MessageType<StepRequest> {
         /* optional string output_lifetime = 5; */
         if (message.outputLifetime !== undefined)
             writer.tag(5, WireType.LengthDelimited).string(message.outputLifetime);
+        /* repeated int32 definitive_exit_codes = 6; */
+        if (message.definitiveExitCodes.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.definitiveExitCodes.length; i++)
+                writer.int32(message.definitiveExitCodes[i]);
+            writer.join();
+        }
+        /* optional string definitive_pattern = 7; */
+        if (message.definitivePattern !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.definitivePattern);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

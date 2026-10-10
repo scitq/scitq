@@ -919,6 +919,40 @@ Some tools load a large read-only reference (an mmap'd genome index, a kraken2 d
 
 When you hand-write a `worker_pool` filter, remember to size it for the shared block too: `mem: 5 mem_shared: 15` at concurrency 3 needs `mem >= 30` (15 shared + 3×5) at minimum. The DSL derives this automatically from `task_spec`; hand-written YAML `worker_pool` filters do not.
 
+#### Definitive failures — skip retry when the error can't recover
+
+By default, every failed task consumes one retry slot. For failures that retrying can never fix (missing reference file, unsupported option, corrupt input) that wastes cluster time: the next attempt lands on the same input and fails the same way. Declare a per-step policy and the worker stamps `failure_class='definitive'` on those failures; the server's retry gate skips the clone.
+
+Two signals, either or both:
+
+```yaml
+  - name: gtdbtk-classify
+    task_spec:
+      cpu: 32
+      mem: 240
+      definitive_exit_codes: [2]            # exit 2 → don't retry
+      definitive_pattern: "^FATAL: reference" # also match on stderr
+```
+
+- `definitive_exit_codes` is a list of exit codes the tool uses for permanent errors. When the task's container/bare exit matches any of them, the failure is definitive.
+- `definitive_pattern` is a regex matched against the tail of stderr (~4 KiB kept per task). Line-anchored matching is enabled by default — `^FATAL:` matches "FATAL:" at the start of any line, not just the start of the whole stderr. Useful when the tool exits 1 regardless of cause.
+
+Pair with the shell helper to opt in from inside your task without memorising exit codes:
+
+```yaml
+    command: |
+      . /builtin/std.sh
+      if ! gtdbtk check_install; then
+        _fail_definitive "reference package is not usable by this GTDB-Tk build"
+      fi
+```
+
+`_fail_definitive "message"` writes `SCITQ_DEFINITIVE: <message>` to stderr and `exit 2`. The example above would be matched by either `definitive_exit_codes: [2]` or `definitive_pattern: "^SCITQ_DEFINITIVE:"`.
+
+The UI and `scitq task list` show `failure_class` so operators can distinguish "stopped early because retry wouldn't help" from "exhausted retries".
+
+A definitive failure also sets the task's `retry` counter to 0 on the same database update. This makes compilation / fan-in steps declared with `accept_failure: true` unblock immediately on definitive failures, instead of waiting for a retry budget that is never going to be spent. A plain F keeps the counter and the dependent step waits until all retries are exhausted — the pre-feature behaviour, unchanged.
+
 #### Per-attempt resource escalation (retry curves)
 
 `cpu`, `mem`, and `disk` each accept either a scalar (constant across every attempt) **or a list** giving the resource ask for each successive attempt. Use a list for tasks that occasionally hit OOM or run out of disk and would succeed with a heavier allocation:
