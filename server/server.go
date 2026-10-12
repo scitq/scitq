@@ -879,23 +879,50 @@ func shouldTriggerAssignFor(status string) bool {
 
 func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowID int32) {
 	var newStatus string
+	// Workflow success is driven by LEAF steps — those whose tasks have no
+	// in-workflow dependents. A fan-in / collection step with
+	// accept_failure on its edges is almost always a leaf; when it
+	// finishes S, it has already honored the accept_failure contract and
+	// the upstream F is considered forgiven. So the workflow is S when
+	// every leaf-step task is S and the whole workflow has reached a
+	// terminal shape (S / F, or W that will never move because an F
+	// upstream was not accepted). The workflow is F when some failure or
+	// permanently-stuck task remains and leaves did not all succeed.
 	err := s.db.QueryRowContext(ctx, `
-		WITH stats AS (
-			SELECT
-				COUNT(*) AS total,
-				COUNT(*) FILTER (WHERE t.status = 'S') AS succeeded,
-				COUNT(*) FILTER (WHERE t.status = 'F') AS failed,
-				COUNT(*) FILTER (WHERE t.status IN ('S','F','W')) AS terminal_or_wait
+		WITH wf_tasks AS (
+			SELECT t.task_id, t.status, t.step_id
 			FROM task t
 			JOIN step s ON s.step_id = t.step_id
 			WHERE s.workflow_id = $1
 			  AND NOT t.hidden
 		),
+		non_leaf_step AS (
+			SELECT DISTINCT t.step_id
+			FROM wf_tasks t
+			JOIN task_dependencies d ON d.prerequisite_task_id = t.task_id
+			JOIN wf_tasks dt         ON dt.task_id            = d.dependent_task_id
+		),
+		leaf_tasks AS (
+			SELECT * FROM wf_tasks
+			WHERE step_id NOT IN (SELECT step_id FROM non_leaf_step)
+		),
+		stats AS (
+			SELECT
+				COUNT(*)                                              AS total,
+				COUNT(*) FILTER (WHERE status = 'F')                  AS failed,
+				COUNT(*) FILTER (WHERE status IN ('S','F','W'))       AS terminal_or_wait,
+				(SELECT COUNT(*) FROM leaf_tasks)                     AS leaf_total,
+				(SELECT COUNT(*) FROM leaf_tasks WHERE status = 'S')  AS leaf_succeeded
+			FROM wf_tasks
+		),
 		desired AS (
 			SELECT
 				CASE
-					WHEN total > 0 AND succeeded = total THEN 'S'
-					WHEN total > 0 AND terminal_or_wait = total AND failed > 0 THEN 'F'
+					WHEN total > 0 AND terminal_or_wait = total
+					              AND leaf_total > 0
+					              AND leaf_succeeded = leaf_total THEN 'S'
+					WHEN total > 0 AND terminal_or_wait = total
+					              AND failed > 0                  THEN 'F'
 					ELSE NULL
 				END AS new_status
 			FROM stats
