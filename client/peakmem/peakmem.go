@@ -187,29 +187,41 @@ type Sampler struct {
 
 // NewDockerSampler starts a background goroutine that polls the peak
 // memory of a docker container identified by containerName. The
-// goroutine first waits for the container to be inspectable (up to
-// startupDeadline) so callers can construct the sampler at the same
-// time they run `docker run` without having to wait for the CID to
-// become discoverable first. interval is how often to re-read the
-// cgroup counter while the container is alive; 1 s is a fine default
+// goroutine first waits for the container to be inspectable so
+// callers can construct the sampler at the same time they run
+// `docker run` without having to wait for the CID to become
+// discoverable first. interval is how often to re-read the cgroup
+// counter while the container is alive; 1 s is a fine default
 // (memory.peak is monotonic, so a 1 s lag on the "final" reading is a
 // tight bound on an hours-long workload).
-func NewDockerSampler(containerName string, interval, startupDeadline time.Duration) *Sampler {
+//
+// The CID lookup has no wall-clock deadline: it polls `docker inspect`
+// until either the container becomes inspectable OR the executor calls
+// Stop(). This matters on cold-start workers where the first task per
+// slot has to pull a multi-hundred-MB image before docker registers
+// the container by name — a race we observed in production on Azure
+// Standard_D48als_v6 workers running the metagenomics scan step, where
+// a 30 s deadline systematically expired during image pull and the
+// sampler never got to read memory.peak at all. Relying on Stop()
+// means the sampler's lifetime is bounded by the executor's cmd.Wait,
+// which is the right notion of "this task is done".
+func NewDockerSampler(containerName string, interval time.Duration) *Sampler {
 	s := &Sampler{
 		stop: make(chan struct{}),
 		done: make(chan struct{}),
 	}
-	go s.run(containerName, interval, startupDeadline)
+	go s.run(containerName, interval)
 	return s
 }
 
-func (s *Sampler) run(containerName string, interval, startupDeadline time.Duration) {
+func (s *Sampler) run(containerName string, interval time.Duration) {
 	defer close(s.done)
 
 	// Wait for the container to become inspectable, then hold onto its
 	// CID for the rest of the sampler's life. The container may need a
-	// moment to appear in Docker's index after `docker run` starts.
-	cid := s.waitForCID(containerName, startupDeadline)
+	// moment to appear in Docker's index after `docker run` starts; on
+	// a cold worker the first task's image pull can take minutes.
+	cid := s.waitForCID(containerName)
 	if cid == "" {
 		return
 	}
@@ -236,8 +248,7 @@ func (s *Sampler) run(containerName string, interval, startupDeadline time.Durat
 	}
 }
 
-func (s *Sampler) waitForCID(containerName string, deadline time.Duration) string {
-	end := time.Now().Add(deadline)
+func (s *Sampler) waitForCID(containerName string) string {
 	for {
 		select {
 		case <-s.stop:
@@ -252,9 +263,6 @@ func (s *Sampler) waitForCID(containerName string, deadline time.Duration) strin
 			if cid != "" {
 				return cid
 			}
-		}
-		if time.Now().After(end) {
-			return ""
 		}
 		// Short backoff. `docker run` fills its container record before
 		// the workload starts, so the first inspect after ~100 ms is

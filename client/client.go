@@ -587,7 +587,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	// value. Best-effort — 0 lands as NULL server-side.
 	var peakSampler *peakmem.Sampler
 	if !isBare && containerName != "" {
-		peakSampler = peakmem.NewDockerSampler(containerName, time.Second, 30*time.Second)
+		peakSampler = peakmem.NewDockerSampler(containerName, time.Second)
 	}
 
 	// Track bare processes for signal handling (keyed by workerName:taskID to avoid cross-test collisions)
