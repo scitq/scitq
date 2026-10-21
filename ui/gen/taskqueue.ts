@@ -3580,6 +3580,15 @@ export interface UploadTemplateRequest {
      * @generated from protobuf field: optional string filename = 3
      */
     filename?: string;
+    /**
+     * Folder path to place this template in ("/"-separated, no leading or
+     * trailing slash, empty = root). When unset the server inherits the
+     * folder of the latest existing version with the same name; a template
+     * with no prior versions defaults to root.
+     *
+     * @generated from protobuf field: optional string folder = 4
+     */
+    folder?: string;
 }
 /**
  * @generated from protobuf message taskqueue.UploadTemplateResponse
@@ -3613,6 +3622,10 @@ export interface UploadTemplateResponse {
      * @generated from protobuf field: optional string param_json = 7
      */
     paramJson?: string;
+    /**
+     * @generated from protobuf field: optional string folder = 8
+     */
+    folder?: string;
 }
 /**
  * @generated from protobuf message taskqueue.RunTemplateRequest
@@ -3685,6 +3698,15 @@ export interface TemplateFilter {
      * @generated from protobuf field: optional bool show_hidden = 5
      */
     showHidden?: boolean;
+    /**
+     * Folder prefix. Matches rows whose folder equals this value OR starts
+     * with this value + "/" — so `folder="bio"` returns `bio`, `bio/qc`,
+     * `bio/qc/fastp` but not `bioinfo`. Unset = any folder (no filter).
+     * Trailing slash is tolerated and stripped before matching.
+     *
+     * @generated from protobuf field: optional string folder = 6
+     */
+    folder?: string;
 }
 /**
  * @generated from protobuf message taskqueue.Template
@@ -3733,6 +3755,14 @@ export interface Template {
      * @generated from protobuf field: int32 version_count = 9
      */
     versionCount: number;
+    /**
+     * Folder path ("/"-separated, empty = root). All versions of a given
+     * template name share the same folder — a move updates every row with
+     * that name on the server side.
+     *
+     * @generated from protobuf field: string folder = 10
+     */
+    folder: string;
 }
 /**
  * UpdateTemplateRequest carries an in-place edit of a workflow_template
@@ -3750,6 +3780,15 @@ export interface UpdateTemplateRequest {
      * @generated from protobuf field: optional bool hidden = 2
      */
     hidden?: boolean;
+    /**
+     * Move this template (and every other version sharing its name) to the
+     * given folder. Server-side validation strips leading/trailing slashes,
+     * rejects empty segments, and allows only `[A-Za-z0-9 _.-]` plus `/`.
+     * Empty string moves back to the root.
+     *
+     * @generated from protobuf field: optional string folder = 3
+     */
+    folder?: string;
 }
 /**
  * @generated from protobuf message taskqueue.TemplateList
@@ -13892,7 +13931,8 @@ class UploadTemplateRequest$Type extends MessageType<UploadTemplateRequest> {
         super("taskqueue.UploadTemplateRequest", [
             { no: 1, name: "script", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
             { no: 2, name: "force", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "filename", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "filename", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "folder", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<UploadTemplateRequest>): UploadTemplateRequest {
@@ -13917,6 +13957,9 @@ class UploadTemplateRequest$Type extends MessageType<UploadTemplateRequest> {
                 case /* optional string filename */ 3:
                     message.filename = reader.string();
                     break;
+                case /* optional string folder */ 4:
+                    message.folder = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13938,6 +13981,9 @@ class UploadTemplateRequest$Type extends MessageType<UploadTemplateRequest> {
         /* optional string filename = 3; */
         if (message.filename !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.filename);
+        /* optional string folder = 4; */
+        if (message.folder !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.folder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13958,7 +14004,8 @@ class UploadTemplateResponse$Type extends MessageType<UploadTemplateResponse> {
             { no: 4, name: "name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 7, name: "param_json", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 7, name: "param_json", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "folder", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<UploadTemplateResponse>): UploadTemplateResponse {
@@ -13995,6 +14042,9 @@ class UploadTemplateResponse$Type extends MessageType<UploadTemplateResponse> {
                 case /* optional string param_json */ 7:
                     message.paramJson = reader.string();
                     break;
+                case /* optional string folder */ 8:
+                    message.folder = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14028,6 +14078,9 @@ class UploadTemplateResponse$Type extends MessageType<UploadTemplateResponse> {
         /* optional string param_json = 7; */
         if (message.paramJson !== undefined)
             writer.tag(7, WireType.LengthDelimited).string(message.paramJson);
+        /* optional string folder = 8; */
+        if (message.folder !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.folder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14132,7 +14185,8 @@ class TemplateFilter$Type extends MessageType<TemplateFilter> {
             { no: 2, name: "name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "all_versions", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 5, name: "show_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 5, name: "show_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "folder", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<TemplateFilter>): TemplateFilter {
@@ -14161,6 +14215,9 @@ class TemplateFilter$Type extends MessageType<TemplateFilter> {
                 case /* optional bool show_hidden */ 5:
                     message.showHidden = reader.bool();
                     break;
+                case /* optional string folder */ 6:
+                    message.folder = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14188,6 +14245,9 @@ class TemplateFilter$Type extends MessageType<TemplateFilter> {
         /* optional bool show_hidden = 5; */
         if (message.showHidden !== undefined)
             writer.tag(5, WireType.Varint).bool(message.showHidden);
+        /* optional string folder = 6; */
+        if (message.folder !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.folder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14210,7 +14270,8 @@ class Template$Type extends MessageType<Template> {
             { no: 6, name: "uploaded_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 7, name: "uploaded_by", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 8, name: "hidden", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 9, name: "version_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 9, name: "version_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "folder", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Template>): Template {
@@ -14223,6 +14284,7 @@ class Template$Type extends MessageType<Template> {
         message.uploadedAt = "";
         message.hidden = false;
         message.versionCount = 0;
+        message.folder = "";
         if (value !== undefined)
             reflectionMergePartial<Template>(this, message, value);
         return message;
@@ -14258,6 +14320,9 @@ class Template$Type extends MessageType<Template> {
                     break;
                 case /* int32 version_count */ 9:
                     message.versionCount = reader.int32();
+                    break;
+                case /* string folder */ 10:
+                    message.folder = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -14298,6 +14363,9 @@ class Template$Type extends MessageType<Template> {
         /* int32 version_count = 9; */
         if (message.versionCount !== 0)
             writer.tag(9, WireType.Varint).int32(message.versionCount);
+        /* string folder = 10; */
+        if (message.folder !== "")
+            writer.tag(10, WireType.LengthDelimited).string(message.folder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14313,7 +14381,8 @@ class UpdateTemplateRequest$Type extends MessageType<UpdateTemplateRequest> {
     constructor() {
         super("taskqueue.UpdateTemplateRequest", [
             { no: 1, name: "workflow_template_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 2, name: "hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "folder", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateTemplateRequest>): UpdateTemplateRequest {
@@ -14334,6 +14403,9 @@ class UpdateTemplateRequest$Type extends MessageType<UpdateTemplateRequest> {
                 case /* optional bool hidden */ 2:
                     message.hidden = reader.bool();
                     break;
+                case /* optional string folder */ 3:
+                    message.folder = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14352,6 +14424,9 @@ class UpdateTemplateRequest$Type extends MessageType<UpdateTemplateRequest> {
         /* optional bool hidden = 2; */
         if (message.hidden !== undefined)
             writer.tag(2, WireType.Varint).bool(message.hidden);
+        /* optional string folder = 3; */
+        if (message.folder !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.folder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

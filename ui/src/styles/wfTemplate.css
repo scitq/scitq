@@ -46,6 +46,22 @@
   align-items: center;
 }
 
+/* Folder input sitting between the file name and the action buttons.
+   Matches the file display's visual weight so the form reads as a
+   single row of inputs — file name, folder, actions. Monospace to
+   mirror the folder paths shown in the list below. */
+.wfTemp-folder-input input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  min-width: 180px;
+  max-width: 260px;
+}
+
 .wfTemp-file-display {
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border-color);

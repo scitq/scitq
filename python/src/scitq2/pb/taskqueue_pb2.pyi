@@ -1702,17 +1702,19 @@ class FetchInfoResponse(_message.Message):
     def __init__(self, uri: _Optional[str] = ..., filename: _Optional[str] = ..., description: _Optional[str] = ..., size: _Optional[int] = ..., is_file: bool = ..., is_dir: bool = ...) -> None: ...
 
 class UploadTemplateRequest(_message.Message):
-    __slots__ = ("script", "force", "filename")
+    __slots__ = ("script", "force", "filename", "folder")
     SCRIPT_FIELD_NUMBER: _ClassVar[int]
     FORCE_FIELD_NUMBER: _ClassVar[int]
     FILENAME_FIELD_NUMBER: _ClassVar[int]
+    FOLDER_FIELD_NUMBER: _ClassVar[int]
     script: bytes
     force: bool
     filename: str
-    def __init__(self, script: _Optional[bytes] = ..., force: bool = ..., filename: _Optional[str] = ...) -> None: ...
+    folder: str
+    def __init__(self, script: _Optional[bytes] = ..., force: bool = ..., filename: _Optional[str] = ..., folder: _Optional[str] = ...) -> None: ...
 
 class UploadTemplateResponse(_message.Message):
-    __slots__ = ("success", "message", "workflow_template_id", "name", "version", "description", "param_json")
+    __slots__ = ("success", "message", "workflow_template_id", "name", "version", "description", "param_json", "folder")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1720,6 +1722,7 @@ class UploadTemplateResponse(_message.Message):
     VERSION_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     PARAM_JSON_FIELD_NUMBER: _ClassVar[int]
+    FOLDER_FIELD_NUMBER: _ClassVar[int]
     success: bool
     message: str
     workflow_template_id: int
@@ -1727,7 +1730,8 @@ class UploadTemplateResponse(_message.Message):
     version: str
     description: str
     param_json: str
-    def __init__(self, success: bool = ..., message: _Optional[str] = ..., workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ...) -> None: ...
+    folder: str
+    def __init__(self, success: bool = ..., message: _Optional[str] = ..., workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ..., folder: _Optional[str] = ...) -> None: ...
 
 class RunTemplateRequest(_message.Message):
     __slots__ = ("workflow_template_id", "param_values_json", "no_recruiters", "extend_workflow_id", "retry_failed_only", "continue_last")
@@ -1746,21 +1750,23 @@ class RunTemplateRequest(_message.Message):
     def __init__(self, workflow_template_id: _Optional[int] = ..., param_values_json: _Optional[str] = ..., no_recruiters: bool = ..., extend_workflow_id: _Optional[int] = ..., retry_failed_only: bool = ..., continue_last: bool = ...) -> None: ...
 
 class TemplateFilter(_message.Message):
-    __slots__ = ("workflow_template_id", "name", "version", "all_versions", "show_hidden")
+    __slots__ = ("workflow_template_id", "name", "version", "all_versions", "show_hidden", "folder")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     ALL_VERSIONS_FIELD_NUMBER: _ClassVar[int]
     SHOW_HIDDEN_FIELD_NUMBER: _ClassVar[int]
+    FOLDER_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     name: str
     version: str
     all_versions: bool
     show_hidden: bool
-    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., all_versions: bool = ..., show_hidden: bool = ...) -> None: ...
+    folder: str
+    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., all_versions: bool = ..., show_hidden: bool = ..., folder: _Optional[str] = ...) -> None: ...
 
 class Template(_message.Message):
-    __slots__ = ("workflow_template_id", "name", "version", "description", "param_json", "uploaded_at", "uploaded_by", "hidden", "version_count")
+    __slots__ = ("workflow_template_id", "name", "version", "description", "param_json", "uploaded_at", "uploaded_by", "hidden", "version_count", "folder")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
@@ -1770,6 +1776,7 @@ class Template(_message.Message):
     UPLOADED_BY_FIELD_NUMBER: _ClassVar[int]
     HIDDEN_FIELD_NUMBER: _ClassVar[int]
     VERSION_COUNT_FIELD_NUMBER: _ClassVar[int]
+    FOLDER_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     name: str
     version: str
@@ -1779,15 +1786,18 @@ class Template(_message.Message):
     uploaded_by: int
     hidden: bool
     version_count: int
-    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ..., uploaded_at: _Optional[str] = ..., uploaded_by: _Optional[int] = ..., hidden: bool = ..., version_count: _Optional[int] = ...) -> None: ...
+    folder: str
+    def __init__(self, workflow_template_id: _Optional[int] = ..., name: _Optional[str] = ..., version: _Optional[str] = ..., description: _Optional[str] = ..., param_json: _Optional[str] = ..., uploaded_at: _Optional[str] = ..., uploaded_by: _Optional[int] = ..., hidden: bool = ..., version_count: _Optional[int] = ..., folder: _Optional[str] = ...) -> None: ...
 
 class UpdateTemplateRequest(_message.Message):
-    __slots__ = ("workflow_template_id", "hidden")
+    __slots__ = ("workflow_template_id", "hidden", "folder")
     WORKFLOW_TEMPLATE_ID_FIELD_NUMBER: _ClassVar[int]
     HIDDEN_FIELD_NUMBER: _ClassVar[int]
+    FOLDER_FIELD_NUMBER: _ClassVar[int]
     workflow_template_id: int
     hidden: bool
-    def __init__(self, workflow_template_id: _Optional[int] = ..., hidden: bool = ...) -> None: ...
+    folder: str
+    def __init__(self, workflow_template_id: _Optional[int] = ..., hidden: bool = ..., folder: _Optional[str] = ...) -> None: ...
 
 class TemplateList(_message.Message):
     __slots__ = ("templates",)

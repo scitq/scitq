@@ -4,7 +4,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { wsClient } from '../lib/wsClient';
   import { Plus, Check, Loader2 } from 'lucide-svelte';
-  import { getTemplates, UploadTemplates, runTemp, updateTemplateHidden, getTemplateRun } from '../lib/api';
+  import { getTemplates, UploadTemplates, runTemp, updateTemplateHidden, updateTemplateFolder, getTemplateRun } from '../lib/api';
   import WfTemplateList from '../components/WfTemplateList.svelte';
   import '../styles/wfTemplate.css';
   import type { UploadTemplateResponse } from '../lib/types';
@@ -34,6 +34,11 @@
   let sortBy: 'template' | 'name' = $state('name');
   // Currently selected file for upload
   let selectedFile: File | null = $state(null);
+  // Folder path for the pending upload. Blank = inherit from the latest
+  // existing version of this template name (server-side); for first
+  // uploads with blank, the template goes to the root. Operators can
+  // move templates later via the Move button in the list.
+  let uploadFolder: string = $state('');
   // Reference to file input element
   let fileInput: HTMLInputElement = $state();
   // Content of selected file as Uint8Array
@@ -219,6 +224,29 @@
     }
   }
 
+  /**
+   * Move a template (and every version sharing its name) to a different
+   * folder. The target is collected via window.prompt: a lightweight
+   * UX for Phase B — a dedicated modal is a reasonable follow-up but
+   * the prompt covers the "I need to reorganize my templates" case
+   * right now without blocking the ship. Server-side validation still
+   * applies: disallowed characters and empty segments are rejected.
+   */
+  async function moveTemplate(templateId: number, currentFolder: string) {
+    const next = window.prompt(
+      `Move template to folder (empty = root; "/"-separated, e.g. bio/qc):`,
+      currentFolder,
+    );
+    if (next === null) return; // user cancelled
+    try {
+      await updateTemplateFolder(templateId, next);
+      await reloadTemplates();
+    } catch (e: any) {
+      errorMessage = e?.message || 'Failed to move template';
+      showErrorModal = true;
+    }
+  }
+
   // Cleanup - unsubscribe from WebSocket when component is destroyed
   onDestroy(() => {
     if (unsubscribeWS) {
@@ -295,12 +323,17 @@
 
     try {
       fileContent = new Uint8Array(await readFileAsArrayBuffer(selectedFile));
-      uploadResponse = await UploadTemplates(fileContent, force);
+      // Only pass folder when the operator typed something — blank
+      // means "inherit from latest existing version" (or root for a
+      // first upload). The server does the resolution.
+      const folderArg = uploadFolder.trim() === '' ? undefined : uploadFolder.trim();
+      uploadResponse = await UploadTemplates(fileContent, force, folderArg);
 
       if (!uploadResponse.success) {
         errorMessage = uploadResponse.message || "Unknown error occurred during upload.";
         showErrorModal = true;
       } else {
+        uploadFolder = '';
         resetFileSelection();
       }
     } catch (error) {
@@ -642,10 +675,10 @@
     <div class="wfTemp-file-action-group">
       <!-- File info display -->
       <div class="wfTemp-file-info">
-        <input 
-          type="text" 
-          class="wfTemp-file-display" 
-          readonly 
+        <input
+          type="text"
+          class="wfTemp-file-display"
+          readonly
           value={selectedFile?.name || 'No file selected'}
           title={selectedFile?.name || 'No file selected'}
         />
@@ -656,14 +689,28 @@
           </button>
         {/if}
       </div>
-      
+
+      <!-- Optional target folder for this upload. Blank = inherit from
+           the latest existing version with the same name, or root for a
+           first upload. "/"-separated paths like 'bio/qc' are
+           supported; server-side normalization strips surrounding
+           slashes and rejects disallowed characters. -->
+      <div class="wfTemp-folder-input">
+        <input
+          type="text"
+          bind:value={uploadFolder}
+          placeholder="Folder (optional, e.g. bio/qc)"
+          title="Target folder for this upload. Leave blank to inherit from existing versions, or type a '/'-separated path."
+        />
+      </div>
+
       <!-- Action buttons -->
       <div class="wfTemp-button-group">
         <button class="wfTemp-action-button wfTemp-add-button" onclick={handleAdd}>
           <Plus size={20} title="Add Workflow" />
         </button>
-        <button 
-          class="wfTemp-action-button wfTemp-validate-button" 
+        <button
+          class="wfTemp-action-button wfTemp-validate-button"
           onclick={() => handleValidate(false)}
           disabled={!selectedFile}
         >
@@ -683,7 +730,7 @@
   </label>
 
   <!-- Template list component -->
-  <WfTemplateList {workflowsTemp} openParamModal={openParamModal} {toggleHidden}/>
+  <WfTemplateList {workflowsTemp} openParamModal={openParamModal} {toggleHidden} {moveTemplate}/>
 </div>
 
 <!-- ----------- ERROR MODAL ---------- -->

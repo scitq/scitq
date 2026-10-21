@@ -9457,10 +9457,15 @@ func (x *FetchInfoResponse) GetIsDir() bool {
 }
 
 type UploadTemplateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Script        []byte                 `protobuf:"bytes,1,opt,name=script,proto3" json:"script,omitempty"`
-	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
-	Filename      *string                `protobuf:"bytes,3,opt,name=filename,proto3,oneof" json:"filename,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Script   []byte                 `protobuf:"bytes,1,opt,name=script,proto3" json:"script,omitempty"`
+	Force    bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	Filename *string                `protobuf:"bytes,3,opt,name=filename,proto3,oneof" json:"filename,omitempty"`
+	// Folder path to place this template in ("/"-separated, no leading or
+	// trailing slash, empty = root). When unset the server inherits the
+	// folder of the latest existing version with the same name; a template
+	// with no prior versions defaults to root.
+	Folder        *string `protobuf:"bytes,4,opt,name=folder,proto3,oneof" json:"folder,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9516,6 +9521,13 @@ func (x *UploadTemplateRequest) GetFilename() string {
 	return ""
 }
 
+func (x *UploadTemplateRequest) GetFolder() string {
+	if x != nil && x.Folder != nil {
+		return *x.Folder
+	}
+	return ""
+}
+
 type UploadTemplateResponse struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Success            bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
@@ -9525,6 +9537,7 @@ type UploadTemplateResponse struct {
 	Version            *string                `protobuf:"bytes,5,opt,name=version,proto3,oneof" json:"version,omitempty"`
 	Description        *string                `protobuf:"bytes,6,opt,name=description,proto3,oneof" json:"description,omitempty"`
 	ParamJson          *string                `protobuf:"bytes,7,opt,name=param_json,json=paramJson,proto3,oneof" json:"param_json,omitempty"`
+	Folder             *string                `protobuf:"bytes,8,opt,name=folder,proto3,oneof" json:"folder,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -9604,6 +9617,13 @@ func (x *UploadTemplateResponse) GetDescription() string {
 func (x *UploadTemplateResponse) GetParamJson() string {
 	if x != nil && x.ParamJson != nil {
 		return *x.ParamJson
+	}
+	return ""
+}
+
+func (x *UploadTemplateResponse) GetFolder() string {
+	if x != nil && x.Folder != nil {
+		return *x.Folder
 	}
 	return ""
 }
@@ -9712,7 +9732,12 @@ type TemplateFilter struct {
 	AllVersions *bool `protobuf:"varint,4,opt,name=all_versions,json=allVersions,proto3,oneof" json:"all_versions,omitempty"`
 	// When true, include hidden templates in the result. Default (false)
 	// excludes them. See workflow_template.hidden (migration 24).
-	ShowHidden    *bool `protobuf:"varint,5,opt,name=show_hidden,json=showHidden,proto3,oneof" json:"show_hidden,omitempty"`
+	ShowHidden *bool `protobuf:"varint,5,opt,name=show_hidden,json=showHidden,proto3,oneof" json:"show_hidden,omitempty"`
+	// Folder prefix. Matches rows whose folder equals this value OR starts
+	// with this value + "/" — so `folder="bio"` returns `bio`, `bio/qc`,
+	// `bio/qc/fastp` but not `bioinfo`. Unset = any folder (no filter).
+	// Trailing slash is tolerated and stripped before matching.
+	Folder        *string `protobuf:"bytes,6,opt,name=folder,proto3,oneof" json:"folder,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9782,6 +9807,13 @@ func (x *TemplateFilter) GetShowHidden() bool {
 	return false
 }
 
+func (x *TemplateFilter) GetFolder() string {
+	if x != nil && x.Folder != nil {
+		return *x.Folder
+	}
+	return ""
+}
+
 type Template struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	WorkflowTemplateId int32                  `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
@@ -9798,7 +9830,11 @@ type Template struct {
 	// mode every row is its own version, so the field stays 0/unset and
 	// callers should ignore it. Used by the UI to decide whether to render
 	// a "more versions" dropdown trigger.
-	VersionCount  int32 `protobuf:"varint,9,opt,name=version_count,json=versionCount,proto3" json:"version_count,omitempty"`
+	VersionCount int32 `protobuf:"varint,9,opt,name=version_count,json=versionCount,proto3" json:"version_count,omitempty"`
+	// Folder path ("/"-separated, empty = root). All versions of a given
+	// template name share the same folder — a move updates every row with
+	// that name on the server side.
+	Folder        string `protobuf:"bytes,10,opt,name=folder,proto3" json:"folder,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9896,6 +9932,13 @@ func (x *Template) GetVersionCount() int32 {
 	return 0
 }
 
+func (x *Template) GetFolder() string {
+	if x != nil {
+		return x.Folder
+	}
+	return ""
+}
+
 // UpdateTemplateRequest carries an in-place edit of a workflow_template
 // row. Currently only `hidden` is mutable — uploads still go through
 // UploadTemplate which validates the script and bumps the version.
@@ -9903,8 +9946,13 @@ type UpdateTemplateRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	WorkflowTemplateId int32                  `protobuf:"varint,1,opt,name=workflow_template_id,json=workflowTemplateId,proto3" json:"workflow_template_id,omitempty"`
 	Hidden             *bool                  `protobuf:"varint,2,opt,name=hidden,proto3,oneof" json:"hidden,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Move this template (and every other version sharing its name) to the
+	// given folder. Server-side validation strips leading/trailing slashes,
+	// rejects empty segments, and allows only `[A-Za-z0-9 _.-]` plus `/`.
+	// Empty string moves back to the root.
+	Folder        *string `protobuf:"bytes,3,opt,name=folder,proto3,oneof" json:"folder,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateTemplateRequest) Reset() {
@@ -9949,6 +9997,13 @@ func (x *UpdateTemplateRequest) GetHidden() bool {
 		return *x.Hidden
 	}
 	return false
+}
+
+func (x *UpdateTemplateRequest) GetFolder() string {
+	if x != nil && x.Folder != nil {
+		return *x.Folder
+	}
+	return ""
 }
 
 type TemplateList struct {
@@ -13675,12 +13730,14 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x12\n" +
 	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x17\n" +
 	"\ais_file\x18\x05 \x01(\bR\x06isFile\x12\x15\n" +
-	"\x06is_dir\x18\x06 \x01(\bR\x05isDir\"s\n" +
+	"\x06is_dir\x18\x06 \x01(\bR\x05isDir\"\x9b\x01\n" +
 	"\x15UploadTemplateRequest\x12\x16\n" +
 	"\x06script\x18\x01 \x01(\fR\x06script\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\x12\x1f\n" +
-	"\bfilename\x18\x03 \x01(\tH\x00R\bfilename\x88\x01\x01B\v\n" +
-	"\t_filename\"\xd3\x02\n" +
+	"\bfilename\x18\x03 \x01(\tH\x00R\bfilename\x88\x01\x01\x12\x1b\n" +
+	"\x06folder\x18\x04 \x01(\tH\x01R\x06folder\x88\x01\x01B\v\n" +
+	"\t_filenameB\t\n" +
+	"\a_folder\"\xfb\x02\n" +
 	"\x16UploadTemplateResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
@@ -13689,13 +13746,15 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aversion\x18\x05 \x01(\tH\x02R\aversion\x88\x01\x01\x12%\n" +
 	"\vdescription\x18\x06 \x01(\tH\x03R\vdescription\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"param_json\x18\a \x01(\tH\x04R\tparamJson\x88\x01\x01B\x17\n" +
+	"param_json\x18\a \x01(\tH\x04R\tparamJson\x88\x01\x01\x12\x1b\n" +
+	"\x06folder\x18\b \x01(\tH\x05R\x06folder\x88\x01\x01B\x17\n" +
 	"\x15_workflow_template_idB\a\n" +
 	"\x05_nameB\n" +
 	"\n" +
 	"\b_versionB\x0e\n" +
 	"\f_descriptionB\r\n" +
-	"\v_param_json\"\xb2\x02\n" +
+	"\v_param_jsonB\t\n" +
+	"\a_folder\"\xb2\x02\n" +
 	"\x12RunTemplateRequest\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12*\n" +
 	"\x11param_values_json\x18\x02 \x01(\tR\x0fparamValuesJson\x12#\n" +
@@ -13703,20 +13762,22 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x12extend_workflow_id\x18\x04 \x01(\x05H\x00R\x10extendWorkflowId\x88\x01\x01\x12*\n" +
 	"\x11retry_failed_only\x18\x05 \x01(\bR\x0fretryFailedOnly\x12#\n" +
 	"\rcontinue_last\x18\x06 \x01(\bR\fcontinueLastB\x15\n" +
-	"\x13_extend_workflow_id\"\x9c\x02\n" +
+	"\x13_extend_workflow_id\"\xc4\x02\n" +
 	"\x0eTemplateFilter\x125\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05H\x00R\x12workflowTemplateId\x88\x01\x01\x12\x17\n" +
 	"\x04name\x18\x02 \x01(\tH\x01R\x04name\x88\x01\x01\x12\x1d\n" +
 	"\aversion\x18\x03 \x01(\tH\x02R\aversion\x88\x01\x01\x12&\n" +
 	"\fall_versions\x18\x04 \x01(\bH\x03R\vallVersions\x88\x01\x01\x12$\n" +
 	"\vshow_hidden\x18\x05 \x01(\bH\x04R\n" +
-	"showHidden\x88\x01\x01B\x17\n" +
+	"showHidden\x88\x01\x01\x12\x1b\n" +
+	"\x06folder\x18\x06 \x01(\tH\x05R\x06folder\x88\x01\x01B\x17\n" +
 	"\x15_workflow_template_idB\a\n" +
 	"\x05_nameB\n" +
 	"\n" +
 	"\b_versionB\x0f\n" +
 	"\r_all_versionsB\x0e\n" +
-	"\f_show_hidden\"\xbf\x02\n" +
+	"\f_show_hiddenB\t\n" +
+	"\a_folder\"\xd7\x02\n" +
 	"\bTemplate\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -13729,12 +13790,16 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\vuploaded_by\x18\a \x01(\x05H\x00R\n" +
 	"uploadedBy\x88\x01\x01\x12\x16\n" +
 	"\x06hidden\x18\b \x01(\bR\x06hidden\x12#\n" +
-	"\rversion_count\x18\t \x01(\x05R\fversionCountB\x0e\n" +
-	"\f_uploaded_by\"q\n" +
+	"\rversion_count\x18\t \x01(\x05R\fversionCount\x12\x16\n" +
+	"\x06folder\x18\n" +
+	" \x01(\tR\x06folderB\x0e\n" +
+	"\f_uploaded_by\"\x99\x01\n" +
 	"\x15UpdateTemplateRequest\x120\n" +
 	"\x14workflow_template_id\x18\x01 \x01(\x05R\x12workflowTemplateId\x12\x1b\n" +
-	"\x06hidden\x18\x02 \x01(\bH\x00R\x06hidden\x88\x01\x01B\t\n" +
-	"\a_hidden\"A\n" +
+	"\x06hidden\x18\x02 \x01(\bH\x00R\x06hidden\x88\x01\x01\x12\x1b\n" +
+	"\x06folder\x18\x03 \x01(\tH\x01R\x06folder\x88\x01\x01B\t\n" +
+	"\a_hiddenB\t\n" +
+	"\a_folder\"A\n" +
 	"\fTemplateList\x121\n" +
 	"\ttemplates\x18\x01 \x03(\v2\x13.taskqueue.TemplateR\ttemplates\"\xa8\x06\n" +
 	"\vTemplateRun\x12&\n" +

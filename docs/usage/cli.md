@@ -738,12 +738,13 @@ Registers a template script and makes it available for later runs.
 Options:
 - `--path` (required): path to the local template script (`.py` or `.yaml`).
 - `--force`: overwrite an existing template that has the same name/version.
+- `--folder`: place the template in a folder (`/`-separated, e.g. `bio/qc`). Omit to inherit from this template's latest existing version; empty string means root.
 
 Examples:
 
 ```sh
 scitq template upload --path qc.py --force
-scitq template upload --path biomscope.yaml
+scitq template upload --path biomscope.yaml --folder metagenomics
 ```
 
 #### `template run`
@@ -797,14 +798,26 @@ Default mode **cascades**: re-running a task because its command drifted also re
 
 #### `template list`
 
-Lists uploaded templates. You can filter by name and/or version.
+Lists uploaded templates. You can filter by name, version, and/or folder.
 
 ```sh
-scitq template list [--name <pattern>] [--version <ver>] [--latest]
+scitq template list [--name <pattern>] [--version <ver>] [--all-versions] [--show-hidden] [--folder <path>]
 ```
 
 - `--name`: filter by template name (supports wildcards like `meta%`).
-- `--version`: filter by version; with `--latest`, shows only the most recent version per name.
+- `--version`: filter by version (exact or SQL `LIKE` pattern); omit for the latest version per name.
+- `--all-versions`: show every version of each matching template (default: latest only).
+- `--show-hidden`: include templates marked hidden.
+- `--folder <path>`: only show templates whose folder is `<path>` or any subfolder — `--folder bio` matches `bio`, `bio/qc`, `bio/qc/fastp`. Pass the empty string to restrict to the root; trailing slash is tolerated.
+
+#### Template folders
+
+Every template lives in a folder. A folder is a `/`-separated path (e.g. `bio/qc/fastp`); the empty string is the root. Allowed per segment: letters, digits, space, `_`, `.`, `-`.
+
+- A template's folder is **per name, not per version**: moving `biomscope` moves every uploaded version of `biomscope` at once.
+- `template upload --folder foo/bar` places the row in `foo/bar`. Omit `--folder` on upload to inherit the folder of the latest existing version of that name — so new versions stay where you put them.
+- `template update --id <N> --folder foo/bar` moves the template (and all its versions) to a different folder. `--folder ""` moves back to the root.
+- `template list --folder foo/` lists every template nested under `foo`.
 
 #### `template detail`
 

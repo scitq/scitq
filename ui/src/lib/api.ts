@@ -727,7 +727,8 @@ export async function getTemplates(
   name?: string,
   version?: string,
   allVersions?: boolean,
-  showHidden?: boolean
+  showHidden?: boolean,
+  folder?: string
 ): Promise<taskqueue.Template[]> {
   try {
     const requestParams: taskqueue.TemplateFilter = {};
@@ -736,6 +737,10 @@ export async function getTemplates(
     if (version) requestParams.version = version;
     if (allVersions) requestParams.allVersions = true;
     if (showHidden) requestParams.showHidden = true;
+    // Pass through only when the caller provided a non-undefined value —
+    // an explicit empty string means "restrict to the root folder" and
+    // must reach the server; omitting the filter means "any folder".
+    if (folder !== undefined) requestParams.folder = folder;
 
     const tempUnary = await client.listTemplates(requestParams, await callOptionsUserToken());
     return tempUnary.response?.templates || [];
@@ -767,15 +772,37 @@ export async function updateTemplateHidden(
 }
 
 /**
+ * Moves a template (every version sharing its name) to a different
+ * folder. Empty-string folder moves back to the root. Server-side
+ * validation normalizes the path and rejects disallowed characters.
+ */
+export async function updateTemplateFolder(
+  templateId: number,
+  folder: string
+): Promise<taskqueue.Template> {
+  const req: taskqueue.UpdateTemplateRequest = {
+    workflowTemplateId: templateId,
+    folder,
+  };
+  const resp = await client.updateTemplate(req, await callOptionsUserToken());
+  return resp.response!;
+}
+
+/**
  * Uploads a new template to the server
  * @param {Uint8Array} script - The template script/content to upload
  * @param {boolean} force - Whether to force upload if template exists
  * @returns {Promise<taskqueue.UploadTemplateResponse>} Promise resolving to upload response
  * @throws {Error} If upload fails
  */
-export async function UploadTemplates(script: Uint8Array, force: boolean): Promise<taskqueue.UploadTemplateResponse> {
+export async function UploadTemplates(script: Uint8Array, force: boolean, folder?: string): Promise<taskqueue.UploadTemplateResponse> {
   try {
-    const uplTempUnary = await client.uploadTemplate({ script, force }, await callOptionsUserToken());
+    const req: any = { script, force };
+    // Only send the folder field when the caller provided one. Explicit
+    // empty string means root; undefined inherits from the latest
+    // existing version with the same name server-side.
+    if (folder !== undefined) req.folder = folder;
+    const uplTempUnary = await client.uploadTemplate(req, await callOptionsUserToken());
     return uplTempUnary.response!;
   } catch (error) {
     console.error("Error while uploading templates:", error);

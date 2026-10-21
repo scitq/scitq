@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,32 @@ import (
 	"google.golang.org/protobuf/proto"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
+
+// folderSegmentRe matches a single valid segment of a template folder
+// path: alphanumerics, space, underscore, dot, hyphen. "/" is the
+// separator and is not part of a segment.
+var folderSegmentRe = regexp.MustCompile(`^[A-Za-z0-9 _.-]+$`)
+
+// normalizeFolderPath canonicalizes a template folder path. Returns the
+// cleaned path and an error when a segment contains disallowed
+// characters or is empty. Empty input (and "/" and "///") all collapse
+// to the root (empty string).
+func normalizeFolderPath(raw string) (string, error) {
+	s := strings.Trim(raw, "/")
+	if s == "" {
+		return "", nil
+	}
+	segs := strings.Split(s, "/")
+	for _, seg := range segs {
+		if seg == "" {
+			return "", fmt.Errorf("folder path contains empty segment: %q", raw)
+		}
+		if !folderSegmentRe.MatchString(seg) {
+			return "", fmt.Errorf("folder segment %q contains disallowed characters (allowed: letters, digits, space, _, ., -)", seg)
+		}
+	}
+	return strings.Join(segs, "/"), nil
+}
 
 func (s *taskQueueServer) UpdateTemplateRun(ctx context.Context, req *pb.UpdateTemplateRunRequest) (*pb.Ack, error) {
 	if req.TemplateRunId == 0 {
@@ -881,6 +908,38 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		return nil, fmt.Errorf("failed to check existing template: %w", err)
 	}
 
+	// 4️⃣.b Resolve the folder for this upload. Rule:
+	//  - If the caller passed req.Folder, normalize + validate it.
+	//  - Else look up the folder of the most recent existing version with
+	//    the same name (preserves the invariant "all versions of a name
+	//    share one folder").
+	//  - Else root ("").
+	// We compute folder before the INSERT so the new row goes to the right
+	// place in one shot.
+	var folder string
+	if req.Folder != nil {
+		normalized, nerr := normalizeFolderPath(*req.Folder)
+		if nerr != nil {
+			return &pb.UploadTemplateResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid folder: %v", nerr),
+			}, nil
+		}
+		folder = normalized
+	} else {
+		var existingFolder sql.NullString
+		err := s.db.QueryRowContext(ctx,
+			`SELECT folder FROM workflow_template WHERE name = $1 ORDER BY uploaded_at DESC LIMIT 1`,
+			meta.Name,
+		).Scan(&existingFolder)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("failed to look up existing folder for %q: %w", meta.Name, err)
+		}
+		if existingFolder.Valid {
+			folder = existingFolder.String
+		}
+	}
+
 	// 5️⃣ Extract params
 	var stdoutParams, stderrParams string
 	if isYAML {
@@ -980,10 +1039,10 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 		var templateID int32
 		if req.Force && existingID != 0 {
 			_, err := s.db.ExecContext(ctx,
-				`UPDATE workflow_template 
-			 SET description = $1, script_path = $2, params_schema = $3, uploaded_at = NOW()
-			 WHERE workflow_template_id = $4`,
-				meta.Description, "", stdoutParams, existingID,
+				`UPDATE workflow_template
+			 SET description = $1, script_path = $2, params_schema = $3, folder = $4, uploaded_at = NOW()
+			 WHERE workflow_template_id = $5`,
+				meta.Description, "", stdoutParams, folder, existingID,
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to update existing template: %w", err)
@@ -991,13 +1050,26 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			templateID = existingID
 		} else {
 			err = s.db.QueryRowContext(ctx,
-				`INSERT INTO workflow_template (name, version, description, script_path, params_schema, uploaded_at)
-			 VALUES ($1, $2, $3, '', $4, NOW())
+				`INSERT INTO workflow_template (name, version, description, script_path, params_schema, folder, uploaded_at)
+			 VALUES ($1, $2, $3, '', $4, $5, NOW())
 			 RETURNING workflow_template_id`,
-				meta.Name, meta.Version, meta.Description, stdoutParams,
+				meta.Name, meta.Version, meta.Description, stdoutParams, folder,
 			).Scan(&templateID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to insert new template: %w", err)
+			}
+		}
+
+		// 6️⃣.b Enforce the per-name folder invariant when the caller moved
+		// this template via req.Folder. Earlier versions of the same name
+		// now get the same folder in one UPDATE. (No-op when the folder is
+		// unchanged or no prior versions exist.)
+		if req.Folder != nil {
+			if _, err := s.db.ExecContext(ctx,
+				`UPDATE workflow_template SET folder = $1 WHERE name = $2 AND folder <> $1`,
+				folder, meta.Name,
+			); err != nil {
+				return nil, fmt.Errorf("failed to propagate folder to other versions: %w", err)
 			}
 		}
 
@@ -1052,6 +1124,7 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			Version:            &meta.Version,
 			Description:        &meta.Description,
 			ParamJson:          &processedParams,
+			Folder:             &folder,
 		}, nil
 	}
 
@@ -1062,7 +1135,7 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 	var clauses []string
 
 	query := `
-		SELECT workflow_template_id, name, version, description, params_schema, uploaded_at, uploaded_by, hidden
+		SELECT workflow_template_id, name, version, description, params_schema, uploaded_at, uploaded_by, hidden, folder
 		FROM workflow_template
 	`
 
@@ -1091,6 +1164,21 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 		clauses = append(clauses, "hidden = FALSE")
 	}
 
+	// Folder prefix filter: `folder = $p` matches the folder itself,
+	// `folder LIKE $p || '/%'` matches everything nested under it. Pass
+	// an empty string (or omit) to see every folder. Trailing slash is
+	// tolerated so `--folder foo/` works the same as `--folder foo`.
+	if req.Folder != nil {
+		prefix := strings.TrimRight(*req.Folder, "/")
+		if prefix == "" {
+			// explicit "root only" when the caller passed "" or "/"
+			clauses = append(clauses, "folder = ''")
+		} else {
+			clauses = append(clauses, fmt.Sprintf("(folder = $%d OR folder LIKE $%d::TEXT || '/%%')", len(args)+1, len(args)+1))
+			args = append(args, prefix)
+		}
+	}
+
 	if len(clauses) > 0 {
 		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
@@ -1110,7 +1198,7 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 		var uploadedAt time.Time
 		var rawParams sql.NullString
 
-		if err := rows.Scan(&t.WorkflowTemplateId, &t.Name, &t.Version, &t.Description, &rawParams, &uploadedAt, &uploadedBy, &t.Hidden); err != nil {
+		if err := rows.Scan(&t.WorkflowTemplateId, &t.Name, &t.Version, &t.Description, &rawParams, &uploadedAt, &uploadedBy, &t.Hidden, &t.Folder); err != nil {
 			return nil, fmt.Errorf("failed to scan template: %w", err)
 		}
 
@@ -1185,29 +1273,62 @@ func (s *taskQueueServer) ListTemplates(ctx context.Context, req *pb.TemplateFil
 }
 
 // UpdateTemplate edits in-place fields on a workflow_template row.
-// Currently only `hidden` is mutable; uploads still go through
-// UploadTemplate which validates and bumps the version.
+// `hidden` toggles visibility; `folder` moves the template (and every
+// other version sharing its name) to a new folder path. Uploads still
+// go through UploadTemplate which validates and bumps the version.
 func (s *taskQueueServer) UpdateTemplate(ctx context.Context, req *pb.UpdateTemplateRequest) (*pb.Template, error) {
 	if req.WorkflowTemplateId == 0 {
 		return nil, fmt.Errorf("workflow_template_id is required")
 	}
-	if req.Hidden == nil {
-		return nil, fmt.Errorf("no fields to update (set hidden=true or hidden=false)")
+	if req.Hidden == nil && req.Folder == nil {
+		return nil, fmt.Errorf("no fields to update (set hidden and/or folder)")
 	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE workflow_template SET hidden = $1 WHERE workflow_template_id = $2`,
-		*req.Hidden, req.WorkflowTemplateId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update template %d: %w", req.WorkflowTemplateId, err)
+
+	if req.Hidden != nil {
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE workflow_template SET hidden = $1 WHERE workflow_template_id = $2`,
+			*req.Hidden, req.WorkflowTemplateId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update template %d: %w", req.WorkflowTemplateId, err)
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			return nil, fmt.Errorf("template %d not found", req.WorkflowTemplateId)
+		}
+		if *req.Hidden {
+			log.Printf("🙈 Template %d hidden", req.WorkflowTemplateId)
+		} else {
+			log.Printf("👁️ Template %d unhidden", req.WorkflowTemplateId)
+		}
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return nil, fmt.Errorf("template %d not found", req.WorkflowTemplateId)
+
+	if req.Folder != nil {
+		normalized, nerr := normalizeFolderPath(*req.Folder)
+		if nerr != nil {
+			return nil, fmt.Errorf("invalid folder: %w", nerr)
+		}
+		// Look up the template name so we can propagate the folder change
+		// to every version sharing it in one statement. We fetch the name
+		// to make the UPDATE scoped and to produce a clearer "not found"
+		// error than silently updating zero rows.
+		var name string
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT name FROM workflow_template WHERE workflow_template_id = $1`,
+			req.WorkflowTemplateId,
+		).Scan(&name); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, fmt.Errorf("template %d not found", req.WorkflowTemplateId)
+			}
+			return nil, fmt.Errorf("failed to read template name: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE workflow_template SET folder = $1 WHERE name = $2`,
+			normalized, name,
+		); err != nil {
+			return nil, fmt.Errorf("failed to move template %q to folder %q: %w", name, normalized, err)
+		}
+		log.Printf("📁 Template %q moved to folder %q (all versions)", name, normalized)
 	}
-	if *req.Hidden {
-		log.Printf("🙈 Template %d hidden", req.WorkflowTemplateId)
-	} else {
-		log.Printf("👁️ Template %d unhidden", req.WorkflowTemplateId)
-	}
+
 	// Echo back the updated row so the caller sees the new state.
 	list, err := s.ListTemplates(ctx, &pb.TemplateFilter{
 		WorkflowTemplateId: &req.WorkflowTemplateId,

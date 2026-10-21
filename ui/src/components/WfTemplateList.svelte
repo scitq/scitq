@@ -2,16 +2,11 @@
   import { run, stopPropagation, createBubbler } from 'svelte/legacy';
 
   const bubble = createBubbler();
-  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronDown, Play, Eye, EyeOff } from 'lucide-svelte';
+  import { RefreshCw, PauseCircle, CircleX, Eraser, ChevronDown, ChevronRight, Play, Eye, EyeOff, FolderOpen, Folder, Move } from 'lucide-svelte';
   import { onDestroy } from 'svelte';
   import { getTemplates } from '../lib/api';
   import type { Template } from '../../gen/taskqueue';
 
-  
-
-  
-
-  
   interface Props {
     /**
    * Array of workflow templates to display
@@ -29,9 +24,52 @@
    * @type {(templateId: number, hidden: boolean) => void}
    */
     toggleHidden?: ((templateId: number, hidden: boolean) => void) | undefined;
+    /**
+   * Optional callback to move a template (every version sharing its
+   * name) to another folder path. When omitted, the Move button is
+   * not rendered. Signature: (templateId, currentFolder) — the parent
+   * owns the prompt / modal and the API call so this component stays
+   * presentational.
+   * @type {(templateId: number, currentFolder: string) => void}
+   */
+    moveTemplate?: ((templateId: number, currentFolder: string) => void) | undefined;
   }
 
-  let { workflowsTemp = [], openParamModal, toggleHidden = undefined }: Props = $props();
+  let { workflowsTemp = [], openParamModal, toggleHidden = undefined, moveTemplate = undefined }: Props = $props();
+
+  // Group templates by folder path. Order of folders is alphabetical,
+  // with the root ("") pinned first so unfiled templates stay visible.
+  let groupedByFolder = $derived.by(() => {
+    const map = new Map<string, Template[]>();
+    for (const t of workflowsTemp) {
+      const f = t.folder ?? '';
+      if (!map.has(f)) map.set(f, []);
+      map.get(f)!.push(t);
+    }
+    const paths = Array.from(map.keys()).sort((a, b) => {
+      if (a === '') return -1;
+      if (b === '') return 1;
+      return a.localeCompare(b);
+    });
+    return paths.map(p => ({ path: p, templates: map.get(p)! }));
+  });
+
+  // Per-folder collapse state. Expanded by default (new entries render
+  // open on first paint). Keyed by the folder path exactly as it appears
+  // in `groupedByFolder` — including the empty string for root.
+  let collapsed: Record<string, boolean> = $state({});
+
+  function toggleFolder(path: string) {
+    collapsed = { ...collapsed, [path]: !collapsed[path] };
+  }
+
+  // Human label for the folder bar. Root templates are shown under
+  // "/ (root)" so operators can see at a glance which templates haven't
+  // been filed yet. Nested paths show the full breadcrumb; the UI relies
+  // on a small font so even deep paths like `bio/qc/fastp` fit a row.
+  function folderLabel(path: string): string {
+    return path === '' ? '/ (root)' : path;
+  }
 
   // Per-row dropdown state. Only one dropdown is open at a time; the row's
   // workflowTemplateId acts as the discriminator. The version list itself
@@ -98,9 +136,29 @@
 </script>
 
 {#if workflowsTemp && workflowsTemp.length > 0}
-  <!-- Workflow templates list container -->
+  <!-- Workflow templates list container, grouped by folder path. Each
+       folder has a collapsible header; templates render in their folder
+       section. Root templates (folder == "") render under "/ (root)" so
+       they stay visible even when nested folders exist. -->
   <div class="wfTemp-list" use:closeOnOutsideClick>
-    {#each workflowsTemp as t (t.workflowTemplateId)}
+    {#each groupedByFolder as grp (grp.path)}
+      <div class="wf-folder-group" data-testid={`wfFolder-${grp.path || 'root'}`}>
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <button class="wf-folder-header" type="button"
+                onclick={() => toggleFolder(grp.path)}
+                aria-expanded={!collapsed[grp.path]}>
+          {#if collapsed[grp.path]}
+            <ChevronRight size={14} />
+            <Folder size={14} />
+          {:else}
+            <ChevronDown size={14} />
+            <FolderOpen size={14} />
+          {/if}
+          <span class="wf-folder-name">{folderLabel(grp.path)}</span>
+          <span class="wf-folder-count">({grp.templates.length})</span>
+        </button>
+        {#if !collapsed[grp.path]}
+    {#each grp.templates as t (t.workflowTemplateId)}
       <!-- Individual workflow template item -->
       <div class="wf-item" data-testid={`wfTemplate-${t.workflowTemplateId}`}
            class:wf-hidden-marker={t.hidden}>
@@ -213,10 +271,19 @@
               </button>
             {/if}
           {/if}
+          {#if moveTemplate}
+            <button class="btn-action" title="Move to folder"
+                    onclick={() => moveTemplate(t.workflowTemplateId ?? 0, t.folder ?? '')}>
+              <Move />
+            </button>
+          {/if}
         </div>
 
       </div>
 
+    {/each}
+        {/if}
+      </div>
     {/each}
   </div>
 {:else}
@@ -307,4 +374,42 @@
   }
   .wf-hidden-marker { opacity: 0.6; }
   .wf-hidden-tag { font-size: 0.85em; }
+
+  /* Folder grouping: a lightweight breadcrumb header above each cluster
+     of templates. The header is a button so keyboard users can
+     collapse / expand each folder; the chevron and folder icon together
+     signal "this toggles". The count is a quiet hint so operators can
+     tell at a glance how many templates live under each folder without
+     expanding. */
+  .wf-folder-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 10px;
+  }
+  .wf-folder-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--bg-secondary, #f0f1f3);
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    color: inherit;
+    width: fit-content;
+    margin-bottom: 4px;
+  }
+  .wf-folder-header:hover {
+    background: var(--bg-tertiary, #e7e8ec);
+  }
+  .wf-folder-name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.95em;
+  }
+  .wf-folder-count {
+    font-size: 0.85em;
+    opacity: 0.65;
+    font-weight: 400;
+  }
 </style>

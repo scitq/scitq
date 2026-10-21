@@ -405,12 +405,25 @@ func (h *mcpHandler) listTools() []mcpTool {
 			},
 		},
 		{
+			Name:        "move_template",
+			Description: "Move a template (every version sharing its name) to a different folder. Pass folder=\"\" to move to the root. Folder paths are \"/\"-separated and limited to [A-Za-z0-9 _.-] per segment.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"workflow_template_id": {Type: "integer", Description: "Any workflow_template_id belonging to the template to move (the server propagates the change to every version with the same name)."},
+					"folder":               {Type: "string", Description: "Target folder path (e.g. 'bio/qc'). Empty string = root."},
+				},
+				Required: []string{"workflow_template_id", "folder"},
+			},
+		},
+		{
 			Name:        "list_templates",
 			Description: "List available workflow templates.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"name": {Type: "string", Description: "Filter by name (optional)"},
+					"name":   {Type: "string", Description: "Filter by name (optional)"},
+					"folder": {Type: "string", Description: "Filter by folder prefix (e.g. 'bio' matches 'bio', 'bio/qc', 'bio/qc/fastp'). Empty string restricts to the root; trailing slash tolerated."},
 				},
 			},
 		},
@@ -687,6 +700,7 @@ func (h *mcpHandler) listTools() []mcpTool {
 					"filename": {Type: "string", Description: "Filename with extension (e.g. biomscope.yaml or qc.py)"},
 					"content":  {Type: "string", Description: "Template file content"},
 					"force":    {Type: "boolean", Description: "Overwrite existing template with same name/version"},
+					"folder":   {Type: "string", Description: "Folder to place this template in (e.g. 'bio/qc'). Omit to inherit from the latest existing version with the same name; empty string = root."},
 				},
 				Required: []string{"filename", "content"},
 			},
@@ -758,6 +772,21 @@ func (h *mcpHandler) listTools() []mcpTool {
 					"new_version":    {Type: "string", Description: "Version string for the new fork row (must not already exist at this path)"},
 				},
 				Required: []string{"source_path", "new_version"},
+			},
+		},
+		{
+			Name:        "update_task",
+			Description: "Patch sizing fields on a task in place — min_cpu, min_mem, min_disk, min_gpu. Does not change the task's status and does not clone/retry it. Use when a running or pending task was mis-sized and should become eligible for a different flavor without a tear-down. For failed tasks that need a code or resource change, use edit_and_retry_task instead.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"task_id":  {Type: "integer", Description: "Task ID to update"},
+					"min_cpu":  {Type: "number", Description: "Per-task minimum CPU cores (worker-fit predicate). Lower it to make a stuck task eligible for smaller workers."},
+					"min_mem":  {Type: "number", Description: "Per-task minimum memory in GB (worker-fit predicate). Risky — going below the real footprint may cause OOM."},
+					"min_disk": {Type: "number", Description: "Per-task minimum disk in GB (worker-fit predicate)."},
+					"min_gpu":  {Type: "integer", Description: "Per-task GPU count. >0 makes the task GPU-only (fit requires worker.flavor.has_gpu)."},
+				},
+				Required: []string{"task_id"},
 			},
 		},
 		{
@@ -987,6 +1016,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolRunTemplate(authCtx, call.Arguments)
 	case "upload_template":
 		return h.toolUploadTemplate(authCtx, call.Arguments)
+	case "move_template":
+		return h.toolMoveTemplate(authCtx, call.Arguments)
 	case "download_template":
 		return h.toolDownloadTemplate(authCtx, call.Arguments)
 	case "list_workflows":
@@ -1041,6 +1072,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolForkModule(authCtx, call.Arguments)
 	case "download_module":
 		return h.toolDownloadModule(authCtx, call.Arguments)
+	case "update_task":
+		return h.toolUpdateTask(authCtx, call.Arguments)
 	case "edit_and_retry_task":
 		return h.toolEditAndRetryTask(authCtx, call.Arguments)
 	case "edit_step_command":
@@ -1096,13 +1129,17 @@ func (h *mcpHandler) toolLogin(ctx context.Context, session *mcpSession, args js
 
 func (h *mcpHandler) toolListTemplates(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
-		Name string `json:"name"`
+		Name   string  `json:"name"`
+		Folder *string `json:"folder"`
 	}
 	json.Unmarshal(args, &p)
 
 	filter := &pb.TemplateFilter{}
 	if p.Name != "" {
 		filter.Name = &p.Name
+	}
+	if p.Folder != nil {
+		filter.Folder = p.Folder
 	}
 	latest := "latest"
 	filter.Version = &latest
@@ -1789,16 +1826,21 @@ func (h *mcpHandler) toolDeleteWorkflow(ctx context.Context, args json.RawMessag
 
 func (h *mcpHandler) toolUploadTemplate(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct {
-		Filename string `json:"filename"`
-		Content  string `json:"content"`
-		Force    bool   `json:"force"`
+		Filename string  `json:"filename"`
+		Content  string  `json:"content"`
+		Force    bool    `json:"force"`
+		Folder   *string `json:"folder"`
 	}
 	json.Unmarshal(args, &p)
-	resp, err := h.server.UploadTemplate(ctx, &pb.UploadTemplateRequest{
+	req := &pb.UploadTemplateRequest{
 		Script:   []byte(p.Content),
 		Force:    p.Force,
 		Filename: &p.Filename,
-	})
+	}
+	if p.Folder != nil {
+		req.Folder = p.Folder
+	}
+	resp, err := h.server.UploadTemplate(ctx, req)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1810,7 +1852,28 @@ func (h *mcpHandler) toolUploadTemplate(ctx context.Context, args json.RawMessag
 		"name":        resp.GetName(),
 		"version":     resp.GetVersion(),
 		"description": resp.GetDescription(),
+		"folder":      resp.GetFolder(),
 	}), nil
+}
+
+func (h *mcpHandler) toolMoveTemplate(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		WorkflowTemplateID int32  `json:"workflow_template_id"`
+		Folder             string `json:"folder"`
+	}
+	json.Unmarshal(args, &p)
+	res, err := h.server.UpdateTemplate(ctx, &pb.UpdateTemplateRequest{
+		WorkflowTemplateId: p.WorkflowTemplateID,
+		Folder:             &p.Folder,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	loc := "root"
+	if res.Folder != "" {
+		loc = res.Folder
+	}
+	return textResult(fmt.Sprintf("Template %q (every version) moved to folder %s", res.Name, loc)), nil
 }
 
 func (h *mcpHandler) toolDownloadTemplate(ctx context.Context, args json.RawMessage) (any, *rpcError) {
@@ -1901,6 +1964,28 @@ func (h *mcpHandler) toolForkModule(ctx context.Context, args json.RawMessage) (
 		return errorResult(err), nil
 	}
 	return textResult(fmt.Sprintf("Forked %s@%s → %s@%s", p.SourcePath, p.SourceVersion, p.SourcePath, p.NewVersion)), nil
+}
+
+func (h *mcpHandler) toolUpdateTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		TaskID  int32    `json:"task_id"`
+		MinCpu  *float32 `json:"min_cpu"`
+		MinMem  *float32 `json:"min_mem"`
+		MinDisk *float32 `json:"min_disk"`
+		MinGpu  *int32   `json:"min_gpu"`
+	}
+	json.Unmarshal(args, &p)
+	req := &pb.EditTaskRequest{
+		TaskId:  p.TaskID,
+		MinCpu:  p.MinCpu,
+		MinMem:  p.MinMem,
+		MinDisk: p.MinDisk,
+		MinGpu:  p.MinGpu,
+	}
+	if _, err := h.server.EditTask(ctx, req); err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(fmt.Sprintf("Task %d updated", p.TaskID)), nil
 }
 
 func (h *mcpHandler) toolEditAndRetryTask(ctx context.Context, args json.RawMessage) (any, *rpcError) {

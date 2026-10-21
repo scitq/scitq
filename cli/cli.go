@@ -370,8 +370,9 @@ type Attr struct {
 	// (Workflow) Template commands
 	Template *struct {
 		Upload *struct {
-			Path  string `arg:"--path,required" help:"Path to the Python template script"`
-			Force bool   `arg:"--force" help:"Overwrite existing template with same name/version"`
+			Path   string  `arg:"--path,required" help:"Path to the Python template script"`
+			Force  bool    `arg:"--force" help:"Overwrite existing template with same name/version"`
+			Folder *string `arg:"--folder" help:"Folder path to place this template in (\"/\"-separated, e.g. 'bio/qc'). Omit to inherit the folder of this template's latest existing version; empty string means root."`
 		} `arg:"subcommand:upload" help:"Upload a new workflow template"`
 
 		Run *struct {
@@ -391,6 +392,7 @@ type Attr struct {
 			Latest      bool    `arg:"--latest" help:"DEPRECATED no-op: latest is now the default. Use --all-versions to opt out."`
 			AllVersions bool    `arg:"--all-versions" help:"Show every version per template name (default: latest only)"`
 			ShowHidden  bool    `arg:"--show-hidden" help:"Include templates marked hidden in the listing"`
+			Folder      *string `arg:"--folder" help:"Only show templates in this folder or any subfolder (e.g. 'bio' matches 'bio', 'bio/qc', 'bio/qc/fastp'). Empty string restricts to the root; trailing slash is tolerated."`
 		} `arg:"subcommand:list" help:"List uploaded workflow templates (latest version per name by default)"`
 
 		Detail *struct {
@@ -407,10 +409,11 @@ type Attr struct {
 		} `arg:"subcommand:download" help:"Download a template script"`
 
 		Update *struct {
-			TemplateId int32 `arg:"--id,required" help:"Template ID to update"`
-			Hide       bool  `arg:"--hide" help:"Hide the template (excluded from default listings)"`
-			Unhide     bool  `arg:"--unhide" help:"Unhide a previously hidden template"`
-		} `arg:"subcommand:update" help:"Update a template's metadata (currently: hide / unhide)"`
+			TemplateId int32   `arg:"--id,required" help:"Template ID to update"`
+			Hide       bool    `arg:"--hide" help:"Hide the template (excluded from default listings)"`
+			Unhide     bool    `arg:"--unhide" help:"Unhide a previously hidden template"`
+			Folder     *string `arg:"--folder" help:"Move this template (every version with the same name) to the given folder. Empty string moves to the root."`
+		} `arg:"subcommand:update" help:"Update a template's metadata (hide/unhide, folder)"`
 	} `arg:"subcommand:template" help:"Manage workflow templates"`
 
 	// Module commands
@@ -1947,11 +1950,15 @@ func (c *CLI) TemplateUpload() error {
 
 	// Call UploadTemplate RPC
 	filename := filepath.Base(path)
-	resp, err := c.QC.Client.UploadTemplate(ctx, &pb.UploadTemplateRequest{
+	req := &pb.UploadTemplateRequest{
 		Script:   data,
 		Force:    force,
 		Filename: &filename,
-	})
+	}
+	if c.Attr.Template.Upload.Folder != nil {
+		req.Folder = c.Attr.Template.Upload.Folder
+	}
+	resp, err := c.QC.Client.UploadTemplate(ctx, req)
 	if err != nil {
 		return fmt.Errorf("❌ UploadTemplate RPC failed: %w", err)
 	}
@@ -1970,6 +1977,9 @@ func (c *CLI) TemplateUpload() error {
 	fmt.Printf("  Name:      %s\n", resp.GetName())
 	fmt.Printf("  Version:   %s\n", resp.GetVersion())
 	fmt.Printf("  Desc:      %s\n", resp.GetDescription())
+	if f := resp.GetFolder(); f != "" {
+		fmt.Printf("  Folder:    %s\n", f)
+	}
 
 	if msg := strings.TrimSpace(resp.Message); msg != "" {
 		fmt.Println("⚠️  Warnings:")
@@ -2001,6 +2011,9 @@ func (c *CLI) TemplateList() error {
 		t := true
 		filter.ShowHidden = &t
 	}
+	if c.Attr.Template.List.Folder != nil {
+		filter.Folder = c.Attr.Template.List.Folder
+	}
 
 	res, err := c.QC.Client.ListTemplates(ctx, filter)
 	if err != nil {
@@ -2026,8 +2039,12 @@ func (c *CLI) TemplateList() error {
 		if t.Hidden {
 			hiddenMark = " 🙈 hidden"
 		}
-		fmt.Printf("🔹 ID: %d | Name: %s | Version: %s | Description: %s | UploadedAt: %s | UploadedBy: %s%s\n",
-			t.WorkflowTemplateId, t.Name, t.Version, t.Description, t.UploadedAt, uploadedBy, hiddenMark)
+		folderMark := ""
+		if t.Folder != "" {
+			folderMark = fmt.Sprintf(" | Folder: %s", t.Folder)
+		}
+		fmt.Printf("🔹 ID: %d | Name: %s | Version: %s | Description: %s | UploadedAt: %s | UploadedBy: %s%s%s\n",
+			t.WorkflowTemplateId, t.Name, t.Version, t.Description, t.UploadedAt, uploadedBy, folderMark, hiddenMark)
 	}
 	return nil
 }
@@ -2042,15 +2059,20 @@ func (c *CLI) TemplateUpdate() error {
 	if u.Hide && u.Unhide {
 		return fmt.Errorf("--hide and --unhide are mutually exclusive")
 	}
-	if !u.Hide && !u.Unhide {
-		return fmt.Errorf("nothing to update: pass --hide or --unhide")
+	if !u.Hide && !u.Unhide && u.Folder == nil {
+		return fmt.Errorf("nothing to update: pass --hide, --unhide, or --folder")
 	}
 
-	hidden := u.Hide
-	res, err := c.QC.Client.UpdateTemplate(ctx, &pb.UpdateTemplateRequest{
-		WorkflowTemplateId: u.TemplateId,
-		Hidden:             &hidden,
-	})
+	req := &pb.UpdateTemplateRequest{WorkflowTemplateId: u.TemplateId}
+	if u.Hide || u.Unhide {
+		hidden := u.Hide
+		req.Hidden = &hidden
+	}
+	if u.Folder != nil {
+		req.Folder = u.Folder
+	}
+
+	res, err := c.QC.Client.UpdateTemplate(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to update template: %w", err)
 	}
@@ -2061,7 +2083,11 @@ func (c *CLI) TemplateUpdate() error {
 	if res.Hidden {
 		state = "hidden"
 	}
-	fmt.Printf("✏️ Template %d (%s@%s) is now %s\n", res.WorkflowTemplateId, res.Name, res.Version, state)
+	loc := "root"
+	if res.Folder != "" {
+		loc = res.Folder
+	}
+	fmt.Printf("✏️ Template %d (%s@%s) is now %s in folder %s\n", res.WorkflowTemplateId, res.Name, res.Version, state, loc)
 	return nil
 }
 

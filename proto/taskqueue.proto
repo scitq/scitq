@@ -1566,6 +1566,11 @@ message UploadTemplateRequest {
   bytes script = 1;
   bool force = 2;
   optional string filename = 3;
+  // Folder path to place this template in ("/"-separated, no leading or
+  // trailing slash, empty = root). When unset the server inherits the
+  // folder of the latest existing version with the same name; a template
+  // with no prior versions defaults to root.
+  optional string folder = 4;
 }
 
 message UploadTemplateResponse {
@@ -1576,6 +1581,7 @@ message UploadTemplateResponse {
   optional string version = 5;
   optional string description = 6;
   optional string param_json = 7;
+  optional string folder = 8;
 }
 
 
@@ -1608,6 +1614,11 @@ message TemplateFilter {
   // When true, include hidden templates in the result. Default (false)
   // excludes them. See workflow_template.hidden (migration 24).
   optional bool show_hidden = 5;
+  // Folder prefix. Matches rows whose folder equals this value OR starts
+  // with this value + "/" — so `folder="bio"` returns `bio`, `bio/qc`,
+  // `bio/qc/fastp` but not `bioinfo`. Unset = any folder (no filter).
+  // Trailing slash is tolerated and stripped before matching.
+  optional string folder = 6;
 }
 
 message Template {
@@ -1626,6 +1637,10 @@ message Template {
   // callers should ignore it. Used by the UI to decide whether to render
   // a "more versions" dropdown trigger.
   int32 version_count = 9;
+  // Folder path ("/"-separated, empty = root). All versions of a given
+  // template name share the same folder — a move updates every row with
+  // that name on the server side.
+  string folder = 10;
 }
 
 // UpdateTemplateRequest carries an in-place edit of a workflow_template
@@ -1634,6 +1649,11 @@ message Template {
 message UpdateTemplateRequest {
   int32 workflow_template_id = 1;
   optional bool hidden = 2;
+  // Move this template (and every other version sharing its name) to the
+  // given folder. Server-side validation strips leading/trailing slashes,
+  // rejects empty segments, and allows only `[A-Za-z0-9 _.-]` plus `/`.
+  // Empty string moves back to the root.
+  optional string folder = 3;
 }
 
 message TemplateList {
