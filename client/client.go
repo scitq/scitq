@@ -1573,8 +1573,11 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 					if msg == "" {
 						msg = "Upload failed"
 					}
-					// Single point: update server status to F once
-					reporter.UpdateTask(tid, "F", msg, "network")
+					// Single point: update server status to F once, through
+					// the per-task ordered queue (retried until it lands),
+					// with the output manifest showing the shortfall.
+					secs, terminal := um.FinishTask(fail.Task)
+					reporter.UpdateTaskAsyncTerminal(tid, "F", msg, &secs, "network", terminal)
 					// Cleanup and clear local bookkeeping
 					cleanupTaskWorkingDir(store, tid, reporter)
 					activeTasks.Delete(tid)

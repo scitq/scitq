@@ -363,6 +363,13 @@ message Task {
     // every failure is retryable up to task.retry.
     repeated int32 definitive_exit_codes = 52;
     optional string definitive_pattern    = 53;
+    // Output manifest reported with the terminal status (migration 55):
+    // files and bytes the program left in /output, and how many of those
+    // files reached every upload target with a matching size. Unset when
+    // not reported.
+    optional int32 produced_files  = 54;
+    optional int64 produced_bytes  = 55;
+    optional int32 uploaded_files = 56;
 }
 
 message TaskList {
@@ -673,6 +680,12 @@ message TaskStatusUpdate {
     // kernel, task that never ran); the server persists NULL and the
     // MCP surface omits the field.
     optional int32 peak_mem_mb = 6;
+    // Output manifest: files and bytes the program left in /output, and how
+    // many of those files reached every upload target with a matching size.
+    // Absent when the task never reached the upload phase.
+    optional int32 produced_files  = 7;
+    optional int64 produced_bytes  = 8;
+    optional int32 uploaded_files = 9;
 }
 
 message TaskLog {

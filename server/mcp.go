@@ -351,6 +351,9 @@ optimize:
 ### Per-task peak memory
 Each task carries a ` + "`peak_mem_mb`" + ` field populated by the worker at task terminal — the kernel-tracked peak resident memory the task actually used, in MB. Sourced from cgroup memory.peak on v2 hosts, memory.max_usage_in_bytes on v1, or ` + "`/proc/<pid>/status:VmHWM`" + ` for bare tasks. Answers "which task drove the mem peak" — the per-task complement to ` + "`get_worker_stats_peak`" + ` (which reports the worker-wide MAX across all co-running tasks on that worker). NULL / omitted when the worker couldn't read the counter or ran under an older client. Visible in ` + "`list_tasks`" + ` output.
 
+### Per-task output manifest
+Terminal tasks carry ` + "`produced_files`" + ` and ` + "`produced_bytes`" + ` (what the program left in /output) and ` + "`uploaded_files`" + ` (how many of those files reached every upload target with a verified size). A succeeded task always has uploaded_files equal to produced_files; a shortfall makes the task fail (class network) and retry. produced_files = 0 on a succeeded task means the program wrote nothing — check the program and its inputs; scitq moved everything there was. Omitted for tasks that never reached the upload phase or ran on an older worker.
+
 ### Auto-cleanup of intermediate data
 Add ` + "`" + `lifetime: workflow` + "`" + ` (sibling of the named globs) inside a step's ` + "`" + `outputs:` + "`" + ` block to have the server sweep this step's workspace copies when the workflow reaches S. Publish destinations are never touched. Fires only on workflow S (never F/D); best-effort — a backend hiccup logs a warning and moves on. Use for intermediate data (e.g. trimmed reads that only exist to feed the next step). Only ` + "`" + `workflow` + "`" + ` is accepted today; ` + "`" + `task` + "`" + ` is reserved.
 ` + "`" + `yaml
@@ -1319,6 +1322,9 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		// readable. Answers "which task drove the peak" without a
 		// per-worker divide.
 		PeakMemMb        *int32    `json:"peak_mem_mb,omitempty"`
+		ProducedFiles    *int32    `json:"produced_files,omitempty"`
+		ProducedBytes    *int64    `json:"produced_bytes,omitempty"`
+		UploadedFiles    *int32    `json:"uploaded_files,omitempty"`
 	}
 	summaries := make([]taskSummary, 0, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -1360,6 +1366,7 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		if len(t.MemSharedCurve) > 1 { s.MemSharedCurve = t.MemSharedCurve }
 		if len(t.DiskSharedCurve) > 1 { s.DiskSharedCurve = t.DiskSharedCurve }
 		if t.PeakMemMb != nil && *t.PeakMemMb > 0 { s.PeakMemMb = t.PeakMemMb }
+		s.ProducedFiles, s.ProducedBytes, s.UploadedFiles = t.ProducedFiles, t.ProducedBytes, t.UploadedFiles
 		summaries = append(summaries, s)
 	}
 	return jsonResult(summaries), nil

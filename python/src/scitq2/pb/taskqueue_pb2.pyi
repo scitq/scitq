@@ -124,7 +124,7 @@ class TaskRequest(_message.Message):
     def __init__(self, command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., dependency: _Optional[_Iterable[int]] = ..., task_name: _Optional[str] = ..., skip_if_exists: bool = ..., accept_failure: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., consume_reuse: bool = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., min_gpu: _Optional[int] = ..., gpu_all: bool = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., publish_mode: _Optional[str] = ..., min_mem_shared: _Optional[float] = ..., min_disk_shared: _Optional[float] = ..., mem_shared_curve: _Optional[_Iterable[float]] = ..., disk_shared_curve: _Optional[_Iterable[float]] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "worker_id", "workflow_id", "task_name", "retry_count", "hidden", "previous_task_id", "weight", "run_start_time", "skip_if_exists", "publish", "reuse_key", "download_duration", "run_duration", "upload_duration", "quality_score", "quality_vars", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "cpu_curve", "mem_curve", "disk_curve", "min_gpu", "gpu_all", "failure_class", "publish_mode", "created_at", "modified_at", "min_mem_shared", "min_disk_shared", "mem_shared_curve", "disk_shared_curve", "peak_mem_mb", "definitive_exit_codes", "definitive_pattern")
+    __slots__ = ("task_id", "command", "shell", "container", "container_options", "step_id", "input", "resource", "output", "retry", "is_final", "uses_cache", "download_timeout", "running_timeout", "upload_timeout", "status", "worker_id", "workflow_id", "task_name", "retry_count", "hidden", "previous_task_id", "weight", "run_start_time", "skip_if_exists", "publish", "reuse_key", "download_duration", "run_duration", "upload_duration", "quality_score", "quality_vars", "scitq_auth", "numa", "min_cpu", "min_mem", "min_disk", "cpu_curve", "mem_curve", "disk_curve", "min_gpu", "gpu_all", "failure_class", "publish_mode", "created_at", "modified_at", "min_mem_shared", "min_disk_shared", "mem_shared_curve", "disk_shared_curve", "peak_mem_mb", "definitive_exit_codes", "definitive_pattern", "produced_files", "produced_bytes", "uploaded_files")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     SHELL_FIELD_NUMBER: _ClassVar[int]
@@ -178,6 +178,9 @@ class Task(_message.Message):
     PEAK_MEM_MB_FIELD_NUMBER: _ClassVar[int]
     DEFINITIVE_EXIT_CODES_FIELD_NUMBER: _ClassVar[int]
     DEFINITIVE_PATTERN_FIELD_NUMBER: _ClassVar[int]
+    PRODUCED_FILES_FIELD_NUMBER: _ClassVar[int]
+    PRODUCED_BYTES_FIELD_NUMBER: _ClassVar[int]
+    UPLOADED_FILES_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     command: str
     shell: str
@@ -231,7 +234,10 @@ class Task(_message.Message):
     peak_mem_mb: int
     definitive_exit_codes: _containers.RepeatedScalarFieldContainer[int]
     definitive_pattern: str
-    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., worker_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., task_name: _Optional[str] = ..., retry_count: _Optional[int] = ..., hidden: bool = ..., previous_task_id: _Optional[int] = ..., weight: _Optional[float] = ..., run_start_time: _Optional[int] = ..., skip_if_exists: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., download_duration: _Optional[int] = ..., run_duration: _Optional[int] = ..., upload_duration: _Optional[int] = ..., quality_score: _Optional[float] = ..., quality_vars: _Optional[str] = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., min_gpu: _Optional[int] = ..., gpu_all: bool = ..., failure_class: _Optional[str] = ..., publish_mode: _Optional[str] = ..., created_at: _Optional[int] = ..., modified_at: _Optional[int] = ..., min_mem_shared: _Optional[float] = ..., min_disk_shared: _Optional[float] = ..., mem_shared_curve: _Optional[_Iterable[float]] = ..., disk_shared_curve: _Optional[_Iterable[float]] = ..., peak_mem_mb: _Optional[int] = ..., definitive_exit_codes: _Optional[_Iterable[int]] = ..., definitive_pattern: _Optional[str] = ...) -> None: ...
+    produced_files: int
+    produced_bytes: int
+    uploaded_files: int
+    def __init__(self, task_id: _Optional[int] = ..., command: _Optional[str] = ..., shell: _Optional[str] = ..., container: _Optional[str] = ..., container_options: _Optional[str] = ..., step_id: _Optional[int] = ..., input: _Optional[_Iterable[str]] = ..., resource: _Optional[_Iterable[str]] = ..., output: _Optional[str] = ..., retry: _Optional[int] = ..., is_final: bool = ..., uses_cache: bool = ..., download_timeout: _Optional[float] = ..., running_timeout: _Optional[float] = ..., upload_timeout: _Optional[float] = ..., status: _Optional[str] = ..., worker_id: _Optional[int] = ..., workflow_id: _Optional[int] = ..., task_name: _Optional[str] = ..., retry_count: _Optional[int] = ..., hidden: bool = ..., previous_task_id: _Optional[int] = ..., weight: _Optional[float] = ..., run_start_time: _Optional[int] = ..., skip_if_exists: bool = ..., publish: _Optional[str] = ..., reuse_key: _Optional[str] = ..., download_duration: _Optional[int] = ..., run_duration: _Optional[int] = ..., upload_duration: _Optional[int] = ..., quality_score: _Optional[float] = ..., quality_vars: _Optional[str] = ..., scitq_auth: bool = ..., numa: _Optional[int] = ..., min_cpu: _Optional[float] = ..., min_mem: _Optional[float] = ..., min_disk: _Optional[float] = ..., cpu_curve: _Optional[_Iterable[float]] = ..., mem_curve: _Optional[_Iterable[float]] = ..., disk_curve: _Optional[_Iterable[float]] = ..., min_gpu: _Optional[int] = ..., gpu_all: bool = ..., failure_class: _Optional[str] = ..., publish_mode: _Optional[str] = ..., created_at: _Optional[int] = ..., modified_at: _Optional[int] = ..., min_mem_shared: _Optional[float] = ..., min_disk_shared: _Optional[float] = ..., mem_shared_curve: _Optional[_Iterable[float]] = ..., disk_shared_curve: _Optional[_Iterable[float]] = ..., peak_mem_mb: _Optional[int] = ..., definitive_exit_codes: _Optional[_Iterable[int]] = ..., definitive_pattern: _Optional[str] = ..., produced_files: _Optional[int] = ..., produced_bytes: _Optional[int] = ..., uploaded_files: _Optional[int] = ...) -> None: ...
 
 class TaskList(_message.Message):
     __slots__ = ("tasks",)
@@ -519,20 +525,26 @@ class TaskSignalRequest(_message.Message):
     def __init__(self, task_id: _Optional[int] = ..., signal: _Optional[str] = ..., grace_period: _Optional[int] = ...) -> None: ...
 
 class TaskStatusUpdate(_message.Message):
-    __slots__ = ("task_id", "new_status", "duration", "free_retry", "failure_class", "peak_mem_mb")
+    __slots__ = ("task_id", "new_status", "duration", "free_retry", "failure_class", "peak_mem_mb", "produced_files", "produced_bytes", "uploaded_files")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     NEW_STATUS_FIELD_NUMBER: _ClassVar[int]
     DURATION_FIELD_NUMBER: _ClassVar[int]
     FREE_RETRY_FIELD_NUMBER: _ClassVar[int]
     FAILURE_CLASS_FIELD_NUMBER: _ClassVar[int]
     PEAK_MEM_MB_FIELD_NUMBER: _ClassVar[int]
+    PRODUCED_FILES_FIELD_NUMBER: _ClassVar[int]
+    PRODUCED_BYTES_FIELD_NUMBER: _ClassVar[int]
+    UPLOADED_FILES_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     new_status: str
     duration: int
     free_retry: bool
     failure_class: str
     peak_mem_mb: int
-    def __init__(self, task_id: _Optional[int] = ..., new_status: _Optional[str] = ..., duration: _Optional[int] = ..., free_retry: bool = ..., failure_class: _Optional[str] = ..., peak_mem_mb: _Optional[int] = ...) -> None: ...
+    produced_files: int
+    produced_bytes: int
+    uploaded_files: int
+    def __init__(self, task_id: _Optional[int] = ..., new_status: _Optional[str] = ..., duration: _Optional[int] = ..., free_retry: bool = ..., failure_class: _Optional[str] = ..., peak_mem_mb: _Optional[int] = ..., produced_files: _Optional[int] = ..., produced_bytes: _Optional[int] = ..., uploaded_files: _Optional[int] = ...) -> None: ...
 
 class TaskLog(_message.Message):
     __slots__ = ("task_id", "log_type", "log_text")

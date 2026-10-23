@@ -1160,7 +1160,11 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 				peak_mem_mb       = CASE
 					WHEN $6::INT IS NOT NULL AND $6::INT > 0 THEN $6::INT
 					ELSE peak_mem_mb
-				END
+				END,
+				-- Output manifest, sent with the terminal status only.
+				produced_files    = COALESCE($7::INT, produced_files),
+				produced_bytes    = COALESCE($8::BIGINT, produced_bytes),
+				uploaded_files    = COALESCE($9::INT, uploaded_files)
 			WHERE task_id = $2
 			AND status <> $1
 			AND NOT hidden
@@ -1204,6 +1208,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
     `,
 		req.NewStatus, req.TaskId, req.Duration, (req.FreeRetry != nil && *req.FreeRetry),
 		req.FailureClass, req.PeakMemMb,
+		req.ProducedFiles, req.ProducedBytes, req.UploadedFiles,
 	).Scan(
 		&workerID, &oldStatus, &curRetry, &stepID, &workflowID, &prevRunStartedAt,
 		&runStartedEpoch, &dlDur, &runDur, &upDur, &startEpoch, &endEpoch,
@@ -4929,6 +4934,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			t.min_mem_shared, t.min_disk_shared,
 			t.mem_shared_curve, t.disk_shared_curve,
 			t.peak_mem_mb,
+			t.produced_files, t.produced_bytes, t.uploaded_files,
 			EXTRACT(EPOCH FROM t.created_at)::bigint AS created_epoch,
 			EXTRACT(EPOCH FROM t.modified_at)::bigint AS modified_epoch
         FROM task t
@@ -4985,6 +4991,8 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			minMemShared, minDiskShared                                       sql.NullFloat64
 			memSharedCurve, diskSharedCurve                                   pq.Float64Array
 			peakMemMB                                                         sql.NullInt32
+			producedFiles, uploadedFiles                                      sql.NullInt32
+			producedBytes                                                     sql.NullInt64
 			retryCount                                                        int32
 			hidden                                                            bool
 			createdEpoch, modifiedEpoch                                       sql.NullInt64
@@ -5029,6 +5037,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&memSharedCurve,
 			&diskSharedCurve,
 			&peakMemMB,
+			&producedFiles,
+			&producedBytes,
+			&uploadedFiles,
 			&createdEpoch,
 			&modifiedEpoch,
 		); err != nil {
@@ -5101,6 +5112,15 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		if peakMemMB.Valid && peakMemMB.Int32 > 0 {
 			v := peakMemMB.Int32
 			task.PeakMemMb = &v
+		}
+		if producedFiles.Valid {
+			task.ProducedFiles = &producedFiles.Int32
+		}
+		if producedBytes.Valid {
+			task.ProducedBytes = &producedBytes.Int64
+		}
+		if uploadedFiles.Valid {
+			task.UploadedFiles = &uploadedFiles.Int32
 		}
 
 		tasks = append(tasks, &task)

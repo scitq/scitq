@@ -714,8 +714,15 @@ type Task struct {
 	// every failure is retryable up to task.retry.
 	DefinitiveExitCodes []int32 `protobuf:"varint,52,rep,packed,name=definitive_exit_codes,json=definitiveExitCodes,proto3" json:"definitive_exit_codes,omitempty"`
 	DefinitivePattern   *string `protobuf:"bytes,53,opt,name=definitive_pattern,json=definitivePattern,proto3,oneof" json:"definitive_pattern,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Output manifest reported with the terminal status (migration 55):
+	// files and bytes the program left in /output, and how many of those
+	// files reached every upload target with a matching size. Unset when
+	// not reported.
+	ProducedFiles *int32 `protobuf:"varint,54,opt,name=produced_files,json=producedFiles,proto3,oneof" json:"produced_files,omitempty"`
+	ProducedBytes *int64 `protobuf:"varint,55,opt,name=produced_bytes,json=producedBytes,proto3,oneof" json:"produced_bytes,omitempty"`
+	UploadedFiles *int32 `protobuf:"varint,56,opt,name=uploaded_files,json=uploadedFiles,proto3,oneof" json:"uploaded_files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -1117,6 +1124,27 @@ func (x *Task) GetDefinitivePattern() string {
 		return *x.DefinitivePattern
 	}
 	return ""
+}
+
+func (x *Task) GetProducedFiles() int32 {
+	if x != nil && x.ProducedFiles != nil {
+		return *x.ProducedFiles
+	}
+	return 0
+}
+
+func (x *Task) GetProducedBytes() int64 {
+	if x != nil && x.ProducedBytes != nil {
+		return *x.ProducedBytes
+	}
+	return 0
+}
+
+func (x *Task) GetUploadedFiles() int32 {
+	if x != nil && x.UploadedFiles != nil {
+		return *x.UploadedFiles
+	}
+	return 0
 }
 
 type TaskList struct {
@@ -2780,7 +2808,13 @@ type TaskStatusUpdate struct {
 	// worker couldn't read the counter (missing cgroup file, unsupported
 	// kernel, task that never ran); the server persists NULL and the
 	// MCP surface omits the field.
-	PeakMemMb     *int32 `protobuf:"varint,6,opt,name=peak_mem_mb,json=peakMemMb,proto3,oneof" json:"peak_mem_mb,omitempty"`
+	PeakMemMb *int32 `protobuf:"varint,6,opt,name=peak_mem_mb,json=peakMemMb,proto3,oneof" json:"peak_mem_mb,omitempty"`
+	// Output manifest: files and bytes the program left in /output, and how
+	// many of those files reached every upload target with a matching size.
+	// Absent when the task never reached the upload phase.
+	ProducedFiles *int32 `protobuf:"varint,7,opt,name=produced_files,json=producedFiles,proto3,oneof" json:"produced_files,omitempty"`
+	ProducedBytes *int64 `protobuf:"varint,8,opt,name=produced_bytes,json=producedBytes,proto3,oneof" json:"produced_bytes,omitempty"`
+	UploadedFiles *int32 `protobuf:"varint,9,opt,name=uploaded_files,json=uploadedFiles,proto3,oneof" json:"uploaded_files,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2853,6 +2887,27 @@ func (x *TaskStatusUpdate) GetFailureClass() string {
 func (x *TaskStatusUpdate) GetPeakMemMb() int32 {
 	if x != nil && x.PeakMemMb != nil {
 		return *x.PeakMemMb
+	}
+	return 0
+}
+
+func (x *TaskStatusUpdate) GetProducedFiles() int32 {
+	if x != nil && x.ProducedFiles != nil {
+		return *x.ProducedFiles
+	}
+	return 0
+}
+
+func (x *TaskStatusUpdate) GetProducedBytes() int64 {
+	if x != nil && x.ProducedBytes != nil {
+		return *x.ProducedBytes
+	}
+	return 0
+}
+
+func (x *TaskStatusUpdate) GetUploadedFiles() int32 {
+	if x != nil && x.UploadedFiles != nil {
+		return *x.UploadedFiles
 	}
 	return 0
 }
@@ -12652,7 +12707,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_gpu_allB\x0f\n" +
 	"\r_publish_modeB\x11\n" +
 	"\x0f_min_mem_sharedB\x12\n" +
-	"\x10_min_disk_shared\"\x9e\x13\n" +
+	"\x10_min_disk_shared\"\xdb\x14\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -12715,7 +12770,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x11disk_shared_curve\x182 \x03(\x02R\x0fdiskSharedCurve\x12#\n" +
 	"\vpeak_mem_mb\x183 \x01(\x05H\"R\tpeakMemMb\x88\x01\x01\x122\n" +
 	"\x15definitive_exit_codes\x184 \x03(\x05R\x13definitiveExitCodes\x122\n" +
-	"\x12definitive_pattern\x185 \x01(\tH#R\x11definitivePattern\x88\x01\x01B\b\n" +
+	"\x12definitive_pattern\x185 \x01(\tH#R\x11definitivePattern\x88\x01\x01\x12*\n" +
+	"\x0eproduced_files\x186 \x01(\x05H$R\rproducedFiles\x88\x01\x01\x12*\n" +
+	"\x0eproduced_bytes\x187 \x01(\x03H%R\rproducedBytes\x88\x01\x01\x12*\n" +
+	"\x0euploaded_files\x188 \x01(\x05H&R\ruploadedFiles\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -12760,7 +12818,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x0f_min_mem_sharedB\x12\n" +
 	"\x10_min_disk_sharedB\x0e\n" +
 	"\f_peak_mem_mbB\x15\n" +
-	"\x13_definitive_pattern\"1\n" +
+	"\x13_definitive_patternB\x11\n" +
+	"\x0f_produced_filesB\x11\n" +
+	"\x0f_produced_bytesB\x11\n" +
+	"\x0f_uploaded_files\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +
@@ -12967,7 +13028,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\x12&\n" +
 	"\fgrace_period\x18\x03 \x01(\x05H\x00R\vgracePeriod\x88\x01\x01B\x0f\n" +
-	"\r_grace_period\"\x9c\x02\n" +
+	"\r_grace_period\"\xd9\x03\n" +
 	"\x10TaskStatusUpdate\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x1d\n" +
 	"\n" +
@@ -12976,11 +13037,17 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"free_retry\x18\x04 \x01(\bH\x01R\tfreeRetry\x88\x01\x01\x12(\n" +
 	"\rfailure_class\x18\x05 \x01(\tH\x02R\ffailureClass\x88\x01\x01\x12#\n" +
-	"\vpeak_mem_mb\x18\x06 \x01(\x05H\x03R\tpeakMemMb\x88\x01\x01B\v\n" +
+	"\vpeak_mem_mb\x18\x06 \x01(\x05H\x03R\tpeakMemMb\x88\x01\x01\x12*\n" +
+	"\x0eproduced_files\x18\a \x01(\x05H\x04R\rproducedFiles\x88\x01\x01\x12*\n" +
+	"\x0eproduced_bytes\x18\b \x01(\x03H\x05R\rproducedBytes\x88\x01\x01\x12*\n" +
+	"\x0euploaded_files\x18\t \x01(\x05H\x06R\ruploadedFiles\x88\x01\x01B\v\n" +
 	"\t_durationB\r\n" +
 	"\v_free_retryB\x10\n" +
 	"\x0e_failure_classB\x0e\n" +
-	"\f_peak_mem_mb\"X\n" +
+	"\f_peak_mem_mbB\x11\n" +
+	"\x0f_produced_filesB\x11\n" +
+	"\x0f_produced_bytesB\x11\n" +
+	"\x0f_uploaded_files\"X\n" +
 	"\aTaskLog\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x19\n" +
 	"\blog_type\x18\x02 \x01(\tR\alogType\x12\x19\n" +

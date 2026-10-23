@@ -97,6 +97,20 @@
     return logs.map((line, i) => ({ id: `${taskId}-err-${i}`, text: line }));
   }
 
+  function formatBytes(n: number): string {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) {
+      n /= 1024;
+      i++;
+    }
+    return i === 0 ? `${n} B` : `${n.toFixed(1)} ${units[i]}`;
+  }
+
+  function hasManifest(task: any): boolean {
+    return task.producedFiles != null && task.uploadedFiles != null;
+  }
+
   function formatTaskDuration(task: any): string {
     if (task.runDuration && task.runDuration > 0) {
       const total = (task.downloadDuration || 0) + task.runDuration + (task.uploadDuration || 0);
@@ -209,6 +223,13 @@ async function deleteTaskClick(taskId: number, status: string) {
               {#if task.publish}
                 <div class="task-publish" class:task-dimmed={task.status === 'F'}>{task.publish}</div>
               {/if}
+              {#if hasManifest(task)}
+                <div class="task-manifest" class:task-manifest-short={task.uploadedFiles < task.producedFiles}
+                     data-testid={`task-manifest-${task.taskId}`}
+                     title="Files the program left in /output, and how many reached the destination with a verified size">
+                  {task.producedFiles} files ({formatBytes(Number(task.producedBytes ?? 0))}) · {task.uploadedFiles} uploaded
+                </div>
+              {/if}
             </td>
             
             <!-- Action Buttons -->
@@ -245,6 +266,16 @@ async function deleteTaskClick(taskId: number, status: string) {
   .task-publish {
     font-size: 0.85em;
     color: var(--color-accent, #3b82f6);
+  }
+  .task-manifest {
+    font-size: 0.8em;
+    opacity: 0.7;
+    white-space: nowrap;
+  }
+  .task-manifest-short {
+    opacity: 1;
+    color: var(--color-danger, #dc2626);
+    font-weight: 600;
   }
   /* Compact UTC timestamp shown under the task id — italic, smaller,
      dimmed so it reads as secondary metadata. Rendered from

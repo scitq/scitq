@@ -121,11 +121,22 @@ type item struct {
 	msg          string // for itLog or optional accompanying text
 	duration     *int32 // optional duration in seconds for status updates
 	failureClass string // for itStatus when status == "F" (oom/timeout/network/other); empty otherwise
-	// peakMemMB: kernel-tracked peak resident memory the task used (MB).
-	// Read once at task terminal via client/peakmem; 0 means "not
-	// observed" (older kernel, missing cgroup file, task never ran) and
-	// is not sent on the wire — the server persists NULL for that.
-	peakMemMB int32
+	terminal     Terminal
+}
+
+// Terminal carries the per-task metrics reported once, with the terminal
+// status. Zero / nil fields mean "not observed" and are not sent on the
+// wire; the server keeps NULL for them.
+type Terminal struct {
+	// PeakMemMB is the kernel-tracked peak resident memory the task used
+	// (MB), read via client/peakmem.
+	PeakMemMB int32
+	// Output manifest: files and bytes the program left in /output, and
+	// how many of those files reached every upload target with a matching
+	// size.
+	ProducedFiles *int32
+	ProducedBytes *int64
+	UploadedFiles *int32
 }
 
 type taskWorker struct {
@@ -183,21 +194,20 @@ func (r *Reporter) getWorker(taskID int32) *taskWorker {
 // "" when the transition isn't a classified failure (success, intermediate
 // statuses, transient updates).
 func (r *Reporter) UpdateTaskAsync(taskID int32, status, msg string, duration *int32, failureClass string) {
-	r.UpdateTaskAsyncWithPeaks(taskID, status, msg, duration, failureClass, 0)
+	r.UpdateTaskAsyncTerminal(taskID, status, msg, duration, failureClass, Terminal{})
 }
 
-// UpdateTaskAsyncWithPeaks is UpdateTaskAsync with the terminal-time
-// per-task counters. peakMemMB=0 is the "not observed" sentinel and is
-// omitted on the wire (server persists NULL). Called from the executor
-// once the container / bare-process is confirmed done, so the cgroup
-// counter or /proc entry is still readable at the moment we sample it.
-func (r *Reporter) UpdateTaskAsyncWithPeaks(taskID int32, status, msg string, duration *int32, failureClass string, peakMemMB int32) {
+// UpdateTaskAsyncTerminal is UpdateTaskAsync carrying the terminal-time
+// per-task metrics (peak memory, output manifest). It goes through the same
+// per-task ordered queue, so a terminal status never overtakes an earlier
+// intermediate one, and terminal statuses are retried until they land.
+func (r *Reporter) UpdateTaskAsyncTerminal(taskID int32, status, msg string, duration *int32, failureClass string, t Terminal) {
 	if r.Client == nil || taskID == 0 || status == "" {
 		return
 	}
 	w := r.getWorker(taskID)
 	// enqueue the status item (blocks if queue is full)
-	w.ch <- item{kind: itStatus, status: status, duration: duration, failureClass: failureClass, peakMemMB: peakMemMB}
+	w.ch <- item{kind: itStatus, status: status, duration: duration, failureClass: failureClass, terminal: t}
 	// optionally enqueue a human/audit message
 	if msg != "" {
 		w.ch <- item{kind: itLog, msg: msg}
@@ -292,10 +302,13 @@ func (r *Reporter) runWorker(taskID int32, w *taskWorker) {
 					fc := it.failureClass
 					req.FailureClass = &fc
 				}
-				if it.peakMemMB > 0 {
-					v := it.peakMemMB
+				if it.terminal.PeakMemMB > 0 {
+					v := it.terminal.PeakMemMB
 					req.PeakMemMb = &v
 				}
+				req.ProducedFiles = it.terminal.ProducedFiles
+				req.ProducedBytes = it.terminal.ProducedBytes
+				req.UploadedFiles = it.terminal.UploadedFiles
 				_, err := r.Client.UpdateTaskStatus(ctx, req)
 				cancel()
 				if err == nil {

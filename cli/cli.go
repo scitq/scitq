@@ -691,6 +691,10 @@ func (c *CLI) TaskList() error {
 			if task.UploadDuration != nil {
 				fmt.Printf("   Upload:    %s\n", formatDuration(float32(*task.UploadDuration)))
 			}
+			if task.ProducedFiles != nil && task.ProducedBytes != nil && task.UploadedFiles != nil {
+				fmt.Printf("   Outputs:   %d files (%s) produced, %d uploaded\n",
+					*task.ProducedFiles, formatBytes(*task.ProducedBytes), *task.UploadedFiles)
+			}
 			if task.QualityScore != nil {
 				fmt.Printf("   Quality:   %.4f\n", *task.QualityScore)
 			}
@@ -3179,6 +3183,20 @@ func compactCommand(cmd string, max int) string {
 // - "Xs" if under 60 seconds
 // - "YmZs" if under 3600 seconds (minutes + leftover seconds)
 // - "XhYm" if 3600 seconds or more (hours + leftover minutes, omit seconds)
+// formatBytes renders a byte count with a binary-unit suffix (B, KiB, MiB…).
+func formatBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
 func formatDuration(durSeconds float32) string {
 	if durSeconds == 0 {
 		return "0"

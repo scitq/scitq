@@ -562,6 +562,23 @@ export interface Task {
      * @generated from protobuf field: optional string definitive_pattern = 53
      */
     definitivePattern?: string;
+    /**
+     * Output manifest reported with the terminal status (migration 55):
+     * files and bytes the program left in /output, and how many of those
+     * files reached every upload target with a matching size. Unset when
+     * not reported.
+     *
+     * @generated from protobuf field: optional int32 produced_files = 54
+     */
+    producedFiles?: number;
+    /**
+     * @generated from protobuf field: optional int64 produced_bytes = 55
+     */
+    producedBytes?: string;
+    /**
+     * @generated from protobuf field: optional int32 uploaded_files = 56
+     */
+    uploadedFiles?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -1256,6 +1273,22 @@ export interface TaskStatusUpdate {
      * @generated from protobuf field: optional int32 peak_mem_mb = 6
      */
     peakMemMb?: number;
+    /**
+     * Output manifest: files and bytes the program left in /output, and how
+     * many of those files reached every upload target with a matching size.
+     * Absent when the task never reached the upload phase.
+     *
+     * @generated from protobuf field: optional int32 produced_files = 7
+     */
+    producedFiles?: number;
+    /**
+     * @generated from protobuf field: optional int64 produced_bytes = 8
+     */
+    producedBytes?: string;
+    /**
+     * @generated from protobuf field: optional int32 uploaded_files = 9
+     */
+    uploadedFiles?: number;
 }
 /**
  * @generated from protobuf message taskqueue.TaskLog
@@ -5227,7 +5260,10 @@ class Task$Type extends MessageType<Task> {
             { no: 50, name: "disk_shared_curve", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 2 /*ScalarType.FLOAT*/ },
             { no: 51, name: "peak_mem_mb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 52, name: "definitive_exit_codes", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ },
-            { no: 53, name: "definitive_pattern", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 53, name: "definitive_pattern", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 54, name: "produced_files", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 55, name: "produced_bytes", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
+            { no: 56, name: "uploaded_files", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -5441,6 +5477,15 @@ class Task$Type extends MessageType<Task> {
                 case /* optional string definitive_pattern */ 53:
                     message.definitivePattern = reader.string();
                     break;
+                case /* optional int32 produced_files */ 54:
+                    message.producedFiles = reader.int32();
+                    break;
+                case /* optional int64 produced_bytes */ 55:
+                    message.producedBytes = reader.int64().toString();
+                    break;
+                case /* optional int32 uploaded_files */ 56:
+                    message.uploadedFiles = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5636,6 +5681,15 @@ class Task$Type extends MessageType<Task> {
         /* optional string definitive_pattern = 53; */
         if (message.definitivePattern !== undefined)
             writer.tag(53, WireType.LengthDelimited).string(message.definitivePattern);
+        /* optional int32 produced_files = 54; */
+        if (message.producedFiles !== undefined)
+            writer.tag(54, WireType.Varint).int32(message.producedFiles);
+        /* optional int64 produced_bytes = 55; */
+        if (message.producedBytes !== undefined)
+            writer.tag(55, WireType.Varint).int64(message.producedBytes);
+        /* optional int32 uploaded_files = 56; */
+        if (message.uploadedFiles !== undefined)
+            writer.tag(56, WireType.Varint).int32(message.uploadedFiles);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7237,7 +7291,10 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
             { no: 3, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "free_retry", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 5, name: "failure_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 6, name: "peak_mem_mb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 6, name: "peak_mem_mb", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "produced_files", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "produced_bytes", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
+            { no: 9, name: "uploaded_files", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<TaskStatusUpdate>): TaskStatusUpdate {
@@ -7271,6 +7328,15 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
                 case /* optional int32 peak_mem_mb */ 6:
                     message.peakMemMb = reader.int32();
                     break;
+                case /* optional int32 produced_files */ 7:
+                    message.producedFiles = reader.int32();
+                    break;
+                case /* optional int64 produced_bytes */ 8:
+                    message.producedBytes = reader.int64().toString();
+                    break;
+                case /* optional int32 uploaded_files */ 9:
+                    message.uploadedFiles = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7301,6 +7367,15 @@ class TaskStatusUpdate$Type extends MessageType<TaskStatusUpdate> {
         /* optional int32 peak_mem_mb = 6; */
         if (message.peakMemMb !== undefined)
             writer.tag(6, WireType.Varint).int32(message.peakMemMb);
+        /* optional int32 produced_files = 7; */
+        if (message.producedFiles !== undefined)
+            writer.tag(7, WireType.Varint).int32(message.producedFiles);
+        /* optional int64 produced_bytes = 8; */
+        if (message.producedBytes !== undefined)
+            writer.tag(8, WireType.Varint).int64(message.producedBytes);
+        /* optional int32 uploaded_files = 9; */
+        if (message.uploadedFiles !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.uploadedFiles);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
