@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,15 +106,15 @@ type taskHooks struct {
 	cmd           *exec.Cmd          // the docker run / bare process command
 	containerName string             // empty for bare tasks
 	isBare        bool
+	reporter      *event.Reporter
 	recovered     atomic.Bool // true once recovery has been triggered, to keep it idempotent
 
 	// capturedExit lets recoverTask preserve the workload's *actual* exit
 	// code when phase-2 SIGKILL has to fire. Set to -1 by registerHooks;
-	// recoverTask phase 2 stores the container's State.ExitCode here if
-	// `docker inspect` returns it cleanly before the kill. The post-Wait
-	// path in executeTask reads this and, if non-negative, uses it instead
-	// of cmd.Wait()'s "signal: killed" — so a workload that actually
-	// succeeded but got stuck in our log pipeline is reported as S, not F.
+	// recoverTask phase 2 stores the container's exit code here only when
+	// `docker inspect` shows the container genuinely finished (see
+	// finishedExitCode). The post-Wait path in executeTask reads this and,
+	// if non-negative, uses it instead of cmd.Wait()'s "signal: killed".
 	capturedExit atomic.Int32
 }
 
@@ -645,6 +644,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		cmd:           cmd,
 		containerName: containerName,
 		isBare:        isBare,
+		reporter:      reporter,
 	}
 	hooks.capturedExit.Store(-1) // sentinel: "no captured exit code yet"
 	taskHooksMap.Store(task.TaskId, hooks)
@@ -865,6 +865,12 @@ func recoverTask(taskID int32, hooks *taskHooks, reason string) bool {
 		return false
 	}
 	log.Printf("🩺 Task %d: forcing recovery (%s)", taskID, reason)
+	if hooks.reporter != nil {
+		hooks.reporter.Event("W", "recovery", "task recovery triggered", map[string]any{
+			"task_id": taskID,
+			"reason":  reason,
+		})
+	}
 	// Phase 1: cancel-only.
 	if hooks.cancel != nil {
 		hooks.cancel()
@@ -878,18 +884,28 @@ func recoverTask(taskID int32, hooks *taskHooks, reason string) bool {
 			return
 		}
 		// Before killing, try to recover the container's actual exit code
-		// from the daemon. With --rm dropped, the container persists in
-		// stopped state until our cleanup defer removes it; until then
-		// State.ExitCode is queryable. If we get a clean code, the
-		// post-Wait path in executeTask will use it instead of
-		// "signal: killed", preserving a successful workload.
+		// from the daemon. With --rm dropped, the container persists until
+		// our cleanup defer removes it, so its state is queryable here.
 		if !hooks.isBare && hooks.containerName != "" {
-			out, err := exec.Command("docker", "inspect", "-f", "{{.State.ExitCode}}", hooks.containerName).CombinedOutput()
+			out, err := exec.Command("docker", "inspect", "-f", finishedExitFormat, hooks.containerName).CombinedOutput()
+			state := strings.TrimSpace(string(out))
+			code, finished := int32(-1), false
 			if err == nil {
-				if code, perr := strconv.Atoi(strings.TrimSpace(string(out))); perr == nil {
-					hooks.capturedExit.Store(int32(code))
-					log.Printf("🩺 Task %d recovery: captured container exit code %d before SIGKILL", taskID, code)
-				}
+				code, finished = finishedExitCode(state)
+			}
+			if finished {
+				hooks.capturedExit.Store(code)
+				log.Printf("🩺 Task %d recovery: container finished with exit code %d before SIGKILL", taskID, code)
+			} else {
+				log.Printf("🩺 Task %d recovery: container did not finish (state %q, err %v); task will be reported failed", taskID, state, err)
+			}
+			if hooks.reporter != nil {
+				hooks.reporter.Event("W", "recovery", "phase-2 kill after inspect", map[string]any{
+					"task_id":        taskID,
+					"docker_state":   state,
+					"captured_exit":  code,
+					"container_done": finished,
+				})
 			}
 		}
 		log.Printf("🩺 Task %d: still stuck 30s after cancel; SIGKILL'ing cmd process", taskID)

@@ -132,12 +132,9 @@ type Recruiter struct {
 	TargetTaskrate        int
 	PotentialTaskrate     int
 	WorkflowID            int32
-	TimeoutPassed         bool // <- new field
-	LastTrigger           time.Time
-	RemainingUntilTimeout time.Duration
 }
 
-func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[RecruiterKey]RecruiterState, wfcMem map[int32]WorkflowCounter) ([]Recruiter, error) {
+func listActiveRecruiters(db *sql.DB, wfcMem map[int32]WorkflowCounter) ([]Recruiter, error) {
 	const query = `
         WITH pt_agg AS (
             SELECT step_id, COUNT(*) AS pending
@@ -294,31 +291,24 @@ func listActiveRecruiters(db *sql.DB, now time.Time, recruiterTimers map[Recruit
 		}
 		log.Printf("ℹ️ [DEBUG] Found active recruiter: step_id=%d rank=%d pending_tasks=%d active_taskrate=%d current_workers=%d step_maximum=%s workflow_maximum=%s\n",
 			r.StepID, r.Rank, r.PendingTasks, r.ActiveTaskrate, r.CurrentWorkers, stepMaxStr, wfMax)
-		key := RecruiterKey{StepID: r.StepID, Rank: r.Rank}
-		state, seen := recruiterTimers[key]
-		if !seen {
-			// Start the timeout window now (seconds-based)
-			state.LastTrigger = now
-			r.TimeoutPassed = false
-			r.LastTrigger = state.LastTrigger
-			r.RemainingUntilTimeout = time.Duration(r.TimeoutSeconds) * time.Second
-			recruiterTimers[key] = state
-		} else {
-			timeout := time.Duration(r.TimeoutSeconds) * time.Second
-			elapsed := now.Sub(state.LastTrigger)
-			r.TimeoutPassed = elapsed >= timeout
-			r.LastTrigger = state.LastTrigger
-			if !r.TimeoutPassed {
-				r.RemainingUntilTimeout = timeout - elapsed
-			} else {
-				r.RemainingUntilTimeout = 0
-			}
-		}
-
 		results = append(results, r)
 	}
 
 	return results, rows.Err()
+}
+
+// pruneRecruiterTimers drops the timeout state of every recruiter that was
+// not eligible to deploy this cycle, so a recruiter's timeout window
+// restarts each time it becomes eligible. A kept entry would carry the
+// LastTrigger of a long-past activation or deploy, and the recruiter would
+// deploy on its first cycle back, skipping the grace period meant for
+// recycling and for permanent workers to absorb the new tasks.
+func pruneRecruiterTimers(recruiterTimers map[RecruiterKey]RecruiterState, eligible map[RecruiterKey]struct{}) {
+	for k := range recruiterTimers {
+		if _, ok := eligible[k]; !ok {
+			delete(recruiterTimers, k)
+		}
+	}
 }
 
 func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCounter) ([]Recruiter, error) {
@@ -461,9 +451,6 @@ func listRecruitersForStep(db *sql.DB, stepID int32, wfcMem map[int32]WorkflowCo
 		if err != nil {
 			return nil, err
 		}
-		r.TimeoutPassed = true
-		r.LastTrigger = time.Now()
-		r.RemainingUntilTimeout = 0
 		results = append(results, r)
 	}
 	return results, rows.Err()
@@ -1310,24 +1297,42 @@ func RecruiterCycle(
 		log.Printf("⚠️ Could not adjust workflow counters: %v", err)
 	}
 
-	recruiters, err := listActiveRecruiters(db, now, recruiterTimers, workflowCounterMemory)
+	recruiters, err := listActiveRecruiters(db, workflowCounterMemory)
 	if err != nil {
 		return fmt.Errorf("failed to list active recruiters: %w", err)
 	}
+
+	eligible := make(map[RecruiterKey]struct{})
+	defer pruneRecruiterTimers(recruiterTimers, eligible)
 
 	if len(recruiters) == 0 {
 		log.Println("ℹ️ No active recruiters")
 		return nil
 	}
 
-	// Fetch recruiter flavor/region info: recruitmentMap, recyclingMap, regionInfoMap
+	return recruitSteps(ctx, db, qm, creator, recruiters, recruiterTimers, eligible, workflowCounterMemory, now, cfgDefaultSwap)
+}
+
+// recruitSteps fetches the flavor and recyclable-worker context once for
+// all recruiters, then runs recruitStep for each step. recruiters must be
+// ordered by (step_id, rank), as both listing queries return them.
+func recruitSteps(
+	ctx context.Context,
+	db *sql.DB,
+	qm *QuotaManager,
+	creator WorkerCreator,
+	recruiters []Recruiter,
+	recruiterTimers map[RecruiterKey]RecruiterState,
+	eligible map[RecruiterKey]struct{},
+	workflowCounterMemory map[int32]WorkflowCounter,
+	now time.Time,
+	cfgDefaultSwap float32,
+) error {
 	recruitmentMap, recyclingMap, regionInfoMap, err := fetchRecruiterFlavors(db, recruiters)
 	if err != nil {
 		return fmt.Errorf("failed to fetch flavor/region info: %w", err)
 	}
 
-	// Aggregate all allowed flavor_ids and region_ids across all recruiters for recycling.
-	// Using map[int32]struct{} as a lightweight set to collect unique IDs.
 	allFlavorIDs := make(map[int32]struct{})
 	allRegionIDs := make(map[int32]struct{})
 	for _, frList := range recyclingMap {
@@ -1341,157 +1346,231 @@ func RecruiterCycle(
 	if err != nil {
 		return fmt.Errorf("failed to find recyclable workers: %w", err)
 	}
-
-	hasRecyclableWorkers := len(recyclableWorkers) > 0
-	if !hasRecyclableWorkers {
+	if len(recyclableWorkers) == 0 {
 		log.Printf("No recyclable workers")
 	}
 
-	recyclableMap := make(map[int32]RecyclableWorker)
-	for _, w := range recyclableWorkers {
-		recyclableMap[w.WorkerID] = w
+	sc := stepContext{
+		db:                db,
+		qm:                qm,
+		creator:           creator,
+		recruitmentMap:    recruitmentMap,
+		recyclingMap:      recyclingMap,
+		regionInfoMap:     regionInfoMap,
+		recyclableWorkers: recyclableWorkers,
+		timers:            recruiterTimers,
+		eligible:          eligible,
+		wfcMem:            workflowCounterMemory,
+		now:               now,
+		cfgDefaultSwap:    cfgDefaultSwap,
 	}
-
-	for _, recruiter := range recruiters {
-		key := RecruiterKey{StepID: recruiter.StepID, Rank: recruiter.Rank}
-		// Use recruitmentMap for cloud deployment
-		flavorRegionList := recruitmentMap[key]
-		// Use recyclingMap for recycling logic
-		recyclingFlavorRegionList := recyclingMap[key]
-
-		if len(flavorRegionList) == 0 {
-			log.Printf("⚠️ No flavor/region candidates for recruiter step=%d rank=%d", recruiter.StepID, recruiter.Rank)
-			continue
+	for start := 0; start < len(recruiters); {
+		end := start + 1
+		for end < len(recruiters) && recruiters[end].StepID == recruiters[start].StepID {
+			end++
 		}
-
-		// Build recruiter-specific allowed flavor/region sets for recycling
-		recruiterFlavorIDs := make(map[int32]struct{})
-		recruiterRegionIDs := make(map[int32]struct{})
-		for _, fr := range recyclingFlavorRegionList {
-			recruiterFlavorIDs[fr.FlavorID] = struct{}{}
-			recruiterRegionIDs[fr.RegionID] = struct{}{}
-		}
-
-		remainingTaskrate := recruiter.TargetTaskrate - recruiter.PotentialTaskrate
-		if remainingTaskrate <= 0 {
-			log.Printf("Recruiter step=%d rank=%d already meets target throughput (taskrate %d >= target %d).",
-				recruiter.StepID, recruiter.Rank, recruiter.ActiveTaskrate, recruiter.TargetTaskrate)
-			continue
-		}
-
-		if hasRecyclableWorkers {
-			// Try recycling first (select workers to fill the throughput gap)
-			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, remainingTaskrate, recruiter.StepID, recruiter.WorkflowID, recruiter, cfgDefaultSwap)
-			if len(selectedWorkerIDs) > 0 {
-				// Calculate total taskrate being recycled
-				newConcurrencyByWorkerID := make(map[int32]int)
-				newPrefetchByWorkerID := make(map[int32]int)
-				for _, wid := range selectedWorkerIDs {
-					if w, ok := recyclableMap[wid]; ok {
-						newConcurrency := computeConcurrencyForRecruiterWorker(recruiter, w)
-						newConcurrencyByWorkerID[wid] = newConcurrency
-						if recruiter.WorkerPrefetch == nil && recruiter.PrefetchPercent == nil {
-							log.Printf("!! Recruiter %d:%d should have either WorkerPrefetch or PrefetchPercent !!",
-								recruiter.StepID, recruiter.Rank)
-							newPrefetchByWorkerID[wid] = 0
-						} else {
-							newPrefetchByWorkerID[wid] = computePrefetchForRecruiterWorker(recruiter, newConcurrency)
-						}
-					}
-				}
-				affected, recycledTaskrate := recycleWorkers(
-					db,
-					recyclableWorkers,
-					selectedWorkerIDs,
-					&recruiter,
-					keys(recruiterFlavorIDs),
-					newConcurrencyByWorkerID,
-					newPrefetchByWorkerID,
-					remainingTaskrate,
-				)
-				remainingTaskrate -= recycledTaskrate
-				if remainingTaskrate < 0 {
-					remainingTaskrate = 0
-				}
-				log.Printf("♻️ Recycled %d workers (total taskrate=%d) for step=%d (still need throughput=%d)", affected, recycledTaskrate, recruiter.StepID, remainingTaskrate)
-			} else {
-				log.Printf("No recyclable workers compatible with recruiter %d for step %d", recruiter.Rank, recruiter.StepID)
-			}
-		}
-
-		if remainingTaskrate <= 0 {
-			log.Printf("No recruitment needed anymore.")
-			continue
-		}
-
-		// Verbose timeout diagnostics (seconds-based)
-		if !recruiter.TimeoutPassed {
-			log.Printf("⏳ Recruiter step=%d rank=%d waiting %s before cloud deploy (timeout=%ds since %s)",
-				recruiter.StepID,
-				recruiter.Rank,
-				recruiter.RemainingUntilTimeout.Truncate(time.Second),
-				recruiter.TimeoutSeconds,
-				recruiter.LastTrigger.Format(time.RFC3339))
-			continue
-		}
-
-		// Enforce workflow-level maximum before cloud deploy (recycling is allowed to exceed caps)
-		wfc := workflowCounterMemory[recruiter.WorkflowID]
-		if wfc.Maximum != nil && wfc.Counter >= *wfc.Maximum {
-			log.Printf("⚠️ Workflow %d at maximum workers (%d) — skipping cloud deploy for step=%d rank=%d (recycling allowed)",
-				recruiter.WorkflowID, *wfc.Maximum, recruiter.StepID, recruiter.Rank)
-			continue
-		}
-
-		// Pre-check: can ANY flavor fit in the quota? If not, skip deploy entirely.
-		canFitAny := false
-		for _, fr := range flavorRegionList {
-			ri, ok := regionInfoMap[fr.RegionID]
-			if !ok {
-				continue
-			}
-			if qm.IsFlavorBlacklisted(ri.Name, ri.Provider, fr.Name) {
-				continue
-			}
-			if qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
-				canFitAny = true
-				break
-			}
-		}
-		if !canFitAny {
-			log.Printf("⚠️ Quota exhausted for all flavors in target regions — skipping cloud deploy for step=%d rank=%d",
-				recruiter.StepID, recruiter.Rank)
-			continue
-		}
-
-		log.Printf("⏱️ Timeout passed for step=%d rank=%d; attempting cloud deploy (need throughput=%d, worker concurrency=%d, launching workers for %d task rate)",
-			recruiter.StepID, recruiter.Rank, remainingTaskrate, recruiter.WorkerConcurrency, remainingTaskrate)
-
-		deployed, err := deployWorkers(
-			ctx,
-			qm,
-			creator,
-			recruiter,
-			flavorRegionList,
-			regionInfoMap,
-			remainingTaskrate,
-			&wfc,
-		)
-
-		// Update the workflow counter memory
-		workflowCounterMemory[recruiter.WorkflowID] = wfc
-
-		if err != nil {
-			log.Printf("⚠️ Failed to deploy workers for step %d: %v", recruiter.StepID, err)
-			continue
-		}
-		log.Printf("🚀 Deployed %d workers for step=%d", deployed, recruiter.StepID)
-		recruiterTimers[key] = RecruiterState{LastTrigger: now}
+		sc.recruitStep(ctx, recruiters[start:end])
+		start = end
 	}
-
 	return nil
 }
 
+type stepContext struct {
+	db                *sql.DB
+	qm                *QuotaManager
+	creator           WorkerCreator
+	recruitmentMap    map[RecruiterKey][]FlavorDetail
+	recyclingMap      map[RecruiterKey][]FlavorDetail
+	regionInfoMap     map[int32]RegionInfo
+	recyclableWorkers []RecyclableWorker
+	// timers is nil for an explicit debug recruit, which deploys without
+	// waiting for any timeout.
+	timers         map[RecruiterKey]RecruiterState
+	eligible       map[RecruiterKey]struct{}
+	wfcMem         map[int32]WorkflowCounter
+	now            time.Time
+	cfgDefaultSwap float32
+}
+
+// recruitStep runs one step's recruiters in rank order against a single
+// step-wide shortfall. Every recruiting rule is a rule for the step as a
+// whole (max_workers and rounds included); ranks only order the sources
+// of workers. A rank acts only once every lower rank is done — it either
+// brought the step to its max_workers or has nothing it can recycle or
+// deploy. A rank still waiting out its timeout, or one that deployed
+// workers this cycle, holds the higher ranks until a later cycle, which
+// sees the new workers as step capacity. Recycling never waits on a timer.
+func (sc *stepContext) recruitStep(ctx context.Context, recruiters []Recruiter) {
+	need := recruiters[0].TargetTaskrate - recruiters[0].PotentialTaskrate
+	stepWorkers := recruiters[0].CurrentWorkers
+
+	for _, recruiter := range recruiters {
+		recruiter.CurrentWorkers = stepWorkers
+		if need <= 0 {
+			log.Printf("Step %d: target throughput met, no recruitment needed at rank %d or above.", recruiter.StepID, recruiter.Rank)
+			return
+		}
+		if recruiter.MaximumWorkers != nil && stepWorkers >= *recruiter.MaximumWorkers {
+			log.Printf("Recruiter step=%d rank=%d done: step has %d workers (max %d)",
+				recruiter.StepID, recruiter.Rank, stepWorkers, *recruiter.MaximumWorkers)
+			continue
+		}
+		key := RecruiterKey{StepID: recruiter.StepID, Rank: recruiter.Rank}
+
+		recycled, recycledTaskrate := sc.recycleFor(&recruiter, key, need)
+		need -= recycledTaskrate
+		stepWorkers += recycled
+		if need <= 0 {
+			log.Printf("No recruitment needed anymore for step=%d after recycling.", recruiter.StepID)
+			return
+		}
+		if recruiter.MaximumWorkers != nil && stepWorkers >= *recruiter.MaximumWorkers {
+			log.Printf("Recruiter step=%d rank=%d done after recycling: step has %d workers (max %d)",
+				recruiter.StepID, recruiter.Rank, stepWorkers, *recruiter.MaximumWorkers)
+			continue
+		}
+
+		flavorRegionList := sc.deployableFlavors(recruiter, key)
+		if len(flavorRegionList) == 0 {
+			continue
+		}
+
+		sc.eligible[key] = struct{}{}
+		if sc.timers != nil {
+			state, seen := sc.timers[key]
+			if !seen {
+				sc.timers[key] = RecruiterState{LastTrigger: sc.now}
+				state.LastTrigger = sc.now
+			}
+			timeout := time.Duration(recruiter.TimeoutSeconds) * time.Second
+			if elapsed := sc.now.Sub(state.LastTrigger); elapsed < timeout {
+				log.Printf("⏳ Recruiter step=%d rank=%d waiting %s before cloud deploy (timeout=%ds since %s); higher ranks wait",
+					recruiter.StepID, recruiter.Rank, (timeout - elapsed).Truncate(time.Second),
+					recruiter.TimeoutSeconds, state.LastTrigger.Format(time.RFC3339))
+				return
+			}
+		}
+
+		log.Printf("⏱️ Recruiter step=%d rank=%d attempting cloud deploy (need throughput=%d)",
+			recruiter.StepID, recruiter.Rank, need)
+		wfc := sc.wfcMem[recruiter.WorkflowID]
+		deployed, err := deployWorkers(ctx, sc.qm, sc.creator, recruiter, flavorRegionList, sc.regionInfoMap, need, &wfc)
+		sc.wfcMem[recruiter.WorkflowID] = wfc
+		if err != nil {
+			log.Printf("⚠️ Failed to deploy workers for step %d rank %d: %v", recruiter.StepID, recruiter.Rank, err)
+		}
+		if deployed > 0 {
+			log.Printf("🚀 Deployed %d workers for step=%d rank=%d", deployed, recruiter.StepID, recruiter.Rank)
+			if sc.timers != nil {
+				sc.timers[key] = RecruiterState{LastTrigger: sc.now}
+			}
+			return
+		}
+		log.Printf("Recruiter step=%d rank=%d done: nothing deployed", recruiter.StepID, recruiter.Rank)
+	}
+}
+
+// recycleFor recycles idle workers matching the recruiter's filter toward
+// the step's shortfall. Returns the number of workers recycled and the
+// taskrate they add.
+func (sc *stepContext) recycleFor(recruiter *Recruiter, key RecruiterKey, need int) (int, int) {
+	if len(sc.recyclableWorkers) == 0 {
+		return 0, 0
+	}
+	recruiterFlavorIDs := make(map[int32]struct{})
+	recruiterRegionIDs := make(map[int32]struct{})
+	for _, fr := range sc.recyclingMap[key] {
+		recruiterFlavorIDs[fr.FlavorID] = struct{}{}
+		recruiterRegionIDs[fr.RegionID] = struct{}{}
+	}
+	selectedWorkerIDs := selectWorkersForRecruiter(sc.recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, need, recruiter.StepID, recruiter.WorkflowID, *recruiter, sc.cfgDefaultSwap)
+	if len(selectedWorkerIDs) == 0 {
+		log.Printf("No recyclable workers compatible with recruiter %d for step %d", recruiter.Rank, recruiter.StepID)
+		return 0, 0
+	}
+
+	byID := make(map[int32]RecyclableWorker, len(sc.recyclableWorkers))
+	for _, w := range sc.recyclableWorkers {
+		byID[w.WorkerID] = w
+	}
+	newConcurrencyByWorkerID := make(map[int32]int)
+	newPrefetchByWorkerID := make(map[int32]int)
+	for _, wid := range selectedWorkerIDs {
+		w, ok := byID[wid]
+		if !ok {
+			continue
+		}
+		newConcurrency := computeConcurrencyForRecruiterWorker(*recruiter, w)
+		newConcurrencyByWorkerID[wid] = newConcurrency
+		if recruiter.WorkerPrefetch == nil && recruiter.PrefetchPercent == nil {
+			log.Printf("!! Recruiter %d:%d should have either WorkerPrefetch or PrefetchPercent !!",
+				recruiter.StepID, recruiter.Rank)
+			newPrefetchByWorkerID[wid] = 0
+		} else {
+			newPrefetchByWorkerID[wid] = computePrefetchForRecruiterWorker(*recruiter, newConcurrency)
+		}
+	}
+	affected, recycledTaskrate := recycleWorkers(
+		sc.db,
+		sc.recyclableWorkers,
+		selectedWorkerIDs,
+		recruiter,
+		keys(recruiterFlavorIDs),
+		newConcurrencyByWorkerID,
+		newPrefetchByWorkerID,
+		need,
+	)
+	if affected > 0 {
+		recycledIDs := make(map[int32]struct{}, len(selectedWorkerIDs))
+		for _, id := range selectedWorkerIDs {
+			recycledIDs[id] = struct{}{}
+		}
+		remaining := sc.recyclableWorkers[:0:0]
+		for _, w := range sc.recyclableWorkers {
+			if _, taken := recycledIDs[w.WorkerID]; !taken {
+				remaining = append(remaining, w)
+			}
+		}
+		sc.recyclableWorkers = remaining
+	}
+	log.Printf("♻️ Recycled %d workers (total taskrate=%d) for step=%d rank=%d", affected, recycledTaskrate, recruiter.StepID, recruiter.Rank)
+	return affected, recycledTaskrate
+}
+
+// deployableFlavors returns the recruiter's flavors when it may deploy
+// right now, or nil — after logging why — when it cannot: no available
+// flavor matches its filter, the workflow is at its worker cap, or every
+// flavor is blacklisted or out of quota. A nil result means the rank is
+// done for this cycle.
+func (sc *stepContext) deployableFlavors(recruiter Recruiter, key RecruiterKey) []FlavorDetail {
+	flavorRegionList := sc.recruitmentMap[key]
+	if len(flavorRegionList) == 0 {
+		log.Printf("Recruiter step=%d rank=%d done: no available flavor matches its filter", recruiter.StepID, recruiter.Rank)
+		return nil
+	}
+	wfc := sc.wfcMem[recruiter.WorkflowID]
+	if wfc.Maximum != nil && wfc.Counter >= *wfc.Maximum {
+		log.Printf("Recruiter step=%d rank=%d done: workflow %d at maximum workers (%d)",
+			recruiter.StepID, recruiter.Rank, recruiter.WorkflowID, *wfc.Maximum)
+		return nil
+	}
+	for _, fr := range flavorRegionList {
+		ri, ok := sc.regionInfoMap[fr.RegionID]
+		if !ok || sc.qm.IsFlavorBlacklisted(ri.Name, ri.Provider, fr.Name) {
+			continue
+		}
+		if sc.qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
+			return flavorRegionList
+		}
+	}
+	log.Printf("Recruiter step=%d rank=%d done: quota exhausted or flavors blacklisted in all target regions",
+		recruiter.StepID, recruiter.Rank)
+	return nil
+}
+
+// DebugRecruitStep runs one recruitment pass for a single step with the
+// same rank rules as the regular cycle, but deploys without waiting for
+// recruiter timeouts.
 func DebugRecruitStep(
 	ctx context.Context,
 	db *sql.DB,
@@ -1514,152 +1593,7 @@ func DebugRecruitStep(
 		return nil
 	}
 
-	recruitmentMap, recyclingMap, regionInfoMap, err := fetchRecruiterFlavors(db, recruiters)
-	if err != nil {
-		return fmt.Errorf("failed to fetch flavor/region info: %w", err)
-	}
-
-	allFlavorIDs := make(map[int32]struct{})
-	allRegionIDs := make(map[int32]struct{})
-	for _, frList := range recyclingMap {
-		for _, fr := range frList {
-			allFlavorIDs[fr.FlavorID] = struct{}{}
-			allRegionIDs[fr.RegionID] = struct{}{}
-		}
-	}
-
-	recyclableWorkers, err := findRecyclableWorkers(db, keys(allFlavorIDs), keys(allRegionIDs))
-	if err != nil {
-		return fmt.Errorf("failed to find recyclable workers: %w", err)
-	}
-
-	hasRecyclableWorkers := len(recyclableWorkers) > 0
-	if !hasRecyclableWorkers {
-		log.Printf("No recyclable workers")
-	}
-
-	recyclableMap := make(map[int32]RecyclableWorker)
-	for _, w := range recyclableWorkers {
-		recyclableMap[w.WorkerID] = w
-	}
-
-	for _, recruiter := range recruiters {
-		key := RecruiterKey{StepID: recruiter.StepID, Rank: recruiter.Rank}
-		flavorRegionList := recruitmentMap[key]
-		recyclingFlavorRegionList := recyclingMap[key]
-
-		if len(flavorRegionList) == 0 {
-			log.Printf("⚠️ No flavor/region candidates for recruiter step=%d rank=%d", recruiter.StepID, recruiter.Rank)
-			continue
-		}
-
-		recruiterFlavorIDs := make(map[int32]struct{})
-		recruiterRegionIDs := make(map[int32]struct{})
-		for _, fr := range recyclingFlavorRegionList {
-			recruiterFlavorIDs[fr.FlavorID] = struct{}{}
-			recruiterRegionIDs[fr.RegionID] = struct{}{}
-		}
-
-		remainingTaskrate := recruiter.TargetTaskrate - recruiter.PotentialTaskrate
-		if remainingTaskrate <= 0 {
-			log.Printf("Recruiter step=%d rank=%d already meets target throughput (taskrate %d >= target %d).",
-				recruiter.StepID, recruiter.Rank, recruiter.ActiveTaskrate, recruiter.TargetTaskrate)
-			continue
-		}
-
-		if hasRecyclableWorkers {
-			selectedWorkerIDs := selectWorkersForRecruiter(recyclableWorkers, recruiterFlavorIDs, recruiterRegionIDs, remainingTaskrate, recruiter.StepID, recruiter.WorkflowID, recruiter, cfgDefaultSwap)
-			if len(selectedWorkerIDs) > 0 {
-				newConcurrencyByWorkerID := make(map[int32]int)
-				newPrefetchByWorkerID := make(map[int32]int)
-				for _, wid := range selectedWorkerIDs {
-					if w, ok := recyclableMap[wid]; ok {
-						newConcurrency := computeConcurrencyForRecruiterWorker(recruiter, w)
-						newConcurrencyByWorkerID[wid] = newConcurrency
-						if recruiter.WorkerPrefetch == nil && recruiter.PrefetchPercent == nil {
-							log.Printf("!! Recruiter %d:%d should have either WorkerPrefetch or PrefetchPercent !!",
-								recruiter.StepID, recruiter.Rank)
-							newPrefetchByWorkerID[wid] = 0
-						} else {
-							newPrefetchByWorkerID[wid] = computePrefetchForRecruiterWorker(recruiter, newConcurrency)
-						}
-					}
-				}
-				affected, recycledTaskrate := recycleWorkers(
-					db,
-					recyclableWorkers,
-					selectedWorkerIDs,
-					&recruiter,
-					keys(recruiterFlavorIDs),
-					newConcurrencyByWorkerID,
-					newPrefetchByWorkerID,
-					remainingTaskrate,
-				)
-				remainingTaskrate -= recycledTaskrate
-				if remainingTaskrate < 0 {
-					remainingTaskrate = 0
-				}
-				log.Printf("♻️ Recycled %d workers (total taskrate=%d) for step=%d (still need throughput=%d)", affected, recycledTaskrate, recruiter.StepID, remainingTaskrate)
-			} else {
-				log.Printf("No recyclable workers compatible with recruiter %d for step %d", recruiter.Rank, recruiter.StepID)
-			}
-		}
-
-		if remainingTaskrate <= 0 {
-			log.Printf("No recruitment needed anymore.")
-			continue
-		}
-
-		wfc := workflowCounterMemory[recruiter.WorkflowID]
-		if wfc.Maximum != nil && wfc.Counter >= *wfc.Maximum {
-			log.Printf("⚠️ Workflow %d at maximum workers (%d) — skipping cloud deploy for step=%d rank=%d (recycling allowed)",
-				recruiter.WorkflowID, *wfc.Maximum, recruiter.StepID, recruiter.Rank)
-			continue
-		}
-
-		// Pre-check quota
-		canFitAny := false
-		for _, fr := range flavorRegionList {
-			ri, ok := regionInfoMap[fr.RegionID]
-			if !ok {
-				continue
-			}
-			if qm.IsFlavorBlacklisted(ri.Name, ri.Provider, fr.Name) {
-				continue
-			}
-			if qm.CanLaunch(ri.Name, ri.Provider, fr.Cpu, fr.Memory) {
-				canFitAny = true
-				break
-			}
-		}
-		if !canFitAny {
-			log.Printf("⚠️ Quota exhausted for all flavors — skipping debug deploy for step=%d rank=%d",
-				recruiter.StepID, recruiter.Rank)
-			continue
-		}
-
-		log.Printf("⏱️ Debug recruit for step=%d rank=%d (need throughput=%d, worker concurrency=%d)",
-			recruiter.StepID, recruiter.Rank, remainingTaskrate, recruiter.WorkerConcurrency)
-
-		deployed, err := deployWorkers(
-			ctx,
-			qm,
-			creator,
-			recruiter,
-			flavorRegionList,
-			regionInfoMap,
-			remainingTaskrate,
-			&wfc,
-		)
-		workflowCounterMemory[recruiter.WorkflowID] = wfc
-		if err != nil {
-			log.Printf("⚠️ Failed to deploy workers for step %d: %v", recruiter.StepID, err)
-			continue
-		}
-		log.Printf("🚀 Deployed %d workers for step=%d", deployed, recruiter.StepID)
-	}
-
-	return nil
+	return recruitSteps(ctx, db, qm, creator, recruiters, nil, make(map[RecruiterKey]struct{}), workflowCounterMemory, time.Now(), cfgDefaultSwap)
 }
 
 func keys(m map[int32]struct{}) []int32 {
