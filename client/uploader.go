@@ -132,7 +132,20 @@ func (um *UploadManager) EnqueueTaskOutput(task *pb.Task) {
 	})
 	if err != nil {
 		if os.IsNotExist(err) {
+			// The worker creates the output directory when it accepts the
+			// task, so a missing one means the task directory was lost while
+			// the task ran: whatever the program wrote is gone. That is a
+			// worker-side fault, never a program outcome.
 			log.Printf("⚠️ Output directory does not exist for task %d", task.TaskId)
+			if task.Status == "S" {
+				um.reporter.Event("E", "upload", "output directory missing at upload; task failed", map[string]any{
+					"task_id":    task.TaskId,
+					"output_dir": outputDir,
+				})
+				task.Status = "F"
+				fc := "other"
+				task.FailureClass = &fc
+			}
 			um.Completion <- task
 			return
 		}
