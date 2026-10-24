@@ -505,6 +505,23 @@ type Attr struct {
 			DryRun    bool   `arg:"--dry-run" help:"Only count matched rows; do not delete"`
 		} `arg:"subcommand:prune" help:"Prune worker events by age and optional filters"`
 	} `arg:"subcommand:worker-event" help:"Worker event logs"`
+
+	// Audit trail commands
+	Audit *struct {
+		List *struct {
+			Worker   *int32 `arg:"--worker" help:"Events about this worker id"`
+			Task     *int32 `arg:"--task" help:"Events about this task id"`
+			Step     *int32 `arg:"--step" help:"Events about this step id (recruiters, step-wide command edits)"`
+			Workflow *int32 `arg:"--workflow" help:"Events about this workflow id"`
+			Template *int32 `arg:"--template" help:"Events about this template id"`
+			Actor    string `arg:"--actor" help:"Only events by this actor (username, or scheduler component such as 'idle watchdog')"`
+			Since    string `arg:"--since" help:"Only events since an age (e.g. 12h, 7d) or an RFC3339 time"`
+			Limit    int32  `arg:"--limit" default:"100" help:"Max number of events"`
+		} `arg:"subcommand:list" help:"List audit events, newest first"`
+		Prune *struct {
+			OlderThanDays int32 `arg:"--older-than-days,required" help:"Delete audit events older than this many days (admin)"`
+		} `arg:"subcommand:prune" help:"Delete old audit events (admin)"`
+	} `arg:"subcommand:audit" help:"Audit trail: who or what changed workers, tasks, steps, workflows and templates"`
 }
 
 // Version enables go-arg's built-in --version handling.
@@ -2849,6 +2866,77 @@ func (c *CLI) WorkerEventDelete() error {
 	return nil
 }
 
+func (c *CLI) AuditList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+
+	a := c.Attr.Audit.List
+	f := &pb.AuditFilter{Limit: &a.Limit}
+	set := 0
+	for kind, id := range map[string]*int32{"worker": a.Worker, "task": a.Task, "step": a.Step, "workflow": a.Workflow, "template": a.Template} {
+		if id != nil {
+			k := kind
+			f.ObjectKind, f.ObjectId = &k, id
+			set++
+		}
+	}
+	if set > 1 {
+		return fmt.Errorf("pass at most one of --worker, --task, --step, --workflow, --template")
+	}
+	if a.Actor != "" {
+		f.Actor = &a.Actor
+	}
+	if a.Since != "" {
+		t, err := time.Parse(time.RFC3339, a.Since)
+		if err != nil {
+			cutoff, aerr := parseAgeToRFC3339(a.Since)
+			if aerr != nil {
+				return fmt.Errorf("invalid --since %q: use an age such as 12h or 7d, or an RFC3339 time", a.Since)
+			}
+			t, _ = time.Parse(time.RFC3339, cutoff)
+		}
+		since := t.Unix()
+		f.SinceEpoch = &since
+	}
+
+	res, err := c.QC.Client.ListAuditEvents(ctx, f)
+	if err != nil {
+		return fmt.Errorf("error fetching audit events: %w", err)
+	}
+	if c.jsonOut(res.Events) {
+		return nil
+	}
+	if len(res.Events) == 0 {
+		fmt.Println("⚠️ No audit events found.")
+		return nil
+	}
+	for _, e := range res.Events {
+		via := e.Channel
+		if e.Client != nil {
+			via += " (" + *e.Client + ")"
+		}
+		fmt.Printf("%s  %-22s %s %d  by %s via %s\n", e.CreatedAt, e.Action, e.ObjectKind, e.ObjectId, e.ActorName, via)
+		if e.DetailsJson != "" && e.DetailsJson != "{}" {
+			fmt.Printf("    %s\n", e.DetailsJson)
+		}
+	}
+	return nil
+}
+
+func (c *CLI) AuditPrune() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+	res, err := c.QC.Client.PruneAuditEvents(ctx, &pb.AuditPruneRequest{OlderThanDays: c.Attr.Audit.Prune.OlderThanDays})
+	if err != nil {
+		return fmt.Errorf("error pruning audit events: %w", err)
+	}
+	if c.jsonOut(res) {
+		return nil
+	}
+	fmt.Printf("🧹 Deleted %d audit events older than %d days\n", res.Deleted, c.Attr.Audit.Prune.OlderThanDays)
+	return nil
+}
+
 func parseAgeToRFC3339(older string) (string, error) {
 	// supports Ns, Nm, Nh, Nd, Nw
 	if older == "" {
@@ -3575,6 +3663,13 @@ func Run(c CLI) error {
 			err = c.RunList()
 		case c.Attr.Run.Delete != nil:
 			err = c.RunDelete()
+		}
+	case c.Attr.Audit != nil:
+		switch {
+		case c.Attr.Audit.List != nil:
+			err = c.AuditList()
+		case c.Attr.Audit.Prune != nil:
+			err = c.AuditPrune()
 		}
 	case c.Attr.WorkerEvent != nil:
 		switch {

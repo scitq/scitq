@@ -38,9 +38,12 @@ func submitTwoFileTask(t *testing.T, qc pb.TaskQueueClient, output string) int32
 	t.Helper()
 	shell := "sh"
 	retry := int32(0)
+	// Bare, not docker: on Linux a container writes as root, and a
+	// root-owned subdirectory in the output can't be removed by a non-root
+	// test runner. A bare task writes as the worker's own user.
 	task, err := qc.SubmitTask(context.Background(), &pb.TaskRequest{
-		Command:   "mkdir -p /output/sub && echo hello > /output/a.txt && echo world > /output/sub/b.txt",
-		Container: "alpine",
+		Command:   `mkdir -p "$OUTPUT/sub" && echo hello > "$OUTPUT/a.txt" && echo world > "$OUTPUT/sub/b.txt"`,
+		Container: "bare",
 		Shell:     &shell,
 		Status:    "P",
 		Output:    &output,

@@ -225,7 +225,7 @@ func newTaskQueueServer(cfg config.Config, db *sql.DB, logRoot string, ctx conte
 			return err
 		},
 		func(workerID int32) error {
-			_, err := s.DeleteWorker(context.Background(), &pb.WorkerDeletion{WorkerId: workerID})
+			_, err := s.DeleteWorker(withSchedulerActor(context.Background(), "idle watchdog"), &pb.WorkerDeletion{WorkerId: workerID})
 			return err
 		},
 		func(workerID int32) (bool, time.Duration) {
@@ -1244,6 +1244,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		log.Printf("⚠️ no update applied for task %d (old=%s new=%s)", req.TaskId, oldStatus, req.NewStatus)
 		return &pb.Ack{Success: false}, fmt.Errorf("no update applied for task %d", req.TaskId)
 	}
+	s.audit(ctx, "task.status", "task", req.TaskId, map[string]any{"from": oldStatus, "to": req.NewStatus})
 
 	// --- Step stats aggregator update ---
 	var sid, wid int32
@@ -2697,7 +2698,11 @@ func (s *taskQueueServer) reclaimOfflineWorkerTasks(ctx context.Context, workerI
 }
 
 func (s *taskQueueServer) RetryTask(ctx context.Context, req *pb.RetryTaskRequest) (*pb.TaskResponse, error) {
-	return s.retryTaskInternal(ctx, req, "R", false, retryOverrides{})
+	res, err := s.retryTaskInternal(ctx, req, "R", false, retryOverrides{})
+	if err == nil {
+		s.audit(ctx, "task.retry", "task", req.TaskId, map[string]any{"new_task_id": res.GetTaskId()})
+	}
+	return res, err
 }
 
 func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTaskRequest) (*pb.Ack, error) {
@@ -2705,6 +2710,7 @@ func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTask
 		return nil, fmt.Errorf("task %d is not in waiting (W) status", req.TaskId)
 	}
 	log.Printf("⚡ Task %d forced from W → P (dependency check bypassed)", req.TaskId)
+	s.audit(ctx, "task.force_run", "task", req.TaskId, nil)
 	ws.EmitWS("task", req.TaskId, "status", struct {
 		TaskId int32  `json:"taskId"`
 		Status string `json:"status"`
@@ -2742,6 +2748,7 @@ func (s *taskQueueServer) SignalTask(ctx context.Context, req *pb.TaskSignalRequ
 	}
 	sigName := map[string]string{"K": "SIGKILL", "T": "SIGTERM", "B": "REREAD-ON-EDIT"}[req.Signal]
 	log.Printf("🔪 %s signal queued for task %d", sigName, req.TaskId)
+	s.audit(ctx, "task.signal", "task", req.TaskId, requestDetails(req))
 	return &pb.Ack{}, nil
 }
 
@@ -2901,6 +2908,7 @@ func (s *taskQueueServer) EditTask(ctx context.Context, req *pb.EditTaskRequest)
 		Resource:         resourceVals,
 	})
 
+	s.audit(ctx, "task.edit", "task", req.TaskId, requestDetails(req))
 	return &pb.TaskResponse{TaskId: req.TaskId}, nil
 }
 
@@ -3058,11 +3066,17 @@ func (s *taskQueueServer) EditAndRetryTask(ctx context.Context, req *pb.EditAndR
 	}
 	ws.EmitWS("task", req.TaskId, "edited", editEvt)
 
-	return s.retryTaskInternal(ctx, &pb.RetryTaskRequest{TaskId: req.TaskId}, "R", false, retryOverrides{
+	res, err := s.retryTaskInternal(ctx, &pb.RetryTaskRequest{TaskId: req.TaskId}, "R", false, retryOverrides{
 		Inputs:    req.Inputs,
 		Resources: req.Resources,
 		Depends:   req.Depends,
 	})
+	if err == nil {
+		details := requestDetails(req)
+		details["new_task_id"] = res.GetTaskId()
+		s.audit(ctx, "task.edit_and_retry", "task", req.TaskId, details)
+	}
+	return res, err
 }
 
 func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepCommandRequest) (*pb.EditStepCommandResponse, error) {
@@ -3202,6 +3216,10 @@ func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepC
 
 	log.Printf("✏️ EditStepCommand: step %d — %d tasks touched (%d F retried, %d in-place)",
 		req.StepId, edited, len(newTaskIDs), int(edited)-len(newTaskIDs))
+	details := requestDetails(req)
+	details["edited_count"] = edited
+	details["new_task_ids"] = newTaskIDs
+	s.audit(ctx, "step.edit_command", "step", req.StepId, details)
 	return &pb.EditStepCommandResponse{
 		EditedCount: edited,
 		NewTaskIds:  newTaskIDs,
@@ -3913,6 +3931,9 @@ func (s *taskQueueServer) CreateWorker(ctx context.Context, req *pb.WorkerReques
 		s.addJob(job)
 	}
 
+	for _, wd := range workerDetailsList {
+		s.audit(ctx, "worker.deploy", "worker", wd.WorkerId, requestDetails(req))
+	}
 	s.triggerAssign()
 
 	return &pb.WorkerIds{
@@ -4099,6 +4120,7 @@ func (s *taskQueueServer) UpdateWorker(ctx context.Context, req *pb.WorkerUpdate
 		s.watchdog.SetPermanent(req.GetWorkerId(), req.GetIsPermanent())
 	}
 
+	s.audit(ctx, "worker.update", "worker", req.WorkerId, requestDetails(req))
 	s.triggerAssign()
 	return &pb.Ack{Success: true}, nil
 }
@@ -4257,6 +4279,7 @@ func (s *taskQueueServer) UserUpdateWorker(ctx context.Context, req *pb.WorkerUp
 		s.watchdog.SetPermanent(req.GetWorkerId(), req.GetIsPermanent())
 	}
 
+	s.audit(ctx, "worker.update", "worker", req.WorkerId, requestDetails(req))
 	s.triggerAssign()
 	return &pb.Ack{Success: true}, nil
 }
@@ -4481,6 +4504,7 @@ func (s *taskQueueServer) DeleteWorker(ctx context.Context, req *pb.WorkerDeleti
 		}
 	}
 
+	s.audit(ctx, "worker.delete", "worker", req.WorkerId, requestDetails(req))
 	if !is_permanent && !undeployed {
 		return &pb.JobId{JobId: job.JobID}, nil
 	}
@@ -6444,6 +6468,7 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 		}
 	}
 
+	s.audit(ctx, "recruiter.create", "step", req.StepId, requestDetails(req))
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -6460,6 +6485,7 @@ func (s *taskQueueServer) DeleteRecruiter(ctx context.Context, req *pb.Recruiter
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to delete recruiter: %w", err)
 	}
 
+	s.audit(ctx, "recruiter.delete", "step", req.StepId, requestDetails(req))
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -6636,6 +6662,7 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 				}{WorkflowId: wfID.Int32, MaximumWorkers: *req.MaxWorkers})
 			}
 		}
+		s.audit(ctx, "recruiter.update", "step", req.StepId, requestDetails(req))
 		return &pb.Ack{Success: true}, nil
 	case "missing_concurrency":
 		// tx will rollback by defer
@@ -6951,6 +6978,7 @@ func (s *taskQueueServer) UpdateWorkflowStatus(ctx context.Context, req *pb.Work
 			s.triggerAssign()
 		}
 	}
+	s.audit(ctx, "workflow.update", "workflow", req.WorkflowId, requestDetails(req))
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -7254,6 +7282,7 @@ func (s *taskQueueServer) DeleteWorkflow(ctx context.Context, req *pb.WorkflowId
 	ws.EmitWS("workflow", req.WorkflowId, "deleted", struct {
 		WorkflowId int32 `json:"workflowId"`
 	}{WorkflowId: req.WorkflowId})
+	s.audit(ctx, "workflow.delete", "workflow", req.WorkflowId, nil)
 	return &pb.Ack{Success: true}, nil
 }
 
@@ -7523,6 +7552,7 @@ func (s *taskQueueServer) DeleteTask(ctx context.Context, req *pb.TaskId) (*pb.A
 	// rarer "delete unblocked recruitment" angle.
 	s.triggerAssign()
 
+	s.audit(ctx, "task.delete", "task", req.TaskId, nil)
 	return &pb.Ack{Success: true}, nil
 }
 

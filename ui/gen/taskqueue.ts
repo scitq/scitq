@@ -4426,6 +4426,106 @@ export interface WorkerEventId {
     eventId: number;
 }
 /**
+ * Audit trail of decisions (migration 56): who or what changed a worker,
+ * task, step, workflow or template, and through which channel.
+ *
+ * @generated from protobuf message taskqueue.AuditFilter
+ */
+export interface AuditFilter {
+    /**
+     * @generated from protobuf field: optional string object_kind = 1
+     */
+    objectKind?: string; // worker, task, step, workflow, template
+    /**
+     * @generated from protobuf field: optional int32 object_id = 2
+     */
+    objectId?: number; // requires object_kind
+    /**
+     * @generated from protobuf field: optional string actor = 3
+     */
+    actor?: string; // exact actor name (username or scheduler component)
+    /**
+     * @generated from protobuf field: optional int64 since_epoch = 4
+     */
+    sinceEpoch?: string; // only events at or after this time (unix seconds)
+    /**
+     * @generated from protobuf field: optional int32 limit = 5
+     */
+    limit?: number; // default 100
+}
+/**
+ * @generated from protobuf message taskqueue.AuditEvent
+ */
+export interface AuditEvent {
+    /**
+     * @generated from protobuf field: int64 audit_id = 1
+     */
+    auditId: string;
+    /**
+     * @generated from protobuf field: string created_at = 2
+     */
+    createdAt: string; // RFC3339
+    /**
+     * @generated from protobuf field: string actor_kind = 3
+     */
+    actorKind: string; // user or scheduler
+    /**
+     * @generated from protobuf field: string actor_name = 4
+     */
+    actorName: string;
+    /**
+     * @generated from protobuf field: string channel = 5
+     */
+    channel: string; // cli, ui, mcp or scheduler
+    /**
+     * @generated from protobuf field: optional string client = 6
+     */
+    client?: string; // MCP client name when known
+    /**
+     * @generated from protobuf field: string action = 7
+     */
+    action: string; // e.g. worker.update, task.retry
+    /**
+     * @generated from protobuf field: string object_kind = 8
+     */
+    objectKind: string;
+    /**
+     * @generated from protobuf field: int32 object_id = 9
+     */
+    objectId: number;
+    /**
+     * @generated from protobuf field: string details_json = 10
+     */
+    detailsJson: string;
+}
+/**
+ * @generated from protobuf message taskqueue.AuditEventList
+ */
+export interface AuditEventList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.AuditEvent events = 1
+     */
+    events: AuditEvent[];
+}
+/**
+ * @generated from protobuf message taskqueue.AuditPruneRequest
+ */
+export interface AuditPruneRequest {
+    /**
+     * @generated from protobuf field: int32 older_than_days = 1
+     */
+    olderThanDays: number; // must be > 0
+}
+/**
+ * @generated from protobuf message taskqueue.AuditPruneResult
+ */
+export interface AuditPruneResult {
+    /**
+     * @generated from protobuf field: int64 deleted = 1
+     */
+    deleted: string;
+}
+/**
  * @generated from protobuf message taskqueue.WorkerEventPruneFilter
  */
 export interface WorkerEventPruneFilter {
@@ -16353,6 +16453,339 @@ class WorkerEventId$Type extends MessageType<WorkerEventId> {
  */
 export const WorkerEventId = new WorkerEventId$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class AuditFilter$Type extends MessageType<AuditFilter> {
+    constructor() {
+        super("taskqueue.AuditFilter", [
+            { no: 1, name: "object_kind", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "object_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "actor", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "since_epoch", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
+            { no: 5, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuditFilter>): AuditFilter {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AuditFilter>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuditFilter): AuditFilter {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string object_kind */ 1:
+                    message.objectKind = reader.string();
+                    break;
+                case /* optional int32 object_id */ 2:
+                    message.objectId = reader.int32();
+                    break;
+                case /* optional string actor */ 3:
+                    message.actor = reader.string();
+                    break;
+                case /* optional int64 since_epoch */ 4:
+                    message.sinceEpoch = reader.int64().toString();
+                    break;
+                case /* optional int32 limit */ 5:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuditFilter, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string object_kind = 1; */
+        if (message.objectKind !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.objectKind);
+        /* optional int32 object_id = 2; */
+        if (message.objectId !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.objectId);
+        /* optional string actor = 3; */
+        if (message.actor !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.actor);
+        /* optional int64 since_epoch = 4; */
+        if (message.sinceEpoch !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.sinceEpoch);
+        /* optional int32 limit = 5; */
+        if (message.limit !== undefined)
+            writer.tag(5, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.AuditFilter
+ */
+export const AuditFilter = new AuditFilter$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuditEvent$Type extends MessageType<AuditEvent> {
+    constructor() {
+        super("taskqueue.AuditEvent", [
+            { no: 1, name: "audit_id", kind: "scalar", T: 3 /*ScalarType.INT64*/ },
+            { no: 2, name: "created_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "actor_kind", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "actor_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "channel", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "client", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "action", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "object_kind", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "object_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "details_json", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuditEvent>): AuditEvent {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.auditId = "0";
+        message.createdAt = "";
+        message.actorKind = "";
+        message.actorName = "";
+        message.channel = "";
+        message.action = "";
+        message.objectKind = "";
+        message.objectId = 0;
+        message.detailsJson = "";
+        if (value !== undefined)
+            reflectionMergePartial<AuditEvent>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuditEvent): AuditEvent {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 audit_id */ 1:
+                    message.auditId = reader.int64().toString();
+                    break;
+                case /* string created_at */ 2:
+                    message.createdAt = reader.string();
+                    break;
+                case /* string actor_kind */ 3:
+                    message.actorKind = reader.string();
+                    break;
+                case /* string actor_name */ 4:
+                    message.actorName = reader.string();
+                    break;
+                case /* string channel */ 5:
+                    message.channel = reader.string();
+                    break;
+                case /* optional string client */ 6:
+                    message.client = reader.string();
+                    break;
+                case /* string action */ 7:
+                    message.action = reader.string();
+                    break;
+                case /* string object_kind */ 8:
+                    message.objectKind = reader.string();
+                    break;
+                case /* int32 object_id */ 9:
+                    message.objectId = reader.int32();
+                    break;
+                case /* string details_json */ 10:
+                    message.detailsJson = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuditEvent, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 audit_id = 1; */
+        if (message.auditId !== "0")
+            writer.tag(1, WireType.Varint).int64(message.auditId);
+        /* string created_at = 2; */
+        if (message.createdAt !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.createdAt);
+        /* string actor_kind = 3; */
+        if (message.actorKind !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.actorKind);
+        /* string actor_name = 4; */
+        if (message.actorName !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.actorName);
+        /* string channel = 5; */
+        if (message.channel !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.channel);
+        /* optional string client = 6; */
+        if (message.client !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.client);
+        /* string action = 7; */
+        if (message.action !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.action);
+        /* string object_kind = 8; */
+        if (message.objectKind !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.objectKind);
+        /* int32 object_id = 9; */
+        if (message.objectId !== 0)
+            writer.tag(9, WireType.Varint).int32(message.objectId);
+        /* string details_json = 10; */
+        if (message.detailsJson !== "")
+            writer.tag(10, WireType.LengthDelimited).string(message.detailsJson);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.AuditEvent
+ */
+export const AuditEvent = new AuditEvent$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuditEventList$Type extends MessageType<AuditEventList> {
+    constructor() {
+        super("taskqueue.AuditEventList", [
+            { no: 1, name: "events", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => AuditEvent }
+        ]);
+    }
+    create(value?: PartialMessage<AuditEventList>): AuditEventList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.events = [];
+        if (value !== undefined)
+            reflectionMergePartial<AuditEventList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuditEventList): AuditEventList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.AuditEvent events */ 1:
+                    message.events.push(AuditEvent.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuditEventList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.AuditEvent events = 1; */
+        for (let i = 0; i < message.events.length; i++)
+            AuditEvent.internalBinaryWrite(message.events[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.AuditEventList
+ */
+export const AuditEventList = new AuditEventList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuditPruneRequest$Type extends MessageType<AuditPruneRequest> {
+    constructor() {
+        super("taskqueue.AuditPruneRequest", [
+            { no: 1, name: "older_than_days", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuditPruneRequest>): AuditPruneRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.olderThanDays = 0;
+        if (value !== undefined)
+            reflectionMergePartial<AuditPruneRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuditPruneRequest): AuditPruneRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 older_than_days */ 1:
+                    message.olderThanDays = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuditPruneRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 older_than_days = 1; */
+        if (message.olderThanDays !== 0)
+            writer.tag(1, WireType.Varint).int32(message.olderThanDays);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.AuditPruneRequest
+ */
+export const AuditPruneRequest = new AuditPruneRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuditPruneResult$Type extends MessageType<AuditPruneResult> {
+    constructor() {
+        super("taskqueue.AuditPruneResult", [
+            { no: 1, name: "deleted", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuditPruneResult>): AuditPruneResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.deleted = "0";
+        if (value !== undefined)
+            reflectionMergePartial<AuditPruneResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuditPruneResult): AuditPruneResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 deleted */ 1:
+                    message.deleted = reader.int64().toString();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuditPruneResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 deleted = 1; */
+        if (message.deleted !== "0")
+            writer.tag(1, WireType.Varint).int64(message.deleted);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.AuditPruneResult
+ */
+export const AuditPruneResult = new AuditPruneResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class WorkerEventPruneFilter$Type extends MessageType<WorkerEventPruneFilter> {
     constructor() {
         super("taskqueue.WorkerEventPruneFilter", [
@@ -17192,6 +17625,8 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListWorkerEvents", options: {}, I: WorkerEventFilter, O: WorkerEventList },
     { name: "DeleteWorkerEvent", options: {}, I: WorkerEventId, O: Ack },
     { name: "PruneWorkerEvents", options: {}, I: WorkerEventPruneFilter, O: WorkerEventPruneResult },
+    { name: "ListAuditEvents", options: {}, I: AuditFilter, O: AuditEventList },
+    { name: "PruneAuditEvents", options: {}, I: AuditPruneRequest, O: AuditPruneResult },
     { name: "GetTaskStatusCounts", options: {}, I: TaskStatusCountsRequest, O: TaskStatusCountsResponse },
     { name: "SignalTask", options: {}, I: TaskSignalRequest, O: Ack },
     { name: "ServerVersion", options: {}, I: Empty, O: ServerVersionResponse },

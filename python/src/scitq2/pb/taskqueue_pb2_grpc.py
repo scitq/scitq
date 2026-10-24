@@ -525,6 +525,16 @@ class TaskQueueStub(object):
                 request_serializer=taskqueue__pb2.WorkerEventPruneFilter.SerializeToString,
                 response_deserializer=taskqueue__pb2.WorkerEventPruneResult.FromString,
                 _registered_method=True)
+        self.ListAuditEvents = channel.unary_unary(
+                '/taskqueue.TaskQueue/ListAuditEvents',
+                request_serializer=taskqueue__pb2.AuditFilter.SerializeToString,
+                response_deserializer=taskqueue__pb2.AuditEventList.FromString,
+                _registered_method=True)
+        self.PruneAuditEvents = channel.unary_unary(
+                '/taskqueue.TaskQueue/PruneAuditEvents',
+                request_serializer=taskqueue__pb2.AuditPruneRequest.SerializeToString,
+                response_deserializer=taskqueue__pb2.AuditPruneResult.FromString,
+                _registered_method=True)
         self.GetTaskStatusCounts = channel.unary_unary(
                 '/taskqueue.TaskQueue/GetTaskStatusCounts',
                 request_serializer=taskqueue__pb2.TaskStatusCountsRequest.SerializeToString,
@@ -1177,6 +1187,20 @@ class TaskQueueServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListAuditEvents(self, request, context):
+        """Who or what changed an object, newest first
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PruneAuditEvents(self, request, context):
+        """Admin: delete audit events older than N days
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetTaskStatusCounts(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1710,6 +1734,16 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.PruneWorkerEvents,
                     request_deserializer=taskqueue__pb2.WorkerEventPruneFilter.FromString,
                     response_serializer=taskqueue__pb2.WorkerEventPruneResult.SerializeToString,
+            ),
+            'ListAuditEvents': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListAuditEvents,
+                    request_deserializer=taskqueue__pb2.AuditFilter.FromString,
+                    response_serializer=taskqueue__pb2.AuditEventList.SerializeToString,
+            ),
+            'PruneAuditEvents': grpc.unary_unary_rpc_method_handler(
+                    servicer.PruneAuditEvents,
+                    request_deserializer=taskqueue__pb2.AuditPruneRequest.FromString,
+                    response_serializer=taskqueue__pb2.AuditPruneResult.SerializeToString,
             ),
             'GetTaskStatusCounts': grpc.unary_unary_rpc_method_handler(
                     servicer.GetTaskStatusCounts,
@@ -4383,6 +4417,60 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/PruneWorkerEvents',
             taskqueue__pb2.WorkerEventPruneFilter.SerializeToString,
             taskqueue__pb2.WorkerEventPruneResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListAuditEvents(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ListAuditEvents',
+            taskqueue__pb2.AuditFilter.SerializeToString,
+            taskqueue__pb2.AuditEventList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PruneAuditEvents(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/PruneAuditEvents',
+            taskqueue__pb2.AuditPruneRequest.SerializeToString,
+            taskqueue__pb2.AuditPruneResult.FromString,
             options,
             channel_credentials,
             insecure,

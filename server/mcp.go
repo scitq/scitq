@@ -22,7 +22,8 @@ import (
 // Single endpoint: POST /mcp accepts JSON-RPC 2.0 messages.
 
 type mcpSession struct {
-	token string // JWT token set by login tool
+	token  string // JWT token set by login tool
+	client string // clientInfo.name from initialize, recorded in the audit trail
 }
 
 type mcpHandler struct {
@@ -228,6 +229,14 @@ func (h *mcpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 func (h *mcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request, req jsonrpcRequest) (*mcpSession, string) {
 	sid := generateSessionID()
 	session := &mcpSession{}
+	var initParams struct {
+		ClientInfo struct {
+			Name string `json:"name"`
+		} `json:"clientInfo"`
+	}
+	if json.Unmarshal(req.Params, &initParams) == nil {
+		session.client = initParams.ClientInfo.Name
+	}
 
 	// If Authorization: Bearer <token> is provided, pre-authenticate the session
 	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
@@ -296,6 +305,7 @@ Key rules: large workers (32 CPU) + task_spec (cpu: 8) + prefetch: 1 + workspace
 - Use task_status_counts to get a quick overview of workflow progress.
 - Use task_logs to inspect stdout/stderr of failed tasks.
 - Use list_worker_events to check worker lifecycle issues (install failures, evictions).
+- Use list_audit to find who or what changed a worker, task, step or workflow (e.g. why a worker is on a step, who reset a task).
 - Use retry_task or edit_and_retry_task to recover from failures.
 - Use kill_task to stop a stuck or runaway task, stop_task for graceful SIGTERM.
 
@@ -923,6 +933,21 @@ func (h *mcpHandler) listTools() []mcpTool {
 				Required: []string{"uri"},
 			},
 		},
+		// --- Audit trail ---
+		{
+			Name:        "list_audit",
+			Description: "Who or what changed an object, newest first: deploys, recycling, reassignments and deletions of workers; edits, retries, signals and manual status changes of tasks; recruiter changes and step-wide edits; workflow runs, status changes and deletions; template uploads and changes. Each event names its actor (a user, or a scheduler component such as 'recruiter step 75230 rank 2' or 'idle watchdog') and channel (cli, ui, mcp, scheduler).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]schemaProperty{
+					"object_kind": {Type: "string", Description: "worker, task, step, workflow or template (optional)"},
+					"object_id":   {Type: "integer", Description: "Object id; requires object_kind (optional)"},
+					"actor":       {Type: "string", Description: "Only events by this actor name (optional)"},
+					"since_hours": {Type: "number", Description: "Only events from the last N hours (optional)"},
+					"limit":       {Type: "integer", Description: "Max events (default: 100)"},
+				},
+			},
+		},
 		// --- Worker events ---
 		{
 			Name:        "list_worker_events",
@@ -1002,7 +1027,7 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 	}
 
 	// Resolve session token to authenticated user context
-	authCtx := h.resolveSessionContext(ctx, session.token)
+	authCtx := withAuditChannel(h.resolveSessionContext(ctx, session.token), "mcp", session.client)
 	if GetUserFromContext(authCtx) == nil {
 		return &toolResult{
 			Content: []contentBlock{{Type: "text", Text: "Authentication failed: invalid or expired token. Call the login tool to refresh."}},
@@ -1097,6 +1122,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolFileList(authCtx, call.Arguments)
 	case "list_worker_events":
 		return h.toolListWorkerEvents(authCtx, call.Arguments)
+	case "list_audit":
+		return h.toolListAudit(authCtx, call.Arguments)
 	case "prune_worker_events":
 		return h.toolPruneWorkerEvents(authCtx, call.Arguments)
 	case "list_template_runs":
@@ -2187,6 +2214,27 @@ func (h *mcpHandler) toolListFlavors(ctx context.Context, args json.RawMessage) 
 		return errorResult(err), nil
 	}
 	return jsonResult(res.Flavors), nil
+}
+
+func (h *mcpHandler) toolListAudit(ctx context.Context, args json.RawMessage) (any, *rpcError) {
+	var p struct {
+		ObjectKind *string  `json:"object_kind"`
+		ObjectID   *int32   `json:"object_id"`
+		Actor      *string  `json:"actor"`
+		SinceHours *float64 `json:"since_hours"`
+		Limit      *int32   `json:"limit"`
+	}
+	json.Unmarshal(args, &p)
+	f := &pb.AuditFilter{ObjectKind: p.ObjectKind, ObjectId: p.ObjectID, Actor: p.Actor, Limit: p.Limit}
+	if p.SinceHours != nil {
+		since := time.Now().Add(-time.Duration(*p.SinceHours * float64(time.Hour))).Unix()
+		f.SinceEpoch = &since
+	}
+	res, err := h.server.ListAuditEvents(ctx, f)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return jsonResult(res.Events), nil
 }
 
 func (h *mcpHandler) toolListWorkerEvents(ctx context.Context, args json.RawMessage) (any, *rpcError) {

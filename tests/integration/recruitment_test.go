@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"testing"
 	"time"
@@ -337,6 +338,7 @@ func TestRecruitmentCycle(t *testing.T) {
 		require.True(t, cheap8_id < exp16_id, "cheap8 worker ID should be lower than exp16 ID since created first")
 		taskDone := make(map[int32]bool)
 		var stepsRunning, steps1to10Done, atLeastOneTaskWithWeightNotOne, workersRecycled, steps11to20Done bool
+		var recycledID int32
 
 		StartTime := time.Now()
 		for {
@@ -395,6 +397,7 @@ func TestRecruitmentCycle(t *testing.T) {
 						if (w.WorkerId == cheap8_id || w.WorkerId == exp16_id) &&
 							w.StepId != nil && *w.StepId == 2 {
 							workersRecycled = true
+							recycledID = w.WorkerId
 							log.Printf("✅ Worker %d (originally deployed for step 1) recycled to step 2", w.WorkerId)
 							break
 						}
@@ -427,6 +430,24 @@ func TestRecruitmentCycle(t *testing.T) {
 		require.True(t, workersRecycled, "workers should have been recycled to step 2")
 		require.True(t, steps11to20Done, "step 2 tasks 11 to 20 should be done")
 
+		// --- Audit trail: the recycled worker's history names its actors ---
+		requireAuditEvent(t, qc, recycledID, "worker.deploy", "scheduler",
+			fmt.Sprintf("recruiter step %d rank 1", step1Id), "scheduler", "")
+		requireAuditEvent(t, qc, recycledID, "worker.recycle", "scheduler",
+			fmt.Sprintf("recruiter step %d rank 1", step2Id), "scheduler", "")
+
+		// A user then moves the worker through MCP.
+		mcpURL := fmt.Sprintf("http://localhost:%d/mcp", httpPortForAddr(t, serverAddr))
+		sessionID := mcpSession(t, mcpURL, "audit-test", adminUser, adminPassword)
+		upd := mcpPost(t, mcpURL, sessionID, rpcRequest{
+			JSONRPC: "2.0", ID: 3, Method: "tools/call",
+			Params: map[string]any{
+				"name":      "update_worker",
+				"arguments": map[string]any{"worker_id": recycledID, "step_id": step1Id},
+			},
+		})
+		require.Nil(t, upd.Error, "update_worker via MCP should succeed")
+		requireAuditEvent(t, qc, recycledID, "worker.update", "user", adminUser, "mcp", "audit-test")
 	})
 }
 

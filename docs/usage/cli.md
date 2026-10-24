@@ -1171,6 +1171,40 @@ scitq user change-password --username <name>
 - Prompts for current password, then for the new password twice.
 - Uses the server set by `SCITQ_SERVER` (defaults to `localhost:50051`).
 
+### `audit`
+
+The audit trail records decisions: who or what changed a worker, task, step, workflow or template, and through which channel. Each event names its actor — a user, or a scheduler component such as `recruiter step 75230 rank 2`, `idle watchdog` or `stuck-delete janitor` — and its channel: `cli`, `ui`, `mcp` (with the MCP client name when the agent announces one) or `scheduler`. Task status transitions reported by workers are not part of it; worker events and task timestamps cover those.
+
+Recorded decisions:
+
+- **Workers**: deploy (by a recruiter or a user), recycle onto another step, update (step, concurrency, prefetch, caps…), delete.
+- **Tasks**: edit, edit-and-retry, retry, force-run, kill/stop signal, delete, status change made by a user.
+- **Steps**: recruiter create/update/delete, step-wide command edit.
+- **Workflows**: run from a template (template and parameters), status and maximum-workers changes, delete.
+- **Templates**: upload, hide/unhide, move to a folder.
+
+#### `audit list`
+
+```sh
+scitq audit list [--worker ID | --task ID | --step ID | --workflow ID | --template ID] [--actor NAME] [--since AGE|TIME] [--limit N]
+```
+
+Lists events newest first (default limit 100). `--since` takes an age such as `12h` or `7d`, or an RFC3339 time. Use `--json` for machine-readable output.
+
+Example — why is worker 5223 on its current step?
+
+```sh
+scitq audit list --worker 5223 --since 2d
+```
+
+#### `audit prune`
+
+```sh
+scitq audit prune --older-than-days N
+```
+
+Deletes audit events older than N days. Requires admin rights.
+
 ### `worker-event`
 
 Worker event commands let you inspect, delete, or prune event logs emitted by workers.  

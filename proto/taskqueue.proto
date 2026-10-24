@@ -132,6 +132,8 @@ service TaskQueue {
     rpc ListWorkerEvents(WorkerEventFilter) returns (WorkerEventList);
     rpc DeleteWorkerEvent(WorkerEventId) returns (Ack);
     rpc PruneWorkerEvents(WorkerEventPruneFilter) returns (WorkerEventPruneResult);
+    rpc ListAuditEvents(AuditFilter) returns (AuditEventList); // Who or what changed an object, newest first
+    rpc PruneAuditEvents(AuditPruneRequest) returns (AuditPruneResult); // Admin: delete audit events older than N days
     rpc GetTaskStatusCounts(TaskStatusCountsRequest) returns (TaskStatusCountsResponse);
     rpc SignalTask(TaskSignalRequest) returns (Ack);
     // Returns the server's own build identity so callers (CLI, worker) can
@@ -1900,6 +1902,41 @@ message WorkerEventList {
 
 message WorkerEventId {
   int32 event_id = 1;
+}
+
+// Audit trail of decisions (migration 56): who or what changed a worker,
+// task, step, workflow or template, and through which channel.
+message AuditFilter {
+  optional string object_kind = 1; // worker, task, step, workflow, template
+  optional int32 object_id = 2;    // requires object_kind
+  optional string actor = 3;       // exact actor name (username or scheduler component)
+  optional int64 since_epoch = 4;  // only events at or after this time (unix seconds)
+  optional int32 limit = 5;        // default 100
+}
+
+message AuditEvent {
+  int64 audit_id = 1;
+  string created_at = 2;       // RFC3339
+  string actor_kind = 3;       // user or scheduler
+  string actor_name = 4;
+  string channel = 5;          // cli, ui, mcp or scheduler
+  optional string client = 6;  // MCP client name when known
+  string action = 7;           // e.g. worker.update, task.retry
+  string object_kind = 8;
+  int32 object_id = 9;
+  string details_json = 10;
+}
+
+message AuditEventList {
+  repeated AuditEvent events = 1;
+}
+
+message AuditPruneRequest {
+  int32 older_than_days = 1; // must be > 0
+}
+
+message AuditPruneResult {
+  int64 deleted = 1;
 }
 
 message WorkerEventPruneFilter {

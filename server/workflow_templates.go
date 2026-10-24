@@ -692,6 +692,9 @@ func (s *taskQueueServer) RunTemplate(ctx context.Context, req *pb.RunTemplateRe
 	if strings.TrimSpace(stderr) != "" {
 		resp.ErrorMessage = proto.String(stderr)
 	}
+	details := requestDetails(req)
+	details["template_run_id"] = templateRunId
+	s.audit(ctx, "workflow.run_template", "workflow", workflowID.Int32, details)
 	return resp, nil
 }
 
@@ -1116,6 +1119,9 @@ func (s *taskQueueServer) UploadTemplate(ctx context.Context, req *pb.UploadTemp
 			UploadedAt:         time.Now().Format(time.RFC3339),
 		})
 
+		s.audit(ctx, "template.upload", "template", templateID, map[string]any{
+			"name": meta.Name, "version": meta.Version, "folder": folder, "force": req.Force,
+		})
 		return &pb.UploadTemplateResponse{
 			Success:            success,
 			Message:            strings.TrimSpace(stderrMeta + "\n" + stderrParams),
@@ -1328,6 +1334,8 @@ func (s *taskQueueServer) UpdateTemplate(ctx context.Context, req *pb.UpdateTemp
 		}
 		log.Printf("📁 Template %q moved to folder %q (all versions)", name, normalized)
 	}
+
+	s.audit(ctx, "template.update", "template", req.WorkflowTemplateId, requestDetails(req))
 
 	// Echo back the updated row so the caller sees the new state.
 	list, err := s.ListTemplates(ctx, &pb.TemplateFilter{

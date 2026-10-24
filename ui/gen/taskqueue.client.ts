@@ -11,6 +11,10 @@ import type { ServerVersionResponse } from "./taskqueue";
 import type { TaskSignalRequest } from "./taskqueue";
 import type { TaskStatusCountsResponse } from "./taskqueue";
 import type { TaskStatusCountsRequest } from "./taskqueue";
+import type { AuditPruneResult } from "./taskqueue";
+import type { AuditPruneRequest } from "./taskqueue";
+import type { AuditEventList } from "./taskqueue";
+import type { AuditFilter } from "./taskqueue";
 import type { WorkerEventPruneResult } from "./taskqueue";
 import type { WorkerEventPruneFilter } from "./taskqueue";
 import type { WorkerEventId } from "./taskqueue";
@@ -587,6 +591,18 @@ export interface ITaskQueueClient {
      * @generated from protobuf rpc: PruneWorkerEvents
      */
     pruneWorkerEvents(input: WorkerEventPruneFilter, options?: RpcOptions): UnaryCall<WorkerEventPruneFilter, WorkerEventPruneResult>;
+    /**
+     * Who or what changed an object, newest first
+     *
+     * @generated from protobuf rpc: ListAuditEvents
+     */
+    listAuditEvents(input: AuditFilter, options?: RpcOptions): UnaryCall<AuditFilter, AuditEventList>;
+    /**
+     * Admin: delete audit events older than N days
+     *
+     * @generated from protobuf rpc: PruneAuditEvents
+     */
+    pruneAuditEvents(input: AuditPruneRequest, options?: RpcOptions): UnaryCall<AuditPruneRequest, AuditPruneResult>;
     /**
      * @generated from protobuf rpc: GetTaskStatusCounts
      */
@@ -1367,17 +1383,35 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
         return stackIntercept<WorkerEventPruneFilter, WorkerEventPruneResult>("unary", this._transport, method, opt, input);
     }
     /**
+     * Who or what changed an object, newest first
+     *
+     * @generated from protobuf rpc: ListAuditEvents
+     */
+    listAuditEvents(input: AuditFilter, options?: RpcOptions): UnaryCall<AuditFilter, AuditEventList> {
+        const method = this.methods[98], opt = this._transport.mergeOptions(options);
+        return stackIntercept<AuditFilter, AuditEventList>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * Admin: delete audit events older than N days
+     *
+     * @generated from protobuf rpc: PruneAuditEvents
+     */
+    pruneAuditEvents(input: AuditPruneRequest, options?: RpcOptions): UnaryCall<AuditPruneRequest, AuditPruneResult> {
+        const method = this.methods[99], opt = this._transport.mergeOptions(options);
+        return stackIntercept<AuditPruneRequest, AuditPruneResult>("unary", this._transport, method, opt, input);
+    }
+    /**
      * @generated from protobuf rpc: GetTaskStatusCounts
      */
     getTaskStatusCounts(input: TaskStatusCountsRequest, options?: RpcOptions): UnaryCall<TaskStatusCountsRequest, TaskStatusCountsResponse> {
-        const method = this.methods[98], opt = this._transport.mergeOptions(options);
+        const method = this.methods[100], opt = this._transport.mergeOptions(options);
         return stackIntercept<TaskStatusCountsRequest, TaskStatusCountsResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: SignalTask
      */
     signalTask(input: TaskSignalRequest, options?: RpcOptions): UnaryCall<TaskSignalRequest, Ack> {
-        const method = this.methods[99], opt = this._transport.mergeOptions(options);
+        const method = this.methods[101], opt = this._transport.mergeOptions(options);
         return stackIntercept<TaskSignalRequest, Ack>("unary", this._transport, method, opt, input);
     }
     /**
@@ -1388,7 +1422,7 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
      * @generated from protobuf rpc: ServerVersion
      */
     serverVersion(input: Empty, options?: RpcOptions): UnaryCall<Empty, ServerVersionResponse> {
-        const method = this.methods[100], opt = this._transport.mergeOptions(options);
+        const method = this.methods[102], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, ServerVersionResponse>("unary", this._transport, method, opt, input);
     }
     /**
@@ -1400,7 +1434,7 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
      * @generated from protobuf rpc: RequestWorkerUpgrade
      */
     requestWorkerUpgrade(input: WorkerUpgradeRequest, options?: RpcOptions): UnaryCall<WorkerUpgradeRequest, WorkerUpgradeReply> {
-        const method = this.methods[101], opt = this._transport.mergeOptions(options);
+        const method = this.methods[103], opt = this._transport.mergeOptions(options);
         return stackIntercept<WorkerUpgradeRequest, WorkerUpgradeReply>("unary", this._transport, method, opt, input);
     }
     /**
@@ -1412,7 +1446,7 @@ export class TaskQueueClient implements ITaskQueueClient, ServiceInfo {
      * @generated from protobuf rpc: GetClientUpgradeInfo
      */
     getClientUpgradeInfo(input: Empty, options?: RpcOptions): UnaryCall<Empty, ClientUpgradeInfo> {
-        const method = this.methods[102], opt = this._transport.mergeOptions(options);
+        const method = this.methods[104], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, ClientUpgradeInfo>("unary", this._transport, method, opt, input);
     }
 }

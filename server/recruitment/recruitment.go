@@ -12,6 +12,7 @@ import (
 	"github.com/lib/pq"
 
 	pb "github.com/scitq/scitq/gen/taskqueuepb"
+	"github.com/scitq/scitq/server/audit"
 	"github.com/scitq/scitq/server/metrics"
 	"github.com/scitq/scitq/server/protofilter"
 	ws "github.com/scitq/scitq/server/websocket"
@@ -132,6 +133,11 @@ type Recruiter struct {
 	TargetTaskrate        int
 	PotentialTaskrate     int
 	WorkflowID            int32
+}
+
+// auditName identifies the recruiter as the actor of its decisions.
+func (r Recruiter) auditName() string {
+	return fmt.Sprintf("recruiter step %d rank %d", r.StepID, r.Rank)
 }
 
 func listActiveRecruiters(db *sql.DB, wfcMem map[int32]WorkflowCounter) ([]Recruiter, error) {
@@ -915,6 +921,7 @@ func recycleWorkers(
 	defer rows2.Close()
 
 	var affected, recycledTaskrate int
+	var recycledIDs []int32
 	for rows2.Next() {
 		affected++
 		var workerId int32
@@ -926,6 +933,7 @@ func recycleWorkers(
 		}
 		stepDisplayName := utils.NullStringToString(stepName)
 		workerDisplayName := utils.NullStringToString(workerName)
+		recycledIDs = append(recycledIDs, workerId)
 		recycledTaskrate += max(int(float64(newConcurrencyByWorkerID[workerId])*(1.0-recyclableMap[workerId].Occupation)), 0)
 
 		// Emit WS update, including the worker name when available
@@ -954,6 +962,19 @@ func recycleWorkers(
 	if err := tx.Commit(); err != nil {
 		log.Printf("⚠️ Commit failed: %v", err)
 		return 0, 0
+	}
+
+	actor := audit.Scheduler(recruiter.auditName())
+	for _, id := range recycledIDs {
+		details := map[string]any{
+			"step_id":     recruiter.StepID,
+			"concurrency": newConcurrencyByWorkerID[id],
+			"prefetch":    newPrefetchByWorkerID[id],
+		}
+		if prev := recyclableMap[id].StepID; prev != nil {
+			details["previous_step_id"] = *prev
+		}
+		audit.Record(db, actor, "worker.recycle", "worker", id, details)
 	}
 
 	recruiter.CurrentWorkers += affected
@@ -1177,6 +1198,7 @@ type RegionInfo struct {
 
 func deployWorkers(
 	ctx context.Context,
+	db audit.Execer,
 	qm *QuotaManager,
 	creator WorkerCreator,
 	recruiter Recruiter,
@@ -1240,7 +1262,7 @@ func deployWorkers(
 			RecyclableWorker{Cpu: &selected.Cpu, Memory: &selected.Memory, Disk: &selected.Disk, GpuCount: &selected.GpuCount})
 		newPrefetch := computePrefetchForRecruiterWorker(recruiter, newConcurrency)
 
-		_, err := creator.CreateWorker(ctx, &pb.WorkerRequest{
+		created, err := creator.CreateWorker(ctx, &pb.WorkerRequest{
 			FlavorId:         selected.FlavorID,
 			ProviderId:       regionInfo.ProviderID,
 			RegionId:         selected.RegionID,
@@ -1261,6 +1283,16 @@ func deployWorkers(
 		}
 
 		log.Printf("✅ Deployed worker: step=%d flavor=%d region=%d provider=%s", recruiter.StepID, selected.FlavorID, selected.RegionID, regionInfo.Provider)
+		for _, wd := range created.GetWorkersDetails() {
+			audit.Record(db, audit.Scheduler(recruiter.auditName()), "worker.deploy", "worker", wd.WorkerId, map[string]any{
+				"step_id":     recruiter.StepID,
+				"flavor":      selected.Name,
+				"region":      regionInfo.Name,
+				"provider":    regionInfo.Provider,
+				"concurrency": newConcurrency,
+				"prefetch":    newPrefetch,
+			})
+		}
 		metrics.RecruiterLaunches.WithLabelValues(regionInfo.Provider, regionInfo.Name, "success").Inc()
 		workflowCounterMemory.Counter++
 
@@ -1454,7 +1486,7 @@ func (sc *stepContext) recruitStep(ctx context.Context, recruiters []Recruiter) 
 		log.Printf("⏱️ Recruiter step=%d rank=%d attempting cloud deploy (need throughput=%d)",
 			recruiter.StepID, recruiter.Rank, need)
 		wfc := sc.wfcMem[recruiter.WorkflowID]
-		deployed, err := deployWorkers(ctx, sc.qm, sc.creator, recruiter, flavorRegionList, sc.regionInfoMap, need, &wfc)
+		deployed, err := deployWorkers(ctx, sc.db, sc.qm, sc.creator, recruiter, flavorRegionList, sc.regionInfoMap, need, &wfc)
 		sc.wfcMem[recruiter.WorkflowID] = wfc
 		if err != nil {
 			log.Printf("⚠️ Failed to deploy workers for step %d rank %d: %v", recruiter.StepID, recruiter.Rank, err)

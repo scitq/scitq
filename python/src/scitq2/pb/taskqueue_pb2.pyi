@@ -2116,6 +2116,62 @@ class WorkerEventId(_message.Message):
     event_id: int
     def __init__(self, event_id: _Optional[int] = ...) -> None: ...
 
+class AuditFilter(_message.Message):
+    __slots__ = ("object_kind", "object_id", "actor", "since_epoch", "limit")
+    OBJECT_KIND_FIELD_NUMBER: _ClassVar[int]
+    OBJECT_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_FIELD_NUMBER: _ClassVar[int]
+    SINCE_EPOCH_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    object_kind: str
+    object_id: int
+    actor: str
+    since_epoch: int
+    limit: int
+    def __init__(self, object_kind: _Optional[str] = ..., object_id: _Optional[int] = ..., actor: _Optional[str] = ..., since_epoch: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class AuditEvent(_message.Message):
+    __slots__ = ("audit_id", "created_at", "actor_kind", "actor_name", "channel", "client", "action", "object_kind", "object_id", "details_json")
+    AUDIT_ID_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_KIND_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_NAME_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_FIELD_NUMBER: _ClassVar[int]
+    CLIENT_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    OBJECT_KIND_FIELD_NUMBER: _ClassVar[int]
+    OBJECT_ID_FIELD_NUMBER: _ClassVar[int]
+    DETAILS_JSON_FIELD_NUMBER: _ClassVar[int]
+    audit_id: int
+    created_at: str
+    actor_kind: str
+    actor_name: str
+    channel: str
+    client: str
+    action: str
+    object_kind: str
+    object_id: int
+    details_json: str
+    def __init__(self, audit_id: _Optional[int] = ..., created_at: _Optional[str] = ..., actor_kind: _Optional[str] = ..., actor_name: _Optional[str] = ..., channel: _Optional[str] = ..., client: _Optional[str] = ..., action: _Optional[str] = ..., object_kind: _Optional[str] = ..., object_id: _Optional[int] = ..., details_json: _Optional[str] = ...) -> None: ...
+
+class AuditEventList(_message.Message):
+    __slots__ = ("events",)
+    EVENTS_FIELD_NUMBER: _ClassVar[int]
+    events: _containers.RepeatedCompositeFieldContainer[AuditEvent]
+    def __init__(self, events: _Optional[_Iterable[_Union[AuditEvent, _Mapping]]] = ...) -> None: ...
+
+class AuditPruneRequest(_message.Message):
+    __slots__ = ("older_than_days",)
+    OLDER_THAN_DAYS_FIELD_NUMBER: _ClassVar[int]
+    older_than_days: int
+    def __init__(self, older_than_days: _Optional[int] = ...) -> None: ...
+
+class AuditPruneResult(_message.Message):
+    __slots__ = ("deleted",)
+    DELETED_FIELD_NUMBER: _ClassVar[int]
+    deleted: int
+    def __init__(self, deleted: _Optional[int] = ...) -> None: ...
+
 class WorkerEventPruneFilter(_message.Message):
     __slots__ = ("before", "level", "worker_id", "dry_run")
     BEFORE_FIELD_NUMBER: _ClassVar[int]

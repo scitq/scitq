@@ -132,7 +132,7 @@ func (s *taskQueueServer) cleanupStuckDeletes() error {
 				continue
 			}
 			log.Printf("🧹 stuck-delete janitor: worker %d (%s) confirmed absent at provider; soft-deleting", c.workerID, c.workerName)
-			_, derr := s.DeleteWorker(context.Background(), &pb.WorkerDeletion{
+			_, derr := s.DeleteWorker(withSchedulerActor(context.Background(), "stuck-delete janitor"), &pb.WorkerDeletion{
 				WorkerId:   c.workerID,
 				Undeployed: proto.Bool(true),
 			})
