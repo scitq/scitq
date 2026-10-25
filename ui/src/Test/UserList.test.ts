@@ -1,10 +1,8 @@
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import UserList from '../components/UserList.svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { wsClient } from '../lib/wsClient';
 
 describe('UserList', () => {
   const mockUsers = [
@@ -15,7 +13,7 @@ describe('UserList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Mock getListUser to return our test users
-    mockApi.getListUser = vi.fn().mockResolvedValue(mockUsers);
+    mockApi.getListUser.mockResolvedValue(mockUsers);
   });
 
   it('should call delUser with correct userId when delete button is clicked', async () => {
@@ -26,9 +24,12 @@ describe('UserList', () => {
       expect(deleteButtons.length).toBe(2);
     });
 
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const deleteButtons = getAllByTestId(/delete-btn-user-/);
     await fireEvent.click(deleteButtons[0]);
 
+    expect(confirmSpy).toHaveBeenCalledWith('Are you sure you want to delete user "user1"? This cannot be undone.');
+    confirmSpy.mockRestore();
     expect(mockApi.delUser).toHaveBeenCalledTimes(1);
     expect(mockApi.delUser).toHaveBeenCalledWith(1); // First user's ID
   });

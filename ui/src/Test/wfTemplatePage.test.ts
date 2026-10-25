@@ -1,12 +1,11 @@
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
 import { render, fireEvent, screen, waitFor } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import WorkflowTemplatePage from '../pages/WfTemplatePage.svelte';
-import { wsClient } from '../lib/wsClient';
+import { wsConnect, wsReset, type FakeWebSocket } from './wsHarness';
 
-let messageHandler: (msg: any) => void;
+let ws: FakeWebSocket;
 
 const mockTemplates = [
   {
@@ -32,11 +31,9 @@ describe('WorkflowTemplatePage', () => {
     mockApi.UploadTemplates.mockResolvedValue({ success: true });
     mockApi.runTemp.mockResolvedValue({});
 
-    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
-        messageHandler = handler; // Store the handler for later use
-        return () => true; // Unsubscribe function
-    });
+    ws = wsConnect();
   });
+  afterEach(() => wsReset());
 
   it('loads and displays templates on mount', async () => {
     render(WorkflowTemplatePage);
@@ -82,13 +79,12 @@ describe('WorkflowTemplatePage', () => {
 
     // Verify API call
     await waitFor(() => {
-        expect(mockApi.UploadTemplates).toHaveBeenCalledWith(expect.any(Uint8Array), false);
+        expect(mockApi.UploadTemplates).toHaveBeenCalledWith(expect.any(Uint8Array), false, undefined); // no folder typed
     });
 
-    // Simulate WebSocket response as sent by server
-    if (messageHandler) {
-        messageHandler({
-            type: 'template-uploaded',
+    // WebSocket event as sent by the server
+    ws.deliver({
+            type: 'template', action: 'uploaded', id: 123,
             payload: {
                 workflowTemplateId: 123,
                 name: 'test-template',
@@ -97,8 +93,7 @@ describe('WorkflowTemplatePage', () => {
                 paramJson: '[]',
                 uploadedAt: new Date().toISOString()
             }
-        });
-    }
+    });
 
     // Verify new template appears in the list
     expect(await findByText('test-template')).toBeInTheDocument();

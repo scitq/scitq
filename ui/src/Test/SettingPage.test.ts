@@ -1,23 +1,12 @@
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
-import { wsClient } from '../lib/wsClient';
-
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import SettingPage from '../pages/SettingPage.svelte';
 import * as auth from '../lib/auth';
+import { wsConnect, wsReset, type FakeWebSocket } from './wsHarness';
 
-let messageHandler: (msg: any) => void;
-
-
-vi.mock('../lib/auth', async () => {
-  const actual = await vi.importActual<typeof import('../lib/auth')>('../lib/auth');
-  return {
-    ...actual,
-    getToken: vi.fn(),
-  };
-});
+let ws: FakeWebSocket;
 
 
 describe('SettingPage', () => {
@@ -34,11 +23,9 @@ describe('SettingPage', () => {
     mockApi.getUser.mockResolvedValue(mockUser);
     mockApi.getListUser.mockResolvedValue(mockUsers);
 
-    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
-      messageHandler = handler; // Store the handler for later use
-      return () => true; // Unsubscribe function
-    });
+    ws = wsConnect();
   });
+  afterEach(() => wsReset());
 
   it('displays current user information after fetching', async () => {
     const { getByText, getByDisplayValue } = render(SettingPage);
@@ -149,18 +136,13 @@ it('should add a user and update the list', async () => {
     // Submit the form
     await fireEvent.click(getByTestId('create-user-button'));
 
-    // Simulate WebSocket message
-    if (messageHandler) {
-        messageHandler({
-            type: 'user-created',
-            payload: {
-                userId: 4,
-                username: 'newuser',
-                email: 'new@test.com',
-                isAdmin: true
-            }
-        });
-    }
+    expect(mockApi.newUser).toHaveBeenCalledWith('newuser', 'password123', 'new@test.com', true);
+
+    // Server event announcing the new user
+    ws.deliver({
+        type: 'user', action: 'created', id: 4,
+        payload: { userId: 4, username: 'newuser', email: 'new@test.com', isAdmin: true },
+    });
 
     expect(await findByText('newuser')).toBeInTheDocument();
 });
@@ -172,15 +154,14 @@ it('should delete a user and update the list', async () => {
         expect(getByTestId('delete-btn-user-3')).toBeInTheDocument();
     });
 
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await fireEvent.click(getByTestId('delete-btn-user-3'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+    expect(mockApi.delUser).toHaveBeenCalledWith(3);
 
-    // Simulate WebSocket message
-    if (messageHandler) {
-        messageHandler({
-            type: 'user-deleted',
-            userId: 3
-        });
-    }
+    // Server event confirming the deletion
+    ws.deliver({ type: 'user', action: 'deleted', id: 3, payload: { userId: 3 } });
 
     // Wait for success message
     expect(await findByText('User Deleted')).toBeInTheDocument();
@@ -206,18 +187,13 @@ it('should update a user and show success message', async () => {
     await fireEvent.click(getByTestId('isAdmin-edit'));
     await fireEvent.click(getByText('Confirm'));
 
-    // Simulate WebSocket message
-    if (messageHandler) {
-        messageHandler({
-            type: 'user-updated',
-            payload: {
-                userId: 2,
-                username: 'updatedUser',
-                email: 'updated@test.com',
-                isAdmin: true
-            }
-        });
-    }
+    expect(mockApi.updateUser).toHaveBeenCalledWith(2, { username: 'updatedUser', email: 'updated@test.com', isAdmin: true });
+
+    // Server event carrying the updated fields
+    ws.deliver({
+        type: 'user', action: 'updated', id: 2,
+        payload: { userId: 2, username: 'updatedUser', email: 'updated@test.com', isAdmin: true },
+    });
 
     // Wait for success message
     expect(await findByText('User Updated')).toBeInTheDocument();

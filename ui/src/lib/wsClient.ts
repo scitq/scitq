@@ -1,13 +1,19 @@
-import { writable } from 'svelte/store';
 import { CONFIG } from './config';
 import { scitqDebug } from './debug';
 
-type WSMessage = any; // adapte selon tes types
+type WSMessage = any;
 type MessageHandler = (data: WSMessage) => void;
 
-function createWebSocketStore() {
-  const { subscribe, set } = writable<WebSocket | null>(null);
+// Messages are delivered to handlers in batches: a batch closes once the
+// socket has been quiet for BATCH_QUIET_MS, or BATCH_MAX_MS after its first
+// message. All handlers run over the whole batch in one task, so the UI
+// renders once per batch. A task passes through several states within a
+// few milliseconds (C→R takes ~10 ms, U→S ~15 ms): delivered one by one,
+// each state would be drawn for a frame and the value would blink.
+export const BATCH_QUIET_MS = 50;
+export const BATCH_MAX_MS = 300;
 
+function createWebSocketClient() {
   let socket: WebSocket | null = null;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   let pingInterval: ReturnType<typeof setInterval> | null = null;
@@ -19,145 +25,81 @@ function createWebSocketStore() {
   // fresh connect that skips replay. See server/websocket/websocket.go.
   let lastEventId = 0;
 
-  const handlers = new Set<MessageHandler>();
+  // Topics each handler needs: event -> ids, null meaning all ids.
+  const topicsByHandler = new Map<MessageHandler, Map<string, Set<number> | null>>();
 
-  // Per-event subscription cache:
-  // Map event -> null (means "all ids") OR Set<number> of ids
-  const subs = new Map<string, Set<number> | null>();
+  let batch: WSMessage[] = [];
+  let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  let maxTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Per-handler contributions to topics (for union-based subscription management)
-  // Map handler -> (event -> Set<ids>)
-  const contrib = new Map<MessageHandler, Map<string, Set<number>>>();
+  /** The ids the server must send for event, over all handlers: null for all ids, undefined for none. */
+  function wanted(event: string): Set<number> | null | undefined {
+    let union: Set<number> | undefined;
+    for (const topics of topicsByHandler.values()) {
+      if (!topics.has(event)) continue;
+      const ids = topics.get(event)!;
+      if (ids === null) return null;
+      union = new Set([...(union ?? []), ...ids]);
+    }
+    return union;
+  }
 
-  function recomputeEvent(event: string) {
-    // Build union of all contributed ids for this event
-    let union: Set<number> | null = new Set<number>();
-    for (const [, eventsMap] of contrib) {
-      const s = eventsMap.get(event);
-      if (s) {
-        for (const id of s) union.add(id);
-      }
-    }
-    // If no contributors, drop subscription entirely
-    if (union.size === 0) {
-      subs.delete(event);
-      if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'unsubscribe', event, ids: [] }));
-      }
-      return;
-    }
-    // Update cache and push subscribe with new union
-    subs.set(event, union);
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'subscribe', event, ids: Array.from(union) }));
-    }
+  function send(msg: object) {
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
+  }
+
+  function syncEvent(event: string) {
+    const ids = wanted(event);
+    if (ids === undefined) send({ type: 'unsubscribe', event, ids: [] });
+    else send({ type: 'subscribe', event, ids: ids === null ? [] : Array.from(ids) });
   }
 
   /**
-   * Subscribe a handler and declare the topics (event -> ids) it needs.
-   * - topics: e.g., { 'step-stats': [55], 'worker': [] } (empty array means "all ids" for that event)
-   * - Returns a disposer that removes the handler and updates server subscriptions accordingly.
+   * Subscribe a handler to the topics it needs (event -> ids; an empty
+   * array means all ids of that event). Returns a disposer.
    */
-  function subscribeWithTopics(
-    topics: Record<string, number[]>,
-    handler: MessageHandler
-  ): () => void {
-    // 1) register handler
-    handlers.add(handler);
+  function subscribeWithTopics(topics: Record<string, number[]>, handler: MessageHandler): () => void {
+    const own = new Map<string, Set<number> | null>();
+    for (const [event, ids] of Object.entries(topics)) {
+      own.set(event, ids.length === 0 ? null : new Set(ids));
+    }
+    topicsByHandler.set(handler, own);
+    for (const event of own.keys()) syncEvent(event);
 
-    // 2) record contributions
-    const eventsMap = new Map<string, Set<number>>();
-    for (const [event, ids] of Object.entries(topics || {})) {
-      if (!event) continue;
-      if (!Array.isArray(ids)) continue;
+    return () => {
+      topicsByHandler.delete(handler);
+      for (const event of own.keys()) syncEvent(event);
+    };
+  }
 
-      // Empty array => "all ids" for this event.
-      // For union semantics, treat "all ids" as a special case: we store a null in subs and short-circuit.
-      if (ids.length === 0) {
-        // Mark subs as "all ids" for that event
-        subs.set(event, null);
-        // Tell server we want all ids for this event
-        if (socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'subscribe', event, ids: [] }));
-        }
-        // Do not record concrete id contributions for this handler (null dominates the union)
-        continue;
-      }
-
-      const set = new Set<number>(ids);
-      eventsMap.set(event, set);
-
-      // Merge into existing union in subs
-      const current = subs.get(event);
-      if (current === null) {
-        // already subscribed to all ids; nothing to do
-      } else {
-        const union = current ?? new Set<number>();
-        for (const id of set) union.add(id);
-        subs.set(event, union);
-        if (socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'subscribe', event, ids: Array.from(union) }));
+  function flush() {
+    if (quietTimer) clearTimeout(quietTimer);
+    if (maxTimer) clearTimeout(maxTimer);
+    quietTimer = maxTimer = null;
+    const messages = batch;
+    batch = [];
+    const handlers = Array.from(topicsByHandler.keys());
+    for (const msg of messages) {
+      for (const handler of handlers) {
+        try {
+          handler(msg);
+        } catch (err) {
+          console.error('❌ WebSocket handler failed', err);
         }
       }
     }
-    contrib.set(handler, eventsMap);
+  }
 
-    // 3) return disposer
-    return () => {
-      // Remove handler from handler set
-      handlers.delete(handler);
-
-      // Remove this handler's contributions and recompute per event
-      const map = contrib.get(handler);
-      contrib.delete(handler);
-
-      if (map) {
-        for (const [event, idsSet] of map) {
-          // If someone previously asked for "all ids" (subs.get(event) === null),
-          // we keep "all ids" until that component unmounts. If this handler wasn't the one
-          // that requested "all ids", we just recompute the union of concrete ids.
-          if (subs.get(event) === null) {
-            // Check if ANY remaining contributor had empty ids (i.e., wants all)
-            let stillAll = false;
-            for (const [, otherMap] of contrib) {
-              const otherSet = otherMap.get(event);
-              // otherSet being undefined means that handler didn't contribute;
-              // "all ids" contributors don't appear in contrib map (treated specially),
-              // so we cannot detect them here. We keep "all ids" unless we see there's no subscriber left.
-            }
-            // If there are no contributors left for this event (no handler has it in their map),
-            // drop to recomputeEvent (which will unsubscribe).
-            let hasAnyContributor = false;
-            for (const [, otherMap] of contrib) {
-              if (otherMap.has(event)) { hasAnyContributor = true; break; }
-            }
-            if (!hasAnyContributor) {
-              // No contributors left; unsubscribe
-              subs.delete(event);
-              if (socket?.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: 'unsubscribe', event, ids: [] }));
-              }
-            }
-            // If stillAll is true, do nothing (keep global subscription).
-            // Otherwise, if some contributors remain with concrete ids, recompute union:
-            if (!hasAnyContributor) {
-              // already unsubscribed above
-            } else {
-              // recompute union from remaining contributors
-              recomputeEvent(event);
-            }
-            continue;
-          }
-
-          // Normal case: recompute union by removing this handler's ids
-          recomputeEvent(event);
-        }
-      }
-    };
+  function enqueue(msg: WSMessage) {
+    batch.push(msg);
+    if (quietTimer) clearTimeout(quietTimer);
+    quietTimer = setTimeout(flush, BATCH_QUIET_MS);
+    if (!maxTimer) maxTimer = setTimeout(flush, BATCH_MAX_MS);
   }
 
   function connect() {
     if (socket && socket.readyState === WebSocket.OPEN) return;
+    shouldReconnect = true;
 
     // Ask the server for a replay of anything emitted since our last
     // observed event_id. On a truly fresh boot lastEventId is 0 and the
@@ -171,72 +113,51 @@ function createWebSocketStore() {
     socket.onopen = () => {
       console.log('✅ WebSocket connected');
       scitqDebug.recordWsOpen();
-      set(socket);
-
       if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;
       }
+      pingInterval = setInterval(() => send({ type: 'ping' }), 30000);
 
-      pingInterval = setInterval(() => {
-        if (socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'ping' }));
-        }
-      }, 30000); // 30s ping
-
-      // Re-subscribe to previous topics on reconnect
-      for (const [event, idset] of subs.entries()) {
-        const ids = idset === null ? [] : Array.from(idset);
-        socket!.send(JSON.stringify({ type: 'subscribe', event, ids }));
-      }
+      // Re-subscribe to every topic still wanted.
+      const events = new Set<string>();
+      for (const topics of topicsByHandler.values()) for (const e of topics.keys()) events.add(e);
+      for (const event of events) syncEvent(event);
     };
 
     socket.onmessage = (event) => {
+      let data: WSMessage;
       try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'pong') return;
-
-        // Track the highest event_id seen so a reconnect can ?since=
-        // it. event_id === 0 is either the "reset" system marker
-        // (which we handle below without advancing) or an
-        // older-than-envelope message we shouldn't count.
-        if (typeof data.event_id === 'number' && data.event_id > lastEventId) {
-          lastEventId = data.event_id;
-        }
-
-        // Reset marker: the server couldn't replay far enough and is
-        // telling us we may have missed events. Consumers should
-        // re-fetch state from REST; we pass it through as an ordinary
-        // message so each subscriber decides. Do NOT reset
-        // lastEventId — future live messages resume the sequence
-        // from wherever the server is now.
-        if (data.type === 'system' && data.action === 'reset') {
-          console.warn('⚠️ WebSocket reset: missed messages, consumers should re-fetch');
-        }
-
-        // Count every WS message before dispatch — gives us per-second
-        // rates by (type, action), the ring buffer of recent events, and
-        // a periodic console summary. Crucial for diagnosing "the page
-        // suddenly froze" cases where you want to know what was firing
-        // at high rate in the seconds before the freeze.
-        scitqDebug.recordWs(data);
-
-        handlers.forEach((handler) => handler(data));
+        data = JSON.parse(event.data);
       } catch (err) {
         console.error('❌ Error parsing WebSocket message', err);
+        return;
       }
+      if (data.type === 'pong') return;
+
+      // Track the highest event_id seen so a reconnect can ?since=
+      // it. event_id === 0 is either the "reset" system marker
+      // (passed through below without advancing) or an
+      // older-than-envelope message we shouldn't count.
+      if (typeof data.event_id === 'number' && data.event_id > lastEventId) {
+        lastEventId = data.event_id;
+      }
+      if (data.type === 'system' && data.action === 'reset') {
+        console.warn('⚠️ WebSocket reset: missed messages, consumers should re-fetch');
+      }
+      // Count every WS message before dispatch — per-second rates by
+      // (type, action), the ring buffer of recent events, and a periodic
+      // console summary for diagnosing "the page suddenly froze" cases.
+      scitqDebug.recordWs(data);
+      enqueue(data);
     };
 
     socket.onclose = (event) => {
       console.warn(`⚠️ WebSocket closed (code: ${event.code})`);
       scitqDebug.recordWsClose(event.code);
       cleanup();
-      set(null);
-
       if (shouldReconnect) {
-        reconnectTimeout = setTimeout(() => {
-          connect();
-        }, 3000);
+        reconnectTimeout = setTimeout(connect, 3000);
       }
     };
 
@@ -247,17 +168,13 @@ function createWebSocketStore() {
   }
 
   function disconnect() {
-    console.log('🔌 WebSocket disconnect requested');
     shouldReconnect = false;
     cleanup();
-
     if (socket) {
       socket.close(1000, 'Client closed connection');
       socket = null;
-      set(null);
     }
-
-    handlers.clear();
+    topicsByHandler.clear();
   }
 
   function cleanup() {
@@ -265,51 +182,13 @@ function createWebSocketStore() {
       clearInterval(pingInterval);
       pingInterval = null;
     }
-
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
     }
   }
 
-  function subscribeToMessages(handler: MessageHandler) {
-    handlers.add(handler);
-    return () => handlers.delete(handler); 
-  }
-
-  function wsSubscribe(event: string, ids: number[] = []) {
-    if (!event) return;
-    // Update local cache first
-    if (ids.length === 0) {
-      subs.set(event, null); // null => all ids for this event
-    } else {
-      subs.set(event, new Set(ids));
-    }
-    // Send to server if socket is open
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'subscribe', event, ids }));
-    }
-  }
-
-  function wsUnsubscribe(event: string) {
-    if (!event) return;
-    // Remove from cache
-    subs.delete(event);
-    // Notify server (ids: [] means full event unsubscribe in our protocol)
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'unsubscribe', event, ids: [] }));
-    }
-  }
-
-  return {
-    subscribe,
-    connect,
-    disconnect,
-    subscribeToMessages,
-    wsSubscribe,
-    wsUnsubscribe,
-    subscribeWithTopics,
-  };
+  return { connect, disconnect, subscribeWithTopics };
 }
 
-export const wsClient = createWebSocketStore();
+export const wsClient = createWebSocketClient();

@@ -304,6 +304,11 @@ ui-deps:
 ui-build: ui-deps build-ui-version-file
 	@cd $(UI_DIR) && npm run build
 
+# UI component tests (vitest, jsdom); needs `make ui-deps` once. --root
+# keeps vitest from collecting test files outside ui/.
+ui-test:
+	@cd $(UI_DIR) && npx vitest run --root .
+
 ui-embed: ui-build
 	@rm -rf $(SERVER_PUBLIC)/*
 	@mkdir -p $(SERVER_PUBLIC)

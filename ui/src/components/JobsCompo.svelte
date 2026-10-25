@@ -1,296 +1,74 @@
 <script lang="ts">
-  import { run } from 'svelte/legacy';
-
-  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { Trash, RefreshCw } from 'lucide-svelte';
-  import { getJobs, getJobStatusClass, getJobStatusText, delJob, getJobStatus, retryJob } from '../lib/api';
+  import { getJobStatusClass, getJobStatusText, delJob, retryJob } from '../lib/api';
   import type { Job } from '../proto/taskqueue_pb';
   import "../styles/worker.css";
   import "../styles/jobsCompo.css";
   import { JobId } from '../../gen/taskqueue';
-  import { wsClient } from '../lib/wsClient';
-  import type { WSMessage } from '../lib/wsTypes';
 
-  
+  // Renders the dashboard's job list. The list is the parent's, bound so
+  // that row actions update it; live updates are applied by the parent
+  // (Dashboard.svelte), the list's only writer besides these actions.
   interface Props {
-    /**
-   * List of all jobs passed as a prop to the component
-   * @type {Job[]}
-   */
     jobs?: Job[];
   }
 
   let { jobs = $bindable([]) }: Props = $props();
 
-  /**
-   * Jobs enriched with status and progression for display
-   * @type {Array<Job & { status?: string, progression?: number }>}
-   */
-  let displayJobs: (Job & { status?: string, progression?: number })[] = $state([]);
-
-
-  /**
-   * Flag to track initial data load status
-   * @type {boolean}
-   */
-  let hasLoaded = $state(false);
-
-  /**
-   * Map storing job statuses and progressions by job ID
-   * @type {Map<number, { status: string, progression?: number }>}
-   */
-  let jobStatusMap = $state(new Map<number, { status: string, progression?: number }>());
-
-  let deleting = new Set<number>();
+  let deleting = $state(new Set<number>());
 
   const MAX_DELETE_CONCURRENCY = 3;
   let deleteQueue: number[] = [];
-  let pendingDelete = new Set<number>(); // prevents duplicate enqueues
-  let processingDeletes = false;
   let inFlightDeletes = 0;
 
-  const dispatch = createEventDispatcher();
-  let sentinel: HTMLDivElement | null = $state(null);
-  let observer: IntersectionObserver | null = null;
-  let lastLoadRequest = 0;
-
-  // --- WS unsubscribe reference for cleanup ---
-  let unsubscribeWS: (() => void) | null = null;
-
-  function maybeRequestMoreJobs() {
-    const now = Date.now();
-    if (now - lastLoadRequest < 500) return; // debounce
-    lastLoadRequest = now;
-    dispatch('load-more-jobs');
-  }
-
-  function enqueueDelete(jobId: number) {
-    if (pendingDelete.has(jobId)) return; // already queued or in-flight
-    pendingDelete.add(jobId);
+  function deleteJob(jobId: number): void {
+    if (deleting.has(jobId)) return;
+    deleting = new Set(deleting).add(jobId);
     deleteQueue.push(jobId);
     processDeleteQueue();
   }
 
-  async function processDeleteQueue() {
-    if (processingDeletes) return;
-    processingDeletes = true;
-    try {
-      while (deleteQueue.length > 0 || inFlightDeletes > 0) {
-        while (inFlightDeletes < MAX_DELETE_CONCURRENCY && deleteQueue.length > 0) {
-          const nextId = deleteQueue.shift();
-          if (nextId === undefined) break;
-          inFlightDeletes++;
-          // mark row as deleting (disable button + optional style)
-          deleting.add(nextId);
-          (async () => {
-            try {
-              const req: JobId = { jobId: nextId };
-              await delJob(req);
-              // Only remove from UI after a confirmed success
-              jobs = jobs.filter(j => j.jobId !== nextId);
-              jobStatusMap.delete(nextId);
-            } catch (err) {
-              console.error('Failed to delete job', nextId, err);
-              // optional: non-blocking user feedback (keep row visible)
-              // alert(`Failed to delete job ${nextId}`);
-            } finally {
-              deleting.delete(nextId);
-              pendingDelete.delete(nextId);
-              inFlightDeletes--;
-            }
-          })();
-        }
-        // Small tick to yield back to event loop while in-flight operations settle
-        await new Promise(r => setTimeout(r, 50));
-      }
-      // After batch deletions, the list may have shrunk enough to expose the sentinel; proactively request more jobs.
-      // The IntersectionObserver will also fire if visibility changed, but this is a safe extra nudge.
-      maybeRequestMoreJobs();
-    } finally {
-      processingDeletes = false;
+  function processDeleteQueue() {
+    while (inFlightDeletes < MAX_DELETE_CONCURRENCY && deleteQueue.length > 0) {
+      const jobId = deleteQueue.shift()!;
+      inFlightDeletes++;
+      delJob({ jobId } as JobId)
+        .then(() => { jobs = jobs.filter(j => j.jobId !== jobId); })
+        .catch((err) => console.error('Failed to delete job', jobId, err))
+        .finally(() => {
+          inFlightDeletes--;
+          const next = new Set(deleting);
+          next.delete(jobId);
+          deleting = next;
+          processDeleteQueue();
+        });
     }
   }
 
-  function deleteJob(jobId: number): void {
-    enqueueDelete(jobId);
-  }
-
-  // Removed sorting reactive statement to honor server-side job_id DESC ordering
-
-  // Live updates are driven by WS `job` events (created/updated/deleted).
-  // We still perform one initial `updateJobData()` to hydrate statuses for preloaded jobs.
-  onMount(() => {
-    updateJobData(); // one-time seed
-
-    // Setup intersection observer to request more jobs when the list end is visible
-    observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          maybeRequestMoreJobs();
-        }
-      }
-    }, { root: null, rootMargin: '0px', threshold: 0.01 });
-
-    if (sentinel) observer.observe(sentinel);
-
-    function handleMessage(message: WSMessage) {
-      const { type, action, id, payload } = message;
-      console.log('[WS][job]', { type, action, id, payload });
-      if (type !== 'job') return;
-
-      switch (action) {
-        case 'created': {
-          // A new job was created; ask parent to fetch the newest page so it appears immediately
-          maybeRequestMoreJobs();
-
-          // Seed status map so the new job (once loaded) gets a sensible status immediately
-          if (typeof id === 'number' && (payload as any) && typeof (payload as any).status === 'string') {
-            const status = (payload as any).status as string;
-            jobStatusMap.set(id, { status, progression: 0 });
-            jobStatusMap = new Map(jobStatusMap);
-            console.log('[WS][job][created] seed status/prog', id, jobStatusMap.get(id));
-          }
-
-          // If the new job isn't in the current list yet, prepend a minimal placeholder on top
-          if (typeof id === 'number') {
-            const p: any = payload;
-            if (!jobs.some(j => j.jobId === id)) {
-              const placeholder = {
-                jobId: id,
-                workerId: typeof p.workerId === 'number' ? p.workerId : 0,
-                action: typeof p.action === 'string' ? p.action : '',
-                status: typeof p.status === 'string' ? p.status : 'P',
-                modifiedAt: p.modifiedAt || new Date().toISOString(),
-              } as Job;
-              jobs = [placeholder, ...jobs];
-            }
-          }
-          break;
-        }
-        case 'updated': {
-          const jid = id;
-          const p: any = payload;
-          const prev = jobStatusMap.get(jid) || { status: 'unknown', progression: undefined };
-          const nextStatus = typeof p.status === 'string' ? p.status : prev.status;
-          const nextProg = typeof p.progression === 'number' ? p.progression : prev.progression;
-          console.log('[WS][job][updated] before', jid, prev, '->', { status: nextStatus, progression: nextProg });
-          jobStatusMap.set(jid, { status: nextStatus, progression: nextProg });
-          jobStatusMap = new Map(jobStatusMap);
-          console.log('[WS][job][updated] after', jid, jobStatusMap.get(jid));
-
-          // Update the job's modifiedAt so display is accurate
-          if (p && p.modifiedAt) {
-            const idx = jobs.findIndex(j => j.jobId === jid);
-            if (idx !== -1) {
-              const clone = [...jobs];
-              clone[idx] = { ...clone[idx], modifiedAt: p.modifiedAt } as Job;
-              jobs = clone;
-            }
-          }
-          break;
-        }
-        case 'deleted': {
-          const jid = id;
-          // Remove from local lists so it disappears without reload
-          jobs = jobs.filter(j => j.jobId !== jid);
-          jobStatusMap.delete(jid);
-          jobStatusMap = new Map(jobStatusMap);
-          // Optionally request more to replenish the page if it got short
-          maybeRequestMoreJobs();
-          break;
-        }
-        default:
-          break;
-      }
-    }
-    unsubscribeWS = wsClient.subscribeWithTopics({ job: [] }, handleMessage);
-
-    return () => {
-      if (observer && sentinel) observer.unobserve(sentinel);
-      observer = null;
-      if (unsubscribeWS) unsubscribeWS();
-      unsubscribeWS = null;
-    };
-  });
-
-
-
-  /**
-   * Fetches latest job statuses and progressions
-   * Updates the internal job status map
-   * @async
-   * @returns {Promise<void>}
-   */
-  async function updateJobData(): Promise<void> {
-    if (jobs.length === 0) return; 
-
-    try {
-      const jobsStatus = await getJobStatus(jobs.map(j => j.jobId));
-      jobStatusMap = new Map(jobsStatus.map(s => [s.jobId, { 
-        status: s.jobStatus, 
-        progression: s.progression 
-      }]));
-      console.log('[POLL][job] seeded statuses', jobsStatus);
-    } catch (err) {
-      console.error('Error loading job data:', err);
-    }
+  function setStatus(jobId: number, status: string) {
+    jobs = jobs.map(j => j.jobId === jobId ? { ...j, status } : j);
   }
 
   /**
-   * Retry a terminal job (F/X). Optimistically flips the row to P and
-   * clears the error badge; the server's WS `job.updated` event will
-   * reconcile once the RPC lands. On error we surface it via alert so
-   * the operator hears about "worker already cleaned up — deploy fresh"
-   * cases instead of the click being a silent no-op again.
-   * @param {number} jobId - The ID of the job to restart
+   * Retry a terminal job (F/X). Optimistically flips the row to P; the
+   * server's job.updated event confirms it. On error the row goes back and
+   * the operator hears about it (e.g. "worker already cleaned up — deploy
+   * fresh") instead of the click being a silent no-op.
    */
   async function handleRestart(jobId: number): Promise<void> {
-    const prev = jobStatusMap.get(jobId);
-    jobStatusMap.set(jobId, { status: 'P', progression: prev?.progression });
-    jobStatusMap = new Map(jobStatusMap);
+    const prev = jobs.find(j => j.jobId === jobId)?.status;
+    setStatus(jobId, 'P');
     try {
       await retryJob(jobId);
     } catch (err) {
-      // Roll back the optimistic status flip so the row goes back to F
-      // and the operator sees the button re-enable (F is the only
-      // status that renders the retry button).
-      if (prev) {
-        jobStatusMap.set(jobId, prev);
-      } else {
-        jobStatusMap.delete(jobId);
-      }
-      jobStatusMap = new Map(jobStatusMap);
+      if (prev !== undefined) setStatus(jobId, prev);
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Retry failed: ${msg}`);
     }
   }
-  /**
-   * Reactive statement that updates job data when jobs are initialized
-   * One-shot status hydration after first jobs arrive
-   */
-  run(() => {
-    if (jobs.length > 0 && !hasLoaded) {
-      // One-shot status hydration after first jobs arrive
-      updateJobData();
-      hasLoaded = true;
-    }
-  });
-  /**
-   * Reactive statement that creates display jobs with enriched status data
-   */
-  run(() => {
-    displayJobs = jobs.map(job => {
-      const statusInfo = jobStatusMap.get(job.jobId) || {};
-      return {
-        ...job,
-        status: statusInfo.status || job.status || 'unknown',
-        progression: statusInfo.progression ?? job.progression
-      } as Job & { status?: string; progression?: number };
-    });
-  });
 </script>
 
-{#if displayJobs && displayJobs.length > 0}
+{#if jobs && jobs.length > 0}
   <div class="jobCompo-table-wrapper">
     <table class="listTable">
       <thead>
@@ -304,7 +82,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each displayJobs as job (job.jobId)}
+        {#each jobs as job (job.jobId)}
           <tr data-testid={`job-row-${job.jobId}`}>
             <td>
               {#if job.action === 'C'}
@@ -325,7 +103,7 @@
                 {job.action}
               {/if}
             </td>
-            <td title={job.flavorInfo || ''}>{job.workerName || job.workerId}</td>
+            <td title={job.flavorInfo || ''} data-testid={`job-target-${job.jobId}`}>{job.workerName || job.workerId}</td>
             <td>
               <div
                 class="jobCompo-status-pill {getJobStatusClass(job.status)}"
@@ -360,7 +138,7 @@
                 title="Delete"
                 onclick={() => deleteJob(job.jobId)}
                 data-testid={`trash-button-${job.jobId}`}
-                disabled={deleting.has(job.jobId) || pendingDelete.has(job.jobId)}
+                disabled={deleting.has(job.jobId)}
               >
                 <Trash />
               </button>
@@ -369,7 +147,6 @@
         {/each}
       </tbody>
     </table>
-    <div bind:this={sentinel} style="height: 1px; width: 100%;"></div>
   </div>
 {:else}
   <p class="workerCompo-empty-state">No jobs currently running.</p>

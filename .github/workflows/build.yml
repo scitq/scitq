@@ -32,8 +32,8 @@ jobs:
       # Node is only needed on the build job: `go build ./...` triggers
       # //go:embed all:public in server/http.go, and server/public is
       # .gitignored — it lives on disk after `make ui-embed` (vite build)
-      # regenerates it from ui/. Test jobs don't hit the UI so they skip
-      # this and stay fast on Go-only runners.
+      # regenerates it from ui/. The UI component tests run here too, so
+      # the Go test jobs stay on Go-only runners.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -42,6 +42,9 @@ jobs:
 
       - name: Build Go project
         run: make ui-embed copy-docs && go build ./...
+
+      - name: UI component tests
+        run: make ui-test
 
   # Unit tests outside tests/integration: Go packages and the Python DSL suite.
   unit:

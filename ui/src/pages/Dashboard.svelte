@@ -115,7 +115,7 @@ import { getJobs, delWorker, delJob } from '../lib/api';
    */
   onMount(async () => {
     jobs = await getJobs(JOBS_CHUNK_SIZE, 0);
-    unsubscribeWS = wsClient.subscribeWithTopics({ worker: [], job: [] }, handleMessage);
+    unsubscribeWS = wsClient.subscribeWithTopics({ job: [] }, handleMessage);
   });
 
   /**
@@ -126,25 +126,44 @@ import { getJobs, delWorker, delJob } from '../lib/api';
     if (unsubscribeWS) { unsubscribeWS(); unsubscribeWS = null; }
   });
 
+  // Fields a job.updated event may carry; each present one replaces the
+  // row's value, the others stay as they are.
+  const JOB_UPDATE_FIELDS = ['status', 'progression', 'errorClass', 'errorMessage', 'modifiedAt'];
+
   /**
-   * Handles incoming WebSocket messages
-   * @param {Object} message - The WebSocket message
+   * Applies job events to the job list, its only source of truth: rows are
+   * inserted complete (the created event carries the full row), updated in
+   * place field by field, and removed.
    */
   function handleMessage(message) {
-    // === New envelope support ===
-    // { type: 'job', action: 'deleted', payload: { jobId } }
-    if (message?.type === 'job') {
-      if (message.action === 'deleted') {
-        const id = Number(message.payload?.jobId ?? message.jobId);
-        if (!Number.isNaN(id)) {
-          jobs = jobs.filter(j => j.jobId !== id);
-          pendingJobs = pendingJobs.filter(j => j.jobId !== id);
+    if (message?.type !== 'job') return;
+    const id = message.id;
+    const p = message.payload || {};
+    switch (message.action) {
+      case 'created':
+        if (jobs.some(j => j.jobId === id) || pendingJobs.some(j => j.jobId === id)) return;
+        if (isScrolledToTop) {
+          jobs = [p, ...jobs];
+        } else {
+          pendingJobs = [p, ...pendingJobs];
+          newJobsCount = pendingJobs.length;
+          showNewJobsNotification = true;
         }
         return;
+      case 'updated': {
+        const patch = Object.fromEntries(JOB_UPDATE_FIELDS.filter(k => p[k] !== undefined).map(k => [k, p[k]]));
+        const merge = (list) => list.map(j => j.jobId === id ? { ...j, ...patch } : j);
+        jobs = merge(jobs);
+        pendingJobs = merge(pendingJobs);
+        return;
       }
+      case 'deleted':
+        jobs = jobs.filter(j => j.jobId !== id);
+        pendingJobs = pendingJobs.filter(j => j.jobId !== id);
+        newJobsCount = pendingJobs.length;
+        showNewJobsNotification = newJobsCount > 0;
+        return;
     }
-
-
   }
 
   /**
@@ -239,7 +258,7 @@ import { getJobs, delWorker, delJob } from '../lib/api';
       {/if}
 
       <!-- Jobs component -->
-      <JobCompo {jobs} />
+      <JobCompo bind:jobs />
 
       <!-- Loading indicators -->
       {#if isLoading}

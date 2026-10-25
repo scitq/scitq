@@ -348,24 +348,12 @@
       }
     }
 
-    // Step-stats delta: update per-workflow counters via the sideband
-    // store. We deliberately avoid `workflows[idx] = updated` here.
-    // Invalidating the `workflows` array forces WorkflowList's
-    // keyed-each to re-run block.p across every row, which in turn
-    // calls $set on every child component (StepList, lucide icons,
-    // ...). Svelte 4's `safe_not_equal` returns true for any object
-    // prop, so each child treats its props as dirty even when refs
-    // are unchanged. On the workflows page with megahit expanded that
-    // cascade allocated 1+ GB in a single delta and crashed the
-    // renderer. Writing to the wfCounters store only invalidates the
-    // counter-reading bindings in WorkflowList's row template; the
-    // keyed-each itself stays put and no child $set fires.
-    if (message?.type === 'step-stats' && message?.action === 'delta') {
-      const p = message.payload || {};
-      const wfId = p.workflowId;
-      if (typeof wfId !== 'number') return;
-      wfCounters.applyDelta(wfId, p.oldStatus, p.newStatus, !!p.retried);
-      return;
+    // Step-stats snapshot: the server ships the workflow's counters
+    // summed over all its steps, the same values ListWorkflows returns.
+    // Written to the wfCounters sideband store, not to `workflows`: see
+    // ../lib/wfCounters.ts for why.
+    if (message?.type === 'step-stats' && message?.action === 'snapshot' && message.payload?.workflow) {
+      wfCounters.seed(message.id, message.payload.workflow);
     }
   }
 

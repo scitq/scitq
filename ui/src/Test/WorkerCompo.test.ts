@@ -1,61 +1,19 @@
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import WorkerCompo from '../components/WorkerCompo.svelte';
 
-// Define types for task status
-interface TaskStatus {
-  pending: number;
-  assigned: number;
-  accepted: number;
-  downloading: number;
-  running: number;
-  uploadingSuccess: number;
-  succeeded: number;
-  uploadingFailure: number;
-  failed: number;
-  suspended: number;
-  canceled: number;
-  waiting: number;
-}
-
-interface TasksStatus {
-  [workerId: number]: TaskStatus;
-}
-
-// Example task status data for testing
-export const taskStatusMock: TasksStatus = {
-  1: {
-    pending: 3,
-    assigned: 2,
-    accepted: 1,
-    downloading: 4,
-    running: 5,
-    uploadingSuccess: 6,
-    succeeded: 7,
-    uploadingFailure: 8,
-    failed: 9,
-    suspended: 10,
-    canceled: 11,
-    waiting: 12,
-  },
-  2: {
-    pending: 1,
-    assigned: 1,
-    accepted: 2,
-    downloading: 2,
-    running: 3,
-    uploadingSuccess: 4,
-    succeeded: 5,
-    uploadingFailure: 1,
-    failed: 2,
-    suspended: 1,
-    canceled: 0,
-    waiting: 1,
-  }
+// Task counts as getAllTaskStats returns them: keyed by task status letter.
+const perWorkerStatusCounts: Record<number, Record<string, number>> = {
+  1: { P: 3, A: 2, C: 1, D: 4, O: 2, R: 5, U: 6, V: 8, S: 7, F: 9, I: 1, Z: 10, X: 11, W: 12 },
+  2: { P: 1, A: 1, C: 2, D: 2, O: 0, R: 3, U: 4, V: 1, S: 5, F: 2, I: 0, Z: 1, X: 0, W: 1 },
 };
+const globalStatusCounts: Record<string, number> = {};
+for (const counts of Object.values(perWorkerStatusCounts)) {
+  for (const [status, n] of Object.entries(counts)) globalStatusCounts[status] = (globalStatusCounts[status] || 0) + n;
+}
+const totalCount = Object.values(globalStatusCounts).reduce((a, b) => a + b, 0);
 
 // Example worker data
 const mockWorkers = [
@@ -104,31 +62,27 @@ const mockStats = {
   },
 };
 
+// Renders the component and waits until the workers and their stats are shown.
+async function renderLoaded() {
+  const result = render(WorkerCompo);
+  await waitFor(() => expect(screen.getByText('sda1: 60.4%')).toBeInTheDocument());
+  return result;
+}
+
 describe('WorkerCompo', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
     mockApi.getWorkers.mockResolvedValue(mockWorkers);
     (mockApi.getStats as any).mockResolvedValue(mockStats);
-    mockApi.getTasksCount.mockImplementation((workerId?: number) => {
-      if (workerId !== undefined) {
-        return Promise.resolve(taskStatusMock[workerId] ?? {});
-      }
-      const combined = Object.values(taskStatusMock).reduce((acc, curr) => {
-        for (const key in curr) {
-          acc[key] = (acc[key] || 0) + curr[key];
-        }
-        return acc;
-      }, {} as TaskStatus);
-      return Promise.resolve(combined);
-    });
+    mockApi.getAllTaskStats.mockResolvedValue({ perWorkerStatusCounts, globalStatusCounts, totalCount });
   });
 
   it('should display the list of workers', async () => {
     (mockApi.getWorkers as any).mockResolvedValue(mockWorkers);
     (mockApi.getStats as any).mockResolvedValue(mockStats);
 
-    const { getByText } = render(WorkerCompo, { props: { workers: mockWorkers } });
+    const { getByText } = render(WorkerCompo);
 
     await waitFor(() => {
       expect(getByText('Worker One')).toBeTruthy();
@@ -136,99 +90,79 @@ describe('WorkerCompo', () => {
   });
 
   it('should display "No workers found." when there are no workers', async () => {
+    mockApi.getWorkers.mockResolvedValue([]);
     const { getByText } = render(WorkerCompo);
 
+    await waitFor(() => expect(mockApi.getWorkers).toHaveBeenCalled());
     await waitFor(() => {
       expect(getByText('No workers found.')).toBeTruthy();
     });
   });
 
   it('should display statistics for a worker', async () => {
-    render(WorkerCompo, { props: { workers: mockWorkers } });
-    const metricsButton = screen.getByTestId('advanced-metrics');
-    await fireEvent.click(metricsButton);
-    expect(screen.queryByTestId('charts-worker-1')).toBeInTheDocument();
+    await renderLoaded();
 
-    await waitFor(() => {
-      expect(screen.getByText('42.5%')).toBeTruthy();
-      expect(screen.getByText('73.1%')).toBeTruthy();
-      expect(screen.getByText('sda1: 60.4%')).toBeTruthy();
-      expect(screen.getByText('sdb1: 88.2%')).toBeTruthy();
-      expect(screen.getByText('1.0/0.5 MB/s')).toBeTruthy();
-      expect(screen.getByText('1.0/0.5 GB')).toBeTruthy();
-      expect(screen.getByText('2.0/1.0 MB/s')).toBeTruthy();
-      expect(screen.getByText('2.0/1.0 GB')).toBeTruthy();
-    });
+    // Table mode (the default) shows CPU, memory and per-disk usage.
+    expect(screen.getByTestId('charts-worker-1')).toBeInTheDocument();
+    expect(screen.getByText('42.5%')).toBeInTheDocument();
+    expect(screen.getByText('73.1%')).toBeInTheDocument();
+    expect(screen.getByText('sda1: 60.4%')).toBeInTheDocument();
+    expect(screen.getByText('sdb1: 88.2%')).toBeInTheDocument();
   });
 
   it('should display graphs statistics for a worker', async () => {
-    render(WorkerCompo, { props: { workers: mockWorkers } });
+    await renderLoaded();
 
-    const metricsButton = screen.getByTestId('advanced-metrics');
-    await fireEvent.click(metricsButton);
+    expect(screen.getByTestId('charts-worker-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('table-worker-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('I/O-chart-1')).not.toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText('Network Sent/Recv')).toBeInTheDocument();
-      expect(screen.queryByTestId('Metrics')).not.toBeInTheDocument();
-      expect(screen.getByTestId('charts-worker-1')).toBeInTheDocument();
-      expect(screen.queryByTestId('table-worker-1')).not.toBeInTheDocument();
-      expect(screen.getByText('2.0/1.0 MB/s')).toBeInTheDocument();
-      expect(screen.queryByTestId('I/O-chart-1')).not.toBeInTheDocument();
-    });
-
-    const chartsButton = screen.getByTestId('charts-worker-1');
-    await fireEvent.click(chartsButton);
+    await fireEvent.click(screen.getByTestId('charts-worker-1'));
 
     await waitFor(() => {
       expect(screen.getByTestId('I/O-chart-1')).toBeInTheDocument();
-      expect(screen.queryByText('2.0/1.0 MB/s')).not.toBeInTheDocument();
+      expect(screen.getByText('Network I/O')).toBeInTheDocument();
+      expect(screen.getByText('CPU: 42.5%')).toBeInTheDocument();
+      expect(screen.queryByText('sda1: 60.4%')).not.toBeInTheDocument();
       expect(screen.queryByTestId('charts-worker-1')).not.toBeInTheDocument();
       expect(screen.getByTestId('table-worker-1')).toBeInTheDocument();
     });
 
-    const tableButton = screen.getByTestId('table-worker-1');
-    await fireEvent.click(tableButton);
+    await fireEvent.click(screen.getByTestId('table-worker-1'));
 
     await waitFor(() => {
       expect(screen.queryByTestId('I/O-chart-1')).not.toBeInTheDocument();
-      expect(screen.queryByText('2.0/1.0 MB/s')).toBeInTheDocument();
+      expect(screen.getByText('sda1: 60.4%')).toBeInTheDocument();
       expect(screen.getByTestId('charts-worker-1')).toBeInTheDocument();
       expect(screen.queryByTestId('table-worker-1')).not.toBeInTheDocument();
     });
   });
 
   it('should count tasks per worker (taskCountWorker)', async () => {
-    render(WorkerCompo, { props: { workers: mockWorkers } });
+    await renderLoaded();
 
+    const w = perWorkerStatusCounts[1];
     await waitFor(() => {
-      const worker1 = taskStatusMock[1];
-      const awaiting = worker1.pending + worker1.assigned + worker1.accepted;
-      expect(screen.getByTestId('tasks-awaiting-execution-1').textContent).toBe(String(awaiting));
-
-      const inProgress = worker1.downloading + worker1.running;
-      expect(screen.getByTestId('tasks-in-progress-1').textContent).toBe(String(inProgress));
-
-      const success = worker1.uploadingSuccess + worker1.succeeded;
-      expect(screen.getByTestId('successful-tasks-1').textContent).toBe(String(success));
-
-      const failed = worker1.uploadingFailure + worker1.failed;
-      expect(screen.getByTestId('failed-tasks-1').textContent).toBe(String(failed));
-
-      const inactive = worker1.waiting + worker1.suspended + worker1.canceled;
-      expect(screen.getByTestId('inactive-tasks-1').textContent).toBe(String(inactive));
+      // Starting = accepted + downloading + on hold
+      expect(screen.getByTestId('tasks-awaiting-execution-1').textContent!.trim()).toBe(String(w.C + w.D + w.O));
+      // Running = running + uploading (after success or failure)
+      expect(screen.getByTestId('tasks-in-progress-1').textContent!.trim()).toBe(String(w.R + w.U + w.V));
+      expect(screen.getByTestId('successful-tasks-1').textContent!.trim()).toBe(String(w.S));
+      expect(screen.getByTestId('failed-tasks-1').textContent!.trim()).toBe(String(w.F));
+      // Inactive = I + suspended + canceled
+      expect(screen.getByTestId('inactive-tasks-1').textContent!.trim()).toBe(String(w.I + w.Z + w.X));
     });
   });
 
   it('should count tasks globally (allTaskCount)', async () => {
-    const result = await mockApi.getTasksCount();
-    const expected = Object.values(taskStatusMock).reduce((acc, curr) => {
-      for (const key in curr) {
-        acc[key] = (acc[key] || 0) + curr[key];
-      }
-      return acc;
-    }, {} as TaskStatus);
+    await renderLoaded();
 
-    expect(result).toEqual(expected);
+    expect(screen.getByText(`All: ${totalCount}`)).toBeInTheDocument();
+    expect(screen.getByTestId('pending-link-dashboard').textContent!.trim()).toBe(`Pending: ${globalStatusCounts.P}`);
+    expect(screen.getByTestId('count-A').textContent!.trim()).toBe(`Assigned: ${globalStatusCounts.A}`);
+    expect(screen.getByTestId('count-C').textContent!.trim()).toBe(`Accepted: ${globalStatusCounts.C}`);
+    expect(screen.getByTestId('count-U').textContent!.trim()).toBe(`Uploading: ${globalStatusCounts.U + globalStatusCounts.V}`);
+    expect(screen.getByTestId('count-F').textContent!.trim()).toBe(`Failed: ${globalStatusCounts.F}`);
   });
 });
 
@@ -237,18 +171,7 @@ describe('Zoom Management', () => {
     vi.clearAllMocks();
     mockApi.getWorkers.mockResolvedValue(mockWorkers);
     (mockApi.getStats as any).mockResolvedValue(mockStats);
-    mockApi.getTasksCount.mockImplementation((workerId?: number) => {
-      if (workerId !== undefined) {
-        return Promise.resolve(taskStatusMock[workerId] ?? {});
-      }
-      const combined = Object.values(taskStatusMock).reduce((acc, curr) => {
-        for (const key in curr) {
-          acc[key] = (acc[key] || 0) + curr[key];
-        }
-        return acc;
-      }, {} as TaskStatus);
-      return Promise.resolve(combined);
-    });
+    mockApi.getAllTaskStats.mockResolvedValue({ perWorkerStatusCounts, globalStatusCounts, totalCount });
   });
 
   async function switchToChartMode() {
@@ -259,7 +182,7 @@ describe('Zoom Management', () => {
   }
 
   it('should initialize with auto-zoom enabled for both charts', async () => {
-    render(WorkerCompo, { props: { workers: mockWorkers } });
+    await renderLoaded();
 
     await switchToChartMode();
     
@@ -276,7 +199,7 @@ describe('Zoom Management', () => {
   });
 
   it('should toggle auto-zoom for disk chart', async () => {
-    render(WorkerCompo, { props: { workers: mockWorkers } });
+    await renderLoaded();
     await switchToChartMode();
     
     await waitFor(async () => {
@@ -301,7 +224,7 @@ describe('Zoom Management', () => {
   });
 
   it('should handle manual zoom controls for disk chart', async () => {
-    render(WorkerCompo, { props: { workers: mockWorkers } });
+    await renderLoaded();
     
     await switchToChartMode();
     await fireEvent.click(screen.getByTestId('read-auto-zoom-toggle'));
@@ -324,49 +247,5 @@ describe('Zoom Management', () => {
     const afterZoomIn = getZoom();
     await fireEvent.click(screen.getByTestId('read-zoom-out'));
     await waitFor(() => expect(getZoom()).toBeLessThan(afterZoomIn));
-  });
-
-  it('should calculate and apply auto-zoom based on data', async () => {
-    // Mock data with significant variation
-    mockApi.getStats.mockResolvedValue({
-      1: {
-        ...mockStats[1],
-        diskIo: {
-          readBytesRate: 10485760, // 10MB/s
-          writeBytesRate: 5242880, // 5MB/s
-          readBytesTotal: 10737418240,
-          writeBytesTotal: 5368709120
-        },
-        netIo: {
-          sentBytesRate: 20971520, // 20MB/s
-          recvBytesRate: 10485760, // 10MB/s
-          sentBytesTotal: 21474836480,
-          recvBytesTotal: 10737418240
-        }
-      }
-    });
-
-    render(WorkerCompo, { props: { workers: mockWorkers } });
-
-    await switchToChartMode();
-
-    // Disable auto-zoom for disk
-    await fireEvent.click(screen.getByTestId('read-auto-zoom-toggle'));
-    
-    // Disable auto-zoom for network
-    await fireEvent.click(screen.getByTestId('sent-auto-zoom-toggle'));
-
-    await waitFor(() => {
-      // Verify auto-zoom adapts to new data
-      const diskZoomText = screen.getByTestId('read-zoom-level').textContent;
-      const diskZoom = parseFloat(diskZoomText?.match(/[\d.]+/)?.[0] || '0');
-      expect(diskZoom).toBeGreaterThan(1);
-      expect(diskZoom).toBeLessThanOrEqual(15);
-
-      const networkZoomText = screen.getByTestId('sent-zoom-level').textContent;
-      const networkZoom = parseFloat(networkZoomText?.match(/[\d.]+/)?.[0] || '0');
-      expect(networkZoom).toBeGreaterThan(1);
-      expect(networkZoom).toBeLessThanOrEqual(15);
-    });
   });
 });

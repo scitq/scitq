@@ -1,62 +1,17 @@
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Dashboard from '../pages/Dashboard.svelte';
-import { wsClient } from '../lib/wsClient';
+import { wsConnect, wsReset, type FakeWebSocket } from './wsHarness';
 
-let messageHandler: (msg: any) => void;
-
-// Define types for task status
-interface TaskStatus {
-  pending: number;
-  assigned: number;
-  accepted: number;
-  downloading: number;
-  running: number;
-  uploadingSuccess: number;
-  succeeded: number;
-  uploadingFailure: number;
-  failed: number;
-  suspended: number;
-  canceled: number;
-  waiting: number;
-}
-
-interface TasksStatus {
-  [workerId: number]: TaskStatus;
-}
-
-// Example task status data for testing
-const tasksStatus = {
-  1: {
-    pending: 3,
-    assigned: 2,
-    accepted: 1,
-    downloading: 4,
-    running: 5,
-    uploadingSuccess: 6,
-    succeeded: 7,
-    uploadingFailure: 8,
-    failed: 9,
-    suspended: 10,
-    canceled: 11,
-    waiting: 12,
-  }
-};
+let ws: FakeWebSocket;
+afterEach(() => wsReset());
 
 const mockJobs = [
   { jobId: 1, status: 'S', action: 'D', progression: 100, modifiedAt: new Date().toISOString(), workerId: 'worker-1'},
   { jobId: 2, status: 'S', action: 'C', progression: 100, modifiedAt: new Date().toISOString(), workerId: 'worker-2'}
 ]
-
-vi.mock('@/lib/wsClient', () => ({
-  wsClient: {
-    subscribeToMessages: vi.fn(() => () => {}),
-    sendMessage: vi.fn()
-  }
-}));
 
 
 describe('Worker integration', () => {
@@ -76,10 +31,7 @@ describe('Worker integration', () => {
     mockApi.updateWorkerConfig.mockResolvedValue({});
     mockApi.newWorker.mockResolvedValue([]);
 
-    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
-      messageHandler = handler; // Store the handler for later use
-      return () => true; // Unsubscribe function
-    });
+    ws = wsConnect();
   });
 
 it('updates concurrency on increase button click', async () => {
@@ -151,30 +103,23 @@ it('should add a worker and update the worker and the jobs list', async () => {
 
   await fireEvent.click(getByTestId('add-worker-button'));
 
-  // Simulate WebSocket message
-  if (messageHandler) {
-    messageHandler({
-      type: 'worker-created',
-      payloadWorker: {
-        workerId: 3,
-        name: 'new-worker',
-        concurrency: 2,
-        prefetch: 1,
-        status: 'P'
-      },
-      payloadJob: {
-        jobId: 3,
-        action: "C",
-        status: "P",
-        workerID: 3,
-        modifiedAt: new Date().toISOString()
-      }
-    });
-  }
+  // Server events: the worker, then the deploy job it created
+  ws.deliver({
+    type: 'worker', action: 'created', id: 3,
+    payload: {
+      worker: { workerId: 3, name: 'new-worker', concurrency: 2, prefetch: 1, status: 'P' },
+      job: { jobId: 3, action: 'C', status: 'P', workerId: 3, modifiedAt: new Date().toISOString() },
+    },
+  });
+  ws.deliver({
+    type: 'job', action: 'created', id: 3,
+    payload: { jobId: 3, action: 'C', status: 'P', workerId: 3, workerName: 'new-worker', progression: 0, modifiedAt: new Date().toISOString() },
+  });
 
-  // Wait for new worker to appear
+  // Wait for new worker and its job to appear
   await waitFor(() => {
-    expect(screen.getByText('new-worker')).toBeInTheDocument();
+    expect(screen.getByTestId('worker-name-3').textContent!.trim()).toBe('new-worker');
+    expect(screen.getByTestId('job-row-3')).toBeInTheDocument();
   });
 
   // Verify API call
@@ -192,24 +137,17 @@ it('deletes a worker and update Jobs when delete button is clicked', async () =>
     const deleteBtn = getByTestId('delete-worker-1');
     await fireEvent.click(deleteBtn);
 
-    // Simulate WebSocket message
-    if (messageHandler) {
-        messageHandler({
-        type: 'worker-deleted',
-        payloadWorker: { workerId: 1 },
-        payloadJob: {
-            jobId: 3,
-            action: "D",
-            status: "P",
-            workerID: 1,
-            modifiedAt: new Date().toISOString()
-        }
-        });
-    }
+    // Server events: deletion scheduled, with the delete job it queued
+    ws.deliver({ type: 'worker', action: 'deletionScheduled', id: 1, payload: { workerId: 1, jobId: 3 } });
+    ws.deliver({
+        type: 'job', action: 'created', id: 3,
+        payload: { jobId: 3, action: 'D', status: 'P', workerId: 1, progression: 0, modifiedAt: new Date().toISOString() },
+    });
 
     await waitFor(() => {
         expect(mockApi.delWorker).toHaveBeenCalledWith({ workerId: 1 });
         expect(queryByTestId('worker-1')).toBeNull();
+        expect(getByTestId('job-row-3')).toBeInTheDocument();
     });
 });
 });
@@ -240,10 +178,7 @@ describe('Job Pagination and Notifications', () => {
     mockApi.getJobs.mockResolvedValue(mockJobsFirstPage);
     mockApi.getStatus.mockResolvedValue([{ workerId: 1, status: 'online' }]);
 
-    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
-      messageHandler = handler; // Store the handler for later use
-      return () => true; // Unsubscribe function
-    });
+    ws = wsConnect();
   });
 
   it('should load initial jobs', async () => {
@@ -307,25 +242,10 @@ it('should show notification when new jobs are added', async () => {
   await fireEvent.scroll(jobsContainer); // updates isScrolledToTop
 
   // Now simulate WebSocket message
-  if (messageHandler) {
-    messageHandler({
-      type: 'worker-created',
-      payloadWorker: {
-        workerId: 3,
-        name: 'New Worker',
-        concurrency: 2,
-        prefetch: 1,
-        status: 'online'
-      },
-      payloadJob: {
-        jobId: 6,
-        status: "S",
-        action: "C",
-        workerID: 3,
-        modifiedAt: new Date().toISOString()
-      }
-    });
-  }
+  ws.deliver({
+    type: 'job', action: 'created', id: 6,
+    payload: { jobId: 6, status: 'P', action: 'C', workerId: 3, workerName: 'New Worker', progression: 0, modifiedAt: new Date().toISOString() },
+  });
 
   // Verify notification appears
   await waitFor(() => {
@@ -356,25 +276,10 @@ it('should load new jobs when clicking notification', async () => {
   await fireEvent.scroll(jobsContainer); // updates isScrolledToTop
 
   // Simulate new job
-  if (messageHandler) {
-    messageHandler({
-      type: 'worker-created',
-      payloadWorker: {
-        workerId: 3,
-        name: 'New Worker',
-        concurrency: 2,
-        prefetch: 1,
-        status: 'online'
-      },
-      payloadJob: {
-        jobId: 6,
-        status: "S",
-        action: "C",
-        workerID: 3,
-        modifiedAt: new Date().toISOString()
-      }
-    });
-  }
+  ws.deliver({
+    type: 'job', action: 'created', id: 6,
+    payload: { jobId: 6, status: 'P', action: 'C', workerId: 3, workerName: 'New Worker', progression: 0, modifiedAt: new Date().toISOString() },
+  });
   
   // Verify notification appears first
   await waitFor(() => {

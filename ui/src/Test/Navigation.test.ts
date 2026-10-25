@@ -1,15 +1,15 @@
 // Navigation.test.ts
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { wsReset } from './wsHarness';
 import App from '../App.svelte';
 import { isLoggedIn } from '../lib/Stores/user';
 
 const mockTasks = [
-  { taskId: 1, name: 'Task A', status: 'P', workerId: 1, workflowId: 30, stepId: 100, command: 'cmd1' },
-  { taskId: 2, name: 'Task B', status: 'S', workerId: 2, workflowId: 10, stepId: 200, command: 'cmd2' },
-  { taskId: 3, name: 'Task C', status: 'R', workerId: 1, workflowId: 10, stepId: 100, command: 'cmd3' },
+  { taskId: 1, taskName: 'Task A', status: 'P', workerId: 1, workflowId: 30, stepId: 100, command: 'cmd1' },
+  { taskId: 2, taskName: 'Task B', status: 'S', workerId: 2, workflowId: 10, stepId: 200, command: 'cmd2' },
+  { taskId: 3, taskName: 'Task C', status: 'R', workerId: 1, workflowId: 10, stepId: 100, command: 'cmd3' },
 ];
 
 const mockWorkers = [
@@ -26,11 +26,14 @@ const mockWorkflows = [
 describe('Navigation integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Routing lives in the URL hash: start every test from the root.
+    window.location.hash = '';
     isLoggedIn.set(true);
     mockApi.getWorkers.mockResolvedValue(mockWorkers);
     mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
     mockApi.getAllTasks.mockResolvedValue(mockTasks);
   });
+  afterEach(() => wsReset());
 
   it('should display Dashboard page when clicking "Dashboard" in the ToolBar', async () => {
     const { getByTestId, getByText, queryByText } = render(App);
@@ -118,9 +121,8 @@ describe('Navigation integration', () => {
     await fireEvent.click(pendingLink);
 
     await waitFor(() => {
-      console.log(mockApi.getAllTasks.mock.calls);
       expect(mockApi.getAllTasks).toHaveBeenCalledWith(
-        undefined, undefined, undefined, 'P', 'task', undefined, 25, 0
+        undefined, undefined, undefined, 'P', 'task', undefined, 25, 0, false
       );
       expect(screen.getByText('Task A')).toBeInTheDocument();
       expect(screen.queryByText('Task B')).not.toBeInTheDocument();
@@ -150,8 +152,7 @@ describe('Navigation integration', () => {
     await fireEvent.click(workerLink);
 
     await waitFor(() => {
-      expect(mockApi.getAllTasks).toHaveBeenCalledWith(1, undefined, undefined, undefined, 'task', undefined, 25, 0);
-      console.log(mockApi.getAllTasks.mock.calls);
+      expect(mockApi.getAllTasks).toHaveBeenCalledWith(1, undefined, undefined, undefined, 'task', undefined, 25, 0, false);
       expect(screen.getByText('Task A')).toBeInTheDocument();
       expect(screen.queryByText('Task B')).not.toBeInTheDocument();
       expect(screen.getByText('Task C')).toBeInTheDocument();
@@ -181,7 +182,7 @@ describe('Navigation integration', () => {
     const pendingDashboard = getByTestId('pending-link-dashboard');
     await fireEvent.click(pendingDashboard);
     await waitFor(() => {
-        expect(mockApi.getAllTasks).toHaveBeenCalledWith(undefined, undefined, undefined, 'P', 'task', undefined, 25, 0);
+        expect(mockApi.getAllTasks).toHaveBeenCalledWith(undefined, undefined, undefined, 'P', 'task', undefined, 25, 0, false);
         expect(queryByText('Task A')).toBeInTheDocument();
         expect(queryByText('Task B')).not.toBeInTheDocument();
         expect(queryByText('Task C')).not.toBeInTheDocument();
@@ -226,7 +227,7 @@ describe('Navigation integration', () => {
 
     await waitFor(() => {
       expect(mockApi.getAllTasks).toHaveBeenCalledWith(
-        undefined, 10, undefined, undefined, 'task', undefined, 25, 0
+        undefined, 10, undefined, undefined, 'task', undefined, 25, 0, false
       );
       expect(screen.queryByText('Task A')).not.toBeInTheDocument();
       expect(screen.getByText('Task B')).toBeInTheDocument();
@@ -235,9 +236,9 @@ describe('Navigation integration', () => {
   });
 
   it('should navigate to step tasks when clicking through step name in Workflows', async () => {
-    mockApi.getSteps.mockResolvedValue([
-      { stepId: 100, name: 'Step A', workflowId: 10 },
-      { stepId: 200, name: 'Step B', workflowId: 10 }
+    mockApi.getStepStats.mockResolvedValue([
+      { stepId: 100, stepName: 'Step A', workflowId: 10 },
+      { stepId: 200, stepName: 'Step B', workflowId: 10 }
     ]);
 
     mockApi.getAllTasks.mockImplementation((workerId, wfId, stepId) => {
@@ -269,7 +270,8 @@ describe('Navigation integration', () => {
 
     await waitFor(() => {
       expect(mockApi.getAllTasks).toHaveBeenCalledWith(
-        undefined, 10, 100, undefined, 'task', undefined, 25, 0
+        // The step link filters on the step alone (#/tasks?stepId=100)
+        undefined, undefined, 100, undefined, 'task', undefined, 25, 0, false
       );
       expect(screen.getByText('Task A')).toBeInTheDocument();
       expect(screen.queryByText('Task B')).not.toBeInTheDocument();

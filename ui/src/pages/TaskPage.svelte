@@ -103,8 +103,6 @@
   let displayedTasks: Task[] = $state([]);
   // First loaded tasks (used for resetting search)
   let firstTasks: Task[] = [];
-  // New tasks waiting to be displayed
-  let pendingTasks: Task[] = $state([]);
   // Whether more tasks are available to load
   let hasMoreTasks = $state(true);
   // Whether tasks are currently loading
@@ -117,8 +115,6 @@
   let isScrolledToBottom = false;
   // Last scroll position (for maintaining position during updates)
   let lastScrollPosition = 0;
-  // Whether to show new tasks notification
-  let showNewTasksNotification = $state(false);
   // Function to unsubscribe from WebSocket
   let unsubscribeWS: (() => void) | null = null;
 
@@ -369,36 +365,6 @@ async function handleWebSocketMessage(message) {
     }
   }
 
-  /**
-   * Loads newly arrived pending tasks
-   */
-  function loadNewTasks() {
-    if (pendingTasks.length === 0) return;
-    
-    // Reset if in search mode
-    if (selectedCommand) {
-      selectedCommand = undefined;
-      displayedTasks = [...firstTasks];
-      hasMoreTasks = firstTasks.length === TASKS_CHUNK_SIZE;
-      showNewTasksNotification = false;
-      pendingTasks = [];
-      return;
-    }
-
-    // Add pending tasks to display
-    displayedTasks = [...pendingTasks, ...displayedTasks];
-    firstTasks = [...pendingTasks, ...firstTasks];
-    pendingTasks = [];
-    showNewTasksNotification = false;
-    
-    // Scroll to top
-    if (tasksContainer) {
-      tasksContainer.scrollTo({
-        top: 0,
-        behavior: 'smooth'
-      });
-    }
-  }
 
   /**
    * Loads more tasks for infinite scroll
@@ -802,11 +768,6 @@ async function handleWebSocketMessage(message) {
     // Detect scroll position
     isScrolledToTop = scrollTop <= 10;
 
-    // Load new tasks if scrolled to top
-    if (isScrolledToTop && pendingTasks.length > 0) {
-      loadNewTasks();
-    }
-
     // Load more tasks if near bottom
     const distanceFromBottom = scrollHeight - scrollPosition;
     if (distanceFromBottom <= threshold && hasMoreTasks && !isLoading) {
@@ -849,20 +810,6 @@ async function handleWebSocketMessage(message) {
 
 <!-- Main Tasks Container -->
 <div class="tasks-container" data-testid="tasks-page">
-  {#if showNewTasksNotification}
-    <div 
-      class="new-tasks-notification"
-      data-testid={`tasks-notification-${pendingTasks.length}`}
-      onclick={loadNewTasks}
-      onkeydown={e => e.key === 'Enter' && loadNewTasks()}
-      tabindex="0"
-      role="button"
-      aria-label={`Show ${pendingTasks.length} new task${pendingTasks.length > 1 ? 's' : ''}`}
-    >
-    {pendingTasks.length} new task{pendingTasks.length > 1 ? 's' : ''} available
-      <button class="show-new-btn" onclick={loadNewTasks}>Show</button>
-    </div>
-  {/if}
 
   <!-- Filters Section -->
   <form class="tasks-filters-form" onsubmit={preventDefault(() => handleStatusClick())}>

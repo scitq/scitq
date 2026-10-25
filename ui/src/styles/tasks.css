@@ -491,23 +491,6 @@
 /* NOTIFICATIONS */
 /* ==================== */
 
-.new-tasks-notification {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--primary-color);
-  color: white;
-  padding: 10px 20px;
-  border-radius: 20px;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  z-index: 1000;
-  animation: pulse 2s infinite;
-}
 
 .show-new-btn {
   background: white;

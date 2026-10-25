@@ -1,27 +1,25 @@
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 import { render, fireEvent, waitFor, screen, within } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import TaskPage from '../pages/TaskPage.svelte';
-import { wsClient } from '../lib/wsClient';
-import { tick } from 'svelte';
+import { wsConnect, wsReset, type FakeWebSocket } from './wsHarness';
 
-let messageHandler: (msg: any) => void;
+let ws: FakeWebSocket;
 
 // Simple mock data
 const mockTasksFirstPage = [
-  { taskId: 1, name: 'Task 1', status: 'P', workerId: 1, workflowId: 10, command: 'cmd1' },
-  { taskId: 2, name: 'Task 2', status: 'S', workerId: 2, workflowId: 20, command: 'cmd2' },
-  { taskId: 3, name: 'Task 3', status: 'R', workerId: 1, workflowId: 10, command: 'cmd3' }
+  { taskId: 1, taskName: 'Task 1', status: 'P', workerId: 1, workflowId: 10, command: 'cmd1' },
+  { taskId: 2, taskName: 'Task 2', status: 'S', workerId: 2, workflowId: 20, command: 'cmd2' },
+  { taskId: 3, taskName: 'Task 3', status: 'R', workerId: 1, workflowId: 10, command: 'cmd3' }
 ];
 
 const mockTasksSecondPage = [
-  { taskId: 4, name: 'Task 4', status: 'F', workerId: 2, workflowId: 20, command: 'cmd4' },
-  { taskId: 5, name: 'Task 5', status: 'P', workerId: 1, workflowId: 10, command: 'cmd5' }
+  { taskId: 4, taskName: 'Task 4', status: 'F', workerId: 2, workflowId: 20, command: 'cmd4' },
+  { taskId: 5, taskName: 'Task 5', status: 'P', workerId: 1, workflowId: 10, command: 'cmd5' }
 ];
 
 const mockNewTasks = [
-  { taskId: 6, name: 'New Task 6', status: 'S', workerId: 2, workflowId: 20, command: 'cmd6' }
+  { taskId: 6, taskName: 'New Task 6', status: 'S', workerId: 2, workflowId: 20, command: 'cmd6' }
 ];
 
 const mockWorkers = [
@@ -41,12 +39,9 @@ describe('TaskPage', () => {
     mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
     mockApi.getAllTasks.mockResolvedValue(mockTasksFirstPage);
     window.location.hash = '/tasks';
-
-    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
-        messageHandler = handler; // Store the handler for later use
-        return () => true; // Unsubscribe function
-    });
+    ws = wsConnect();
   });
+  afterEach(() => wsReset());
 
   it('should load first page of tasks', async () => {
     render(TaskPage);
@@ -59,165 +54,59 @@ describe('TaskPage', () => {
   });
 
   it('should load more tasks when scrolling down', async () => {
-    // Configure mock with offset
-    let callCount = 0;
-    mockApi.getAllTasks.mockImplementation((workerId, wfId, stepId, status, sortBy, command, limit, offset) => {
-      if (callCount === 0) {
-        callCount++;
-        return Promise.resolve(mockTasksFirstPage);
-      }
-      return Promise.resolve(mockTasksSecondPage);
-    });
+    // A full first page (TASKS_CHUNK_SIZE = 25) means more may exist.
+    const fullFirstPage = Array.from({ length: 25 }, (_, i) => (
+      { taskId: 100 - i, taskName: `Task ${100 - i}`, status: 'S', workerId: 1, workflowId: 10, command: `cmd${100 - i}` }
+    ));
+    const secondPage = [
+      { taskId: 50, taskName: 'Task 50', status: 'S', workerId: 2, workflowId: 20, command: 'cmd50' },
+      { taskId: 49, taskName: 'Task 49', status: 'S', workerId: 2, workflowId: 20, command: 'cmd49' },
+    ];
+    mockApi.getAllTasks.mockImplementation((workerId, wfId, stepId, status, sortBy, command, limit, offset) =>
+      Promise.resolve(offset === 0 ? fullFirstPage : secondPage)
+    );
 
+    // jsdom has no layout: give the list a height so the mount-time scroll
+    // check sees it at the top rather than at the bottom.
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 200 });
+    try {
+      render(TaskPage);
+      await waitFor(() => screen.getByText('Task 100'));
+      expect(screen.queryByText('Task 50')).not.toBeInTheDocument();
+
+      const tasksContainer = screen.getByTestId('tasks-list');
+      tasksContainer.scrollTop = 950; // Almost at bottom
+      await fireEvent.scroll(tasksContainer);
+
+      await waitFor(() => {
+        expect(screen.getByText('Task 50')).toBeInTheDocument();
+        expect(screen.getByText('Task 49')).toBeInTheDocument();
+      }, { timeout: 3000 });
+      expect(mockApi.getAllTasks).toHaveBeenLastCalledWith(
+        undefined, undefined, undefined, undefined, 'task', undefined, 25, 25, false
+      );
+    } finally {
+      delete (HTMLElement.prototype as any).scrollHeight;
+      delete (HTMLElement.prototype as any).clientHeight;
+    }
+  });
+
+  it('shows a task created over WebSocket at the top of the list', async () => {
     render(TaskPage);
-    
-    // Wait for initial load
     await waitFor(() => screen.getByText('Task 1'));
-    
-    // Get container
-    const tasksContainer = screen.getByTestId('tasks-page').querySelector('.tasks-list-container');
-    if (!tasksContainer) throw new Error('Tasks container not found');
 
-    // Simulate being at the bottom
-    Object.defineProperty(tasksContainer, 'scrollHeight', { value: 1000 });
-    Object.defineProperty(tasksContainer, 'scrollTop', { value: 950 }); // Almost at bottom
-    Object.defineProperty(tasksContainer, 'clientHeight', { value: 200 });
-
-    // Trigger scroll
-    fireEvent.scroll(tasksContainer);
-
-    // Wait for new tasks to load
-    await waitFor(() => {
-      expect(screen.getByText('Task 4')).toBeInTheDocument();
-      expect(screen.getByText('Task 5')).toBeInTheDocument();
-    }, { timeout: 3000 });
-  });
-
-it('should show notification when new tasks arrive', async () => {
-  // Mock API initial
-  mockApi.getAllTasks.mockResolvedValue(mockTasksFirstPage);
-
-  // Simulated new task
-  const newTask = {
-    taskId: 999,
-    command: 'new command',
-    status: 'P',
-    stepId: null,
-    workerId: null,
-    workflowId: null,
-    taskName: 'New Task'
-  };
-
-  // Mock scrollTo to avoid JSDOM errors
-  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-    value: vi.fn(),
-    writable: true
-  });
-
-  render(TaskPage);
-
-  // Wait for initial load
-  await waitFor(() => {
-    expect(screen.getByText('Task 1')).toBeInTheDocument();
-  });
-
-  // Simulate being scrolled down in the list
-  const tasksContainer = screen.getByTestId('tasks-list');
-  Object.defineProperties(tasksContainer, {
-    scrollTop: { value: 100, writable: true },
-    scrollHeight: { value: 1000 },
-    clientHeight: { value: 500 }
-  });
-
-  // Trigger scroll → updates isScrolledToTop = false
-  await fireEvent.scroll(tasksContainer);
-
-  // Send WebSocket message
-  messageHandler?.({
-    type: 'task-created',
-    payload: newTask
-  });
-
-  // Verify notification appears
-  await waitFor(() => {
-    expect(screen.getByText('1 new task available')).toBeInTheDocument();
-  }, { timeout: 3000 });
-});
-
-
-it('should scroll to top and show new tasks when clicking notification', async () => {
-  // 1. First call → initial tasks
-  mockApi.getAllTasks.mockImplementationOnce(() =>
-    Promise.resolve(mockTasksFirstPage)
-  );
-
-  // 2. Subsequent calls → new task + existing ones
-  mockApi.getAllTasks.mockImplementation(() =>
-    Promise.resolve([...mockNewTasks, ...mockTasksFirstPage])
-  );
-
-  const newTask = {
-    taskId: 999,
-    command: 'new command',
-    status: 'P',
-    stepId: null,
-    workerId: null,
-    workflowId: null,
-    taskName: 'New Task'
-  };
-
-  // Mock scrollTo
-  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-    value: vi.fn(),
-    writable: true
-  });
-
-  const { getByTestId, getByText, queryByText } = render(TaskPage);
-
-  // 3. Wait for initial load
-  await waitFor(() => screen.getByText('Task 1'));
-
-  // 4. Simulate being scrolled down in the list
-  const tasksContainer = getByTestId('tasks-list');
-  Object.defineProperties(tasksContainer, {
-    scrollTop: { value: 100, writable: true },
-    scrollHeight: { value: 1000 },
-    clientHeight: { value: 500 }
-  });
-  await fireEvent.scroll(tasksContainer);
-
-  // 5. Send WebSocket message
-  messageHandler?.({
-    type: 'task-created',
-    payload: newTask
-  });
-
-  // 6. Verify notification appears
-    await waitFor(() => {
-    expect(getByText('1 new task available')).toBeInTheDocument();
-    }, { timeout: 3000 });
-
-  // 7. Click notification
-  const notification = getByTestId('tasks-notification-1');
-  await fireEvent.click(notification);
-
-  // 8. Verify we scrolled to top
-  await waitFor(() => {
-    expect(tasksContainer.scrollTo).toHaveBeenCalledWith({
-      top: 0,
-      behavior: 'smooth'
+    ws.deliver({
+      type: 'task', action: 'created', id: 999,
+      payload: { taskId: 999, command: 'new command', status: 'P', taskName: 'New Task' },
     });
+
+    await waitFor(() => expect(screen.getByText('New Task')).toBeInTheDocument());
+    const rows = screen.getAllByTestId(/^task-\d+$/);
+    expect(rows[0]).toHaveAttribute('data-testid', 'task-999');
   });
 
-  // 9. Verify new task is visible and notification disappeared
-  await waitFor(() => {
-    expect(screen.getByText('new command')).toBeInTheDocument();
-    expect(queryByText('1 new task available')).not.toBeInTheDocument();
-  });
-});
-
-
-  it('should sort tasks by worker when selecting sort option', async () => {
+    it('should sort tasks by worker when selecting sort option', async () => {
     // 1. Configure mock to respond differently based on sortBy
     mockApi.getAllTasks.mockImplementation((workerId, wfId, stepId, status, sortBy, command, limit, offset) => {
       if (sortBy === 'worker') {
@@ -253,7 +142,7 @@ it('should scroll to top and show new tasks when clicking notification', async (
     
     await waitFor(() => {
       expect(mockApi.getAllTasks).toHaveBeenCalledWith(
-        undefined, undefined, undefined, undefined, 'task', 'cmd2', 25, 0
+        undefined, undefined, undefined, undefined, 'task', 'cmd2', 25, 0, false
       );
     });
   });

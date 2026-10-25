@@ -228,24 +228,6 @@
     position: relative;
 }
 
-/* New steps notification */
-.new-steps-notification {
-    position: sticky;
-    top: 10px;
-    z-index: 100;
-    background: var(--primary-color);
-    color: white;
-    padding: 8px 16px;
-    border-radius: 20px;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0 auto 10px auto;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-}
-
 .show-new-btn {
     font-weight: bold;
 }

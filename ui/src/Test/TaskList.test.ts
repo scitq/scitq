@@ -1,6 +1,3 @@
-vi.mock('../lib/api', () => mockApi);
-import { mockApi } from '../mocks/api_mock';
-
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import TaskList from '../components/TaskList.svelte';
@@ -8,24 +5,24 @@ import TaskList from '../components/TaskList.svelte';
 const mockTasks = [
   {
     taskId: 1,
-    name: 'Task A',
+    taskName: 'Task A',
     command: 'echo A',
-    workerId: 'Worker-1',
+    workerId: 1,
     stepId: 10,
     workflowId: 100,
-    status: 1,
+    status: 'S',
     runningTimeout: '30s',
     output: 'Default Output A',
     retry: 0
   },
   {
     taskId: 2,
-    name: 'Task B',
+    taskName: 'Task B',
     command: 'echo B',
-    workerId: 'Worker-2',
+    workerId: 2,
     stepId: 11,
     workflowId: 101,
-    status: 2,
+    status: 'R',
     runningTimeout: '45s',
     output: 'Default Output B',
     retry: 1

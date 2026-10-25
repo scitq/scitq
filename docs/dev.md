@@ -42,6 +42,26 @@ Or force non utilisation of cache:
 make fresh-integration-test
 ```
 
+UI component tests (vitest; run `make ui-deps` once first):
+```sh
+make ui-test
+```
+
+A component that shows live data gets a test feeding it WebSocket messages
+as the server emits them, through `ui/src/Test/wsHarness.ts`: `wsPlay`
+delivers a timed sequence to the real `wsClient`, and `watchText` records
+every text an element displays, so the test asserts the value never takes
+a wrong or empty intermediate state. `ui/src/Test/liveWorkerCounts.test.ts`
+is the model.
+
+Live values follow two rules:
+
+- Each displayed value has one source of truth. A component that owns a
+  list applies the events to it; components it passes the list to render it.
+- An event merges the fields it carries into the existing row. A row is
+  inserted only from an event that carries it whole (the server sends
+  complete rows in `created` events).
+
 ## Updating proto
 When the .proto file is changed, you must re-generate the stubs for Go, Svelte.js and Python:
 

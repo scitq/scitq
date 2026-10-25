@@ -4672,36 +4672,53 @@ func (s *taskQueueServer) createJob(ctx context.Context, tx *sql.Tx, workerID in
 	if (flavorID == nil || *flavorID == 0) && action == "C" {
 		return 0, fmt.Errorf("createJob: flavorID must be non-nul and non zero for worker creation %d", workerID)
 	}
-	var jobID int32
-	var err error
-	if flavorID != nil {
-		err = tx.QueryRowContext(ctx,
-			"INSERT INTO job (worker_id, flavor_id, region_id, action, retry) VALUES ($1,$2,$3,$4,$5) RETURNING job_id",
-			workerID, *flavorID, regionID, action, retry,
-		).Scan(&jobID)
-	} else {
-		err = tx.QueryRowContext(ctx,
-			"INSERT INTO job (worker_id, region_id, action, retry) VALUES ($1,$2,$3,$4) RETURNING job_id",
-			workerID, regionID, action, retry,
-		).Scan(&jobID)
-	}
+	// The event carries the row as ListJobs shows it, so the UI inserts a
+	// complete row rather than a placeholder that fills in later.
+	var (
+		jobID      int32
+		workerName sql.NullString
+		flavorInfo sql.NullString
+		createdAt  time.Time
+	)
+	err := tx.QueryRowContext(ctx, `
+		WITH j AS (
+			INSERT INTO job (worker_id, flavor_id, region_id, action, retry) VALUES ($1,$2,$3,$4,$5)
+			RETURNING job_id, worker_id, flavor_id, created_at
+		)
+		SELECT j.job_id, w.worker_name,
+			CASE WHEN f.flavor_name IS NOT NULL
+				THEN f.flavor_name || ' — ' || f.cpu || ' CPU, ' || ROUND(f.mem::numeric) || 'GB mem'
+			END,
+			j.created_at
+		FROM j
+		LEFT JOIN worker w ON w.worker_id = j.worker_id
+		LEFT JOIN flavor f ON f.flavor_id = j.flavor_id`,
+		workerID, flavorID, regionID, action, retry,
+	).Scan(&jobID, &workerName, &flavorInfo, &createdAt)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert job for worker %d: %w", workerID, err)
 	}
 	// 🔔 Event tied to the DB change (within the same code path)
 	type jobPayload struct {
-		JobId      int32     `json:"jobId"`
-		Action     string    `json:"action,omitempty"`
-		Status     string    `json:"status,omitempty"`
-		WorkerID   int32     `json:"workerId,omitempty"`
-		ModifiedAt time.Time `json:"modifiedAt,omitempty"`
+		JobId       int32     `json:"jobId"`
+		Action      string    `json:"action"`
+		Status      string    `json:"status"`
+		WorkerID    int32     `json:"workerId"`
+		WorkerName  *string   `json:"workerName,omitempty"`
+		FlavorInfo  *string   `json:"flavorInfo,omitempty"`
+		Progression int32     `json:"progression"`
+		CreatedAt   time.Time `json:"createdAt"`
+		ModifiedAt  time.Time `json:"modifiedAt"`
 	}
 	ws.EmitWS("job", jobID, "created", jobPayload{
 		JobId:      jobID,
 		Action:     action,
 		Status:     "P",
 		WorkerID:   workerID,
-		ModifiedAt: time.Now(),
+		WorkerName: utils.NullStringToPtr(workerName),
+		FlavorInfo: utils.NullStringToPtr(flavorInfo),
+		CreatedAt:  createdAt,
+		ModifiedAt: createdAt,
 	})
 	return jobID, nil
 }
@@ -6817,16 +6834,10 @@ func (s *taskQueueServer) ListWorkflows(ctx context.Context, req *pb.WorkflowFil
 		}
 		// Populate progress from in-memory step stats aggregator (no DB hit)
 		s.stats.mu.Lock()
-		if steps, ok := s.stats.data[wf.WorkflowId]; ok {
-			for _, agg := range steps {
-				wf.TotalTasks += agg.Total
-				wf.SucceededTasks += agg.Succeeded
-				wf.FailedTasks += agg.ReallyFailed
-				wf.RunningTasks += agg.Accepted + agg.Running + agg.Uploading
-				wf.RetryingTasks += agg.Retrying
-			}
-		}
+		c := workflowCounters(s.stats.data[wf.WorkflowId])
 		s.stats.mu.Unlock()
+		wf.TotalTasks, wf.SucceededTasks, wf.FailedTasks = c.TotalTasks, c.SucceededTasks, c.FailedTasks
+		wf.RunningTasks, wf.RetryingTasks = c.RunningTasks, c.RetryingTasks
 
 		workflows = append(workflows, &wf)
 	}

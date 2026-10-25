@@ -1,17 +1,16 @@
-vi.mock('../lib/api', () => mockApi);
 import { mockApi } from '../mocks/api_mock';
 
 import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import WorkflowPage from '../pages/WorkflowPage.svelte';
-import { wsClient } from '../lib/wsClient';
+import { wsConnect, wsReset, type FakeWebSocket } from './wsHarness';
 
-let messageHandler: (msg: any) => void;
+let ws: FakeWebSocket;
 
 const mockSteps= [
-  { stepId: 1, name: 'Step A', workflowId: 10 },
-  { stepId: 2, name: 'Step B', workflowId: 20 },
-  { stepId: 3, name: 'Step C', workflowId: 10 },
+  { stepId: 1, stepName: 'Step A', workflowId: 10 },
+  { stepId: 2, stepName: 'Step B', workflowId: 20 },
+  { stepId: 3, stepName: 'Step C', workflowId: 10 },
 ];
 
 const mockWorkers = [
@@ -29,15 +28,12 @@ describe('WorkflowPage', () => {
     vi.clearAllMocks();
     mockApi.getWorkers.mockResolvedValue(mockWorkers);
     mockApi.getWorkFlow.mockResolvedValue(mockWorkflows);
-    mockApi.getSteps.mockImplementation(async (workflowId) => {
+    mockApi.getStepStats.mockImplementation(async ({ workflowId }) => {
         return mockSteps.filter(step => step.workflowId === workflowId);
     });
-
-    vi.spyOn(wsClient, 'subscribeToMessages').mockImplementation((handler : any) => {
-        messageHandler = handler; // Store the handler for later use
-        return () => true; // Unsubscribe function
-    });
+    ws = wsConnect();
   });
+  afterEach(() => wsReset());
 
   it('displays the initial list of workflows', async () => {
     render(WorkflowPage);
@@ -63,15 +59,8 @@ describe('WorkflowPage', () => {
       expect(mockApi.delWorkflow).toHaveBeenCalledWith(10);
     });
     
-    // Simulate WebSocket response
-    if (messageHandler) {
-      messageHandler({
-        type: 'workflow-deleted',
-        payload: {
-          workflowId: 10
-        }
-      });
-    }
+    // Server event confirming the deletion
+    ws.deliver({ type: 'workflow', action: 'deleted', id: 10, payload: { workflowId: 10 } });
     
     // Verify workflow was removed
     await waitFor(() => {

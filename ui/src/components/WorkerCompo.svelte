@@ -247,8 +247,13 @@
         switch (action) {
           case 'status': {
             const workerId = payload.workerId;
-            const oldStatus = payload.oldStatus;
+            // A retry announces a new task: its oldStatus is the parent's,
+            // and the parent's own count is settled elsewhere (it stays in
+            // F, or a 'hidden' event removes it).
+            const isRetry = payload.parentTaskId !== undefined;
+            const oldStatus = isRetry ? undefined : payload.oldStatus;
             const newStatus = payload.status;
+            if (isRetry) totalCount++;
             // Update global allCount
             if (oldStatus) {
               allCount[oldStatus] = (allCount[oldStatus] || 0) - 1;
@@ -1046,14 +1051,14 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
     <a href="#/tasks"> All: {totalCount}</a>
     <a href="#/tasks?status=W">Waiting: {(allCount['W'] || 0)}</a>
     <a href="#/tasks?status=P" data-testid="pending-link-dashboard"> Pending: {(allCount['P'] || 0)}</a>
-    <a href="#/tasks?status=A"> Assigned: {(allCount['A'] || 0)}</a>
-    <a href="#/tasks?status=C">Accepted: {(allCount['C'] || 0)}</a>
+    <a href="#/tasks?status=A" data-testid="count-A"> Assigned: {(allCount['A'] || 0)}</a>
+    <a href="#/tasks?status=C" data-testid="count-C">Accepted: {(allCount['C'] || 0)}</a>
     <a href="#/tasks?status=D">Downloading: {(allCount['D'] || 0)}</a>
     <a href="#/tasks?status=O">On hold: {(allCount['O'] || 0)}</a>
     <a href="#/tasks?status=R">Running: {(allCount['R'] || 0)}</a>
-    <a href="#/tasks?status=U">Uploading: {(allCount['U'] || 0)+(allCount['V'] || 0)}</a>
+    <a href="#/tasks?status=U" data-testid="count-U">Uploading: {(allCount['U'] || 0)+(allCount['V'] || 0)}</a>
     <a href="#/tasks?status=S">Succeeded: {(allCount['S'] || 0)}</a>
-    <a href="#/tasks?status=F">Failed: {(allCount['F'] || 0)}</a>
+    <a href="#/tasks?status=F" data-testid="count-F">Failed: {(allCount['F'] || 0)}</a>
     <a href="#/tasks?status=Z">Suspended: {(allCount['Z'] || 0)}</a>
     <a href="#/tasks?status=X">Canceled: {(allCount['X'] || 0)}</a>
   </div>

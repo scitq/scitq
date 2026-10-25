@@ -746,6 +746,7 @@ func (a *StepStatsAgg) FlushOnce() {
 	// Group dirty steps by workflow so we emit one WS message per
 	// workflow topic, matching the existing subscription shape.
 	byWorkflow := make(map[int32][]StepCounterSnapshot)
+	totals := make(map[int32]WorkflowCounters)
 	for key := range a.dirty {
 		wf := a.data[key.workflowID]
 		if wf == nil {
@@ -760,6 +761,9 @@ func (a *StepStatsAgg) FlushOnce() {
 			snapshotFromAgg(key.stepID, agg, now),
 		)
 	}
+	for wfID := range byWorkflow {
+		totals[wfID] = workflowCounters(a.data[wfID])
+	}
 	// Clear the set atomically with the read so the next tick starts
 	// fresh — any transition arriving between the unlock and the
 	// emit will mark itself dirty and be picked up next tick.
@@ -771,9 +775,33 @@ func (a *StepStatsAgg) FlushOnce() {
 	// aggregator updates.
 	for wfID, steps := range byWorkflow {
 		websocket.EmitWS("step-stats", wfID, "snapshot", struct {
-			Steps []StepCounterSnapshot `json:"steps"`
-		}{Steps: steps})
+			Steps    []StepCounterSnapshot `json:"steps"`
+			Workflow WorkflowCounters      `json:"workflow"`
+		}{Steps: steps, Workflow: totals[wfID]})
 	}
+}
+
+// WorkflowCounters are a workflow's task counters, summed over all its
+// steps. ListWorkflows and the step-stats snapshot both report these, so
+// the workflow list shows one value whichever delivered it last.
+type WorkflowCounters struct {
+	TotalTasks     int32 `json:"totalTasks"`
+	SucceededTasks int32 `json:"succeededTasks"`
+	FailedTasks    int32 `json:"failedTasks"`
+	RunningTasks   int32 `json:"runningTasks"`
+	RetryingTasks  int32 `json:"retryingTasks"`
+}
+
+func workflowCounters(steps map[int32]*StepAgg) WorkflowCounters {
+	var c WorkflowCounters
+	for _, agg := range steps {
+		c.TotalTasks += agg.Total
+		c.SucceededTasks += agg.Succeeded
+		c.FailedTasks += agg.ReallyFailed
+		c.RunningTasks += agg.Accepted + agg.Running + agg.Uploading
+		c.RetryingTasks += agg.Retrying
+	}
+	return c
 }
 
 // runningHeartbeatInterval is the cadence for re-marking steps with

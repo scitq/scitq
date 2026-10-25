@@ -236,7 +236,7 @@
             {@const pctFailed = failedTasks / t * 100}
             {@const pctRunning = runningTasks / t * 100}
             {@const pctRetrying = retryingTasks / t * 100}
-            <div class="wf-progress-bar"
+            <div class="wf-progress-bar" data-testid={`wf-progress-${wf.workflowId}`}
                  title={`${succeededTasks}/${t} succeeded, ${failedTasks} failed, ${runningTasks} running` + (retryingTasks ? `, ${retryingTasks} retrying` : '')}>
               <div class="wf-progress-success" style="width:{pctSuccess}%"></div>
               <div class="wf-progress-running" style="width:{pctRunning}%"></div>

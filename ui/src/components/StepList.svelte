@@ -74,7 +74,6 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
    * Array of pending steps waiting to be loaded
    * @type {Array<Object>}
    */
-  let pendingSteps = [];
 
   /**
    * Flag indicating if more steps are available to load
@@ -93,24 +92,6 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
    * @type {HTMLDivElement}
    */
   let tableContainer: HTMLDivElement = $state();
-
-  /**
-   * Flag indicating if the table is scrolled to top
-   * @type {boolean}
-   */
-  let isScrolledToTop = true;
-
-  /**
-   * Count of new steps available
-   * @type {number}
-   */
-  let newStepsCount = $state(0);
-
-  /**
-   * Flag to show new steps notification
-   * @type {boolean}
-   */
-  let showNewStepsNotification = $state(false);
 
   /**
    * Last scroll position of the table
@@ -351,8 +332,7 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
       if (message.action === 'created' && message.payload?.workflowId === workflowId) {
         const newStep = message.payload;
         const existsInSteps = steps.some((s) => s.stepId === newStep.stepId);
-        const existsInPending = pendingSteps.some((s) => s.stepId === newStep.stepId);
-        if (!existsInSteps && !existsInPending) {
+        if (!existsInSteps) {
           const stepObj = {
             stepId: newStep.stepId,
             stepName: newStep.name || newStep.stepName || '',
@@ -374,13 +354,8 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
             failedRunStats:  { average: 0, min: 0, max: 0 },
             currentRunStats: { average: 0, min: 0, max: 0 },
           };
-          if (isScrolledToTop) {
-            steps = [...steps, stepObj];
-          } else {
-            pendingSteps = [...pendingSteps, stepObj];
-            newStepsCount = pendingSteps.length;
-            showNewStepsNotification = true;
-          }
+          // Appended at the bottom, so the scroll position stays put.
+          steps = [...steps, stepObj];
         }
         return;
       }
@@ -388,7 +363,6 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
         const idToRemove = message.payload?.stepId ?? message.id;
         if (typeof idToRemove === 'number') {
           steps = steps.filter((s) => s.stepId !== idToRemove);
-          pendingSteps = pendingSteps.filter((s) => s.stepId !== idToRemove);
           runningByStep.delete(idToRemove);
           // Remove any workers shown under this step
           const next = new Map(workersByStep);
@@ -565,8 +539,6 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
 
     if (!isVerticalScroll) return;
 
-    isScrolledToTop = scrollTop <= 10;
-
     const threshold = 150;
     const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
 
@@ -596,13 +568,6 @@ import { getStepStats, delStep, listWorkers, getRunningTasks } from '../lib/api'
 <div class="steps-container">
   {#if steps && steps.length > 0}
     <div class="steps-table-wrapper" bind:this={tableContainer} onscroll={handleScroll}>
-      {#if showNewStepsNotification}
-        <button class="new-steps-notification" onclick={loadNewSteps}>
-          {newStepsCount} new step{newStepsCount > 1 ? 's' : ''} available
-          <span class="show-new-btn">Show</span>
-        </button>
-      {/if}
-
       <!-- Steps table -->
       <table class="listTable">
         <thead>

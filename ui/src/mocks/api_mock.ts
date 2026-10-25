@@ -1,7 +1,16 @@
 import { vi } from 'vitest';
-import * as api from '../lib/api';
+const api = await vi.importActual<typeof import('../lib/api')>('../lib/api');
 
-export const mockApi = {
+// Every async export of the API (a server call) is a mock resolving to
+// nothing; the synchronous ones (formatting, status labels) stay real. The
+// entries below give calls whose callers expect a value a sensible default.
+const auto = Object.fromEntries(Object.entries(api).map(([name, value]) => [
+  name,
+  typeof value === 'function' && value.constructor.name === 'AsyncFunction' ? vi.fn().mockResolvedValue(undefined) : value,
+]));
+
+export const mockApi: Record<string, any> = {
+  ...auto,
   changepswd: vi.fn().mockResolvedValue(undefined),
   getListUser: vi.fn().mockResolvedValue([]),
   newUser: vi.fn().mockResolvedValue(42),
@@ -25,12 +34,9 @@ export const mockApi = {
   delWorker: vi.fn().mockResolvedValue(undefined),
 
   getStatus: vi.fn().mockResolvedValue([]),
+  getAllTaskStats: vi.fn().mockResolvedValue({ perWorkerStatusCounts: {}, globalStatusCounts: {}, totalCount: 0 }),
+  listWorkerEvents: vi.fn().mockResolvedValue([]),
 
-  getWorkerStatusClass: api.getWorkerStatusClass,
-  getWorkerStatusText: api.getWorkerStatusText,
-  getJobStatusClass: api.getJobStatusClass,
-  getJobStatusText: api.getJobStatusText,
-  formatBytesPair : api.formatBytesPair,
 
   getTasksCount: vi.fn().mockResolvedValue([]),
   getAllTasks: vi.fn().mockResolvedValue([]),
@@ -39,6 +45,9 @@ export const mockApi = {
   getLogsBatch: vi.fn().mockResolvedValue([]),
   
   getSteps: vi.fn().mockResolvedValue([]),
+  getStepStats: vi.fn().mockResolvedValue([]),
+  getRunningTasks: vi.fn().mockResolvedValue([]),
+  listWorkers: vi.fn().mockResolvedValue([]),
   delStep: vi.fn().mockResolvedValue([]),
   delWorkflow: vi.fn().mockResolvedValue([]),
 
