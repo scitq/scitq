@@ -46,6 +46,21 @@ jobs:
       - name: UI component tests
         run: make ui-test
 
+  # The documentation site builds, with no broken link (mkdocs --strict).
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the documentation site
+        run: |
+          pip install -r docs/requirements.txt
+          mkdocs build --strict
+
   # Unit tests outside tests/integration: Go packages and the Python DSL suite.
   unit:
     runs-on: ubuntu-latest

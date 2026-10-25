@@ -21,33 +21,38 @@ theme:
 
 plugins:
   - search
-  - mkdocstrings:
-      handlers:
-        python:
-          paths: [python/pyscitq2]
-        go:
-          paths: [internal]
   - include-markdown
+
+# Internal meeting notes are kept in the repository, not published.
+exclude_docs: |
+  meetings/
 
 nav:
   - Home: index.md
   - Motivation: motivation.md
+  - Concepts: concepts.md
   - Installation: install.md
-  - Quickstart: quickstart.md
+  - Upgrading: upgrading.md
   - Usage:
+      - Basic usage: usage/basic.md
       - Web UI: usage/ui.md
       - CLI: usage/cli.md
       - YAML Templates: usage/yaml-templates.md
       - Python DSL: usage/dsl.md
+      - Optimization: usage/optimization.md
       - AI Integration: usage/ai-integration.md
-      - API Reference: usage/api.md
+      - Converting Nextflow: usage/convert-nextflow.md
+      - Converting Snakemake: usage/convert-snakemake.md
   - Reference:
-      - DB Schema: reference/db-schema.md
       - Configuration: reference/configuration.md
-      - Compatibility: reference/compatibility.md
       - Recruitment: reference/recruitment.md
+      - Compatibility: reference/compatibility.md
       - Security: reference/security.md
       - Monitoring: reference/monitoring.md
       - Module Library: reference/module-library.md
-      - Glossary: reference/glossary.md
-  - Troubleshooting: troubleshooting.md
+      - Python DSL API: reference/python_dsl.md
+      - Data model: model.md
+      - Database schema: schema.md
+      - gRPC API: api.md
+  - Development: dev.md
+  - Changelog: changelog.md

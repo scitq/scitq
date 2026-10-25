@@ -84,7 +84,7 @@ money is spent on new machines. Recycling never waits for it.
   step's own `worker_pool` sets only that step's recruiter. For recruiters
   added by hand, `--max-workers` (CLI) or `max_workers` (MCP).
 - **Provider quotas** (`scitq.yaml`, per provider and region) cap what can be
-  deployed in each region. See the [configuration reference](configuration.md#quota-per-region-resource-limits).
+  deployed in each region. See the [configuration reference](configuration.md) (`quotas` of each provider).
 
 ## Recycling
 

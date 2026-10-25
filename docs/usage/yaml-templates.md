@@ -2350,7 +2350,7 @@ Refs that require schema additions (`{parent.publish.<step>}`,
 `{parent.workspace_root}`, `{parent.tag}`) return a clear "not in v1" error
 pointing at the workaround: pass the URI explicitly via
 `{parent.params.X}` and your template's known `publish_root` convention.
-See [`specs/workflow_chain.md`](../../specs/workflow_chain.md) for the v2
+See [`specs/workflow_chain.md`](https://github.com/scitq/scitq/blob/main/specs/workflow_chain.md) for the v2
 plan.
 
 ### Lifecycle and operator controls
@@ -2384,4 +2384,4 @@ entries against their recorded `child_workflow_id` via `--extend-workflow`
 time (e.g. dated archival workflows).
 
 Full design, full lifecycle diagram, and the rerun semantics:
-[`specs/workflow_chain.md`](../../specs/workflow_chain.md).
+[`specs/workflow_chain.md`](https://github.com/scitq/scitq/blob/main/specs/workflow_chain.md).

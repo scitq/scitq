@@ -14,7 +14,7 @@ Tasks can either do something, in which case you may just want to know that it s
 
 There are two kinds of workers:
 - manually deployed workers: these are servers on which scitq client was installed, see [install](../install.md#installing-manually-a-worker),
-- automatically deployed workers: these are created and installed by scitq itself, they require configured instance providers. Look in [server config example](../../sample_files/scitq.yaml) how it is done.
+- automatically deployed workers: these are created and installed by scitq itself, they require configured instance providers. Look in [server config example](https://github.com/scitq/scitq/blob/main/sample_files/scitq.yaml) how it is done.
 
 
 ## Managing which workers execute which tasks

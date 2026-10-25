@@ -25,7 +25,8 @@ For an overview of design philosophy, see [Motivation](motivation.md).
 - [Converting from Nextflow](usage/convert-nextflow.md)
 - [Converting from Snakemake](usage/convert-snakemake.md)
 
-- [Troubleshooting](troubleshooting.md)
+- [Concepts: task lifecycle, retries, workflow success, recruitment](concepts.md)
+- [Upgrading](upgrading.md) and the [Changelog](changelog.md)
 
 ## For developers
 - [Development](dev.md)

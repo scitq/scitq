@@ -11,7 +11,7 @@ saturation, quota exhaustion, deletion jobs hanging, and any other
 "something is off with the server" signal are metrics with
 thresholds, not push messages. For user-facing convenience pings
 ("your workflow finished"), see the
-[Notifications section](configuration.md#notifications-user-facing) in
+[`notifications` keys](configuration.md) in
 the configuration reference.
 
 The design intent behind the split is that alerting logic (silence,

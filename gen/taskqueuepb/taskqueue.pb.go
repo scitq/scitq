@@ -2797,14 +2797,14 @@ type TaskStatusUpdate struct {
 	// Failure classification (spec: addition_from_nextflow.md A). Set when
 	// new_status is "F". Controls whether the retry-decision logic should
 	// advance the step's resource-escalation curve. The worker reports
-	// OOM (docker exit 137), timeout (exceeded running_timeout), and
+	// OOM (Docker's OOMKilled), timeout (exceeded running_timeout), and
 	// explicit-error / unknown ("other"). Eviction / worker-disappeared
 	// failures are server-declared — the worker is gone by definition —
 	// and the server tags the task with failure_class="eviction" directly
 	// when reaping orphaned tasks. Empty / unset is treated the same as
 	// "other" by downstream logic. Recognised values:
 	//
-	//	"oom"      — out-of-memory kill (docker exit 137 / OOMKilled)
+	//	"oom"      — out-of-memory kill (Docker's OOMKilled; exit 137 alone is "other")
 	//	"timeout"  — exceeded running_timeout / upload_timeout / download_timeout
 	//	"eviction" — server-declared (spot preempt, manual worker delete,
 	//	             worker watchdog reaped)

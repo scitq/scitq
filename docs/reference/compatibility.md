@@ -51,20 +51,19 @@ During an upgrade, server, workers and CLI briefly run different versions.
 
 ## Upgrading a server
 
-Follow the checklist in [Upgrading](../install.md#upgrading). In short: back
-up the database, upgrade the server, let its migrations run at startup, then
-upgrade the workers (`scitq worker upgrade --all`).
-
-Downgrading is a restore, not a reinstall. Migrations only go forward: once a
-newer server has started, its database schema no longer matches the older
-binary, and reinstalling that binary alone leaves a server that fails at
-startup or misreads its data. To go back, stop the server, restore the
-database backup taken before the upgrade, then reinstall the previous
-binaries.
+Follow [Upgrading](../upgrading.md): back up the database, upgrade the
+server, let its migrations run at startup, then upgrade the CLIs and the
+workers (`scitq worker upgrade --all`). Going back to a previous release is
+a database restore, described there.
 
 ## For contributors
 
 Run `make compat` before opening a pull request; CI runs the same checks.
+
+Record every change a user can notice in [`CHANGELOG.md`](../changelog.md),
+under the unreleased version at the top: what it adds, changes, deprecates,
+removes or fixes. A change that needs an action at upgrade time also goes in
+the release's section of [Upgrading](../upgrading.md).
 
 - The `compat/*.txt` files record each public surface. They must match the
   code: after an addition, regenerate them and commit the result.

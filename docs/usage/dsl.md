@@ -1408,7 +1408,7 @@ def optimize():
 optimize()
 ```
 
-For parallel trials with fan-out and pruning via SIGTERM, see the [optimization spec](../../specs/quality_scoring_and_optimization.md).
+For parallel trials with fan-out and pruning via SIGTERM, see the [optimization spec](https://github.com/scitq/scitq/blob/main/specs/quality_scoring_and_optimization.md).
 
 ## Reference
 
