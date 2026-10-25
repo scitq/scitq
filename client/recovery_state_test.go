@@ -3,30 +3,30 @@ package client
 import "testing"
 
 // Inspect strings below are verbatim shapes observed against dockerd
-// 27.5.1 (created / clean exit / exited-after-daemon-crash) plus the
-// running and OOM cases.
-func TestFinishedExitCode(t *testing.T) {
+// 27.5.1 (created / clean exit / exited-after-daemon-crash) and Docker
+// Desktop (OOM kill under a memory limit above the container; SIGKILL from
+// outside, which also exits 137 but is not an OOM).
+func TestParseContainerState(t *testing.T) {
 	cases := []struct {
-		name     string
-		state    string
-		wantCode int32
-		wantOK   bool
+		name  string
+		state string
+		want  containerEnd
 	}{
-		{"created never started", "created|0|0001-01-01T00:00:00Z|false", -1, false},
-		{"still running", "running|0|0001-01-01T00:00:00Z|false", -1, false},
-		{"clean exit", "exited|0|2026-10-23T06:23:00.783731299Z|false", 0, true},
-		{"failed exit", "exited|2|2026-10-23T06:23:00.783731299Z|false", 2, true},
-		{"process lost under daemon crash", "exited|255|2026-10-23T06:26:41.174108762Z|false", 255, true},
-		{"oom killed", "exited|0|2026-10-23T06:23:00.783731299Z|true", 137, true},
-		{"exited without finish time", "exited|0|0001-01-01T00:00:00Z|false", -1, false},
-		{"dead", "dead|0|2026-10-23T06:23:00.783731299Z|false", -1, false},
-		{"garbage", "Error: No such object", -1, false},
-		{"empty", "", -1, false},
+		{"created never started", "created|0|0001-01-01T00:00:00Z|false", containerEnd{-1, false, false}},
+		{"still running", "running|0|0001-01-01T00:00:00Z|false", containerEnd{-1, false, false}},
+		{"clean exit", "exited|0|2026-10-23T06:23:00.783731299Z|false", containerEnd{0, true, false}},
+		{"failed exit", "exited|2|2026-10-23T06:23:00.783731299Z|false", containerEnd{2, true, false}},
+		{"process lost under daemon crash", "exited|255|2026-10-23T06:26:41.174108762Z|false", containerEnd{255, true, false}},
+		{"oom killed", "exited|137|2026-10-25T18:40:12.1Z|true", containerEnd{137, true, true}},
+		{"sigkill from outside is not oom", "exited|137|2026-10-25T18:40:14.2Z|false", containerEnd{137, true, false}},
+		{"exited without finish time", "exited|0|0001-01-01T00:00:00Z|false", containerEnd{-1, false, false}},
+		{"dead", "dead|0|2026-10-23T06:23:00.783731299Z|false", containerEnd{-1, false, false}},
+		{"garbage", "Error: No such object", containerEnd{-1, false, false}},
+		{"empty", "", containerEnd{-1, false, false}},
 	}
 	for _, tc := range cases {
-		code, ok := finishedExitCode(tc.state)
-		if code != tc.wantCode || ok != tc.wantOK {
-			t.Errorf("%s: finishedExitCode(%q) = (%d, %v), want (%d, %v)", tc.name, tc.state, code, ok, tc.wantCode, tc.wantOK)
+		if got := parseContainerState(tc.state); got != tc.want {
+			t.Errorf("%s: parseContainerState(%q) = %+v, want %+v", tc.name, tc.state, got, tc.want)
 		}
 	}
 }

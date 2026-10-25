@@ -366,6 +366,9 @@ Each task carries a ` + "`peak_mem_mb`" + ` field populated by the worker at tas
 ### Per-task output manifest
 Terminal tasks carry ` + "`produced_files`" + ` and ` + "`produced_bytes`" + ` (what the program left in /output) and ` + "`uploaded_files`" + ` (how many of those files reached every upload target with a verified size). A succeeded task always has uploaded_files equal to produced_files; a shortfall makes the task fail (class network) and retry. produced_files = 0 on a succeeded task means the program wrote nothing — check the program and its inputs; scitq moved everything there was. Omitted for tasks that never reached the upload phase or ran on an older worker.
 
+### Why a task failed: failure_class
+Failed tasks carry ` + "`failure_class`" + `: ` + "`oom`" + ` — the kernel's out-of-memory killer killed a process in the task (Docker's own verdict, not inferred from exit code 137); ` + "`timeout`" + ` — a download, run or upload timeout expired; ` + "`network`" + ` — an upload or download failed; ` + "`eviction`" + ` — the worker disappeared (spot reclaim, deletion), which does not advance resource curves; ` + "`definitive`" + ` — the step's definitive-failure policy matched, so no retry; ` + "`other`" + ` — anything else, including a container killed from outside (exit 137 without OOM, e.g. a Docker daemon restart or an operator kill). Raise memory only for ` + "`oom`" + `.
+
 ### Auto-cleanup of intermediate data
 Add ` + "`" + `lifetime: workflow` + "`" + ` (sibling of the named globs) inside a step's ` + "`" + `outputs:` + "`" + ` block to have the server sweep this step's workspace copies when the workflow reaches S. Publish destinations are never touched. Fires only on workflow S (never F/D); best-effort — a backend hiccup logs a warning and moves on. Use for intermediate data (e.g. trimmed reads that only exist to feed the next step). Only ` + "`" + `workflow` + "`" + ` is accepted today; ` + "`" + `task` + "`" + ` is reserved.
 ` + "`" + `yaml
@@ -1356,6 +1359,7 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		ProducedFiles    *int32    `json:"produced_files,omitempty"`
 		ProducedBytes    *int64    `json:"produced_bytes,omitempty"`
 		UploadedFiles    *int32    `json:"uploaded_files,omitempty"`
+		FailureClass     *string   `json:"failure_class,omitempty"`
 	}
 	summaries := make([]taskSummary, 0, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -1398,6 +1402,7 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		if len(t.DiskSharedCurve) > 1 { s.DiskSharedCurve = t.DiskSharedCurve }
 		if t.PeakMemMb != nil && *t.PeakMemMb > 0 { s.PeakMemMb = t.PeakMemMb }
 		s.ProducedFiles, s.ProducedBytes, s.UploadedFiles = t.ProducedFiles, t.ProducedBytes, t.UploadedFiles
+		s.FailureClass = t.FailureClass
 		summaries = append(summaries, s)
 	}
 	return jsonResult(summaries), nil

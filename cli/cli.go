@@ -708,6 +708,9 @@ func (c *CLI) TaskList() error {
 			if task.UploadDuration != nil {
 				fmt.Printf("   Upload:    %s\n", formatDuration(float32(*task.UploadDuration)))
 			}
+			if task.FailureClass != nil && *task.FailureClass != "" {
+				fmt.Printf("   Failure:   %s\n", *task.FailureClass)
+			}
 			if task.ProducedFiles != nil && task.ProducedBytes != nil && task.UploadedFiles != nil {
 				fmt.Printf("   Outputs:   %d files (%s) produced, %d uploaded\n",
 					*task.ProducedFiles, formatBytes(*task.ProducedBytes), *task.UploadedFiles)

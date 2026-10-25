@@ -4959,6 +4959,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			t.mem_shared_curve, t.disk_shared_curve,
 			t.peak_mem_mb,
 			t.produced_files, t.produced_bytes, t.uploaded_files,
+			t.failure_class,
 			EXTRACT(EPOCH FROM t.created_at)::bigint AS created_epoch,
 			EXTRACT(EPOCH FROM t.modified_at)::bigint AS modified_epoch
         FROM task t
@@ -5017,6 +5018,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			peakMemMB                                                         sql.NullInt32
 			producedFiles, uploadedFiles                                      sql.NullInt32
 			producedBytes                                                     sql.NullInt64
+			failureClass                                                      sql.NullString
 			retryCount                                                        int32
 			hidden                                                            bool
 			createdEpoch, modifiedEpoch                                       sql.NullInt64
@@ -5064,6 +5066,7 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 			&producedFiles,
 			&producedBytes,
 			&uploadedFiles,
+			&failureClass,
 			&createdEpoch,
 			&modifiedEpoch,
 		); err != nil {
@@ -5145,6 +5148,9 @@ func (s *taskQueueServer) ListTasks(ctx context.Context, req *pb.ListTasksReques
 		}
 		if uploadedFiles.Valid {
 			task.UploadedFiles = &uploadedFiles.Int32
+		}
+		if failureClass.Valid {
+			task.FailureClass = &failureClass.String
 		}
 
 		tasks = append(tasks, &task)

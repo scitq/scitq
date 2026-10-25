@@ -116,6 +116,11 @@ type taskHooks struct {
 	// finishedExitCode). The post-Wait path in executeTask reads this and,
 	// if non-negative, uses it instead of cmd.Wait()'s "signal: killed".
 	capturedExit atomic.Int32
+
+	// oomKilled records Docker's verdict that the kernel OOM killer killed
+	// a process in the task container (inspect .State.OOMKilled). It is
+	// the only signal classifyExecFailure uses for "oom".
+	oomKilled atomic.Bool
 }
 
 var taskHooksMap sync.Map // map[int32]*taskHooks
@@ -732,6 +737,18 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		}
 	}
 
+	// Docker's own verdict on whether the kernel OOM killer struck, read
+	// while the stopped container still exists (removed by the deferred
+	// `docker rm -f`). Also catches an OOM-killed child process when the
+	// script then exits with another code.
+	if err != nil && !isBare && containerName != "" && !hooks.oomKilled.Load() {
+		if out, ierr := exec.Command("docker", "inspect", "-f", containerStateFormat, containerName).Output(); ierr == nil {
+			if parseContainerState(string(out)).oomKilled {
+				hooks.oomKilled.Store(true)
+			}
+		}
+	}
+
 	// Kernel-tracked peak memory: stop the background sampler and read
 	// its accumulated max. The sampler polled memory.peak while the
 	// container was alive, so the counter is available even if the
@@ -804,11 +821,14 @@ func dockerInspectContainerID(containerName string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// classifyExecFailure inspects a cmd.Wait error and the recovery hooks to
-// decide which failure_class to attach to the eventual terminal F status.
-// Values: "oom" (container exit 137 / Linux OOMKilled), "timeout" (running
-// timeout / context cancelled), "other" (everything else). "eviction" is
-// never produced here — server-side reaping owns that classification.
+// classifyExecFailure decides which failure_class to attach to the eventual
+// terminal F status: "timeout" (running timeout / context cancelled), "oom"
+// (Docker reports the container's process was killed by the kernel OOM
+// killer), "other" (everything else). "eviction" is never produced here —
+// server-side reaping owns that classification.
+//
+// Exit code 137 alone is not treated as OOM: it is any SIGKILL, including a
+// Docker daemon shutdown or an operator kill.
 func classifyExecFailure(err error, hooks *taskHooks) string {
 	if err == nil {
 		return ""
@@ -816,18 +836,8 @@ func classifyExecFailure(err error, hooks *taskHooks) string {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return "timeout"
 	}
-	msg := err.Error()
-	// cmd.Wait reports docker / process exit codes via *exec.ExitError —
-	// we already have its String() embedded in err. Both forms ("exit
-	// status 137" from exec, "container exited with code 137" from our
-	// own captured-exit override path) contain "137".
-	if strings.Contains(msg, " 137") || strings.HasSuffix(msg, "137") {
+	if hooks != nil && hooks.oomKilled.Load() {
 		return "oom"
-	}
-	if hooks != nil {
-		if c := hooks.capturedExit.Load(); c == 137 {
-			return "oom"
-		}
 	}
 	return "other"
 }
@@ -887,15 +897,18 @@ func recoverTask(taskID int32, hooks *taskHooks, reason string) bool {
 		// from the daemon. With --rm dropped, the container persists until
 		// our cleanup defer removes it, so its state is queryable here.
 		if !hooks.isBare && hooks.containerName != "" {
-			out, err := exec.Command("docker", "inspect", "-f", finishedExitFormat, hooks.containerName).CombinedOutput()
+			out, err := exec.Command("docker", "inspect", "-f", containerStateFormat, hooks.containerName).CombinedOutput()
 			state := strings.TrimSpace(string(out))
-			code, finished := int32(-1), false
+			end := containerEnd{exitCode: -1}
 			if err == nil {
-				code, finished = finishedExitCode(state)
+				end = parseContainerState(state)
 			}
-			if finished {
-				hooks.capturedExit.Store(code)
-				log.Printf("🩺 Task %d recovery: container finished with exit code %d before SIGKILL", taskID, code)
+			if end.oomKilled {
+				hooks.oomKilled.Store(true)
+			}
+			if end.finished {
+				hooks.capturedExit.Store(end.exitCode)
+				log.Printf("🩺 Task %d recovery: container finished with exit code %d before SIGKILL", taskID, end.exitCode)
 			} else {
 				log.Printf("🩺 Task %d recovery: container did not finish (state %q, err %v); task will be reported failed", taskID, state, err)
 			}
@@ -903,8 +916,8 @@ func recoverTask(taskID int32, hooks *taskHooks, reason string) bool {
 				hooks.reporter.Event("W", "recovery", "phase-2 kill after inspect", map[string]any{
 					"task_id":        taskID,
 					"docker_state":   state,
-					"captured_exit":  code,
-					"container_done": finished,
+					"captured_exit":  end.exitCode,
+					"container_done": end.finished,
 				})
 			}
 		}
