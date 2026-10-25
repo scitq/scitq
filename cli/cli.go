@@ -1049,6 +1049,20 @@ func (c *CLI) WorkerList() error {
 		return fmt.Errorf("error fetching workers: %w", err)
 	}
 
+	if c.Attr.JSON {
+		workers := res.Workers
+		if c.Attr.Worker.List.NeedsUpgrade {
+			workers = nil
+			for _, w := range res.Workers {
+				if w.GetUpgradeStatus() == "needs_upgrade" {
+					workers = append(workers, w)
+				}
+			}
+		}
+		c.jsonOut(workers)
+		return nil
+	}
+
 	fmt.Println("👷 Worker List:")
 	for _, worker := range res.Workers {
 		// --needs-upgrade filter: skip everything except actual stale-amd64 workers.

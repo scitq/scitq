@@ -1,0 +1,7 @@
+# Breaking-change check for the gRPC API (see docs/reference/compatibility.md).
+# WIRE_JSON protects what mixed-version deployments depend on: field numbers,
+# types and JSON names on the wire. Run with `make proto-breaking`.
+version: v2
+breaking:
+  use:
+    - WIRE_JSON

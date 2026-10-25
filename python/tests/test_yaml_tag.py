@@ -14,6 +14,9 @@ import yaml as _yaml
 from scitq2 import yaml_runner as yr
 from scitq2.workflow import Workflow
 
+# Templates are compiled against an in-memory fake, never a real server.
+pytestmark = pytest.mark.usefixtures("fake_server")
+
 
 # ---------------- helper ----------------
 

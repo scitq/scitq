@@ -1,0 +1,288 @@
+mcp create_recruiter
+mcp create_recruiter concurrency optional
+mcp create_recruiter concurrency:integer
+mcp create_recruiter cpu_per_task optional
+mcp create_recruiter cpu_per_task:integer
+mcp create_recruiter extra_storage_gb optional
+mcp create_recruiter extra_storage_gb:integer
+mcp create_recruiter extra_storage_type optional
+mcp create_recruiter extra_storage_type:string
+mcp create_recruiter max_workers optional
+mcp create_recruiter max_workers:integer
+mcp create_recruiter prefetch optional
+mcp create_recruiter prefetch:integer
+mcp create_recruiter protofilter:string
+mcp create_recruiter rank optional
+mcp create_recruiter rank:integer
+mcp create_recruiter rounds optional
+mcp create_recruiter rounds:integer
+mcp create_recruiter step_id:integer
+mcp create_recruiter swap_proportion optional
+mcp create_recruiter swap_proportion:number
+mcp create_recruiter timeout optional
+mcp create_recruiter timeout:integer
+mcp delete_recruiter
+mcp delete_recruiter rank:integer
+mcp delete_recruiter step_id:integer
+mcp delete_task
+mcp delete_task task_id:integer
+mcp delete_worker
+mcp delete_worker undeployed optional
+mcp delete_worker undeployed:boolean
+mcp delete_worker worker_id:integer
+mcp delete_workflow
+mcp delete_workflow workflow_id:integer
+mcp deploy_worker
+mcp deploy_worker concurrency optional
+mcp deploy_worker concurrency:integer
+mcp deploy_worker count optional
+mcp deploy_worker count:integer
+mcp deploy_worker flavor:string
+mcp deploy_worker prefetch optional
+mcp deploy_worker prefetch:integer
+mcp deploy_worker provider:string
+mcp deploy_worker region optional
+mcp deploy_worker region:string
+mcp deploy_worker step_id optional
+mcp deploy_worker step_id:integer
+mcp download_module
+mcp download_module name:string
+mcp download_template
+mcp download_template name:string
+mcp download_template version optional
+mcp download_template version:string
+mcp edit_and_retry_task
+mcp edit_and_retry_task command:string
+mcp edit_and_retry_task container optional
+mcp edit_and_retry_task container:string
+mcp edit_and_retry_task inputs optional
+mcp edit_and_retry_task inputs:array
+mcp edit_and_retry_task publish optional
+mcp edit_and_retry_task publish:string
+mcp edit_and_retry_task resources optional
+mcp edit_and_retry_task resources:array
+mcp edit_and_retry_task task_id:integer
+mcp edit_step_command
+mcp edit_step_command container optional
+mcp edit_step_command container:string
+mcp edit_step_command find:string
+mcp edit_step_command inputs optional
+mcp edit_step_command inputs:array
+mcp edit_step_command is_regexp optional
+mcp edit_step_command is_regexp:boolean
+mcp edit_step_command replace:string
+mcp edit_step_command resources optional
+mcp edit_step_command resources:array
+mcp edit_step_command step_id:integer
+mcp file_list
+mcp file_list uri:string
+mcp force_run_task
+mcp force_run_task task_id:integer
+mcp fork_module
+mcp fork_module new_version:string
+mcp fork_module source_path:string
+mcp fork_module source_version optional
+mcp fork_module source_version:string
+mcp get_doc
+mcp get_doc page:string
+mcp get_worker_stats
+mcp get_worker_stats worker_ids optional
+mcp get_worker_stats worker_ids:array
+mcp get_worker_stats_history
+mcp get_worker_stats_history bucket_seconds optional
+mcp get_worker_stats_history bucket_seconds:integer
+mcp get_worker_stats_history fields optional
+mcp get_worker_stats_history fields:array
+mcp get_worker_stats_history hours_back optional
+mcp get_worker_stats_history hours_back:integer
+mcp get_worker_stats_history limit optional
+mcp get_worker_stats_history limit:integer
+mcp get_worker_stats_history step_id optional
+mcp get_worker_stats_history step_id:integer
+mcp get_worker_stats_history worker_id optional
+mcp get_worker_stats_history worker_id:integer
+mcp get_worker_stats_history workflow_id optional
+mcp get_worker_stats_history workflow_id:integer
+mcp get_worker_stats_peak
+mcp get_worker_stats_peak hours_back optional
+mcp get_worker_stats_peak hours_back:integer
+mcp get_worker_stats_peak step_id optional
+mcp get_worker_stats_peak step_id:integer
+mcp get_worker_stats_peak worker_id optional
+mcp get_worker_stats_peak worker_id:integer
+mcp get_worker_stats_peak workflow_id optional
+mcp get_worker_stats_peak workflow_id:integer
+mcp kill_task
+mcp kill_task task_id:integer
+mcp list_audit
+mcp list_audit actor optional
+mcp list_audit actor:string
+mcp list_audit limit optional
+mcp list_audit limit:integer
+mcp list_audit object_id optional
+mcp list_audit object_id:integer
+mcp list_audit object_kind optional
+mcp list_audit object_kind:string
+mcp list_audit since_hours optional
+mcp list_audit since_hours:number
+mcp list_flavors
+mcp list_flavors filter optional
+mcp list_flavors filter:string
+mcp list_flavors limit optional
+mcp list_flavors limit:integer
+mcp list_jobs
+mcp list_jobs limit optional
+mcp list_jobs limit:integer
+mcp list_jobs status optional
+mcp list_jobs status:string
+mcp list_modules
+mcp list_recruiters
+mcp list_recruiters step_id optional
+mcp list_recruiters step_id:integer
+mcp list_steps
+mcp list_steps workflow_id optional
+mcp list_steps workflow_id:integer
+mcp list_tasks
+mcp list_tasks limit optional
+mcp list_tasks limit:integer
+mcp list_tasks show_hidden optional
+mcp list_tasks show_hidden:boolean
+mcp list_tasks status optional
+mcp list_tasks status:string
+mcp list_tasks workflow_id optional
+mcp list_tasks workflow_id:integer
+mcp list_template_runs
+mcp list_template_runs template_id optional
+mcp list_template_runs template_id:integer
+mcp list_templates
+mcp list_templates folder optional
+mcp list_templates folder:string
+mcp list_templates name optional
+mcp list_templates name:string
+mcp list_worker_events
+mcp list_worker_events class optional
+mcp list_worker_events class:string
+mcp list_worker_events level optional
+mcp list_worker_events level:string
+mcp list_worker_events limit optional
+mcp list_worker_events limit:integer
+mcp list_worker_events worker_id optional
+mcp list_worker_events worker_id:integer
+mcp list_workers
+mcp list_workflows
+mcp list_workflows name optional
+mcp list_workflows name:string
+mcp login
+mcp login password:string
+mcp login user:string
+mcp module_origin
+mcp module_origin name:string
+mcp module_origin version optional
+mcp module_origin version:string
+mcp move_template
+mcp move_template folder:string
+mcp move_template workflow_template_id:integer
+mcp prune_worker_events
+mcp prune_worker_events before optional
+mcp prune_worker_events before:string
+mcp prune_worker_events class optional
+mcp prune_worker_events class:string
+mcp prune_worker_events dry_run optional
+mcp prune_worker_events dry_run:boolean
+mcp prune_worker_events level optional
+mcp prune_worker_events level:string
+mcp prune_worker_events worker_id optional
+mcp prune_worker_events worker_id:integer
+mcp retry_task
+mcp retry_task task_id:integer
+mcp run_template
+mcp run_template name:string
+mcp run_template no_recruiters optional
+mcp run_template no_recruiters:boolean
+mcp run_template params:object
+mcp run_template version optional
+mcp run_template version:string
+mcp stop_task
+mcp stop_task grace_period optional
+mcp stop_task grace_period:integer
+mcp stop_task task_id:integer
+mcp submit_task
+mcp submit_task command:string
+mcp submit_task container:string
+mcp submit_task shell optional
+mcp submit_task shell:string
+mcp task_logs
+mcp task_logs task_id:integer
+mcp task_status_counts
+mcp task_status_counts workflow_id optional
+mcp task_status_counts workflow_id:integer
+mcp template_detail
+mcp template_detail name:string
+mcp template_detail version optional
+mcp template_detail version:string
+mcp update_recruiter
+mcp update_recruiter concurrency optional
+mcp update_recruiter concurrency:integer
+mcp update_recruiter cpu_per_task optional
+mcp update_recruiter cpu_per_task:integer
+mcp update_recruiter extra_storage_gb optional
+mcp update_recruiter extra_storage_gb:integer
+mcp update_recruiter extra_storage_type optional
+mcp update_recruiter extra_storage_type:string
+mcp update_recruiter max_workers optional
+mcp update_recruiter max_workers:integer
+mcp update_recruiter prefetch optional
+mcp update_recruiter prefetch:integer
+mcp update_recruiter protofilter optional
+mcp update_recruiter protofilter:string
+mcp update_recruiter rank:integer
+mcp update_recruiter step_id:integer
+mcp update_recruiter swap_proportion optional
+mcp update_recruiter swap_proportion:number
+mcp update_task
+mcp update_task min_cpu optional
+mcp update_task min_cpu:number
+mcp update_task min_disk optional
+mcp update_task min_disk:number
+mcp update_task min_gpu optional
+mcp update_task min_gpu:integer
+mcp update_task min_mem optional
+mcp update_task min_mem:number
+mcp update_task task_id:integer
+mcp update_worker
+mcp update_worker concurrency optional
+mcp update_worker concurrency:integer
+mcp update_worker max_cpu optional
+mcp update_worker max_cpu:integer
+mcp update_worker max_mem optional
+mcp update_worker max_mem:number
+mcp update_worker permanent optional
+mcp update_worker permanent:boolean
+mcp update_worker prefetch optional
+mcp update_worker prefetch:integer
+mcp update_worker recyclable_scope optional
+mcp update_worker recyclable_scope:string
+mcp update_worker step_id optional
+mcp update_worker step_id:integer
+mcp update_worker worker_id:integer
+mcp update_workflow_status
+mcp update_workflow_status maximum_workers optional
+mcp update_workflow_status maximum_workers:integer
+mcp update_workflow_status status optional
+mcp update_workflow_status status:string
+mcp update_workflow_status workflow_id:integer
+mcp upgrade_modules
+mcp upgrade_modules apply optional
+mcp upgrade_modules apply:boolean
+mcp upload_module
+mcp upload_module content:string
+mcp upload_module filename:string
+mcp upload_module force optional
+mcp upload_module force:boolean
+mcp upload_template
+mcp upload_template content:string
+mcp upload_template filename:string
+mcp upload_template folder optional
+mcp upload_template folder:string
+mcp upload_template force optional
+mcp upload_template force:boolean

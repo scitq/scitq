@@ -1,0 +1,538 @@
+cli --json optional
+cli --json:bool
+cli --server optional
+cli --server:string
+cli --timeout optional
+cli --timeout:int
+cli --token optional
+cli --token:string
+cli audit
+cli audit list
+cli audit list --actor optional
+cli audit list --actor:string
+cli audit list --limit optional
+cli audit list --limit:int
+cli audit list --since optional
+cli audit list --since:string
+cli audit list --step optional
+cli audit list --step:int
+cli audit list --task optional
+cli audit list --task:int
+cli audit list --template optional
+cli audit list --template:int
+cli audit list --worker optional
+cli audit list --worker:int
+cli audit list --workflow optional
+cli audit list --workflow:int
+cli audit prune
+cli audit prune --older-than-days:int
+cli cert
+cli config
+cli config import-rclone
+cli config import-rclone <path> optional
+cli config import-rclone <path>:string
+cli file
+cli file copy
+cli file copy <dst>:string
+cli file copy <src>:string
+cli file list
+cli file list <src>:string
+cli file remote-list
+cli file remote-list --timeout optional
+cli file remote-list --timeout:int
+cli file remote-list <u-r-i>:string
+cli flavor
+cli flavor disable
+cli flavor disable --flavor:string
+cli flavor disable --provider:string
+cli flavor disable --region optional
+cli flavor disable --region:string
+cli flavor enable
+cli flavor enable --flavor:string
+cli flavor enable --provider:string
+cli flavor enable --region optional
+cli flavor enable --region:string
+cli flavor list
+cli flavor list --filter optional
+cli flavor list --filter:string
+cli flavor list --limit optional
+cli flavor list --limit:int
+cli hashpassword
+cli hashpassword <password>:string
+cli job
+cli job list
+cli job list --limit optional
+cli job list --limit:int
+cli job list --long optional
+cli job list --long:bool
+cli job list --status optional
+cli job list --status:string
+cli login
+cli login --password optional
+cli login --password:string
+cli login --user optional
+cli login --user:string
+cli module
+cli module conflicts
+cli module delete
+cli module delete <name>:string
+cli module download
+cli module download --name:string
+cli module download --output optional
+cli module download --output:string
+cli module fork
+cli module fork --new-version:string
+cli module fork <source>:string
+cli module list
+cli module list --latest optional
+cli module list --latest:bool
+cli module list --origin optional
+cli module list --origin:string
+cli module list --tree optional
+cli module list --tree:bool
+cli module list --versions optional
+cli module list --versions:string
+cli module origin
+cli module origin <name>:string
+cli module upgrade
+cli module upgrade --apply optional
+cli module upgrade --apply:bool
+cli module upload
+cli module upload --as optional
+cli module upload --as:string
+cli module upload --force optional
+cli module upload --force:bool
+cli module upload --path:string
+cli recruiter
+cli recruiter create
+cli recruiter create --concurrency optional
+cli recruiter create --concurrency optional
+cli recruiter create --concurrency optional
+cli recruiter create --concurrency:int
+cli recruiter create --concurrency:int
+cli recruiter create --concurrency:int
+cli recruiter create --cpu-per-task optional
+cli recruiter create --cpu-per-task:int
+cli recruiter create --disk-per-task optional
+cli recruiter create --disk-per-task:float
+cli recruiter create --extra-storage-gb optional
+cli recruiter create --extra-storage-gb:int
+cli recruiter create --extra-storage-type optional
+cli recruiter create --extra-storage-type:string
+cli recruiter create --filter:string
+cli recruiter create --max-workers optional
+cli recruiter create --max-workers:int
+cli recruiter create --memory-per-task optional
+cli recruiter create --memory-per-task:float
+cli recruiter create --prefetch optional
+cli recruiter create --prefetch-percent optional
+cli recruiter create --prefetch-percent:int
+cli recruiter create --prefetch:int
+cli recruiter create --rank optional
+cli recruiter create --rank:int
+cli recruiter create --rounds optional
+cli recruiter create --rounds:int
+cli recruiter create --step-id:int
+cli recruiter create --swap-proportion optional
+cli recruiter create --swap-proportion:float
+cli recruiter create --timeout optional
+cli recruiter create --timeout:int
+cli recruiter delete
+cli recruiter delete --rank:int
+cli recruiter delete --step-id:int
+cli recruiter list
+cli recruiter list --step-id optional
+cli recruiter list --step-id:int
+cli recruiter update
+cli recruiter update --concurrency optional
+cli recruiter update --concurrency-max optional
+cli recruiter update --concurrency-max:int
+cli recruiter update --concurrency-min optional
+cli recruiter update --concurrency-min:int
+cli recruiter update --concurrency:int
+cli recruiter update --cpu-per-task optional
+cli recruiter update --cpu-per-task:int
+cli recruiter update --disk-per-task optional
+cli recruiter update --disk-per-task:float
+cli recruiter update --extra-storage-gb optional
+cli recruiter update --extra-storage-gb:int
+cli recruiter update --extra-storage-type optional
+cli recruiter update --extra-storage-type:string
+cli recruiter update --filter optional
+cli recruiter update --filter:string
+cli recruiter update --max-workers optional
+cli recruiter update --max-workers:int
+cli recruiter update --memory-per-task optional
+cli recruiter update --memory-per-task:float
+cli recruiter update --prefetch optional
+cli recruiter update --prefetch-percent optional
+cli recruiter update --prefetch-percent:int
+cli recruiter update --prefetch:int
+cli recruiter update --rank:int
+cli recruiter update --rounds optional
+cli recruiter update --rounds:int
+cli recruiter update --step-id:int
+cli recruiter update --swap-proportion optional
+cli recruiter update --swap-proportion:float
+cli recruiter update --timeout optional
+cli recruiter update --timeout:int
+cli run
+cli run delete
+cli run delete --id:int
+cli run list
+cli run list --template-id optional
+cli run list --template-id:int
+cli self
+cli self version
+cli step
+cli step create
+cli step create --definitive-exit-code optional
+cli step create --definitive-exit-code:list
+cli step create --definitive-pattern optional
+cli step create --definitive-pattern:string
+cli step create --name:string
+cli step create --workflow-id optional
+cli step create --workflow-id:int
+cli step create --workflow-name optional
+cli step create --workflow-name:string
+cli step delete
+cli step delete --id:int
+cli step edit
+cli step edit --find:string
+cli step edit --id:int
+cli step edit --regexp optional
+cli step edit --regexp:bool
+cli step edit --replace:string
+cli step list
+cli step list --workflow-id:int
+cli step stats
+cli step stats --step-id optional
+cli step stats --step-id:list
+cli step stats --task-name optional
+cli step stats --task-name:string
+cli step stats --totals optional
+cli step stats --totals:bool
+cli step stats --workflow-id optional
+cli step stats --workflow-id:int
+cli step stats --workflow-name optional
+cli step stats --workflow-name:string
+cli task
+cli task create
+cli task create --command:string
+cli task create --container:string
+cli task create --dependency optional
+cli task create --dependency:list
+cli task create --input optional
+cli task create --input:list
+cli task create --name optional
+cli task create --name:string
+cli task create --output optional
+cli task create --output:string
+cli task create --resource optional
+cli task create --resource:list
+cli task create --scitq-auth optional
+cli task create --scitq-auth:bool
+cli task create --shell optional
+cli task create --shell:string
+cli task create --step-id optional
+cli task create --step-id:int
+cli task delete
+cli task delete --id:int
+cli task edit
+cli task edit --command:string
+cli task edit --id:int
+cli task kill
+cli task kill --id:int
+cli task list
+cli task list --command optional
+cli task list --command:string
+cli task list --limit optional
+cli task list --limit:int
+cli task list --long optional
+cli task list --long:bool
+cli task list --offset optional
+cli task list --offset:int
+cli task list --show-hidden optional
+cli task list --show-hidden:bool
+cli task list --status optional
+cli task list --status:string
+cli task list --step-id optional
+cli task list --step-id:int
+cli task list --worker-id optional
+cli task list --worker-id:int
+cli task list --workflow-id optional
+cli task list --workflow-id:int
+cli task logs
+cli task logs --id:int
+cli task retry
+cli task retry --id:int
+cli task retry --retry optional
+cli task retry --retry:int
+cli task stderr
+cli task stderr --id:int
+cli task stdout
+cli task stdout --id:int
+cli task stop
+cli task stop --grace optional
+cli task stop --grace:int
+cli task stop --id:int
+cli task update
+cli task update --clear-input optional
+cli task update --clear-input:bool
+cli task update --clear-resource optional
+cli task update --clear-resource:bool
+cli task update --command optional
+cli task update --command:string
+cli task update --container optional
+cli task update --container-options optional
+cli task update --container-options:string
+cli task update --container:string
+cli task update --id:int
+cli task update --input optional
+cli task update --input:list
+cli task update --min-cpu optional
+cli task update --min-cpu:float
+cli task update --min-disk optional
+cli task update --min-disk:float
+cli task update --min-gpu optional
+cli task update --min-gpu:int
+cli task update --min-mem optional
+cli task update --min-mem:float
+cli task update --output optional
+cli task update --output:string
+cli task update --publish optional
+cli task update --publish:string
+cli task update --resource optional
+cli task update --resource:list
+cli task update --retry optional
+cli task update --retry:int
+cli task update --shell optional
+cli task update --shell:string
+cli task update --status optional
+cli task update --status:string
+cli template
+cli template detail
+cli template detail --id optional
+cli template detail --id:int
+cli template detail --name optional
+cli template detail --name:string
+cli template detail --ver optional
+cli template detail --ver:string
+cli template download
+cli template download --id optional
+cli template download --id:int
+cli template download --name optional
+cli template download --name:string
+cli template download --output optional
+cli template download --output:string
+cli template download --ver optional
+cli template download --ver:string
+cli template list
+cli template list --all-versions optional
+cli template list --all-versions:bool
+cli template list --folder optional
+cli template list --folder:string
+cli template list --latest optional
+cli template list --latest:bool
+cli template list --name optional
+cli template list --name:string
+cli template list --show-hidden optional
+cli template list --show-hidden:bool
+cli template list --ver optional
+cli template list --ver:string
+cli template run
+cli template run --continue optional
+cli template run --continue:bool
+cli template run --extend-workflow optional
+cli template run --extend-workflow:int
+cli template run --id optional
+cli template run --id:int
+cli template run --name optional
+cli template run --name:string
+cli template run --no-recruiters optional
+cli template run --no-recruiters:bool
+cli template run --param optional
+cli template run --param:list
+cli template run --retry-failed-only optional
+cli template run --retry-failed-only:bool
+cli template run --ver optional
+cli template run --ver:string
+cli template update
+cli template update --folder optional
+cli template update --folder:string
+cli template update --hide optional
+cli template update --hide:bool
+cli template update --id:int
+cli template update --unhide optional
+cli template update --unhide:bool
+cli template upload
+cli template upload --folder optional
+cli template upload --folder:string
+cli template upload --force optional
+cli template upload --force:bool
+cli template upload --path:string
+cli user
+cli user change-password
+cli user change-password --username:string
+cli user create
+cli user create --admin optional
+cli user create --admin:bool
+cli user create --email:string
+cli user create --password:string
+cli user create --username:string
+cli user delete
+cli user delete --id:int
+cli user list
+cli user update
+cli user update --admin optional
+cli user update --admin:bool
+cli user update --email optional
+cli user update --email:string
+cli user update --id:int
+cli user update --no-admin optional
+cli user update --no-admin:bool
+cli user update --username optional
+cli user update --username:string
+cli worker
+cli worker delete
+cli worker delete --undeployed optional
+cli worker delete --undeployed:bool
+cli worker delete --worker-id:int
+cli worker deploy
+cli worker deploy --concurrency optional
+cli worker deploy --concurrency:int
+cli worker deploy --count optional
+cli worker deploy --count:int
+cli worker deploy --flavor:string
+cli worker deploy --prefetch optional
+cli worker deploy --prefetch:int
+cli worker deploy --provider:string
+cli worker deploy --region optional
+cli worker deploy --region:string
+cli worker deploy --step optional
+cli worker deploy --step:int
+cli worker list
+cli worker list --long optional
+cli worker list --long:bool
+cli worker list --needs-upgrade optional
+cli worker list --needs-upgrade:bool
+cli worker stats
+cli worker stats --worker-id:list
+cli worker update
+cli worker update --clear-step optional
+cli worker update --clear-step:bool
+cli worker update --concurrency optional
+cli worker update --concurrency:int
+cli worker update --max-cpu optional
+cli worker update --max-cpu:int
+cli worker update --max-mem optional
+cli worker update --max-mem:float
+cli worker update --no-permanent optional
+cli worker update --no-permanent:bool
+cli worker update --permanent optional
+cli worker update --permanent:bool
+cli worker update --prefetch optional
+cli worker update --prefetch:int
+cli worker update --recyclable-scope optional
+cli worker update --recyclable-scope:string
+cli worker update --step-id optional
+cli worker update --step-id:int
+cli worker update --step-name optional
+cli worker update --step-name:string
+cli worker update --worker-id:int
+cli worker update --workflow-name optional
+cli worker update --workflow-name:string
+cli worker upgrade
+cli worker upgrade --all optional
+cli worker upgrade --all:bool
+cli worker upgrade --cancel optional
+cli worker upgrade --cancel:bool
+cli worker upgrade --emergency optional
+cli worker upgrade --emergency:bool
+cli worker upgrade --yes optional
+cli worker upgrade --yes:bool
+cli worker upgrade <worker-id> optional
+cli worker upgrade <worker-id>:int
+cli worker-event
+cli worker-event delete
+cli worker-event delete --id:int
+cli worker-event list
+cli worker-event list --class optional
+cli worker-event list --class:string
+cli worker-event list --level optional
+cli worker-event list --level:string
+cli worker-event list --limit optional
+cli worker-event list --limit:int
+cli worker-event list --worker-id optional
+cli worker-event list --worker-id:int
+cli worker-event prune
+cli worker-event prune --class optional
+cli worker-event prune --class:string
+cli worker-event prune --dry-run optional
+cli worker-event prune --dry-run:bool
+cli worker-event prune --level optional
+cli worker-event prune --level:string
+cli worker-event prune --older-than optional
+cli worker-event prune --older-than:string
+cli worker-event prune --worker-id optional
+cli worker-event prune --worker-id:int
+cli workflow
+cli workflow chain
+cli workflow chain cancel
+cli workflow chain cancel --id:int
+cli workflow chain edit
+cli workflow chain edit --always-new optional
+cli workflow chain edit --always-new:bool
+cli workflow chain edit --id:int
+cli workflow chain edit --on optional
+cli workflow chain edit --on:string
+cli workflow chain edit --param optional
+cli workflow chain edit --param-clear optional
+cli workflow chain edit --param-clear:list
+cli workflow chain edit --param:list
+cli workflow chain edit --params-json optional
+cli workflow chain edit --params-json:string
+cli workflow chain edit --template optional
+cli workflow chain edit --template:string
+cli workflow chain edit --version optional
+cli workflow chain edit --version:string
+cli workflow chain edit --when optional
+cli workflow chain edit --when:string
+cli workflow chain list
+cli workflow chain list --status optional
+cli workflow chain list --status:string
+cli workflow chain list --workflow-id optional
+cli workflow chain list --workflow-id:int
+cli workflow chain resume
+cli workflow chain resume --id:int
+cli workflow chain show
+cli workflow chain show --id:int
+cli workflow chain suspend
+cli workflow chain suspend --id:int
+cli workflow create
+cli workflow create --maximum-workers optional
+cli workflow create --maximum-workers:int
+cli workflow create --name:string
+cli workflow create --run-strategy optional
+cli workflow create --run-strategy:string
+cli workflow create --status optional
+cli workflow create --status:string
+cli workflow delete
+cli workflow delete --id:int
+cli workflow list
+cli workflow list --all-users optional
+cli workflow list --all-users:bool
+cli workflow list --limit optional
+cli workflow list --limit:int
+cli workflow list --long optional
+cli workflow list --long:bool
+cli workflow list --name-like optional
+cli workflow list --name-like:string
+cli workflow list --user optional
+cli workflow list --user:string
+cli workflow update
+cli workflow update --id:int
+cli workflow update --maximum-workers optional
+cli workflow update --maximum-workers:int
+cli workflow update --status optional
+cli workflow update --status:string

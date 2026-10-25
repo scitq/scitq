@@ -221,15 +221,30 @@ every service has started cleanly on the new binary.
 
 ### Routine upgrade checklist
 
-1. Stop the service: `systemctl stop scitq`.
+Upgrade the server first, then the workers. Which versions can run together
+during the upgrade is described in [Compatibility and versioning](reference/compatibility.md).
+
+1. Back up the database (`pg_dump`). Migrations only go forward, so this
+   backup is how you return to the previous release if needed.
 2. Install the new binaries (`scitq-server`, `scitq`, and the
-   `scitq-client` that workers pull).
-3. Start the service: `systemctl start scitq`. Schema migrations under
-   `server/migrations/` apply automatically at startup; check
-   `journalctl -u scitq -n 200` for any migration warnings.
+   `scitq-client` that workers pull), then restart the server on them.
+   From a source checkout, `make server-upgrade` does both: it installs
+   the binaries, then sends SIGUSR1 to the server, which stops accepting
+   new admin jobs (worker creation and deletion), lets the running ones
+   finish, and exits; systemd restarts it on the new binary. Otherwise,
+   install the binaries and run `systemctl restart scitq`.
+
+   Install the binaries before sending SIGUSR1 yourself: systemd restarts
+   the server immediately, on whatever binary is in place at that moment.
+3. Check the startup. Schema migrations under `server/migrations/` apply
+   automatically; `journalctl -u scitq -n 200` shows any migration
+   warnings.
 4. Rebuild the UI if you serve it locally (`make ui-build`).
 5. Verify: `scitq --version`, `scitq workflow list`, and a one-off
    `scitq task list --limit 1` to confirm the server responds.
+6. Upgrade the workers: `scitq worker list --needs-upgrade` shows those on
+   an older build; `scitq worker upgrade --all` upgrades them, each one
+   when idle.
 
 ### Upgrading from a pre-library release (YAML module library)
 

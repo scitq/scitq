@@ -1,0 +1,269 @@
+dsl Client
+dsl Client(server)
+dsl Client(server) optional
+dsl Client(token)
+dsl Client(token) optional
+dsl LiveContext
+dsl LiveContext(client)
+dsl LiveContext(poll_interval)
+dsl LiveContext(poll_interval) optional
+dsl Outputs
+dsl Outputs(lifetime)
+dsl Outputs(lifetime) optional
+dsl Outputs(publish)
+dsl Outputs(publish) optional
+dsl Outputs(publish_mode)
+dsl Outputs(publish_mode) optional
+dsl Param
+dsl Param(choices)
+dsl Param(choices) optional
+dsl Param(default)
+dsl Param(default) optional
+dsl Param(help)
+dsl Param(help) optional
+dsl Param(required)
+dsl Param(required) optional
+dsl Param(requires)
+dsl Param(requires) optional
+dsl Param(typ)
+dsl ParamSpec
+dsl Python
+dsl Python(cleandoc)
+dsl Python(cleandoc) optional
+dsl Python(shell)
+dsl Python(shell) optional
+dsl Quality
+dsl Quality(formula)
+dsl Quality(formula) optional
+dsl Quality(objectives)
+dsl Quality(objectives) optional
+dsl Quality(variables)
+dsl Raw
+dsl Resource
+dsl Resource(action)
+dsl Resource(path)
+dsl Shell
+dsl Shell(cleandoc)
+dsl Shell(cleandoc) optional
+dsl Shell(shell)
+dsl Shell(shell) optional
+dsl TaskSpec
+dsl TaskSpec(concurrency)
+dsl TaskSpec(concurrency) optional
+dsl TaskSpec(cpu)
+dsl TaskSpec(cpu) optional
+dsl TaskSpec(definitive_exit_codes)
+dsl TaskSpec(definitive_exit_codes) optional
+dsl TaskSpec(definitive_pattern)
+dsl TaskSpec(definitive_pattern) optional
+dsl TaskSpec(disk)
+dsl TaskSpec(disk) optional
+dsl TaskSpec(disk_shared)
+dsl TaskSpec(disk_shared) optional
+dsl TaskSpec(gpu)
+dsl TaskSpec(gpu) optional
+dsl TaskSpec(mem)
+dsl TaskSpec(mem) optional
+dsl TaskSpec(mem_shared)
+dsl TaskSpec(mem_shared) optional
+dsl TaskSpec(numa)
+dsl TaskSpec(numa) optional
+dsl TaskSpec(prefetch)
+dsl TaskSpec(prefetch) optional
+dsl TaskSpec(scitq_auth)
+dsl TaskSpec(scitq_auth) optional
+dsl URI
+dsl W
+dsl WorkerPool
+dsl WorkerPool(extra_storage_gb)
+dsl WorkerPool(extra_storage_gb) optional
+dsl WorkerPool(extra_storage_type)
+dsl WorkerPool(extra_storage_type) optional
+dsl WorkerPool(gpu_image)
+dsl WorkerPool(gpu_image) optional
+dsl WorkerPool(image)
+dsl WorkerPool(image) optional
+dsl WorkerPool(max_recruited)
+dsl WorkerPool(max_recruited) optional
+dsl WorkerPool(swap_proportion)
+dsl WorkerPool(swap_proportion) optional
+dsl WorkerPool(task_batches)
+dsl WorkerPool(task_batches) optional
+dsl WorkerPool(timeout)
+dsl WorkerPool(timeout) optional
+dsl Workflow
+dsl Workflow(container)
+dsl Workflow(container) optional
+dsl Workflow(description)
+dsl Workflow(description) optional
+dsl Workflow(language)
+dsl Workflow(language) optional
+dsl Workflow(live)
+dsl Workflow(live) optional
+dsl Workflow(name)
+dsl Workflow(naming_strategy)
+dsl Workflow(naming_strategy) optional
+dsl Workflow(provider)
+dsl Workflow(provider) optional
+dsl Workflow(publish_root)
+dsl Workflow(publish_root) optional
+dsl Workflow(region)
+dsl Workflow(region) optional
+dsl Workflow(resources)
+dsl Workflow(resources) optional
+dsl Workflow(retry)
+dsl Workflow(retry) optional
+dsl Workflow(run_strategy)
+dsl Workflow(run_strategy) optional
+dsl Workflow(skip_if_exists)
+dsl Workflow(skip_if_exists) optional
+dsl Workflow(tag)
+dsl Workflow(tag) optional
+dsl Workflow(task_naming_strategy)
+dsl Workflow(task_naming_strategy) optional
+dsl Workflow(version)
+dsl Workflow(worker_pool)
+dsl Workflow(worker_pool) optional
+dsl __build_time__
+dsl __commit__
+dsl __version__
+dsl check_if_file
+dsl cond
+dsl cond(default)
+dsl cond(default) optional
+dsl run
+dsl run(func)
+dsl run(live)
+dsl run(live) optional
+yaml chain always_new
+yaml chain on
+yaml chain params
+yaml chain template
+yaml chain version
+yaml chain when
+yaml format 1
+yaml format 2
+yaml iterator ena download_method
+yaml iterator ena fastq_pair_filtering
+yaml iterator ena filter
+yaml iterator ena group_by
+yaml iterator ena identifier
+yaml iterator ena match
+yaml iterator ena name
+yaml iterator ena product
+yaml iterator ena source
+yaml iterator ena where
+yaml iterator lines content
+yaml iterator lines file
+yaml iterator lines item
+yaml iterator lines name
+yaml iterator lines source
+yaml iterator lines tag
+yaml iterator list name
+yaml iterator list product
+yaml iterator list source
+yaml iterator list values
+yaml iterator range end
+yaml iterator range name
+yaml iterator range product
+yaml iterator range source
+yaml iterator range start
+yaml iterator range step
+yaml iterator sra download_method
+yaml iterator sra fastq_pair_filtering
+yaml iterator sra filter
+yaml iterator sra group_by
+yaml iterator sra identifier
+yaml iterator sra match
+yaml iterator sra name
+yaml iterator sra product
+yaml iterator sra source
+yaml iterator sra where
+yaml iterator tsv content
+yaml iterator tsv key
+yaml iterator tsv name
+yaml iterator tsv product
+yaml iterator tsv sep
+yaml iterator tsv source
+yaml iterator tsv uri
+yaml iterator uri download_method
+yaml iterator uri fastq_pair_filtering
+yaml iterator uri filter
+yaml iterator uri group_by
+yaml iterator uri match
+yaml iterator uri name
+yaml iterator uri product
+yaml iterator uri source
+yaml iterator uri uri
+yaml param choices
+yaml param default
+yaml param help
+yaml param required
+yaml param requires
+yaml param type
+yaml step accept_failure
+yaml step apt
+yaml step binary
+yaml step command
+yaml step conda
+yaml step container
+yaml step container_options
+yaml step depends
+yaml step grouped
+yaml step grouped_by
+yaml step inputs
+yaml step language
+yaml step name
+yaml step outputs
+yaml step per_sample
+yaml step pip
+yaml step publish
+yaml step publish_mode
+yaml step quality
+yaml step requires
+yaml step resource
+yaml step retry
+yaml step skip_if_exists
+yaml step tag
+yaml step task_spec
+yaml step vars
+yaml step when
+yaml step worker_pool
+yaml top chain
+yaml top container
+yaml top description
+yaml top format
+yaml top iterate
+yaml top language
+yaml top name
+yaml top no_recruiters
+yaml top opportunistic
+yaml top optimize
+yaml top params
+yaml top publish_root
+yaml top retry
+yaml top run_strategy
+yaml top scores
+yaml top skip_if_exists
+yaml top steps
+yaml top tag
+yaml top untrusted
+yaml top vars
+yaml top version
+yaml top worker_pool
+yaml top workspace
+yaml worker_pool cpu
+yaml worker_pool disk
+yaml worker_pool extra_storage_gb
+yaml worker_pool extra_storage_type
+yaml worker_pool flavor
+yaml worker_pool gpu
+yaml worker_pool gpu_image
+yaml worker_pool gpumem
+yaml worker_pool image
+yaml worker_pool max_recruited
+yaml worker_pool mem
+yaml worker_pool provider
+yaml worker_pool region
+yaml worker_pool swap_proportion
+yaml worker_pool task_batches

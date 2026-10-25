@@ -230,6 +230,57 @@ proto-ui:
 proto-all: proto proto-python proto-ui
 	@echo "✓ All language stubs regenerated from proto definitions."
 
+# --- Compatibility checks (docs/reference/compatibility.md) ----------------
+# COMPAT_BASE is the release the candidate must stay compatible with: the last
+# tag before the current commit (so a tagged release commit is checked
+# against the previous release). Override with COMPAT_BASE=vX.Y.Z.
+BUF         := go run github.com/bufbuild/buf/cmd/buf@v1.50.0
+COMPAT_BASE ?= $(shell git describe --tags --abbrev=0 HEAD~1 2>/dev/null)
+
+.PHONY: proto-breaking
+proto-breaking:
+	@test -n "$(COMPAT_BASE)" || { echo "❌ no release tag found to compare against (set COMPAT_BASE)"; exit 1; }
+	@echo "🔎 gRPC API: checking proto/ against $(COMPAT_BASE)"
+	$(BUF) breaking proto --against '.git#tag=$(COMPAT_BASE),subdir=proto'
+	@echo "✓ No breaking gRPC change since $(COMPAT_BASE)"
+
+# Recorded public surfaces (compat/*.txt) may only grow between releases:
+# every line present at COMPAT_BASE must still be present. The surface tests
+# (`go test ./cli ./server ./server/config -run SurfaceRecorded`, pytest
+# tests/test_public_surface.py) keep the files equal to the code.
+.PHONY: surface-check
+surface-check:
+	@test -n "$(COMPAT_BASE)" || { echo "❌ no release tag found to compare against (set COMPAT_BASE)"; exit 1; }
+	@status=0; tmp=$$(mktemp -d); \
+	for f in compat/*.txt; do \
+	  if ! git cat-file -e "$(COMPAT_BASE):$$f" 2>/dev/null; then \
+	    echo "ℹ️  $$f: not recorded at $(COMPAT_BASE), nothing to compare yet"; continue; \
+	  fi; \
+	  git show "$(COMPAT_BASE):$$f" | LC_ALL=C sort > $$tmp/base; \
+	  LC_ALL=C sort "$$f" > $$tmp/now; \
+	  removed=$$(LC_ALL=C comm -23 $$tmp/base $$tmp/now); \
+	  if [ -n "$$removed" ]; then \
+	    echo "❌ $$f: removed since $(COMPAT_BASE) (breaks users of that release):"; \
+	    echo "$$removed" | sed 's/^/     /'; status=1; \
+	  else \
+	    echo "✓ $$f: nothing removed since $(COMPAT_BASE)"; \
+	  fi; \
+	done; rm -rf $$tmp; exit $$status
+
+# Upgrade from COMPAT_BASE to the candidate with a live worker
+# (tests/upgrade/run.sh). Needs docker, python3, jq; the worker upgrade step
+# runs on linux/amd64 only.
+.PHONY: upgrade-test
+upgrade-test:
+	@test -n "$(COMPAT_BASE)" || { echo "❌ no release tag found to compare against (set COMPAT_BASE)"; exit 1; }
+	tests/upgrade/run.sh $(COMPAT_BASE)
+
+# All compatibility checks, as run in CI.
+.PHONY: compat
+compat: proto-breaking surface-check
+	go test ./cli ./server ./server/config -run 'SurfaceRecorded' -count=1
+	cd python && python -m pytest -q tests/test_public_surface.py tests/test_template_format.py
+
 # --- UI build/embed (opt-out with SKIP_UI=1) -------------------------------
 .PHONY: ui-deps ui-build ui-embed
 

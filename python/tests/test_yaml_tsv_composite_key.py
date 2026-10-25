@@ -20,6 +20,9 @@ import yaml
 
 from scitq2 import yaml_runner as yr
 
+# Templates are compiled against an in-memory fake, never a real server.
+pytestmark = pytest.mark.usefixtures("fake_server")
+
 
 # ---------------- composite key in _build_single_iterator ----------------
 

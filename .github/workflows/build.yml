@@ -43,6 +43,77 @@ jobs:
       - name: Build Go project
         run: make ui-embed copy-docs && go build ./...
 
+  # Unit tests outside tests/integration: Go packages and the Python DSL suite.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Go unit tests
+        run: make copy-docs && go test $(go list ./... | grep -v /tests/integration)
+
+      - name: Python tests
+        run: |
+          pip install grpcio grpcio-tools pyyaml pytest
+          cd python && python -m pytest -q
+
+  # Compatibility with the last release (docs/reference/compatibility.md):
+  # no breaking gRPC change, nothing removed from the recorded public
+  # surfaces (compat/*.txt), and those files match the code.
+  compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # release tags are the compatibility baseline
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compatibility checks
+        run: |
+          pip install grpcio grpcio-tools pyyaml pytest
+          make copy-docs compat
+
+  # Upgrade from the last release to this commit with a live worker:
+  # server switch mid-workflow, migrations, then an in-place worker upgrade.
+  test-upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the last release tag is built and run
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Pre-pull Docker images
+        run: docker pull postgres:17-alpine
+
+      - name: Upgrade test
+        run: make upgrade-test
+
   test-core:
     needs: build
     runs-on: ubuntu-latest

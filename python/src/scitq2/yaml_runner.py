@@ -859,6 +859,10 @@ def _check_unknown_keys(d: dict, allowed: set, context: str) -> None:
     sys.exit(1)
 
 
+# Template `format:` versions this runner understands. A template written for
+# a newer format is rejected rather than run with a different meaning.
+SUPPORTED_FORMATS = (1, 2)
+
 TOPLEVEL_KEYS = {
     'format', 'name', 'version', 'description', 'tag',
     'params', 'vars', 'iterate', 'steps',
@@ -2811,6 +2815,11 @@ def run_yaml(data: dict, params_values: Optional[dict] = None,
 
     # YAML format version (default: 1 for backward compat)
     yaml_format = int(data.get('format', 1))
+    if yaml_format not in SUPPORTED_FORMATS:
+        print(f"❌ Template format {yaml_format} is not supported by this scitq "
+              f"(supported: {', '.join(map(str, SUPPORTED_FORMATS))}). "
+              f"Upgrade the scitq server to run it.", file=sys.stderr)
+        sys.exit(1)
 
     # Strict: unknown top-level keys are typos.
     _check_unknown_keys(data, TOPLEVEL_KEYS, "top-level YAML")
