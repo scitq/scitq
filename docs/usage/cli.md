@@ -639,7 +639,7 @@ scitq step stats --workflow-name myworkflow --totals
 ### `recruiter`
 
 Recruiters are the components that automatically manage worker deployment and recycling for workflow steps.  
-Each recruiter applies a filter to select valid flavors and providers, defines concurrency and prefetch rules, and determines how many workers to maintain.
+Each recruiter applies a filter to select valid flavors and providers, and defines concurrency and prefetch rules. A step can have several recruiters, ranked 1, 2, 3…: they work as one, rank 1 first. The rules they follow — how much capacity a step asks for, when a rank acts, what the limits count — are in [Recruitment rules](../reference/recruitment.md).
 
 #### `recruiter list`
 
@@ -683,9 +683,10 @@ Options allow both **fixed concurrency** and **adaptive concurrency** modes:
 - `--concurrency-min`, `--concurrency-max`: adaptive concurrency bounds
 - `--prefetch-percent`: express prefetch as a percentage of concurrency, thus 50 means when the adaptative concurrency sets to 10, prefetch sets to 5.
 
-- `--max-workers`: upper limit of workers managed by this recruiter
-- `--rounds`: number of execution rounds to tarket to complete the workload
-- `--timeout`: seconds between recruitment cycles
+- `--rank`: order in which the step's recruiters act (1 first). A rank acts once every lower rank is done.
+- `--max-workers`: the rank acts only while the step has fewer workers than this. It counts every worker on the step, including those placed by other ranks or by hand.
+- `--rounds`: number of rounds in which the step should run its pending tasks; it sets how much capacity the step asks for. All recruiters of a step share one value: a recruiter created with a different value is refused, and updating it on one recruiter updates the whole step.
+- `--timeout`: seconds this rank waits, once eligible, before deploying new cloud workers. Recycling idle workers never waits.
 
 The round setting is a key tactical number for a recruitment rule. If a step has 100 tasks to do, and each worker ends up with a concurrency of 10. If rounds is set to 1 (its default), it means recruit 10 workers to execute all the tasks as quickly as possible. If rounds is set to 2, then only 5 workers will be recruited.
 

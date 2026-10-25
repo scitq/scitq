@@ -236,9 +236,13 @@ mcp update_recruiter prefetch:integer
 mcp update_recruiter protofilter optional
 mcp update_recruiter protofilter:string
 mcp update_recruiter rank:integer
+mcp update_recruiter rounds optional
+mcp update_recruiter rounds:integer
 mcp update_recruiter step_id:integer
 mcp update_recruiter swap_proportion optional
 mcp update_recruiter swap_proportion:number
+mcp update_recruiter timeout optional
+mcp update_recruiter timeout:integer
 mcp update_task
 mcp update_task min_cpu optional
 mcp update_task min_cpu:number

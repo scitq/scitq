@@ -45,6 +45,7 @@ nav:
       - DB Schema: reference/db-schema.md
       - Configuration: reference/configuration.md
       - Compatibility: reference/compatibility.md
+      - Recruitment: reference/recruitment.md
       - Monitoring: reference/monitoring.md
       - Module Library: reference/module-library.md
       - Glossary: reference/glossary.md

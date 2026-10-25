@@ -1072,13 +1072,15 @@ worker_pool:
   flavor: "Standard_NC%"           # Flavor-name filter (exact or LIKE with %)
   image: "Canonical/UbuntuServer/24.04-LTS/latest"     # Cloud image override (any flavor)
   gpu_image: "microsoft-dsvm/ubuntu-hpc/2204/latest"   # Cloud image override (GPU flavors only)
-  max_recruited: 10                # Maximum workers to recruit
-  task_batches: 2                  # How many batches of tasks per worker
+  max_recruited: 10                # Workers the step may hold (counts all its workers); here also the workflow's cap
+  task_batches: 2                  # Rounds in which the step runs its pending tasks (fewer workers, reused longer)
   prefetch: 1                      # Tasks to download in advance per worker
   swap_proportion: 0               # Override /scratch swap sizing — see below
   extra_storage_gb: 500            # Attach a 500 GB extra volume, mount at /scratch (OVH + Azure)
   extra_storage_type: high-speed   # Volume class (OVH: classic / high-speed; Azure: standard / standardssd / premium / ultra)
 ```
+
+`max_recruited` and `task_batches` become the step recruiter's `max_workers` and `rounds`. How they act — what `max_recruited` counts, how `task_batches` sizes the step's demand, and how a step's recruiters share the work — is described in [Recruitment rules](../reference/recruitment.md).
 
 The `prefetch` setting controls how many tasks a worker prepares in advance while executing its current tasks. This is key for performance: without prefetch, there's idle time between tasks while inputs are downloaded. With `prefetch: 1`, the next task's inputs are downloaded during the current task's execution. Higher values help for very fast tasks with large inputs. See the [CLI recruiter documentation](cli.md#recruiter-create) for details on tuning prefetch.
 

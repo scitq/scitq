@@ -140,7 +140,7 @@ build-server: tgz-python-src copy-docs | $(BINARY_DIR)
 # test jobs stay Go-only.
 copy-docs: tgz-python-src stub-public
 	@mkdir -p server/docs
-	@cp docs/usage/cli.md docs/usage/yaml-templates.md docs/usage/dsl.md docs/usage/ai-integration.md docs/usage/ui.md docs/usage/optimization.md docs/reference/configuration.md docs/reference/monitoring.md server/docs/
+	@cp docs/usage/cli.md docs/usage/yaml-templates.md docs/usage/dsl.md docs/usage/ai-integration.md docs/usage/ui.md docs/usage/optimization.md docs/reference/configuration.md docs/reference/monitoring.md docs/reference/recruitment.md docs/reference/compatibility.md server/docs/
 
 # stub-public creates server/public/index.html only if it doesn't exist
 # yet. The Go compiler needs at least one file matching the

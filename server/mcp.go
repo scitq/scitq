@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -299,6 +300,7 @@ Prefetch is key to scitq performance but tricky to set right. Diagnose live:
 
 ### Performance optimization
 For detailed guidance on worker sizing, prefetch, transfer costs, and resource locality, use get_doc with page "optimization".
+Before adding or changing recruiters, read get_doc page "recruitment": a step's recruiters act in rank order, max_workers counts every worker on the step (not workers owned by one recruiter), and rounds is shared by all recruiters of a step.
 Key rules: large workers (32 CPU) + task_spec (cpu: 8) + prefetch: 1 + workspace matching worker region + {RESOURCE_ROOT} for reference data.
 
 ### Troubleshooting
@@ -859,21 +861,21 @@ func (h *mcpHandler) listTools() []mcpTool {
 		},
 		{
 			Name:        "create_recruiter",
-			Description: "Create a recruiter for a step. Protofilter defines worker selection (e.g. 'cpu>=32:mem>=120').",
+			Description: "Create a recruiter for a step. Protofilter defines worker selection (e.g. 'cpu>=32:mem>=120'). A step's recruiters work as one: rank 1 acts first, a higher rank only once every lower rank is done; max_workers counts every worker on the step and rounds is shared by the whole step (get_doc page 'recruitment' has the rules).",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
 					"step_id":         {Type: "integer", Description: "Step ID"},
 					"protofilter":     {Type: "string", Description: "Worker filter (e.g. cpu>=32:mem>=120:provider=azure.primary)"},
-					"rank":            {Type: "integer", Description: "Rank (default: 1)"},
-					"max_workers":     {Type: "integer", Description: "Maximum workers to recruit"},
+					"rank":            {Type: "integer", Description: "Order in which the step's recruiters act, 1 first (default: 1)"},
+					"max_workers":     {Type: "integer", Description: "This rank acts only while the step has fewer workers than this. Counts every worker on the step, including those placed by other ranks or by hand — not a per-recruiter quota."},
 					"concurrency":     {Type: "integer", Description: "Static concurrency per worker"},
 					"prefetch":        {Type: "integer", Description: "Prefetch count"},
 					"cpu_per_task":    {Type: "integer", Description: "CPU per task (dynamic concurrency)"},
-					"rounds":          {Type: "integer", Description: "Recruitment rounds (default: 1)"},
-					"timeout":         {Type: "integer", Description: "Timeout in seconds"},
+					"rounds":          {Type: "integer", Description: "Rounds in which the step should run its pending tasks; sets how much capacity it asks for (default: 1). Must equal the rounds of the step's other recruiters."},
+					"timeout":         {Type: "integer", Description: "Seconds this rank waits, once eligible, before deploying new cloud workers. Recycling idle workers never waits."},
 					"swap_proportion":    {Type: "number", Description: "Override /scratch swapfile fraction (0 disables swap; unset = server config default, typically 0.10)"},
-					"extra_storage_gb":   {Type: "integer", Description: "Attach an extra block volume of this size (GB) to each worker, mounted at /scratch (OVH only; Azure returns an error)"},
+					"extra_storage_gb":   {Type: "integer", Description: "Attach an extra block volume of this size (GB) to each worker, mounted at /scratch (OVH and Azure)"},
 					"extra_storage_type": {Type: "string", Description: "Volume class for extra_storage_gb (OVH: classic/high-speed/high-speed-gen2); unset = provider default"},
 				},
 				Required: []string{"step_id", "protofilter"},
@@ -888,12 +890,14 @@ func (h *mcpHandler) listTools() []mcpTool {
 					"step_id":         {Type: "integer", Description: "Step ID"},
 					"rank":            {Type: "integer", Description: "Rank"},
 					"protofilter":     {Type: "string", Description: "Updated worker filter"},
-					"max_workers":     {Type: "integer", Description: "Updated max workers"},
+					"max_workers":     {Type: "integer", Description: "Updated max workers (counts every worker on the step)"},
+					"rounds":          {Type: "integer", Description: "Updated rounds; applies to all recruiters of the step"},
+					"timeout":         {Type: "integer", Description: "Updated delay in seconds before this rank deploys new cloud workers"},
 					"concurrency":     {Type: "integer", Description: "Updated concurrency"},
 					"prefetch":        {Type: "integer", Description: "Updated prefetch"},
 					"cpu_per_task":    {Type: "integer", Description: "Updated CPU per task"},
 					"swap_proportion":    {Type: "number", Description: "Updated /scratch swapfile fraction (0 disables swap)"},
-					"extra_storage_gb":   {Type: "integer", Description: "Updated extra /scratch volume size in GB (OVH only)"},
+					"extra_storage_gb":   {Type: "integer", Description: "Updated extra /scratch volume size in GB (OVH and Azure)"},
 					"extra_storage_type": {Type: "string", Description: "Updated extra volume class (OVH: classic/high-speed/high-speed-gen2)"},
 				},
 				Required: []string{"step_id", "rank"},
@@ -990,11 +994,11 @@ func (h *mcpHandler) listTools() []mcpTool {
 		// --- Documentation ---
 		{
 			Name:        "get_doc",
-			Description: "Get scitq documentation page. Available pages: cli, yaml-templates, dsl, ai-integration, configuration, ui, optimization.",
+			Description: "Get scitq documentation page. Available pages: " + strings.Join(docPages(), ", ") + ".",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]schemaProperty{
-					"page": {Type: "string", Description: "Doc page name (e.g. yaml-templates, cli, dsl, ai-integration, configuration, ui, optimization)"},
+					"page": {Type: "string", Description: "Doc page name, one of: " + strings.Join(docPages(), ", ")},
 				},
 				Required: []string{"page"},
 			},
@@ -2160,6 +2164,8 @@ func (h *mcpHandler) toolUpdateRecruiter(ctx context.Context, args json.RawMessa
 		Concurrency      int32    `json:"concurrency"`
 		Prefetch         int32    `json:"prefetch"`
 		CpuPerTask       int32    `json:"cpu_per_task"`
+		Rounds           *int32   `json:"rounds"`
+		Timeout          *int32   `json:"timeout"`
 		SwapProportion   *float32 `json:"swap_proportion"`
 		ExtraStorageGb   *int32   `json:"extra_storage_gb"`
 		ExtraStorageType *string  `json:"extra_storage_type"`
@@ -2168,6 +2174,8 @@ func (h *mcpHandler) toolUpdateRecruiter(ctx context.Context, args json.RawMessa
 	req := &pb.RecruiterUpdate{
 		StepId:           p.StepID,
 		Rank:             p.Rank,
+		Rounds:           p.Rounds,
+		Timeout:          p.Timeout,
 		SwapProportion:   p.SwapProportion,
 		ExtraStorageGb:   p.ExtraStorageGb,
 		ExtraStorageType: p.ExtraStorageType,
@@ -2310,13 +2318,13 @@ func (h *mcpHandler) toolListTemplateRuns(ctx context.Context, args json.RawMess
 func (h *mcpHandler) toolGetDoc(ctx context.Context, args json.RawMessage) (any, *rpcError) {
 	var p struct{ Page string `json:"page"` }
 	json.Unmarshal(args, &p)
+	pages := docPages()
 	if p.Page == "" {
-		return textResult("Available pages: cli, yaml-templates, dsl, ai-integration, configuration, ui"), nil
+		return textResult("Available pages: " + strings.Join(pages, ", ")), nil
 	}
-	// Sanitize: only allow known page names
-	allowed := map[string]bool{"cli": true, "yaml-templates": true, "dsl": true, "ai-integration": true, "configuration": true, "ui": true}
-	if !allowed[p.Page] {
-		return textResult(fmt.Sprintf("Unknown page %q. Available: cli, yaml-templates, dsl, ai-integration, configuration, ui", p.Page)), nil
+	// Only embedded page names are served, which also rules out path tricks.
+	if !slices.Contains(pages, p.Page) {
+		return textResult(fmt.Sprintf("Unknown page %q. Available: %s", p.Page, strings.Join(pages, ", "))), nil
 	}
 	data, err := embeddedDocs.ReadFile("docs/" + p.Page + ".md")
 	if err != nil {

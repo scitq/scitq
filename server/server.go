@@ -6361,6 +6361,21 @@ func (s *taskQueueServer) CreateRecruiter(ctx context.Context, req *pb.Recruiter
 	if req.Rounds <= 0 {
 		return &pb.Ack{Success: false}, fmt.Errorf("rounds (number of rounds of execution desired to achieve the current load) must be strictly positive")
 	}
+	// rounds is a property of the step: all its recruiters share one value
+	// (docs/reference/recruitment.md).
+	var otherRank, otherRounds int32
+	switch err := s.db.QueryRowContext(ctx,
+		`SELECT rank, rounds FROM recruiter WHERE step_id = $1 AND rank <> $2 AND rounds <> $3 ORDER BY rank LIMIT 1`,
+		req.StepId, req.Rank, req.Rounds).Scan(&otherRank, &otherRounds); err {
+	case nil:
+		return &pb.Ack{Success: false}, status.Errorf(codes.InvalidArgument,
+			"step %d already recruits with rounds=%d (rank %d), and all recruiters of a step share one rounds value: "+
+				"create this recruiter with rounds=%d, or change the step's rounds with an update (it applies to all its recruiters)",
+			req.StepId, otherRounds, otherRank, otherRounds)
+	case sql.ErrNoRows:
+	default:
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to check the step's rounds: %w", err)
+	}
 
 	var err error
 	// Insert with embedded subqueries for provider_id and region_id
@@ -6637,6 +6652,15 @@ func (s *taskQueueServer) UpdateRecruiter(ctx context.Context, req *pb.Recruiter
 
 	switch status {
 	case "ok":
+		// rounds is a property of the step: apply it to all its recruiters
+		// (docs/reference/recruitment.md).
+		if req.Rounds != nil {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE recruiter SET rounds = $1 WHERE step_id = $2 AND rank <> $3`,
+				*req.Rounds, req.StepId, req.Rank); err != nil {
+				return &pb.Ack{Success: false}, fmt.Errorf("failed to apply rounds to the step's other recruiters: %w", err)
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return &pb.Ack{Success: false}, fmt.Errorf("failed to commit recruiter update: %w", err)
 		}

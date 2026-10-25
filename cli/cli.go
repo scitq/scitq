@@ -234,9 +234,9 @@ type Attr struct {
 			DiskPerTask     *float32 `arg:"--disk-per-task" help:"Adaptative concurrency: Disk space (Gb) required for 1 task"`
 			ConcurrencyMax  *int32   `arg:"--concurrency" help:"Adaptative concurrency: Maximum concurrency per worker"`
 			ConcurrencyMin  *int32   `arg:"--concurrency" help:"Adaptative concurrency: Minimal concurrency per worker"`
-			MaxWorkers      *int32   `arg:"--max-workers" help:"Maximum number of workers"`
-			Rounds          int      `arg:"--rounds" help:"Number of rounds"`
-			Timeout         int      `arg:"--timeout" default:"10" help:"Timeout in seconds"`
+			MaxWorkers      *int32   `arg:"--max-workers" help:"This rank acts only while the step has fewer workers than this (counts every worker on the step)"`
+			Rounds          int      `arg:"--rounds" help:"Rounds in which the step should run its pending tasks; shared by all recruiters of the step"`
+			Timeout         int      `arg:"--timeout" default:"10" help:"Seconds this rank waits, once eligible, before deploying new cloud workers (recycling never waits)"`
 			SwapProportion  *float32 `arg:"--swap-proportion" help:"Override /scratch swapfile fraction for this recruiter's workers (0 disables swap; unset = server config default)"`
 			ExtraStorageGb   *int32  `arg:"--extra-storage-gb" help:"Attach an extra block volume of this size (GB) to each recruited worker, mounted at /scratch (OVH only)"`
 			ExtraStorageType *string `arg:"--extra-storage-type" help:"Volume class for --extra-storage-gb (OVH: classic/high-speed/high-speed-gen2); unset = provider default"`
@@ -253,9 +253,9 @@ type Attr struct {
 			DiskPerTask     *float32 `arg:"--disk-per-task" help:"Updated disk per task (GB)"`
 			ConcurrencyMax  *int32   `arg:"--concurrency-max" help:"Updated max concurrency"`
 			ConcurrencyMin  *int32   `arg:"--concurrency-min" help:"Updated min concurrency"`
-			MaxWorkers      *int32   `arg:"--max-workers" help:"Updated max workers"`
-			Rounds          *int32   `arg:"--rounds" help:"Updated rounds"`
-			Timeout         *int32   `arg:"--timeout" help:"Updated timeout (seconds)"`
+			MaxWorkers      *int32   `arg:"--max-workers" help:"Updated max workers (counts every worker on the step)"`
+			Rounds          *int32   `arg:"--rounds" help:"Updated rounds; applies to all recruiters of the step"`
+			Timeout         *int32   `arg:"--timeout" help:"Updated delay (seconds) before this rank deploys new cloud workers"`
 			SwapProportion  *float32 `arg:"--swap-proportion" help:"Updated /scratch swapfile fraction (0 disables)"`
 			ExtraStorageGb   *int32  `arg:"--extra-storage-gb" help:"Updated extra /scratch volume size in GB (OVH only)"`
 			ExtraStorageType *string `arg:"--extra-storage-type" help:"Updated extra volume class (OVH: classic/high-speed/high-speed-gen2)"`
