@@ -2372,57 +2372,17 @@ func errorResult(err error) *toolResult {
 	}
 }
 
-// resolveSessionContext resolves a token (JWT or session) to an authenticated user context.
+// resolveSessionContext resolves a session token (from Login, e.g.
+// `scitq login --json`) to an authenticated user context. Without a valid
+// session the context carries no user and the tools that need one refuse.
 func (h *mcpHandler) resolveSessionContext(ctx context.Context, token string) context.Context {
 	// Always store the raw token so extractTokenFromContext can find it
 	// (needed by RunTemplate to pass SCITQ_TOKEN to the script runner)
 	ctx = context.WithValue(ctx, tokenContextKey, token)
-
-	// Try JWT first (from scitq login --json)
-	claims, err := parseJWT(token, h.server.cfg.Scitq.JwtSecret)
-	if err == nil {
-		userID := int(claims["user_id"].(float64))
-		username, _ := claims["username"].(string)
-		isAdmin, _ := claims["is_admin"].(bool)
-
-		// Ensure the JWT is also registered as a session so subsequent gRPC calls
-		// (e.g. from the script runner subprocess during RunTemplate pre-flight)
-		// are accepted by the gRPC auth interceptor, which only knows DB sessions.
-		// Use the JWT's exp claim for the DB expiry; skip if missing.
-		if expRaw, ok := claims["exp"].(float64); ok {
-			expAt := time.Unix(int64(expRaw), 0)
-			if _, dberr := h.server.db.Exec(
-				`INSERT INTO scitq_user_session (user_id, session_id, expires_at)
-				 VALUES ($1, $2, $3)
-				 ON CONFLICT (session_id) DO NOTHING`,
-				userID, token, expAt); dberr != nil {
-				log.Printf("MCP: failed to register JWT as session: %v", dberr)
-			}
-		}
-
-		return context.WithValue(ctx, userContextKey, &AuthenticatedUser{
-			UserID:   userID,
-			Username: username,
-			IsAdmin:  isAdmin,
-		})
-	}
-
-	// Fall back to session token (from Login RPC)
-	var userID int
-	var username string
-	var isAdmin bool
-	err = h.server.db.QueryRow(
-		`SELECT u.user_id, u.username, u.is_admin FROM scitq_user_session s
-		 JOIN scitq_user u ON s.user_id=u.user_id
-		 WHERE s.session_id=$1 AND s.expires_at > now()`,
-		token).Scan(&userID, &username, &isAdmin)
+	user, err := lookupSession(h.server.db, token)
 	if err != nil {
-		log.Printf("MCP: invalid token (neither JWT nor session)")
+		log.Printf("MCP: invalid or expired session")
 		return ctx
 	}
-	return context.WithValue(ctx, userContextKey, &AuthenticatedUser{
-		UserID:   userID,
-		Username: username,
-		IsAdmin:  isAdmin,
-	})
+	return context.WithValue(ctx, userContextKey, user)
 }

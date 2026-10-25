@@ -124,7 +124,7 @@ STEP=$(scitq step create --workflow-id "$WF" --name work | grep -oE 'ID[^0-9]*[0
 scitq worker update --worker-id "$WORKER_ID" --step-id "$STEP" >/dev/null
 for i in 1 2 3 4; do
   scitq task create --step-id "$STEP" --container bare --shell sh --name "t$i" \
-    --command "sleep 15 && echo done-$i > \"\$OUTPUT/out.txt\"" --output "$WORK/out/t$i/" >/dev/null
+    --command "sleep 15 && echo log-$i && echo done-$i > \"\$OUTPUT/out.txt\"" --output "$WORK/out/t$i/" >/dev/null
 done
 scitq workflow update --id "$WF" --status R >/dev/null
 wait_for 120 "the first task to succeed on $BASE" succeeded_at_least 1
@@ -138,6 +138,10 @@ start_server cand
 wait_for 300 "all tasks to succeed after the server upgrade" succeeded_at_least 4
 [ "$(task_count F)" -eq 0 ] || fail "tasks failed across the server upgrade"
 for i in 1 2 3 4; do [ -s "$WORK/out/t$i/out.txt" ] || fail "output of t$i missing"; done
+# t4 ran wholly on the candidate server: its log stream came from the
+# previous release's worker, which sends logs without a token.
+T4=$(scitq --json task list --workflow-id "$WF" --limit 100 | jq -r '.[] | select(.task_name=="t4") | .task_id')
+scitq task stdout --id "$T4" | grep -q log-4 || fail "stdout of t4 (from the $BASE worker) missing"
 say "all 4 tasks succeeded with a $BASE worker on the candidate server"
 
 # --- 5. Worker upgrade (linux/amd64 only) -----------------------------------

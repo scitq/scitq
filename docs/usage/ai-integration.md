@@ -12,7 +12,7 @@ TOKEN=$(scitq login --user admin --password mypass --server myserver:443 --json 
 scitq template list --server myserver:443 --token $TOKEN --json
 ```
 
-The token is a JWT valid for 24 hours. Store it for the duration of your session.
+The token is a session: it stays valid while it is used at least once every 30 days (up to a year), until you log out or your password changes. Give each agent its own non-admin account — see [Security](../reference/security.md#ai-agents-and-mcp).
 
 ### TLS certificate
 
@@ -232,7 +232,7 @@ Two options:
 
 **Option 1: Bearer token** (recommended for agents that already have a token)
 
-Pass the JWT from `scitq login` in the `Authorization` header during `initialize`:
+Pass the token from `scitq login` in the `Authorization` header during `initialize`:
 
 ```
 POST /mcp
@@ -249,6 +249,8 @@ The session starts pre-authenticated — no need to call the `login` tool.
 1. Send `initialize` request → server returns `Mcp-Session-Id`
 2. Call `login` tool with username/password → session is authenticated
 3. Call other tools — session token is reused automatically
+
+Either way, the tools act with exactly the rights of that account, and stop working as soon as its session is revoked or expires (see [Security](../reference/security.md#sessions)).
 
 ### Server configuration
 

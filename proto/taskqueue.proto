@@ -372,6 +372,10 @@ message Task {
     optional int32 produced_files  = 54;
     optional int64 produced_bytes  = 55;
     optional int32 uploaded_files = 56;
+    // Credential for a scitq_auth task: the worker injects it as
+    // SCITQ_TOKEN. It allows only the calls `scitq file copy|list` makes,
+    // and only while the task is active. Sent with scitq_auth tasks only.
+    optional string task_token = 57;
 }
 
 message TaskList {

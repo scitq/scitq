@@ -721,6 +721,10 @@ type Task struct {
 	ProducedFiles *int32 `protobuf:"varint,54,opt,name=produced_files,json=producedFiles,proto3,oneof" json:"produced_files,omitempty"`
 	ProducedBytes *int64 `protobuf:"varint,55,opt,name=produced_bytes,json=producedBytes,proto3,oneof" json:"produced_bytes,omitempty"`
 	UploadedFiles *int32 `protobuf:"varint,56,opt,name=uploaded_files,json=uploadedFiles,proto3,oneof" json:"uploaded_files,omitempty"`
+	// Credential for a scitq_auth task: the worker injects it as
+	// SCITQ_TOKEN. It allows only the calls `scitq file copy|list` makes,
+	// and only while the task is active. Sent with scitq_auth tasks only.
+	TaskToken     *string `protobuf:"bytes,57,opt,name=task_token,json=taskToken,proto3,oneof" json:"task_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1145,6 +1149,13 @@ func (x *Task) GetUploadedFiles() int32 {
 		return *x.UploadedFiles
 	}
 	return 0
+}
+
+func (x *Task) GetTaskToken() string {
+	if x != nil && x.TaskToken != nil {
+		return *x.TaskToken
+	}
+	return ""
 }
 
 type TaskList struct {
@@ -13033,7 +13044,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\b_gpu_allB\x0f\n" +
 	"\r_publish_modeB\x11\n" +
 	"\x0f_min_mem_sharedB\x12\n" +
-	"\x10_min_disk_shared\"\xdb\x14\n" +
+	"\x10_min_disk_shared\"\x8e\x15\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\x05R\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x19\n" +
@@ -13099,7 +13110,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x12definitive_pattern\x185 \x01(\tH#R\x11definitivePattern\x88\x01\x01\x12*\n" +
 	"\x0eproduced_files\x186 \x01(\x05H$R\rproducedFiles\x88\x01\x01\x12*\n" +
 	"\x0eproduced_bytes\x187 \x01(\x03H%R\rproducedBytes\x88\x01\x01\x12*\n" +
-	"\x0euploaded_files\x188 \x01(\x05H&R\ruploadedFiles\x88\x01\x01B\b\n" +
+	"\x0euploaded_files\x188 \x01(\x05H&R\ruploadedFiles\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"task_token\x189 \x01(\tH'R\ttaskToken\x88\x01\x01B\b\n" +
 	"\x06_shellB\x14\n" +
 	"\x12_container_optionsB\n" +
 	"\n" +
@@ -13147,7 +13160,8 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x13_definitive_patternB\x11\n" +
 	"\x0f_produced_filesB\x11\n" +
 	"\x0f_produced_bytesB\x11\n" +
-	"\x0f_uploaded_files\"1\n" +
+	"\x0f_uploaded_filesB\r\n" +
+	"\v_task_token\"1\n" +
 	"\bTaskList\x12%\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x0f.taskqueue.TaskR\x05tasks\"P\n" +
 	"\x10RetryTaskRequest\x12\x17\n" +

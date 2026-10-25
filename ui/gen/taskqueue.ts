@@ -579,6 +579,14 @@ export interface Task {
      * @generated from protobuf field: optional int32 uploaded_files = 56
      */
     uploadedFiles?: number;
+    /**
+     * Credential for a scitq_auth task: the worker injects it as
+     * SCITQ_TOKEN. It allows only the calls `scitq file copy|list` makes,
+     * and only while the task is active. Sent with scitq_auth tasks only.
+     *
+     * @generated from protobuf field: optional string task_token = 57
+     */
+    taskToken?: string;
 }
 /**
  * @generated from protobuf message taskqueue.TaskList
@@ -5363,7 +5371,8 @@ class Task$Type extends MessageType<Task> {
             { no: 53, name: "definitive_pattern", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 54, name: "produced_files", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 55, name: "produced_bytes", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/ },
-            { no: 56, name: "uploaded_files", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 56, name: "uploaded_files", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 57, name: "task_token", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Task>): Task {
@@ -5586,6 +5595,9 @@ class Task$Type extends MessageType<Task> {
                 case /* optional int32 uploaded_files */ 56:
                     message.uploadedFiles = reader.int32();
                     break;
+                case /* optional string task_token */ 57:
+                    message.taskToken = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5790,6 +5802,9 @@ class Task$Type extends MessageType<Task> {
         /* optional int32 uploaded_files = 56; */
         if (message.uploadedFiles !== undefined)
             writer.tag(56, WireType.Varint).int32(message.uploadedFiles);
+        /* optional string task_token = 57; */
+        if (message.taskToken !== undefined)
+            writer.tag(57, WireType.LengthDelimited).string(message.taskToken);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

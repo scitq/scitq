@@ -1044,10 +1044,10 @@ Semantics:
 
 When `task_spec.scitq_auth: true`, the worker, before launching the task, does two extra things:
 
-1. Injects `SCITQ_SERVER` (the address the worker registered with) and `SCITQ_TOKEN` (the worker's own auth token) as environment variables in the task.
+1. Injects `SCITQ_SERVER` (the address the worker registered with) and `SCITQ_TOKEN` (a token of the task's own) as environment variables in the task.
 2. For docker tasks, bind-mounts the worker's `/usr/local/bin/scitq` into the container at the same path, read-only.
 
-The task can then call `scitq file copy <src> <dst>` (or any other `scitq` CLI subcommand) and authenticate against the server as the worker. The server's rclone configuration — including any encrypted-archive crypt password or cloud-provider access key — never reaches the container; the task only ever holds a token.
+The task can then call `scitq file copy <src> <dst>` and `scitq file list <uri>`. The token allows only those calls, and only while the task is active: it cannot submit tasks, deploy or delete workers, or change workflows. `scitq file copy` runs rclone inside the container with the server's rclone configuration, so the task does see the storage credentials (encrypted-archive crypt password, cloud-provider access keys) — enable `scitq_auth` only for tasks you trust with them. See [Security](../reference/security.md#tasks-calling-scitq-scitq_auth).
 
 Use cases:
 

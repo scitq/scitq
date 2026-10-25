@@ -83,7 +83,7 @@ When a workflow completes (all tasks succeeded or failed) or is deleted, its wor
 
 `template_run`s represent the different runs of each `workflow_template` which may be launched lots of times. They also make the relation between the `workflow_template`s and the `workflow` they created. They are also linked to users, a.k.a. `scitq_user`s.
 
-`scitq_user`s represent the users. They may be admin or not. One of the admin (the base one) is defined in the configuration `scitq.admin_user`. This specific user is synced at the server startup. The others can be defined using the [UI](usage/ui.md#user-interface) or the [CLI](usage/cli.md#user-create) (and are managed in the database only). There is a last user who has no name and is implicitly declared in the configuration (`scitq.worker_token`), the user used by workers, this one is not synced in the database and stays in memory.
+`scitq_user`s represent the users. They may be admin or not. One of the admin (the base one) is defined in the configuration `scitq.admin_user`. This specific user is synced at the server startup. The others can be defined using the [UI](usage/ui.md#user-interface) or the [CLI](usage/cli.md#user-create) (and are managed in the database only). Workers authenticate with the shared worker token declared in the configuration (`scitq.worker_token`); it is not a user, and it allows only the calls a worker makes (see [Security](reference/security.md)).
 
 `scitq_user_session`s represent the user sessions. It holds their token which is reused in cookies for the UI or in the shell environment (in `SCITQ_TOKEN` variable) for the CLI.
 

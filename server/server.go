@@ -3229,6 +3229,8 @@ func (s *taskQueueServer) EditStepCommand(ctx context.Context, req *pb.EditStepC
 func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) error {
 	var taskID int32
 	var registered bool
+	legacy, _ := stream.Context().Value(legacyLogWriterKey).(bool)
+	legacyChecked := map[int32]bool{}
 	for {
 		logEntry, err := stream.Recv()
 		if err != nil {
@@ -3247,6 +3249,13 @@ func (s *taskQueueServer) SendTaskLogs(stream pb.TaskQueue_SendTaskLogsServer) e
 				}
 			}
 			return err
+		}
+		if legacy && !legacyChecked[logEntry.TaskId] {
+			if !legacyLogWriterAllowed(s.db, logEntry.TaskId) {
+				return status.Error(codes.Unauthenticated, "missing token")
+			}
+			log.Printf("⚠️ Task %d: log stream without a token from a pre-v1.0 worker; upgrade the worker", logEntry.TaskId)
+			legacyChecked[logEntry.TaskId] = true
 		}
 		// Register log stream on first message
 		if !registered {
@@ -5385,6 +5394,7 @@ func (s *taskQueueServer) PingAndTakeNewTasks(ctx context.Context, req *pb.PingA
 		task.PublishMode = utils.NullStringToPtr(publishModeNull)
 		if scitqAuth {
 			task.ScitqAuth = proto.Bool(true)
+			task.TaskToken = proto.String(taskToken(s.cfg.Scitq.JwtSecret, task.TaskId))
 		}
 		if numa.Valid {
 			task.Numa = &numa.Int32
@@ -5831,11 +5841,15 @@ func (s *taskQueueServer) ListFlavors(ctx context.Context, req *pb.ListFlavorsRe
 	return &pb.FlavorsList{Flavors: flavors}, nil
 }
 
+// generateJWT issues a session token. jti makes each one unique: two logins
+// of a user within the same second would otherwise produce the same token,
+// and so share one session.
 func generateJWT(userID int32, username, secret string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  userID,
 		"username": username,
-		"exp":      time.Now().Add(365 * 24 * time.Hour).Unix(), // ~ immortal
+		"exp":      time.Now().Add(365 * 24 * time.Hour).Unix(),
+		"jti":      generateRandomPassword(22),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
@@ -5983,21 +5997,12 @@ func (s *taskQueueServer) httpEditAndRetryTask(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Not authenticated", http.StatusUnauthorized)
 		return
 	}
-	var userID int
-	var username string
-	var isAdmin bool
-	err = s.db.QueryRow(
-		`SELECT u.user_id, u.username, u.is_admin FROM scitq_user_session ss
-		 JOIN scitq_user u ON ss.user_id=u.user_id
-		 WHERE ss.session_id=$1 AND ss.expires_at > now()`,
-		cookie.Value).Scan(&userID, &username, &isAdmin)
+	user, err := lookupSession(s.db, cookie.Value)
 	if err != nil {
 		http.Error(w, "Invalid session", http.StatusUnauthorized)
 		return
 	}
-	ctx := context.WithValue(r.Context(), userContextKey, &AuthenticatedUser{
-		UserID: userID, Username: username, IsAdmin: isAdmin,
-	})
+	ctx := context.WithValue(r.Context(), userContextKey, user)
 
 	var req struct {
 		TaskID  int32  `json:"task_id"`
@@ -6051,50 +6056,6 @@ func parseJWT(tokenStr string, secretKey string) (jwt.MapClaims, error) {
 	}
 
 	return claims, nil
-}
-
-// fetchWorkerTokenHandler returns an HTTP handler that provides the worker token.
-func fetchWorkerTokenHandler(s *taskQueueServer) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("➡️ Calling /WorkerToken")
-
-		var tokenStr string
-
-		// Attempt to retrieve the session token from cookie
-		cookie, err := r.Cookie("session_token")
-		if err == nil && cookie.Value != "" {
-			tokenStr = cookie.Value
-			log.Printf("✅ Token retrieved from cookie")
-		} else {
-			// If no cookie, try to get token from Authorization header
-			authHeader := r.Header.Get("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
-				log.Printf("✅ Token retrieved from Authorization header")
-			} else {
-				log.Println("❌ No token provided (neither cookie nor header)")
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		// Verify and parse the JWT token
-		claims, err := parseJWT(tokenStr, s.cfg.Scitq.JwtSecret)
-		if err != nil {
-			log.Println("❌ Invalid or expired JWT token")
-			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
-			return
-		}
-		log.Printf("✅ JWT decoded: %v", claims)
-
-		// Retrieve the pre-configured worker token from server config
-		workerToken := s.cfg.Scitq.WorkerToken
-		log.Printf("✅ Worker token retrieved: %s", workerToken)
-
-		// Respond with the worker token as JSON
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"worker_token": workerToken})
-	}
 }
 
 // CreateUser creates a new user in the system, requires admin privileges.
@@ -6268,7 +6229,11 @@ func (s *taskQueueServer) ChangePassword(ctx context.Context, req *pb.ChangePass
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to hash new password: %w", err)
 	}
 
-	_, err = s.db.Exec("UPDATE scitq_user SET password=$1 WHERE username=$2", hash, req.Username)
+	// The caller's own session (if it sent one) survives; every other
+	// session of the user is revoked.
+	_, err = s.db.Exec(`WITH u AS (UPDATE scitq_user SET password=$1 WHERE username=$2 RETURNING user_id)
+		DELETE FROM scitq_user_session WHERE user_id=(SELECT user_id FROM u) AND session_id<>$3`,
+		hash, req.Username, extractTokenFromContext(ctx))
 	if err != nil {
 		return &pb.Ack{Success: false}, fmt.Errorf("failed to update password: %w", err)
 	}
@@ -6295,6 +6260,9 @@ func (s *taskQueueServer) AdminResetPassword(ctx context.Context, req *pb.AdminR
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return nil, status.Error(codes.NotFound, "user not found")
+	}
+	if _, err := s.db.Exec("DELETE FROM scitq_user_session WHERE user_id=$1", req.UserId); err != nil {
+		return &pb.Ack{Success: false}, fmt.Errorf("failed to revoke sessions: %w", err)
 	}
 
 	return &pb.Ack{Success: true}, nil
@@ -8176,7 +8144,8 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	// Create gRPC server with TLS and authentication interceptor
 	grpcServer := grpc.NewServer(
 		grpc.Creds(creds),
-		grpc.UnaryInterceptor(workerAuthInterceptor(cfg.Scitq.WorkerToken, db)),
+		grpc.UnaryInterceptor(authUnaryInterceptor(cfg.Scitq.WorkerToken, cfg.Scitq.JwtSecret, db)),
+		grpc.StreamInterceptor(authStreamInterceptor(cfg.Scitq.WorkerToken, cfg.Scitq.JwtSecret, db)),
 		grpc.MaxConcurrentStreams(uint32(cfg.Scitq.MaxDBConcurrency)),
 		grpc.MaxRecvMsgSize(50<<20), // 50 MiB
 		grpc.MaxSendMsgSize(50<<20), // 50 MiB
@@ -8276,8 +8245,7 @@ func Serve(cfg config.Config, ctx context.Context, cancel context.CancelFunc) er
 	mux.HandleFunc("/login", NewLogin(s))
 	mux.Handle("/fetchCookie", fetchCookie())
 	mux.HandleFunc("/logout", LogoutHandler)
-	mux.HandleFunc("/WorkerToken", fetchWorkerTokenHandler(s))
-	mux.HandleFunc("/ws", ws.Handler)
+	mux.HandleFunc("/ws", s.requireSession(ws.Handler))
 	mux.Handle("/mcp", newMCPHandler(s))
 	mux.HandleFunc("/api/task/edit-retry", s.httpEditAndRetryTask)
 

@@ -408,13 +408,18 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	}
 
 	// scitq_auth: per-task opt-in. When true the task gets SCITQ_SERVER and
-	// SCITQ_TOKEN in its env (so `scitq file copy` etc. can authenticate as
-	// the worker), and docker tasks additionally bind-mount the worker's
-	// scitq CLI binary at /usr/local/bin/scitq:ro so the binary is available
-	// regardless of what's baked into the container image. The worker's own
-	// auth token is reused — same identity as the worker's other RPCs, no
-	// new credential surface.
+	// SCITQ_TOKEN in its env (so `scitq file copy|list` can authenticate),
+	// and docker tasks additionally bind-mount the worker's scitq CLI binary
+	// at /usr/local/bin/scitq:ro so the binary is available regardless of
+	// what's baked into the container image. The token is the task's own,
+	// minted by the server: it allows the file calls only, and only while the
+	// task is active. A server older than task tokens sends none; the
+	// worker's token is the fallback.
 	scitqAuth := task.ScitqAuth != nil && *task.ScitqAuth
+	taskAuthToken := task.GetTaskToken()
+	if taskAuthToken == "" {
+		taskAuthToken = workerToken
+	}
 
 	if isBare {
 		// Bare execution: run command directly without Docker
@@ -437,7 +442,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			fmt.Sprintf("MEM=%d", memGB),
 		)
 		if scitqAuth {
-			cmd.Env = append(cmd.Env, "SCITQ_SERVER="+serverAddr, "SCITQ_TOKEN="+workerToken)
+			cmd.Env = append(cmd.Env, "SCITQ_SERVER="+serverAddr, "SCITQ_TOKEN="+taskAuthToken)
 		}
 		log.Printf("🛠️  Running bare command: %s -c %s", shell, task.Command)
 	} else {
@@ -493,14 +498,13 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			)
 		}
 		if scitqAuth {
-			// Token + server reach the container via -e so the task can
-			// authenticate as the worker. Binary is bind-mounted in
+			// Token + server reach the container via -e. Binary is bind-mounted in
 			// case the container image doesn't include it (most don't).
 			// Assumes /usr/local/bin/scitq on the worker is the static
 			// build (CGO_ENABLED=0) — see Makefile / install-cli.
 			command = append(command,
 				"-e", "SCITQ_SERVER="+serverAddr,
-				"-e", "SCITQ_TOKEN="+workerToken,
+				"-e", "SCITQ_TOKEN="+taskAuthToken,
 				"-v", "/usr/local/bin/scitq:/usr/local/bin/scitq:ro",
 			)
 		}

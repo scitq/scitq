@@ -32,6 +32,20 @@ func authInterceptor(token string) grpc.UnaryClientInterceptor {
 	}
 }
 
+func streamAuthInterceptor(token string) grpc.StreamClientInterceptor {
+	return func(
+		ctx context.Context,
+		desc *grpc.StreamDesc,
+		cc *grpc.ClientConn,
+		method string,
+		streamer grpc.Streamer,
+		opts ...grpc.CallOption,
+	) (grpc.ClientStream, error) {
+		ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", token))
+		return streamer(ctx, desc, cc, method, opts...)
+	}
+}
+
 // createClientConnection establishes a gRPC connection to the server.
 func CreateLoginClient(serverAddr string) (QueueClient, error) {
 	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
@@ -61,6 +75,7 @@ func CreateClient(serverAddr, token string) (QueueClient, error) {
 		serverAddr,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithUnaryInterceptor(authInterceptor(fmt.Sprintf("Bearer %s", token))),
+		grpc.WithStreamInterceptor(streamAuthInterceptor(fmt.Sprintf("Bearer %s", token))),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(50<<20), // 50 MiB to match server
 			grpc.MaxCallSendMsgSize(50<<20), // 50 MiB to match server

@@ -222,16 +222,17 @@ func TestRequestWorkerUpgrade_AnyAuthenticatedCaller(t *testing.T) {
 	ctx := context.Background()
 
 	content := []byte("fake scitq client binary perm-model test\n")
-	serverAddr, workerToken, _, _, _, _, cleanup := startServerWithClientBinary(t, content)
+	serverAddr, workerToken, adminUser, adminPassword, _, _, cleanup := startServerWithClientBinary(t, content)
 	defer cleanup()
 
 	wid := registerWorker(t, serverAddr, workerToken, "wu-perm-model")
 
-	// Worker token (no admin user attached to the context) succeeds.
-	wk, err := lib.CreateClient(serverAddr, workerToken)
+	// A non-admin user succeeds.
+	admin := clientWithToken(t, serverAddr, loginToken(t, serverAddr, adminUser, adminPassword))
+	_, err := admin.CreateUser(ctx, &pb.CreateUserRequest{Username: "operator", Password: "op-pw", Email: "op@example.org"})
 	require.NoError(t, err)
-	defer wk.Close()
-	resp, err := wk.Client.RequestWorkerUpgrade(ctx, &pb.WorkerUpgradeRequest{
+	user := clientWithToken(t, serverAddr, loginToken(t, serverAddr, "operator", "op-pw"))
+	resp, err := user.RequestWorkerUpgrade(ctx, &pb.WorkerUpgradeRequest{
 		WorkerIds: []int32{wid},
 		Mode:      "normal",
 	})
