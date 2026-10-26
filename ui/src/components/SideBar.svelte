@@ -88,7 +88,7 @@
 <aside class="dashboard-sidebar" aria-label="Main navigation">
   <!-- Sidebar header with version info -->
   <div class="dashboard-sidebar-header">
-    <span>SCITQ2</span>
+    <span>SciTQ</span>
     <span class="dashboard-sidebar-version">{uiVersion}</span>
   </div>
 

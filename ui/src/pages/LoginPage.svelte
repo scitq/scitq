@@ -16,7 +16,7 @@
    * @type {HTMLElement}
    -->
   <div class="loginpage-header_login">
-    <div class="top-left">SCITQ2</div>
+    <div class="top-left">SciTQ</div>
     <div class="loginpage-top-right">
       <span></span>
       <img src="{logo}" alt="Logo" class="loginpage-login-page-logo" />
