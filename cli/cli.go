@@ -3388,7 +3388,7 @@ func (c *CLI) Copy() error {
 	if err != nil {
 		return fmt.Errorf("failed to create fetch operation: %w", err)
 	}
-	defer fetch.CleanOperation(op)
+	defer fetch.Cleanup()
 
 	err = op.Copy()
 	if err != nil {
@@ -3413,7 +3413,7 @@ func (c *CLI) List() error {
 	if err != nil {
 		return fmt.Errorf("failed to create fetch operation: %w", err)
 	}
-	defer fetch.CleanOperation(op)
+	defer fetch.Cleanup()
 
 	files, err := op.List()
 	if err != nil {

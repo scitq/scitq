@@ -2712,9 +2712,10 @@ func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTask
 	log.Printf("⚡ Task %d forced from W → P (dependency check bypassed)", req.TaskId)
 	s.audit(ctx, "task.force_run", "task", req.TaskId, nil)
 	ws.EmitWS("task", req.TaskId, "status", struct {
-		TaskId int32  `json:"taskId"`
-		Status string `json:"status"`
-	}{TaskId: req.TaskId, Status: "P"})
+		TaskId    int32  `json:"taskId"`
+		OldStatus string `json:"oldStatus"`
+		Status    string `json:"status"`
+	}{TaskId: req.TaskId, OldStatus: "W", Status: "P"})
 	s.triggerAssign()
 	return &pb.Ack{}, nil
 }
@@ -3600,8 +3601,10 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		//	log.Printf("⚠️ Failed to update worker %s: %v", req.Name, err)
 		//	return nil, fmt.Errorf("failed to update worker: %w", err)
 		//}
-		// Collect active tasks attributed to this worker and mark them for failure after commit using UpdateTaskStatus
-		rows, err := tx.Query(`SELECT task_id FROM task WHERE status IN ('C','D','R','U') AND worker_id=$1`, workerID)
+		// Collect the tasks the previous client process held and mark them
+		// for failure after commit using UpdateTaskStatus. A tasks stay: the
+		// new process receives them on its next ping.
+		rows, err := tx.Query(`SELECT task_id FROM task WHERE status IN ('C','D','O','R','U','V') AND worker_id=$1 AND NOT hidden`, workerID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list tasks that were running when client %d crashed: %w", workerID, err)
 		}

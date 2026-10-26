@@ -43,6 +43,8 @@ sessions now expire after 30 days without use.
 - `failure_class` is returned by `ListTasks`, shown by `task list --long`
   and MCP `list_tasks`.
 - `scitq worker list --json`.
+- A force-run button on waiting tasks in the UI's task list (runs the task
+  without waiting for its prerequisites).
 - MCP `update_recruiter` takes `rounds` and `timeout`.
 - Each `job.created` event carries the complete job row.
 - Step-stats snapshots carry the workflow's totals.
@@ -89,3 +91,13 @@ sessions now expire after 30 days without use.
 - Collapsing an expanded workflow stopped live updates on the workflow
   page.
 - Steps created while the step table was scrolled never appeared.
+- Forcing a waiting task to run left it counted as waiting on the
+  dashboard.
+- Workers crashed under parallel transfers ("CRITICAL: Failed to load config
+  file" from rclone), failing every task they held: each transfer wrote its
+  own rclone config file, set it as rclone's process-wide config path
+  without a lock, and deleted it when done. A worker now writes one config
+  file and keeps it.
+- When a worker's client restarts, the tasks it had downloaded ahead (O) or
+  was uploading after a failure (V) are failed and retried at once, like
+  its running ones, instead of lingering until the next reconciliation.

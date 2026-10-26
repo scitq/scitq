@@ -557,6 +557,19 @@ export async function retryTask(taskId: number, retryCount?: number): Promise<nu
 }
 
 /**
+ * Moves a waiting (W) task to pending (P) without waiting for its
+ * prerequisites, e.g. to get partial results when some of them failed.
+ */
+export async function forceRunTask(taskId: number): Promise<void> {
+  try {
+    await client.forceRunTask({ taskId }, await callOptionsUserToken());
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to force-run task ${taskId}: ${errMsg}`);
+  }
+}
+
+/**
  * Delete a task. If the task is active (A/C/D/O/R/U/V) the server
  * queues SIGKILL on the worker and waits up to 15s for the worker to
  * ack the ping before removing the row — see server.DeleteTask for

@@ -43,6 +43,22 @@ describe('TaskPage', () => {
   });
   afterEach(() => wsReset());
 
+  it('force-runs a waiting task, and shows it pending once the server confirms', async () => {
+    mockApi.getAllTasks.mockResolvedValue([
+      { taskId: 7, taskName: 'Waiting task', status: 'W', workflowId: 10, command: 'cmd7' },
+      { taskId: 8, taskName: 'Pending task', status: 'P', workflowId: 10, command: 'cmd8' },
+    ]);
+    render(TaskPage);
+    const button = await screen.findByTestId('force-run-7');
+    expect(screen.queryByTestId('force-run-8')).toBeNull();
+
+    await fireEvent.click(button);
+    expect(mockApi.forceRunTask).toHaveBeenCalledWith(7);
+
+    ws.deliver({ type: 'task', action: 'status', id: 7, payload: { taskId: 7, oldStatus: 'W', status: 'P' } });
+    await waitFor(() => expect(screen.queryByTestId('force-run-7')).toBeNull());
+  });
+
   it('should load first page of tasks', async () => {
     render(TaskPage);
     

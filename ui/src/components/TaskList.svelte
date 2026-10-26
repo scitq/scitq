@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { getJobStatusClass, getJobStatusText, retryTask, deleteTask } from '../lib/api';
-  import { RefreshCcw, Download, Trash, Eye } from 'lucide-svelte';
+  import { getJobStatusClass, getJobStatusText, retryTask, deleteTask, forceRunTask } from '../lib/api';
+  import { RefreshCcw, Download, Trash, Eye, FastForward } from 'lucide-svelte';
   import { formatEpochUTC } from '../lib/format';
   import '../styles/worker.css';
   import '../styles/jobsCompo.css';
@@ -139,6 +139,15 @@ async function retryTaskClick(taskId: number) {
   }
 }
 
+async function forceRunClick(taskId: number) {
+  errorMessage = null;
+  try {
+    await forceRunTask(taskId);
+  } catch (err) {
+    errorMessage = err.message || `Failed to force-run task ${taskId}`;
+  }
+}
+
 // In-flight set so a slow delete (active task → kill + 15s wait) doesn't
 // allow a double-click to fire a second DeleteTask. WS task.deleted will
 // remove the row from displayedTasks once the server confirms.
@@ -236,6 +245,11 @@ async function deleteTaskClick(taskId: number, status: string) {
             <td class="workerCompo-actions">
               <button class="btn-action" title="Full Log" data-testid={`full-log-${task.taskId}`} onclick={() => onOpenModal(task.taskId)}><Eye /></button>
               <button class="btn-action" title="Restart" onclick={() => retryTaskClick(task.taskId)}><RefreshCcw /></button>
+              {#if task.status === 'W'}
+                <button class="btn-action" title="Run now, without waiting for its prerequisites"
+                        data-testid={`force-run-${task.taskId}`}
+                        onclick={() => forceRunClick(task.taskId)}><FastForward /></button>
+              {/if}
               <br />
               <button class="btn-action" title="Download"><Download /></button>
               <button class="btn-action"
