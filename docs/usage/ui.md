@@ -172,3 +172,28 @@ Clicking on the `+` button will give you a file selector to select a new templat
 The setting page has two parts, the upper part, available for all users. It enables to change your password.
 
 The lower part enable to add and edit users.
+## Branding
+
+An installation can show its own name, logo and colors. Set them in the
+`ui` section of `/etc/scitq.yaml` and restart the server:
+
+```yaml
+ui:
+  name: "GMT SciTQ"            # sidebar, login page, browser tab title
+  logo: /etc/scitq/logo.png    # image file on the server: sidebar, login page, tab icon
+  colors:
+    primary: "#0b5d3b"         # sidebar, toolbars, table headers, buttons
+    primary_dark: "#2f8f66"    # the same, in dark theme
+    accent: "#c2410c"          # links
+    accent_dark: "#fb923c"     # the same, in dark theme
+```
+
+Every key is optional; unset keys keep scitq's own look. Colors are CSS
+colors (`#hex`, a color name, `rgb(...)` or `hsl(...)`); hover shades are
+derived from them. The colors of statuses (success, failure, warning) are
+the same on every installation. The server checks the colors and that the
+logo file exists when it starts, and refuses to start otherwise.
+
+The server writes the branding into the page it serves, so the interface
+shows it from its first render. A UI run from the Vite development server
+(`npm run dev`) shows scitq's own look.

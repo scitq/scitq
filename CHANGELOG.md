@@ -43,6 +43,8 @@ sessions now expire after 30 days without use.
 - `failure_class` is returned by `ListTasks`, shown by `task list --long`
   and MCP `list_tasks`.
 - `scitq worker list --json`.
+- **Branding**: an installation's name, logo and two brand colors (`ui:` in
+  `scitq.yaml`), shown from the first render.
 - A force-run button on waiting tasks in the UI's task list (runs the task
   without waiting for its prerequisites).
 - MCP `update_recruiter` takes `rounds` and `timeout`.
@@ -67,6 +69,9 @@ sessions now expire after 30 days without use.
 - **UI live updates** are applied in batches, so values no longer flash
   states a task passes through in milliseconds; the workflow list's
   counters follow the server's snapshots.
+
+- In dark theme, the sidebar now uses the dark theme's primary color, like
+  the toolbar.
 
 ### Removed
 

@@ -3,13 +3,13 @@
   width: 220px;
   height: 100vh;
   overflow: auto; 
-  background-color: #192245;
+  background-color: var(--primary-color);
   color: var(--primary-text); 
   display: flex;
   flex-direction: column;
   padding: 1.5rem 1rem;
   box-sizing: border-box;
-  border-right: 1px solid #192245;
+  border-right: 1px solid var(--primary-color);
   font-family: 'Inter', sans-serif;
   transition: transform 0.3s ease;
 }
@@ -29,6 +29,18 @@
   margin-bottom: 2rem;
   color: #f3f4f6;
   justify-content: space-between;
+}
+
+.dashboard-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.dashboard-sidebar-logo {
+  height: 1.75rem;
+  width: auto;
 }
 
 .dashboard-sidebar-version {
@@ -196,7 +208,7 @@
   margin-top: auto;
   color: #f87171;
   text-align: left;
-  background-color: #192245;
+  background-color: var(--primary-color);
   border: none;
 }
 

@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { branding } from '../lib/branding';
   import { Home, ListChecks, Package, Settings, Power, ChevronDown, SunMoon, Copy } from 'lucide-svelte';
   import '../styles/dashboard.css';
   import { theme } from '../lib/Stores/theme';
   import { logout } from '../lib/auth';
   import { uiVersion } from '../version';
+  const { name: brandName, logo: brandLogo } = branding();
 
   /**
    * State variables for controlling submenu visibility
@@ -88,7 +90,10 @@
 <aside class="dashboard-sidebar" aria-label="Main navigation">
   <!-- Sidebar header with version info -->
   <div class="dashboard-sidebar-header">
-    <span>SciTQ</span>
+    <span class="dashboard-sidebar-brand">
+      <img src={brandLogo} alt="" class="dashboard-sidebar-logo" data-testid="brand-logo" />
+      <span data-testid="brand-name">{brandName}</span>
+    </span>
     <span class="dashboard-sidebar-version">{uiVersion}</span>
   </div>
 

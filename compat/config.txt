@@ -139,3 +139,9 @@ config scitq.task_upload_timeout:int
 config scitq.worker_retention:int
 config scitq.worker_stats_retention_hours:int
 config scitq.worker_token:string
+config ui.colors.accent:string
+config ui.colors.accent_dark:string
+config ui.colors.primary:string
+config ui.colors.primary_dark:string
+config ui.logo:string
+config ui.name:string

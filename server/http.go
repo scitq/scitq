@@ -123,7 +123,11 @@ func HttpServer(cfg config.Config) (tls.Certificate, string, http.Handler, error
 	if err != nil {
 		log.Fatalf("failed to create sub FS for public/: %v", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	ui, err := uiHandler(sub, cfg.UI)
+	if err != nil {
+		return tls.Certificate{}, "", nil, err
+	}
+	mux.Handle("/", ui)
 
 	return tlsCert, certPEMstring, mux, nil
 }

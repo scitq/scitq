@@ -279,7 +279,7 @@ async function deleteTaskClick(taskId: number, status: string) {
   }
   .task-publish {
     font-size: 0.85em;
-    color: var(--color-accent, #3b82f6);
+    color: var(--link-color);
   }
   .task-manifest {
     font-size: 0.8em;

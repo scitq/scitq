@@ -366,7 +366,7 @@
     font-size: 0.7em;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    background: var(--primary-color, #192245);
+    background: var(--primary-color);
     color: var(--primary-text, #fff);
     padding: 1px 6px;
     border-radius: 999px;

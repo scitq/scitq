@@ -110,7 +110,7 @@
 /* Status color definitions */
 .tasks-status-tabs .tasks-status-all,
 .tasks-status-pill.all {
-  background: linear-gradient(135deg, #192245, #2a3370);
+  background: linear-gradient(135deg, var(--primary-color), color-mix(in srgb, var(--primary-color) 80%, white));
   color: #e5e7eb;
 }
 

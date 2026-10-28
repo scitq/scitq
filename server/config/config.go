@@ -231,6 +231,57 @@ type Config struct {
 	// leaked workers etc. surface via server/metrics for Zabbix /
 	// Prometheus / Grafana consumption. See server/notifications.
 	Notifications NotificationsConfig `yaml:"notifications"`
+
+	// UI brands the web interface: its name, logo and colors. Every key is
+	// optional; unset keys keep scitq's own look.
+	UI UIConfig `yaml:"ui"`
+}
+
+// UIConfig brands the web interface. The server writes it into the page
+// it serves, so the first render already shows it.
+type UIConfig struct {
+	// Name replaces "SciTQ" in the sidebar, on the login page and in the
+	// browser tab title.
+	Name string `yaml:"name"`
+	// Logo is the path of an image file on the server (PNG, SVG, ...),
+	// shown in the sidebar, on the login page and as the browser tab icon.
+	Logo string `yaml:"logo"`
+	// Colors are CSS colors: #hex, a color name, rgb(...) or hsl(...).
+	Colors UIColors `yaml:"colors"`
+}
+
+// UIColors sets the interface's two brand colors, each for the light and
+// the dark theme. Hover shades are derived from them. Status colors
+// (success, failure, warning) are not configurable: they mean the same on
+// every installation.
+type UIColors struct {
+	// Primary colors the sidebar, toolbars, table headers and buttons.
+	Primary string `yaml:"primary"`
+	// PrimaryDark is Primary in the dark theme.
+	PrimaryDark string `yaml:"primary_dark"`
+	// Accent colors links.
+	Accent string `yaml:"accent"`
+	// AccentDark is Accent in the dark theme.
+	AccentDark string `yaml:"accent_dark"`
+}
+
+var cssColor = regexp.MustCompile(`^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+|(rgb|rgba|hsl|hsla)\([0-9.,%\s/a-z]*\))$`)
+
+func (u UIConfig) validate() error {
+	for key, value := range map[string]string{
+		"ui.colors.primary": u.Colors.Primary, "ui.colors.primary_dark": u.Colors.PrimaryDark,
+		"ui.colors.accent": u.Colors.Accent, "ui.colors.accent_dark": u.Colors.AccentDark,
+	} {
+		if value != "" && !cssColor.MatchString(value) {
+			return fmt.Errorf("%s: %q is not a CSS color (use #hex, a color name, rgb(...) or hsl(...))", key, value)
+		}
+	}
+	if u.Logo != "" {
+		if _, err := os.Stat(u.Logo); err != nil {
+			return fmt.Errorf("ui.logo: %w", err)
+		}
+	}
+	return nil
 }
 
 // NotificationsConfig is the top-level entry for the notifications
@@ -434,8 +485,7 @@ func (c *Config) Validate() error {
 	if len(c.Scitq.DockerCredentials) > 0 && (c.Scitq.DockerRegistry != "" || c.Scitq.DockerAuthentication != "") {
 		log.Printf("warning: both scitq.docker_credentials and legacy scitq.docker_registry/docker_authentication are set; using docker_credentials only")
 	}
-	// You can add more rules as needed
-	return nil
+	return c.UI.validate()
 }
 
 type ProviderConfig interface {

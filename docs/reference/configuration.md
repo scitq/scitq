@@ -55,6 +55,15 @@
 |  | AlwaysLog | `notifications.always_log` | `false` | `bool` | AlwaysLog writes every dispatched notification to the server log in addition to routing to configured channels. Useful as an audit trail or to smoke-test rules without wiring a real backend. |
 |  | Channels | `notifications.channels` | `` | `[]NotificationChannel` | Channels declares the delivery targets. See NotificationChannel for the shape. |
 |  | Routes | `notifications.routes` | `` | `[]NotificationRoute` | Routes maps events to channel names. One event can fan out to several channels; one channel can subscribe to several events. |
+| UI |  | `ui` |  |  | UI brands the web interface: its name, logo and colors. Every key is optional; unset keys keep scitq's own look. |
+|  | Name | `ui.name` | `` | `string` | Name replaces "SciTQ" in the sidebar, on the login page and in the browser tab title. |
+|  | Logo | `ui.logo` | `` | `string` | Logo is the path of an image file on the server (PNG, SVG, ...), shown in the sidebar, on the login page and as the browser tab icon. |
+|  | Colors | `ui.colors` | `` | `UIColors` | Colors are CSS colors: #hex, a color name, rgb(...) or hsl(...). |
+| Colors |  | `ui.colors` |  |  |  |
+|  | Primary | `ui.colors.primary` | `` | `string` | Primary colors the sidebar, toolbars, table headers and buttons. |
+|  | PrimaryDark | `ui.colors.primary_dark` | `` | `string` | PrimaryDark is Primary in the dark theme. |
+|  | Accent | `ui.colors.accent` | `` | `string` | Accent colors links. |
+|  | AccentDark | `ui.colors.accent_dark` | `` | `string` | AccentDark is Accent in the dark theme. |
 
 ### AzureConfig (Providers.Azure map values)
 | Section | Field | YAML key | Default | Type | Description |

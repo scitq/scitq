@@ -372,7 +372,7 @@
 .wfTemp-form-group input:focus {
   border-color: var(--primary-color);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(25, 34, 69, 0.2);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 20%, transparent);
 }
 
 .wfTemp-modal-actions {
