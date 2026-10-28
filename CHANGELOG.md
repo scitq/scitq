@@ -70,9 +70,6 @@ sessions now expire after 30 days without use.
   states a task passes through in milliseconds; the workflow list's
   counters follow the server's snapshots.
 
-- In dark theme, the sidebar now uses the dark theme's primary color, like
-  the toolbar.
-
 ### Removed
 
 - The `/WorkerToken` HTTP endpoint.
@@ -106,3 +103,8 @@ sessions now expire after 30 days without use.
 - When a worker's client restarts, the tasks it had downloaded ahead (O) or
   was uploading after a failure (V) are failed and retried at once, like
   its running ones, instead of lingering until the next reconciliation.
+- A task printing a progress bar (redrawn with `\r`), a line over 64 KiB, or
+  output that is not valid UTF-8 hung forever: the worker stopped reading
+  its output, and the task blocked on its next write. Worker logs now split
+  lines on `\r` as well as `\n`, cut lines at 16 KiB, replace invalid UTF-8,
+  and always read a task's output to its end.

@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -699,16 +698,14 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	stderrTail := newStderrTail(4096)
 	sendLogs := func(reader io.Reader, stream pb.TaskQueue_SendTaskLogsClient, logType string, tail *stderrTailBuf) {
 		defer logWg.Done()
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			line := scanner.Text()
+		err := readLogLines(reader, func(line string) error {
 			if tail != nil {
 				tail.appendLine(line)
 			}
-			if err := stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: logType, LogText: line}); err != nil {
-				log.Printf("⚠️ Failed to send log line for task %d: %v", task.TaskId, err)
-				break
-			}
+			return stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: logType, LogText: line})
+		})
+		if err != nil {
+			log.Printf("⚠️ Failed to send %s of task %d: %v", logType, task.TaskId, err)
 		}
 	}
 

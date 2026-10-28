@@ -60,8 +60,8 @@
 |  | Logo | `ui.logo` | `` | `string` | Logo is the path of an image file on the server (PNG, SVG, ...), shown in the sidebar, on the login page and as the browser tab icon. |
 |  | Colors | `ui.colors` | `` | `UIColors` | Colors are CSS colors: #hex, a color name, rgb(...) or hsl(...). |
 | Colors |  | `ui.colors` |  |  |  |
-|  | Primary | `ui.colors.primary` | `` | `string` | Primary colors the sidebar, toolbars, table headers and buttons. |
-|  | PrimaryDark | `ui.colors.primary_dark` | `` | `string` | PrimaryDark is Primary in the dark theme. |
+|  | Primary | `ui.colors.primary` | `` | `string` | Primary colors the sidebar and login page in both themes, and the toolbars, table headers and buttons in the light theme. |
+|  | PrimaryDark | `ui.colors.primary_dark` | `` | `string` | PrimaryDark colors the toolbars, table headers and buttons in the dark theme. |
 |  | Accent | `ui.colors.accent` | `` | `string` | Accent colors links. |
 |  | AccentDark | `ui.colors.accent_dark` | `` | `string` | AccentDark is Accent in the dark theme. |
 

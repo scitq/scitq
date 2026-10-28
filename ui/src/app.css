@@ -2,6 +2,7 @@
 :root {
   /* Fixed colors (common to both themes) */
   --primary-text: white;
+  --brand-color: #192245; /* sidebar and login, same in both themes */
   
   /* Default light theme */
   --primary-color: #192245; /* Dark blue for light mode */

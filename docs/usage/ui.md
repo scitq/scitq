@@ -182,8 +182,8 @@ ui:
   name: "GMT SciTQ"            # sidebar, login page, browser tab title
   logo: /etc/scitq/logo.png    # image file on the server: sidebar, login page, tab icon
   colors:
-    primary: "#0b5d3b"         # sidebar, toolbars, table headers, buttons
-    primary_dark: "#2f8f66"    # the same, in dark theme
+    primary: "#0b5d3b"         # sidebar and login page (both themes); toolbars, table headers, buttons
+    primary_dark: "#2f8f66"    # toolbars, table headers, buttons in dark theme
     accent: "#c2410c"          # links
     accent_dark: "#fb923c"     # the same, in dark theme
 ```

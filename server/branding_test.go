@@ -41,8 +41,8 @@ func TestUIBrandedPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	ui := config.UIConfig{
-		Name: "GMT SciTQ",
-		Logo: logo,
+		Name:   "GMT SciTQ",
+		Logo:   logo,
 		Colors: config.UIColors{Primary: "#0b5d3b", PrimaryDark: "#2f8f66", Accent: "rgb(200, 80, 0)"},
 	}
 	_, page := serve(t, ui, "/")
@@ -50,7 +50,7 @@ func TestUIBrandedPage(t *testing.T) {
 		"<title>GMT SciTQ</title>",
 		`<link rel="icon" href="/branding/logo" />`,
 		`window.SCITQ_BRANDING={"logo":"/branding/logo","name":"GMT SciTQ"}`,
-		":root{--primary-color:#0b5d3b;",
+		":root{--brand-color:#0b5d3b;--primary-color:#0b5d3b;",
 		"--link-color:rgb(200, 80, 0);",
 		`[data-theme="dark"]{--primary-color:#2f8f66;`,
 	} {

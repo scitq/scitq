@@ -3,13 +3,13 @@
   width: 220px;
   height: 100vh;
   overflow: auto; 
-  background-color: var(--primary-color);
+  background-color: var(--brand-color);
   color: var(--primary-text); 
   display: flex;
   flex-direction: column;
   padding: 1.5rem 1rem;
   box-sizing: border-box;
-  border-right: 1px solid var(--primary-color);
+  border-right: 1px solid var(--brand-color);
   font-family: 'Inter', sans-serif;
   transition: transform 0.3s ease;
 }
@@ -22,13 +22,13 @@
 /* Sidebar header section */
 .dashboard-sidebar-header {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
   font-size: 1.5rem;
   font-weight: bold;
   margin-bottom: 2rem;
   color: #f3f4f6;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
 }
 
 .dashboard-sidebar-brand {
@@ -44,7 +44,8 @@
 }
 
 .dashboard-sidebar-version {
-  font-size: 1.1rem;
+  font-size: 0.75rem;
+  opacity: 0.8;
   font-weight: 100;
 }
 
@@ -208,7 +209,7 @@
   margin-top: auto;
   color: #f87171;
   text-align: left;
-  background-color: var(--primary-color);
+  background-color: var(--brand-color);
   border: none;
 }
 

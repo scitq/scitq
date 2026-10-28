@@ -53,11 +53,11 @@ func brandIndex(index string, ui config.UIConfig) string {
 // validated as CSS colors when the configuration loads.
 func brandColors(c config.UIColors) string {
 	var css strings.Builder
-	block := func(selector, primary, accent, shade string) {
+	block := func(selector, primary, accent, shade, extra string) {
 		if primary == "" && accent == "" {
 			return
 		}
-		css.WriteString(selector + "{")
+		css.WriteString(selector + "{" + extra)
 		if primary != "" {
 			fmt.Fprintf(&css, "--primary-color:%s;--primary-hover:color-mix(in srgb,%s 85%%,%s);", primary, primary, shade)
 		}
@@ -66,8 +66,13 @@ func brandColors(c config.UIColors) string {
 		}
 		css.WriteString("}")
 	}
-	block(":root", c.Primary, c.Accent, "black")
-	block(`[data-theme="dark"]`, c.PrimaryDark, c.AccentDark, "white")
+	// The sidebar and login page (--brand-color) keep one color in both themes.
+	var brand string
+	if c.Primary != "" {
+		brand = "--brand-color:" + c.Primary + ";"
+	}
+	block(":root", c.Primary, c.Accent, "black", brand)
+	block(`[data-theme="dark"]`, c.PrimaryDark, c.AccentDark, "white", "")
 	return css.String()
 }
 

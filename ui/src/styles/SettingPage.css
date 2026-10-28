@@ -64,7 +64,7 @@
 .settings-input-password:focus {
     border-color: var(--primary-color);
     outline: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 20%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-color) 20%, transparent);
 }
 
 .settings-change-password {

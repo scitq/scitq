@@ -255,9 +255,11 @@ type UIConfig struct {
 // (success, failure, warning) are not configurable: they mean the same on
 // every installation.
 type UIColors struct {
-	// Primary colors the sidebar, toolbars, table headers and buttons.
+	// Primary colors the sidebar and login page in both themes, and the
+	// toolbars, table headers and buttons in the light theme.
 	Primary string `yaml:"primary"`
-	// PrimaryDark is Primary in the dark theme.
+	// PrimaryDark colors the toolbars, table headers and buttons in the dark
+	// theme.
 	PrimaryDark string `yaml:"primary_dark"`
 	// Accent colors links.
 	Accent string `yaml:"accent"`
