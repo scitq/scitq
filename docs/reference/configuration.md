@@ -58,12 +58,15 @@
 | UI |  | `ui` |  |  | UI brands the web interface: its name, logo and colors. Every key is optional; unset keys keep scitq's own look. |
 |  | Name | `ui.name` | `` | `string` | Name replaces "SciTQ" in the sidebar, on the login page and in the browser tab title. |
 |  | Logo | `ui.logo` | `` | `string` | Logo is the path of an image file on the server (PNG, SVG, ...), shown in the sidebar, on the login page and as the browser tab icon. |
+|  | LogoDark | `ui.logo_dark` | `` | `string` | LogoDark is the logo for dark backgrounds: the sidebar and the login page, which are dark in both themes, and the browser tab icon when the system theme is dark. It needs Logo. |
 |  | Colors | `ui.colors` | `` | `UIColors` | Colors are CSS colors: #hex, a color name, rgb(...) or hsl(...). |
 | Colors |  | `ui.colors` |  |  |  |
 |  | Primary | `ui.colors.primary` | `` | `string` | Primary colors the sidebar and login page in both themes, and the toolbars, table headers and buttons in the light theme. |
 |  | PrimaryDark | `ui.colors.primary_dark` | `` | `string` | PrimaryDark colors the toolbars, table headers and buttons in the dark theme. |
 |  | Accent | `ui.colors.accent` | `` | `string` | Accent colors links. |
 |  | AccentDark | `ui.colors.accent_dark` | `` | `string` | AccentDark is Accent in the dark theme. |
+|  | Sidebar | `ui.colors.sidebar` | `` | `string` | Sidebar is the sidebar's background in the light theme, as #hex. The sidebar is dark (Primary) otherwise. On a light sidebar the text takes Primary, highlights take Accent, and the logo is Logo rather than LogoDark. |
+|  | SidebarDark | `ui.colors.sidebar_dark` | `` | `string` | SidebarDark is Sidebar in the dark theme. |
 
 ### AzureConfig (Providers.Azure map values)
 | Section | Field | YAML key | Default | Type | Description |

@@ -246,6 +246,10 @@ type UIConfig struct {
 	// Logo is the path of an image file on the server (PNG, SVG, ...),
 	// shown in the sidebar, on the login page and as the browser tab icon.
 	Logo string `yaml:"logo"`
+	// LogoDark is the logo for dark backgrounds: the sidebar and the login
+	// page, which are dark in both themes, and the browser tab icon when
+	// the system theme is dark. It needs Logo.
+	LogoDark string `yaml:"logo_dark"`
 	// Colors are CSS colors: #hex, a color name, rgb(...) or hsl(...).
 	Colors UIColors `yaml:"colors"`
 }
@@ -265,7 +269,16 @@ type UIColors struct {
 	Accent string `yaml:"accent"`
 	// AccentDark is Accent in the dark theme.
 	AccentDark string `yaml:"accent_dark"`
+	// Sidebar is the sidebar's background in the light theme, as #hex.
+	// The sidebar is dark (Primary) otherwise. On a light sidebar the text
+	// takes Primary, highlights take Accent, and the logo is Logo rather
+	// than LogoDark.
+	Sidebar string `yaml:"sidebar"`
+	// SidebarDark is Sidebar in the dark theme.
+	SidebarDark string `yaml:"sidebar_dark"`
 }
+
+var hexColor = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
 
 var cssColor = regexp.MustCompile(`^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+|(rgb|rgba|hsl|hsla)\([0-9.,%\s/a-z]*\))$`)
 
@@ -278,9 +291,21 @@ func (u UIConfig) validate() error {
 			return fmt.Errorf("%s: %q is not a CSS color (use #hex, a color name, rgb(...) or hsl(...))", key, value)
 		}
 	}
-	if u.Logo != "" {
-		if _, err := os.Stat(u.Logo); err != nil {
-			return fmt.Errorf("ui.logo: %w", err)
+	// The sidebar's text and logo depend on its lightness, computed from
+	// its #hex value.
+	for key, value := range map[string]string{"ui.colors.sidebar": u.Colors.Sidebar, "ui.colors.sidebar_dark": u.Colors.SidebarDark} {
+		if value != "" && !hexColor.MatchString(value) {
+			return fmt.Errorf("%s: %q is not a #hex color (#rgb or #rrggbb)", key, value)
+		}
+	}
+	if u.LogoDark != "" && u.Logo == "" {
+		return fmt.Errorf("ui.logo_dark needs ui.logo")
+	}
+	for key, path := range map[string]string{"ui.logo": u.Logo, "ui.logo_dark": u.LogoDark} {
+		if path != "" {
+			if _, err := os.Stat(path); err != nil {
+				return fmt.Errorf("%s: %w", key, err)
+			}
 		}
 	}
 	return nil

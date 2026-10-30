@@ -43,8 +43,9 @@ sessions now expire after 30 days without use.
 - `failure_class` is returned by `ListTasks`, shown by `task list --long`
   and MCP `list_tasks`.
 - `scitq worker list --json`.
-- **Branding**: an installation's name, logo and two brand colors (`ui:` in
-  `scitq.yaml`), shown from the first render.
+- **Branding**: an installation's name, logo (optionally a second one for
+  dark backgrounds), two brand colors and the sidebar's background per
+  theme (`ui:` in `scitq.yaml`), shown from the first render.
 - A force-run button on waiting tasks in the UI's task list (runs the task
   without waiting for its prerequisites).
 - MCP `update_recruiter` takes `rounds` and `timeout`.

@@ -3,7 +3,15 @@
 // render; without it (the Vite dev server) scitq's own look applies.
 import defaultLogo from '../assets/icons/logoSCITQ2.png';
 
-export function branding(): { name: string; logo: string } {
+// logoDark is the logo for dark backgrounds; it is logo when none is set.
+// lightSidebar lists the themes ('light', 'dark') whose sidebar is light.
+export function branding(): { name: string; logo: string; logoDark: string; lightSidebar: string[] } {
   const injected = (typeof window !== 'undefined' && (window as any).SCITQ_BRANDING) || {};
-  return { name: injected.name || 'SciTQ', logo: injected.logo || defaultLogo };
+  const logo = injected.logo || defaultLogo;
+  return {
+    name: injected.name || 'SciTQ',
+    logo,
+    logoDark: injected.logoDark || logo,
+    lightSidebar: injected.lightSidebar || [],
+  };
 }

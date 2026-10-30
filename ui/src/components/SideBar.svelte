@@ -5,7 +5,7 @@
   import { theme } from '../lib/Stores/theme';
   import { logout } from '../lib/auth';
   import { uiVersion } from '../version';
-  const { name: brandName, logo: brandLogo } = branding();
+  const brand = branding();
 
   /**
    * State variables for controlling submenu visibility
@@ -91,8 +91,8 @@
   <!-- Sidebar header with version info -->
   <div class="dashboard-sidebar-header">
     <span class="dashboard-sidebar-brand">
-      <img src={brandLogo} alt="" class="dashboard-sidebar-logo" data-testid="brand-logo" />
-      <span data-testid="brand-name">{brandName}</span>
+      <img src={brand.lightSidebar.includes($theme) ? brand.logo : brand.logoDark} alt="" class="dashboard-sidebar-logo" data-testid="brand-logo" />
+      <span data-testid="brand-name">{brand.name}</span>
     </span>
     <span class="dashboard-sidebar-version">{uiVersion}</span>
   </div>

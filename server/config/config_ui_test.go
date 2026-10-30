@@ -16,4 +16,17 @@ func TestUIColorsAreValidated(t *testing.T) {
 	if err := (UIConfig{Logo: "/nonexistent/logo.png"}).validate(); err == nil {
 		t.Error("a missing logo file is accepted")
 	}
+	if err := (UIConfig{Colors: UIColors{Sidebar: "#f4f5fb", SidebarDark: "#123"}}).validate(); err != nil {
+		t.Errorf("hex sidebar colors refused: %v", err)
+	}
+	if err := (UIConfig{Colors: UIColors{Sidebar: "white"}}).validate(); err == nil {
+		t.Error("a sidebar color that is not #hex is accepted")
+	}
+	logo := t.TempDir()
+	if err := (UIConfig{Logo: logo, LogoDark: "/nonexistent/logo.png"}).validate(); err == nil {
+		t.Error("a missing dark logo file is accepted")
+	}
+	if err := (UIConfig{LogoDark: logo}).validate(); err == nil {
+		t.Error("ui.logo_dark is accepted without ui.logo")
+	}
 }

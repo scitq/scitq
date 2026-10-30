@@ -143,5 +143,8 @@ config ui.colors.accent:string
 config ui.colors.accent_dark:string
 config ui.colors.primary:string
 config ui.colors.primary_dark:string
+config ui.colors.sidebar:string
+config ui.colors.sidebar_dark:string
 config ui.logo:string
+config ui.logo_dark:string
 config ui.name:string

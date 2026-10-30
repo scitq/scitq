@@ -5,15 +5,21 @@ import (
 	"fmt"
 	"html"
 	"io/fs"
+	"math"
 	"net/http"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/scitq/scitq/server/config"
 )
 
-// brandingLogoPath serves the configured logo (ui.logo).
-const brandingLogoPath = "/branding/logo"
+// brandingLogoPath and brandingLogoDarkPath serve ui.logo and ui.logo_dark.
+const (
+	brandingLogoPath     = "/branding/logo"
+	brandingLogoDarkPath = "/branding/logo-dark"
+)
 
 var (
 	titleTag   = regexp.MustCompile(`<title>[^<]*</title>`)
@@ -26,14 +32,31 @@ var (
 // from its first render, without a flash of the default look.
 func brandIndex(index string, ui config.UIConfig) string {
 	var head strings.Builder
-	brand := map[string]string{}
+	brand := map[string]any{}
 	if ui.Name != "" {
 		index = titleTag.ReplaceAllLiteralString(index, "<title>"+html.EscapeString(ui.Name)+"</title>")
 		brand["name"] = ui.Name
 	}
 	if ui.Logo != "" {
-		index = faviconTag.ReplaceAllLiteralString(index, `<link rel="icon" href="`+brandingLogoPath+`" />`)
+		icons := `<link rel="icon" href="` + brandingLogoPath + `" />`
 		brand["logo"] = brandingLogoPath
+		if ui.LogoDark != "" {
+			// The tab icon follows the system theme: the page's own theme
+			// is not known before the UI runs.
+			icons += `<link rel="icon" href="` + brandingLogoDarkPath + `" media="(prefers-color-scheme: dark)" />`
+			brand["logoDark"] = brandingLogoDarkPath
+		}
+		index = faviconTag.ReplaceAllLiteralString(index, icons)
+	}
+	var lightSidebar []string
+	for theme, color := range map[string]string{"light": ui.Colors.Sidebar, "dark": ui.Colors.SidebarDark} {
+		if color != "" && isLight(color) {
+			lightSidebar = append(lightSidebar, theme)
+		}
+	}
+	if lightSidebar != nil {
+		sort.Strings(lightSidebar)
+		brand["lightSidebar"] = lightSidebar
 	}
 	if css := brandColors(ui.Colors); css != "" {
 		head.WriteString("<style>" + css + "</style>")
@@ -73,7 +96,52 @@ func brandColors(c config.UIColors) string {
 	}
 	block(":root", c.Primary, c.Accent, "black", brand)
 	block(`[data-theme="dark"]`, c.PrimaryDark, c.AccentDark, "white", "")
+	sidebar := func(selector, color string) {
+		if color == "" {
+			return
+		}
+		css.WriteString(selector + "{--sidebar-bg:" + color + ";")
+		if isLight(color) {
+			css.WriteString(lightSidebarVars)
+		}
+		css.WriteString("}")
+	}
+	// The light theme's selector leaves the dark theme on the default dark
+	// sidebar when only ui.colors.sidebar is set.
+	sidebar(`:root:not([data-theme="dark"])`, c.Sidebar)
+	sidebar(`[data-theme="dark"]`, c.SidebarDark)
 	return css.String()
+}
+
+// lightSidebarVars restyles the sidebar's text for a light background
+// (ui/src/app.css has the dark-background defaults).
+const lightSidebarVars = "--sidebar-heading:var(--brand-color);--sidebar-link:var(--brand-color);" +
+	"--sidebar-sub:var(--brand-color);--sidebar-icon:color-mix(in srgb,var(--brand-color) 65%,white);" +
+	"--sidebar-subitem:color-mix(in srgb,var(--brand-color) 75%,white);" +
+	"--sidebar-active:var(--link-color);--sidebar-active-sub:var(--link-color);--sidebar-active-item:var(--link-color);" +
+	"--sidebar-hover-bg:rgba(0,0,0,0.05);--sidebar-logout:#dc2626;--sidebar-logout-hover:#b91c1c;" +
+	"--sidebar-logout-hover-bg:rgba(0,0,0,0.06);"
+
+// isLight tells whether dark text reads better than white text on a #hex
+// color (validated at config load): its relative luminance is above the
+// point where both contrasts are equal.
+func isLight(hex string) bool {
+	h := strings.TrimPrefix(hex, "#")
+	if len(h) == 3 {
+		h = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
+	}
+	var lum float64
+	for i, weight := range []float64{0.2126, 0.7152, 0.0722} {
+		v, _ := strconv.ParseUint(h[2*i:2*i+2], 16, 8)
+		c := float64(v) / 255
+		if c <= 0.03928 {
+			c /= 12.92
+		} else {
+			c = math.Pow((c+0.055)/1.055, 2.4)
+		}
+		lum += weight * c
+	}
+	return lum > 0.179
 }
 
 // uiHandler serves the embedded UI, with index.html branded, and the
@@ -87,13 +155,15 @@ func uiHandler(public fs.FS, ui config.UIConfig) (http.Handler, error) {
 	files := http.FileServer(http.FS(public))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(brandingLogoPath, func(w http.ResponseWriter, r *http.Request) {
-		if ui.Logo == "" {
-			http.NotFound(w, r)
-			return
-		}
-		http.ServeFile(w, r, ui.Logo)
-	})
+	for path, file := range map[string]string{brandingLogoPath: ui.Logo, brandingLogoDarkPath: ui.LogoDark} {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			if file == "" {
+				http.NotFound(w, r)
+				return
+			}
+			http.ServeFile(w, r, file)
+		})
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

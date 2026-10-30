@@ -3,6 +3,22 @@
   /* Fixed colors (common to both themes) */
   --primary-text: white;
   --brand-color: #192245; /* sidebar and login, same in both themes */
+
+  /* Sidebar, dark in both themes. Branding (ui.colors.sidebar) may make it
+     light: the server then overrides these. */
+  --sidebar-bg: var(--brand-color);
+  --sidebar-heading: #f3f4f6;
+  --sidebar-link: #d1d5db;
+  --sidebar-icon: #9ca3af;
+  --sidebar-sub: #cbd5e1;
+  --sidebar-subitem: #94a3b8;
+  --sidebar-active: #8ecae6;
+  --sidebar-active-sub: #a5d8f0;
+  --sidebar-active-item: #c1e3f6;
+  --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
+  --sidebar-logout: #f87171;
+  --sidebar-logout-hover: #ef4444;
+  --sidebar-logout-hover-bg: #1e1e1e;
   
   /* Default light theme */
   --primary-color: #192245; /* Dark blue for light mode */

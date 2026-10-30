@@ -30,26 +30,32 @@ func TestUIUnbrandedPageIsUnchanged(t *testing.T) {
 	if _, page := serve(t, config.UIConfig{}, "/"); page != testIndex {
 		t.Fatalf("page changed without ui configuration:\n%s", page)
 	}
-	if code, _ := serve(t, config.UIConfig{}, brandingLogoPath); code != 404 {
-		t.Fatalf("logo without ui.logo: %d, want 404", code)
+	for _, path := range []string{brandingLogoPath, brandingLogoDarkPath} {
+		if code, _ := serve(t, config.UIConfig{}, path); code != 404 {
+			t.Fatalf("%s without a configured logo: %d, want 404", path, code)
+		}
 	}
 }
 
 func TestUIBrandedPage(t *testing.T) {
-	logo := filepath.Join(t.TempDir(), "logo.png")
-	if err := os.WriteFile(logo, []byte("png"), 0o644); err != nil {
-		t.Fatal(err)
+	dir := t.TempDir()
+	logo, logoDark := filepath.Join(dir, "logo.png"), filepath.Join(dir, "logo-dark.png")
+	for file, content := range map[string]string{logo: "png", logoDark: "dark png"} {
+		if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ui := config.UIConfig{
-		Name:   "GMT SciTQ",
-		Logo:   logo,
-		Colors: config.UIColors{Primary: "#0b5d3b", PrimaryDark: "#2f8f66", Accent: "rgb(200, 80, 0)"},
+		Name:     "GMT SciTQ",
+		Logo:     logo,
+		LogoDark: logoDark,
+		Colors:   config.UIColors{Primary: "#0b5d3b", PrimaryDark: "#2f8f66", Accent: "rgb(200, 80, 0)"},
 	}
 	_, page := serve(t, ui, "/")
 	for _, want := range []string{
 		"<title>GMT SciTQ</title>",
-		`<link rel="icon" href="/branding/logo" />`,
-		`window.SCITQ_BRANDING={"logo":"/branding/logo","name":"GMT SciTQ"}`,
+		`<link rel="icon" href="/branding/logo" /><link rel="icon" href="/branding/logo-dark" media="(prefers-color-scheme: dark)" />`,
+		`window.SCITQ_BRANDING={"logo":"/branding/logo","logoDark":"/branding/logo-dark","name":"GMT SciTQ"}`,
 		":root{--brand-color:#0b5d3b;--primary-color:#0b5d3b;",
 		"--link-color:rgb(200, 80, 0);",
 		`[data-theme="dark"]{--primary-color:#2f8f66;`,
@@ -63,6 +69,31 @@ func TestUIBrandedPage(t *testing.T) {
 	}
 	if code, body := serve(t, ui, brandingLogoPath); code != 200 || body != "png" {
 		t.Errorf("logo: %d %q", code, body)
+	}
+	if code, body := serve(t, ui, brandingLogoDarkPath); code != 200 || body != "dark png" {
+		t.Errorf("dark logo: %d %q", code, body)
+	}
+}
+
+func TestUILightSidebar(t *testing.T) {
+	ui := config.UIConfig{Colors: config.UIColors{Sidebar: "#f4f5fb", SidebarDark: "#1f1e64"}}
+	_, page := serve(t, ui, "/")
+	for _, want := range []string{
+		`:root:not([data-theme="dark"]){--sidebar-bg:#f4f5fb;--sidebar-heading:var(--brand-color);`,
+		`[data-theme="dark"]{--sidebar-bg:#1f1e64;}`,
+		`"lightSidebar":["light"]`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %q:\n%s", want, page)
+		}
+	}
+}
+
+func TestIsLight(t *testing.T) {
+	for color, light := range map[string]bool{"#fff": true, "#f4f5fb": true, "#44c2d6": true, "#192245": false, "#1f1e64": false, "#666": false} {
+		if isLight(color) != light {
+			t.Errorf("isLight(%s) = %v", color, !light)
+		}
 	}
 }
 

@@ -3,7 +3,8 @@
   import LoginForm from '../components/LoginForm.svelte';
   import { branding } from '../lib/branding';
   import '../styles/loginPage.css';
-  const { name: brandName, logo: brandLogo } = branding();
+  // The logo sits on the dark background photo in both themes.
+  const { name: brandName, logoDark: brandLogo } = branding();
 </script>
 
 <!-- 

@@ -181,18 +181,34 @@ An installation can show its own name, logo and colors. Set them in the
 ui:
   name: "GMT SciTQ"            # sidebar, login page, browser tab title
   logo: /etc/scitq/logo.png    # image file on the server: sidebar, login page, tab icon
+  logo_dark: /etc/scitq/logo-dark.png  # for dark backgrounds (needs logo)
   colors:
     primary: "#0b5d3b"         # sidebar and login page (both themes); toolbars, table headers, buttons
     primary_dark: "#2f8f66"    # toolbars, table headers, buttons in dark theme
     accent: "#c2410c"          # links
     accent_dark: "#fb923c"     # the same, in dark theme
+    sidebar: "#f4f5fb"         # sidebar background in light theme (#hex)
+    sidebar_dark: "#0b5d3b"    # sidebar background in dark theme (#hex)
 ```
 
 Every key is optional; unset keys keep scitq's own look. Colors are CSS
 colors (`#hex`, a color name, `rgb(...)` or `hsl(...)`); hover shades are
 derived from them. The colors of statuses (success, failure, warning) are
 the same on every installation. The server checks the colors and that the
-logo file exists when it starts, and refuses to start otherwise.
+logo files exist when it starts, and refuses to start otherwise.
+
+The sidebar is `primary` in both themes unless `sidebar` or `sidebar_dark`
+sets it for a theme. On a light sidebar, its text takes `primary` and its
+highlights take `accent`.
+
+A logo drawn for light backgrounds can come with a version for dark ones,
+`logo_dark`:
+
+- the sidebar shows `logo` when it is light, and `logo_dark` when it is
+  dark;
+- the login page, whose header sits on a dark photo, shows `logo_dark`;
+- the browser tab icon is `logo_dark` when the system's theme is dark, and
+  `logo` otherwise.
 
 The server writes the branding into the page it serves, so the interface
 shows it from its first render. A UI run from the Vite development server

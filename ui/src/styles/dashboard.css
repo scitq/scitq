@@ -3,7 +3,7 @@
   width: 220px;
   height: 100vh;
   overflow: auto; 
-  background-color: var(--brand-color);
+  background-color: var(--sidebar-bg);
   color: var(--primary-text); 
   display: flex;
   flex-direction: column;
@@ -25,7 +25,7 @@
   font-size: 1.5rem;
   font-weight: bold;
   margin-bottom: 2rem;
-  color: #f3f4f6;
+  color: var(--sidebar-heading);
   flex-direction: column;
   align-items: flex-start;
   gap: 0.25rem;
@@ -68,7 +68,7 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: #d1d5db;
+  color: var(--sidebar-link);
   text-decoration: none;
   font-size: 1.25rem;
   padding: 0.5rem;
@@ -84,8 +84,8 @@
 /* Navigation link hover/active states */
 .dashboard-nav-link:hover,
 .dashboard-nav-link.active {
-  color: #8ecae6;
-  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--sidebar-active);
+  background-color: var(--sidebar-hover-bg);
 }
 
 /* Dropdown navigation links */
@@ -98,7 +98,7 @@
 .dashboard-icon {
   width: 20px;
   height: 20px;
-  color: #9ca3af;
+  color: var(--sidebar-icon);
 }
 
 /* Left-aligned content in nav items */
@@ -125,12 +125,12 @@
   margin-left: 0.5rem;
   display: flex;
   align-items: center;
-  color: #d1d5db;
+  color: var(--sidebar-link);
 }
 
 /* Chevron hover state */
 .dashboard-chevron-button:hover .dashboard-chevron {
-  color: #8ecae6;
+  color: var(--sidebar-active);
 }
 
 /* Rotated chevron for expanded dropdowns */
@@ -160,7 +160,7 @@
   align-items: center;
   font-size: 1.05rem;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--sidebar-sub);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -173,7 +173,7 @@
 /* Submenu header hover/active states */
 .dashboard-submenu-header:hover,
 .dashboard-submenu-header.active {
-  color: #a5d8f0;
+  color: var(--sidebar-active-sub);
 }
 
 /* Submenu items container */
@@ -189,7 +189,7 @@
 .dashboard-submenu-items a {
   font-size: 1rem;
   font-style: italic;
-  color: #94a3b8;
+  color: var(--sidebar-subitem);
   padding: 0.3rem 0;
   text-align: left;
   border-radius: 4px;
@@ -200,23 +200,23 @@
 /* Submenu link hover/active states */
 .dashboard-submenu-items a:hover,
 .dashboard-submenu-items a.active {
-  color: #c1e3f6;
+  color: var(--sidebar-active-item);
   background: none;
 }
 
 /* Logout button styling */
 .dashboard-logout {
   margin-top: auto;
-  color: #f87171;
+  color: var(--sidebar-logout);
   text-align: left;
-  background-color: var(--brand-color);
+  background-color: var(--sidebar-bg);
   border: none;
 }
 
 /* Logout button hover state */
 .dashboard-logout:hover {
-  color: #ef4444;
-  background-color: #1e1e1e;
+  color: var(--sidebar-logout-hover);
+  background-color: var(--sidebar-logout-hover-bg);
   border: none;
 }
 
