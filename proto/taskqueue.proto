@@ -1887,6 +1887,7 @@ message WorkerEventFilter {
   optional string level     = 2; // 'D','I','W','E'
   optional string class     = 3; // event_class filter
   optional int32 limit     = 4; // max number of events (default 50)
+  optional int32 before_event_id = 5; // only events older than this one (paging)
 }
 
 message WorkerEventRecord {

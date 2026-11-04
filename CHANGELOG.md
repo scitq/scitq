@@ -48,6 +48,9 @@ sessions now expire after 30 days without use.
   theme (`ui:` in `scitq.yaml`), shown from the first render.
 - A force-run button on waiting tasks in the UI's task list (runs the task
   without waiting for its prerequisites).
+- The UI's worker events panel filters by level (all, warnings, errors;
+  a click on the unread warnings count shows the warnings) and loads older
+  events on demand. `ListWorkerEvents` takes `before_event_id` to page.
 - MCP `update_recruiter` takes `rounds` and `timeout`.
 - Each `job.created` event carries the complete job row.
 - Step-stats snapshots carry the workflow's totals.
@@ -109,3 +112,7 @@ sessions now expire after 30 days without use.
   its output, and the task blocked on its next write. Worker logs now split
   lines on `\r` as well as `\n`, cut lines at 16 KiB, replace invalid UTF-8,
   and always read a task's output to its end.
+- `scitq step stats --totals` showed an elapsed time of decades when a
+  workflow had a skipped step: a step none of whose tasks ran reported
+  its start as 0 (1970). Its start and end are now absent, and the CLI
+  ignores a start of 0 from older servers.

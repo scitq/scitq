@@ -115,3 +115,13 @@ func (a *StepStatsAgg) SnapshotCounters() map[int32]map[int32]StepAggSnapshot {
 	}
 	return out
 }
+
+// StepTimes returns a step's time bounds (epoch seconds), nil when unknown.
+func (a *StepStatsAgg) StepTimes(workflowID, stepID int32) (start, end *int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if s := a.data[workflowID][stepID]; s != nil {
+		return s.StartTime, s.EndTime
+	}
+	return nil, nil
+}

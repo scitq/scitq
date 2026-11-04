@@ -2076,15 +2076,17 @@ class WorkerEvent(_message.Message):
     def __init__(self, worker_id: _Optional[int] = ..., worker_name: _Optional[str] = ..., level: _Optional[str] = ..., event_class: _Optional[str] = ..., message: _Optional[str] = ..., details_json: _Optional[str] = ...) -> None: ...
 
 class WorkerEventFilter(_message.Message):
-    __slots__ = ("worker_id", "level", "limit")
+    __slots__ = ("worker_id", "level", "limit", "before_event_id")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     LEVEL_FIELD_NUMBER: _ClassVar[int]
     CLASS_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_EVENT_ID_FIELD_NUMBER: _ClassVar[int]
     worker_id: int
     level: str
     limit: int
-    def __init__(self, worker_id: _Optional[int] = ..., level: _Optional[str] = ..., limit: _Optional[int] = ..., **kwargs) -> None: ...
+    before_event_id: int
+    def __init__(self, worker_id: _Optional[int] = ..., level: _Optional[str] = ..., limit: _Optional[int] = ..., before_event_id: _Optional[int] = ..., **kwargs) -> None: ...
 
 class WorkerEventRecord(_message.Message):
     __slots__ = ("event_id", "created_at", "worker_id", "worker_name", "level", "event_class", "message", "details_json")

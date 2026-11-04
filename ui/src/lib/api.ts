@@ -202,10 +202,16 @@ export async function listWorkers(workflowId?: number): Promise<taskqueue.Worker
  * download failures, task warnings, …). Newest first.
  * @param workerId - The worker to fetch events for.
  * @param limit - Max events (default 50).
+ * @param filter - level ('D','I','W','E') keeps one level; beforeEventId
+ *   returns the events older than that one (the next page).
  */
-export async function listWorkerEvents(workerId: number, limit = 50): Promise<taskqueue.WorkerEventRecord[]> {
+export async function listWorkerEvents(
+  workerId: number,
+  limit = 50,
+  filter: { level?: string; beforeEventId?: number } = {},
+): Promise<taskqueue.WorkerEventRecord[]> {
   try {
-    const res = await client.listWorkerEvents({ workerId, limit }, await callOptionsUserToken());
+    const res = await client.listWorkerEvents({ workerId, limit, ...filter }, await callOptionsUserToken());
     return res.response?.events || [];
   } catch (error) {
     console.error("Error while retrieving worker events:", error);

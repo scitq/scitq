@@ -11655,9 +11655,10 @@ func (x *WorkerEvent) GetDetailsJson() string {
 type WorkerEventFilter struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkerId      *int32                 `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3,oneof" json:"worker_id,omitempty"`
-	Level         *string                `protobuf:"bytes,2,opt,name=level,proto3,oneof" json:"level,omitempty"`  // 'D','I','W','E'
-	Class         *string                `protobuf:"bytes,3,opt,name=class,proto3,oneof" json:"class,omitempty"`  // event_class filter
-	Limit         *int32                 `protobuf:"varint,4,opt,name=limit,proto3,oneof" json:"limit,omitempty"` // max number of events (default 50)
+	Level         *string                `protobuf:"bytes,2,opt,name=level,proto3,oneof" json:"level,omitempty"`                                         // 'D','I','W','E'
+	Class         *string                `protobuf:"bytes,3,opt,name=class,proto3,oneof" json:"class,omitempty"`                                         // event_class filter
+	Limit         *int32                 `protobuf:"varint,4,opt,name=limit,proto3,oneof" json:"limit,omitempty"`                                        // max number of events (default 50)
+	BeforeEventId *int32                 `protobuf:"varint,5,opt,name=before_event_id,json=beforeEventId,proto3,oneof" json:"before_event_id,omitempty"` // only events older than this one (paging)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11716,6 +11717,13 @@ func (x *WorkerEventFilter) GetClass() string {
 func (x *WorkerEventFilter) GetLimit() int32 {
 	if x != nil && x.Limit != nil {
 		return *x.Limit
+	}
+	return 0
+}
+
+func (x *WorkerEventFilter) GetBeforeEventId() int32 {
+	if x != nil && x.BeforeEventId != nil {
+		return *x.BeforeEventId
 	}
 	return 0
 }
@@ -14354,17 +14362,19 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\amessage\x18\x05 \x01(\tR\amessage\x12!\n" +
 	"\fdetails_json\x18\x06 \x01(\tR\vdetailsJsonB\f\n" +
 	"\n" +
-	"_worker_id\"\xb2\x01\n" +
+	"_worker_id\"\xf3\x01\n" +
 	"\x11WorkerEventFilter\x12 \n" +
 	"\tworker_id\x18\x01 \x01(\x05H\x00R\bworkerId\x88\x01\x01\x12\x19\n" +
 	"\x05level\x18\x02 \x01(\tH\x01R\x05level\x88\x01\x01\x12\x19\n" +
 	"\x05class\x18\x03 \x01(\tH\x02R\x05class\x88\x01\x01\x12\x19\n" +
-	"\x05limit\x18\x04 \x01(\x05H\x03R\x05limit\x88\x01\x01B\f\n" +
+	"\x05limit\x18\x04 \x01(\x05H\x03R\x05limit\x88\x01\x01\x12+\n" +
+	"\x0fbefore_event_id\x18\x05 \x01(\x05H\x04R\rbeforeEventId\x88\x01\x01B\f\n" +
 	"\n" +
 	"_worker_idB\b\n" +
 	"\x06_levelB\b\n" +
 	"\x06_classB\b\n" +
-	"\x06_limit\"\x92\x02\n" +
+	"\x06_limitB\x12\n" +
+	"\x10_before_event_id\"\x92\x02\n" +
 	"\x11WorkerEventRecord\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\x05R\aeventId\x12\x1d\n" +
 	"\n" +

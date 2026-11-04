@@ -4377,6 +4377,10 @@ export interface WorkerEventFilter {
      * @generated from protobuf field: optional int32 limit = 4
      */
     limit?: number; // max number of events (default 50)
+    /**
+     * @generated from protobuf field: optional int32 before_event_id = 5
+     */
+    beforeEventId?: number; // only events older than this one (paging)
 }
 /**
  * @generated from protobuf message taskqueue.WorkerEventRecord
@@ -16211,7 +16215,8 @@ class WorkerEventFilter$Type extends MessageType<WorkerEventFilter> {
             { no: 1, name: "worker_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "level", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 4, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "before_event_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerEventFilter>): WorkerEventFilter {
@@ -16237,6 +16242,9 @@ class WorkerEventFilter$Type extends MessageType<WorkerEventFilter> {
                 case /* optional int32 limit */ 4:
                     message.limit = reader.int32();
                     break;
+                case /* optional int32 before_event_id */ 5:
+                    message.beforeEventId = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16261,6 +16269,9 @@ class WorkerEventFilter$Type extends MessageType<WorkerEventFilter> {
         /* optional int32 limit = 4; */
         if (message.limit !== undefined)
             writer.tag(4, WireType.Varint).int32(message.limit);
+        /* optional int32 before_event_id = 5; */
+        if (message.beforeEventId !== undefined)
+            writer.tag(5, WireType.Varint).int32(message.beforeEventId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

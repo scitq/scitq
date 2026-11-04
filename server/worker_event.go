@@ -69,10 +69,17 @@ func (s *taskQueueServer) ListWorkerEvents(ctx context.Context, f *pb.WorkerEven
 		args = append(args, *f.Class)
 	}
 
+	if f.BeforeEventId != nil {
+		where = append(where, "event_id < $"+itoa(len(args)+1))
+		args = append(args, *f.BeforeEventId)
+	}
+
 	if len(where) > 0 {
 		query += " WHERE " + join(where, " AND ")
 	}
-	query += " ORDER BY created_at DESC"
+	// Newest first. event_id follows insertion order (created_at defaults
+	// to now()), and is the paging cursor (before_event_id).
+	query += " ORDER BY event_id DESC"
 	query += " LIMIT $" + itoa(len(args)+1)
 	args = append(args, limit)
 

@@ -3096,6 +3096,25 @@ func int32SetUnion(a, b map[int32]struct{}) map[int32]struct{} {
 }
 
 // StepStats implements the stats subcommand for steps.
+// elapsedSpan is the time from the first start to the last end among the
+// steps that ran. A step none of whose tasks ran (a skipped step) has no
+// start; servers before 2.0 send it as 0, so 0 counts as none.
+func elapsedSpan(stats []*pb.StepStats) float32 {
+	var start, end int64
+	for _, s := range stats {
+		if s.GetStartTime() > 0 && (start == 0 || s.GetStartTime() < start) {
+			start = s.GetStartTime()
+		}
+		if s.GetEndTime() > end {
+			end = s.GetEndTime()
+		}
+	}
+	if start == 0 || end < start {
+		return 0
+	}
+	return float32(end - start)
+}
+
 func (c *CLI) StepStats() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
@@ -3199,7 +3218,6 @@ func (c *CLI) StepStats() error {
 		"StepID", "Name", "Total", "Wait", "Pend", "Acc.", "Runn", "Upl.", "Succ", "Fail", "SuccRun", "FailRun", "CurrRun", "Download", "Upload")
 	fmt.Println(strings.Repeat("-", 222))
 	var totalSuccess, totalFailed, totalRunning, totalDownload, totalUpload float32
-	var startTime, endTime *int64
 
 	for _, stat := range res.Stats {
 		name := stat.StepName
@@ -3241,22 +3259,11 @@ func (c *CLI) StepStats() error {
 			if stat.Upload != nil {
 				totalUpload += stat.Upload.GetSum()
 			}
-			// handle start/end time (int32 pointers)
-			if endTime == nil || (stat.EndTime != nil && *stat.EndTime > *endTime) {
-				endTime = stat.EndTime
-			}
-			if stat.StartTime != nil && (startTime == nil || *stat.StartTime < *startTime) {
-				startTime = stat.StartTime
-			}
 		}
 	}
 	if attr.Totals {
 		fmt.Println(strings.Repeat("-", 222))
-		elapsedTime := float32(0)
-		if startTime != nil && endTime != nil && *endTime >= *startTime {
-			elapsedTime = float32(*endTime - *startTime)
-		}
-		fmt.Printf("Elapsed time: %-10s %-66sCumulated times: %-22s %-22s %-22s %-22s %-22s\n", formatDuration(elapsedTime), "",
+		fmt.Printf("Elapsed time: %-10s %-66sCumulated times: %-22s %-22s %-22s %-22s %-22s\n", formatDuration(elapsedSpan(res.Stats)), "",
 			formatDuration(totalSuccess),
 			formatDuration(totalFailed),
 			formatDuration(totalRunning),

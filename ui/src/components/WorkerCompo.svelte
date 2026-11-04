@@ -795,6 +795,11 @@
   let eventsWorker: any = $state(null);          // worker whose events are shown, or null
   let workerEvents: Array<any> = $state([]);
   let eventsLoading: boolean = $state(false);
+  // Level shown ('' for all, 'W', 'E'), and whether older events remain
+  // (the last page came back full).
+  let eventsLevel: string = $state('');
+  let eventsMore: boolean = $state(false);
+  const EVENTS_PAGE = 100;
   // Inline status line for the Clear/Reset buttons. Shown above the
   // events list. Cleared on next panel open / on success refresh.
   let eventsStatus: string = $state('');
@@ -807,16 +812,35 @@
 
   async function openWorkerEvents(worker: any) {
     eventsWorker = worker;
-    eventsLoading = true;
-    workerEvents = [];
     eventsStatus = '';
     eventsBusy = false;
+    await showEventLevel('');
+  }
+
+  /** Shows the first page of the events of one level ('' for all). */
+  async function showEventLevel(level: string) {
+    eventsLevel = level;
+    workerEvents = [];
+    eventsLoading = true;
+    await loadWorkerEvents(true);
+    eventsLoading = false;
+  }
+
+  /** Loads the first page (fresh) or the page after the last event shown. */
+  async function loadWorkerEvents(fresh: boolean) {
+    if (!eventsWorker) return;
+    const wid = eventsWorker.workerId;
+    const before = fresh ? undefined : workerEvents[workerEvents.length - 1]?.eventId;
     try {
-      workerEvents = await listWorkerEvents(worker.workerId, 100);
+      const page = await listWorkerEvents(wid, EVENTS_PAGE, {
+        level: eventsLevel || undefined,
+        beforeEventId: before,
+      });
+      if (eventsWorker?.workerId !== wid) return; // closed or switched meanwhile
+      workerEvents = fresh ? page : [...workerEvents, ...page];
+      eventsMore = page.length === EVENTS_PAGE;
     } catch (err) {
-      console.error('Failed to load worker events', worker.workerId, err);
-    } finally {
-      eventsLoading = false;
+      console.error('Failed to load worker events', wid, err);
     }
   }
 
@@ -870,7 +894,7 @@
     const fresh = await refreshWorkerFromServer(wid);
     if (fresh && fresh.pendingWarnings === 0) {
       eventsStatus = 'Warnings cleared.';
-      try { workerEvents = await listWorkerEvents(wid, 100); } catch (e) { console.error(e); }
+      await loadWorkerEvents(true);
     } else if (rpcErr) {
       eventsStatus = 'Could not clear warnings — the server did not acknowledge. Check server logs.';
     } else {
@@ -902,7 +926,7 @@
     const fresh = await refreshWorkerFromServer(wid);
     if (fresh && (fresh.recentFailures ?? 0) === 0) {
       eventsStatus = 'Failures cleared.';
-      try { workerEvents = await listWorkerEvents(wid, 100); } catch (e) { console.error(e); }
+      await loadWorkerEvents(true);
     } else if (rpcErr) {
       eventsStatus = 'Could not clear failures — the server did not acknowledge. Check server logs.';
     } else {
@@ -1666,7 +1690,9 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
             <span class="worker-events-warn-text">⚠ {eventsWorker.recentFailures} failures since last success</span>
           {/if}
           {#if (eventsWorker.pendingWarnings ?? 0) > 0}
-            <span class="worker-events-warn-text">⚠ {eventsWorker.pendingWarnings} unread warning{(eventsWorker.pendingWarnings ?? 0) > 1 ? 's' : ''}</span>
+            <button type="button" class="worker-events-warn-text worker-events-warn-link"
+                    title="Show warnings only" data-testid="events-unread-warnings"
+                    onclick={() => showEventLevel('W')}>⚠ {eventsWorker.pendingWarnings} unread warning{(eventsWorker.pendingWarnings ?? 0) > 1 ? 's' : ''}</button>
           {/if}
         </span>
         <span class="worker-events-actions">
@@ -1694,11 +1720,18 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
       {#if eventsStatus}
         <div class="worker-events-status">{eventsStatus}</div>
       {/if}
+      <div class="worker-events-filter" role="group" aria-label="Event level">
+        {#each [['', 'All'], ['W', 'Warnings'], ['E', 'Errors']] as [level, label]}
+          <button type="button" class:active={eventsLevel === level}
+                  data-testid={`events-level-${level || 'all'}`}
+                  onclick={() => showEventLevel(level)}>{label}</button>
+        {/each}
+      </div>
       <div class="worker-events-body">
         {#if eventsLoading}
           <p class="worker-events-empty">Loading…</p>
         {:else if workerEvents.length === 0}
-          <p class="worker-events-empty">No events recorded for this worker.</p>
+          <p class="worker-events-empty">{eventsLevel === 'W' ? 'No warnings' : eventsLevel === 'E' ? 'No errors' : 'No events'} recorded for this worker.</p>
         {:else}
           {#each workerEvents as ev}
             <div class="worker-events-row worker-events-level-{ev.level}">
@@ -1708,6 +1741,10 @@ function displayTasksCount(workerId: number, ...statuses: string[]): string {
               <span class="worker-events-msg">{ev.message}</span>
             </div>
           {/each}
+          {#if eventsMore}
+            <button type="button" class="worker-events-more" data-testid="events-load-more"
+                    onclick={() => loadWorkerEvents(false)}>Load more</button>
+          {/if}
         {/if}
       </div>
     </div>

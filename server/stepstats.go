@@ -161,13 +161,11 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			COALESCE(MIN(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_min,
 			COALESCE(MAX(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_max,
 
-			-- time bounds (epoch seconds)
-			COALESCE(MIN(EXTRACT(EPOCH FROM t.run_started_at) - t.download_duration)::bigint, 0) AS start_epoch,
-			COALESCE(
-				MAX( (EXTRACT(EPOCH FROM t.run_started_at) + t.run_duration + t.upload_duration) )
-				FILTER (WHERE t.status IN ('S','F') AND t.run_started_at IS NOT NULL),
-				0
-			)::bigint AS end_epoch,
+			-- time bounds (epoch seconds), NULL for a step none of whose
+			-- tasks ran (e.g. skipped)
+			MIN(EXTRACT(EPOCH FROM t.run_started_at) - t.download_duration)::bigint AS start_epoch,
+			(MAX(EXTRACT(EPOCH FROM t.run_started_at) + t.run_duration + t.upload_duration)
+				FILTER (WHERE t.status IN ('S','F') AND t.run_started_at IS NOT NULL))::bigint AS end_epoch,
 
 			-- running tasks as separate arrays (NOT hidden, same reason as
 			-- the running counter above — a hidden R task is a ghost).
