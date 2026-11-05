@@ -120,3 +120,7 @@ sessions now expire after 30 days without use.
   second or two, typically ones failing at start: the container was gone
   before the memory sampler found it. Such misses are now debug events;
   the warning remains for containers that ran 5 seconds or more.
+- Azure's "The requested VM size … is not available in the current region"
+  (`InvalidParameter`) was retried and never blacklisted the flavor. It now
+  disables the flavor in that region at the first refusal, like the other
+  permanent VM-size refusals; `scitq flavor enable` re-enables it.

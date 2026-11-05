@@ -163,15 +163,19 @@ func isUnsupportedFlavorError(err error) bool {
 		return false
 	}
 	var respErr *azcore.ResponseError
-	if errors.As(err, &respErr) {
-		if respErr.StatusCode == 400 && respErr.ErrorCode == "BadRequest" {
-			s := err.Error()
-			// Known permanent failure messages for unsupported VM sizes
-			if strings.Contains(s, "is not supported for creation of VMs") ||
-				strings.Contains(s, "security type") {
-				return true
-			}
-		}
+	if !errors.As(err, &respErr) || respErr.StatusCode != 400 {
+		return false
+	}
+	s := err.Error()
+	switch respErr.ErrorCode {
+	case "BadRequest":
+		// Known permanent failure messages for unsupported VM sizes
+		return strings.Contains(s, "is not supported for creation of VMs") ||
+			strings.Contains(s, "security type")
+	case "InvalidParameter":
+		// "The requested VM size X is not available in the current
+		// region. The sizes available in the current region are: …"
+		return strings.Contains(s, "is not available in the current region")
 	}
 	return false
 }
