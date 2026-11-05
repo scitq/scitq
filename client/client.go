@@ -766,7 +766,7 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 			task.PeakMemMb = &peak
 			log.Printf("📊 peakmem: task %d container hit %d MB", task.TaskId, peak)
 		} else {
-			reporter.Event("W", "peakmem", "no cgroup peak found", map[string]any{
+			reporter.Event(peakmem.MissLevel(time.Since(runStart)), "peakmem", "no cgroup peak found", map[string]any{
 				"task_id":   task.TaskId,
 				"container": containerName,
 				"tried":     peakSampler.Diag(),

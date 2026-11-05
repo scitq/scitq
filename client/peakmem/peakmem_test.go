@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // The container/bare readers hit real filesystem paths that don't
@@ -102,5 +103,21 @@ func TestReadBytesFileAsMB_ZeroBytesIsZero(t *testing.T) {
 	_ = os.WriteFile(p, []byte("0\n"), 0o644)
 	if got := readBytesFileAsMB(p); got != 0 {
 		t.Errorf("0-byte reading should map to 0 MB, got %d", got)
+	}
+}
+
+// A container that exits before the Sampler can find it is not a
+// measurement failure worth a warning; a long-running one is.
+func TestMissLevel(t *testing.T) {
+	for ran, want := range map[time.Duration]string{
+		0:                                   "D",
+		1500 * time.Millisecond:             "D",
+		MinObservableRun - time.Millisecond: "D",
+		MinObservableRun:                    "W",
+		10 * time.Minute:                    "W",
+	} {
+		if got := MissLevel(ran); got != want {
+			t.Errorf("MissLevel(%v) = %s, want %s", ran, got, want)
+		}
 	}
 }

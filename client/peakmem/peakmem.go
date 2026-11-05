@@ -87,6 +87,23 @@ func ReadDockerPeakMBWithDiag(containerID string) (int32, []string) {
 	return 0, tried
 }
 
+// MinObservableRun is how long a container must run for the Sampler to be
+// sure to read its cgroup: it finds the container through `docker
+// inspect`, which a busy Docker daemon answers slowly, and systemd removes
+// the cgroup as soon as the container exits. A task that crashes at
+// start lives under a second and is missed routinely.
+const MinObservableRun = 5 * time.Second
+
+// MissLevel is the worker event level for a task whose peak memory was not
+// read: a warning when the container ran long enough to be read, which
+// points at a cgroup layout the Sampler does not know; debug otherwise.
+func MissLevel(ran time.Duration) string {
+	if ran < MinObservableRun {
+		return "D"
+	}
+	return "W"
+}
+
 // ReadProcessPeakMB parses /proc/<pid>/status for VmHWM (peak resident
 // memory). Returns 0 on any read/parse failure, or if the process has
 // already been reaped and its /proc entry is gone.

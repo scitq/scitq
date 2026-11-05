@@ -116,3 +116,7 @@ sessions now expire after 30 days without use.
   workflow had a skipped step: a step none of whose tasks ran reported
   its start as 0 (1970). Its start and end are now absent, and the CLI
   ignores a start of 0 from older servers.
+- Workers warned "no cgroup peak found" for tasks that ended within a
+  second or two, typically ones failing at start: the container was gone
+  before the memory sampler found it. Such misses are now debug events;
+  the warning remains for containers that ran 5 seconds or more.
