@@ -2749,6 +2749,11 @@ def _build_step(workflow: Workflow, step_def: dict, step_map: Dict[str, Step],
     if 'skip_if_exists' in step_def:
         step_kwargs['skip_if_exists'] = step_def['skip_if_exists']
 
+    # retry: the step's (or its module's) retry budget; the template's
+    # top-level retry is the default when the step sets none.
+    if step_def.get('retry') is not None:
+        step_kwargs['retry'] = int(_resolve_field(step_def['retry'], params, itervar, extra_vars=extra_vars))
+
     # accept_failure: allow dependencies to be satisfied even if prerequisite failed
     if 'accept_failure' in step_def:
         step_kwargs['accept_failure'] = step_def['accept_failure']

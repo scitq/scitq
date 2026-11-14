@@ -1737,7 +1737,7 @@ For aggregation steps that should run with partial results, use `accept_failure:
     accept_failure: true    # Run even if some samples failed
 ```
 
-A prerequisite must be **terminally** failed to satisfy `accept_failure` — meaning all retries exhausted (`retry = 0`). A task that fails but still has retries left will be retried first.
+A prerequisite must be **terminally** failed to satisfy `accept_failure` — meaning all retries exhausted (`retry = 0`). A task that fails but still has retries left will be retried first. A task that could not run because its own prerequisite failed (failure class `upstream`) is terminally failed too, so a fan-in accepts the samples that failed early in the chain as well.
 
 **Workflow success and `accept_failure`.** A workflow is considered successful when every *leaf* step — a step whose tasks no other task in the workflow depends on — finishes with all its tasks in `S`. A fan-in / aggregation step declared with `accept_failure: true` is almost always a leaf: when it runs to `S`, the DAG has already forgiven the upstream `F` through the dependency edge, so the top-level workflow status reflects that and ends in `S`. A workflow where some task failed but every leaf step still succeeded is therefore `S`, not `F`. If the leaf aggregation step itself fails (its own command returns non-zero), the workflow is `F` — `accept_failure` tolerates failing *inputs*, not a failing fan-in task.
 

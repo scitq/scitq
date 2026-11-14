@@ -719,7 +719,7 @@ func (s *taskQueueServer) skipExistingTasks(tx *sql.Tx) []skipHitEvent {
 						FROM task_dependencies d
 						JOIN task t ON d.prerequisite_task_id = t.task_id
 						WHERE d.dependent_task_id = $1
-						  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+						  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND (t.retry = 0 OR t.failure_class = 'upstream')))
 					)
 				`, depID).Scan(&allDone)
 				if allDone {
@@ -762,7 +762,7 @@ func (s *taskQueueServer) promoteWaitingTasks(tx *sql.Tx) {
 			FROM task_dependencies d
 			JOIN task dep ON d.prerequisite_task_id = dep.task_id
 			WHERE d.dependent_task_id = t.task_id
-			  AND NOT (dep.status = 'S' OR (dep.status = 'F' AND d.accept_failure AND dep.retry = 0))
+			  AND NOT (dep.status = 'S' OR (dep.status = 'F' AND d.accept_failure AND (dep.retry = 0 OR dep.failure_class = 'upstream')))
 		  )
 	`)
 	if err != nil {
@@ -964,7 +964,7 @@ func (s *taskQueueServer) reuseCheckTasks(tx *sql.Tx) []reuseHitEvent {
 						FROM task_dependencies d
 						JOIN task t ON d.prerequisite_task_id = t.task_id
 						WHERE d.dependent_task_id = $1
-						  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+						  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND (t.retry = 0 OR t.failure_class = 'upstream')))
 					)
 				`, depID).Scan(&allDone)
 				if allDone {

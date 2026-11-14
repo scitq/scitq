@@ -141,3 +141,25 @@ sessions now expire after 30 days without use.
   moved onto a 1-CPU step ran with `CPU=1`. A task now gets its share of
   the worker (its weight over the concurrency), which recycling preserves.
   Recycling also rescales the weight of tasks downloaded ahead (O).
+- A YAML step's `retry:`, or its module's, was ignored: only the template's
+  top-level `retry:` reached the tasks. It now applies to the step's tasks.
+- A task submitted without a retry budget had none recorded, so its
+  failure never counted as final: a fan-in with `accept_failure` waited
+  for it forever. Such a task now has a budget of 0.
+- A task whose prerequisite failed for good, through a dependency that does
+  not accept failure, stayed in W forever, and its workflow was marked F
+  while a fan-in could still run. The task now fails too, with failure
+  class `upstream`, and so do its own dependents; a fan-in with
+  `accept_failure` then runs with what succeeded. Retrying the failed
+  prerequisite puts these tasks back in W. A workflow finishes only when
+  all its tasks are S or F.
+- Forcing a waiting task to run (`force_run_task`) or retrying a task in a
+  failed workflow left the workflow F, so nothing assigned the task or
+  recruited for it. Both now set the workflow back to running.
+- SRA downloads (`run+fastq://` falling back to `sra-aws` or `sra-tools`)
+  ignored a failed compression, and could keep a `.gz` left by a failed ENA
+  transfer of the same run. A failed compression now fails the download,
+  and the compression replaces any such file. The SRA download gives up a
+  stalled transfer after 3 tries of 60 seconds (it waited up to 15 minutes
+  for each of 20 tries), and the ENA metadata query after 2 minutes (it
+  never did). The worker logs which method delivered each run.

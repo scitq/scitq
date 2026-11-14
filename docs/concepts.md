@@ -55,6 +55,7 @@ failure that a retry can fix.
 | `network` | A transfer failed, or the uploaded outputs don't match what was produced. |
 | `eviction` | The worker disappeared or was deleted under the task. |
 | `definitive` | The step declared this failure permanent (see below). |
+| `upstream` | The task never ran: a prerequisite failed for good (see [Dependencies](#dependencies)). |
 | `other` | Anything else: a non-zero exit, a crash, a kill from outside. |
 
 A container killed with exit code 137 is `oom` only when Docker reports
@@ -83,7 +84,7 @@ it.
   a task whatever its budget, as a fresh start: the new task gets the
   original retry budget back, and resource curves restart at their first
   value. `edit_and_retry_task` changes the command first. Retrying a task
-  of a finished workflow sets the workflow back to running.
+  of a finished workflow (S or F) sets the workflow back to running.
 
 The YAML reference describes these settings:
 [definitive failures](usage/yaml-templates.md#definitive-failures-skip-retry-when-the-error-cant-recover)
@@ -107,8 +108,17 @@ is S. A step declared with `accept_failure: true` also accepts a
 prerequisite that failed for good — failed with no retry left. A
 prerequisite that will still be retried keeps its dependents waiting.
 
+When a prerequisite fails for good and the dependent does not accept
+failure, the dependent can never run: it fails too, with failure class
+`upstream`, and so do its own dependents in turn. A fan-in step with
+`accept_failure` accepts these failures like any other, so it runs with
+the samples that succeeded. Retrying the failed prerequisite (`scitq task
+retry`, the UI, or MCP `retry_task`) puts these tasks back in W, with their
+retry budget intact.
+
 To run a waiting task without its prerequisites (to get partial results),
-force it: MCP `force_run_task` moves it from W to P.
+force it: MCP `force_run_task` moves it from W to P, and sets its workflow
+back to running if it had finished.
 
 ## When a workflow is finished
 
@@ -116,8 +126,7 @@ A workflow is **running** (R) while it has work to do. You can also set it
 **paused** (P) or **debug** (D); scitq assigns no task and recruits no
 worker for a workflow that is not running.
 
-A running workflow finishes on its own once each of its tasks is S, F, or W
-that can never start:
+A running workflow finishes on its own once each of its tasks is S or F:
 
 - **S, succeeded,** when every task of every *leaf* step is S. A leaf step is
   one no other task depends on — typically the final collection step.

@@ -171,10 +171,10 @@ func TestDeleteTask_CascadesDependencyEdges(t *testing.T) {
 	require.Equal(t, 1, cCount, "B→C edge (unrelated to A) should survive")
 }
 
-// TestDeleteTask_UnblocksWaitingDependent: when the operator deletes a
-// failed prerequisite (the common emergency-cleanup move), any
-// downstream task that was sitting in W *purely* because of that
-// prereq should be promoted to P automatically.
+// TestDeleteTask_UnblocksWaitingDependent: a task whose prerequisite
+// failed for good fails too (upstream). When the operator deletes that
+// prerequisite (the common emergency-cleanup move), the task runs with the
+// prerequisites it has left: it goes back to W, and to P as they are met.
 //
 // Pre-fix: DeleteTask did the DELETE (cascade dropped the edge in
 // task_dependencies) but never called triggerAssign, so
@@ -223,8 +223,10 @@ func TestDeleteTask_UnblocksWaitingDependent(t *testing.T) {
 	// then cleans up by deleting it.
 	_, err = qc.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: a2.TaskId, NewStatus: "F"})
 	require.NoError(t, err)
-	require.Equal(t, "W", getTask(t, ctx, qc, b.TaskId).Status,
-		"B should still be in W after A1 succeeds and A2 fails")
+	require.Eventually(t, func() bool {
+		return getTask(t, ctx, qc, b.TaskId).Status == "F"
+	}, 5*time.Second, 100*time.Millisecond, "B cannot run once A2 failed for good")
+	require.Equal(t, "upstream", getTask(t, ctx, qc, b.TaskId).GetFailureClass())
 
 	// THE OPERATOR ACTION: delete the failed prereq A2.
 	// Cascade removes the A2→B edge. B's remaining edge (A1) is satisfied (S).

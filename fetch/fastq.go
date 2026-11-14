@@ -19,6 +19,15 @@ import (
 
 var defaultOptions = []string{"ena-ftp", "sra-aws", "sra-tools"}
 
+// enaAPI queries ENA's file report. The answer is small: a request that
+// takes longer has stalled.
+var enaAPI = &http.Client{Timeout: 2 * time.Minute}
+
+// compressFastqs is the shell step of the SRA routes that gzips the FASTQs
+// fasterq-dump wrote, in parallel, and fails if any compression fails. It
+// overwrites a .gz left by a failed ENA transfer of the same run.
+const compressFastqs = `pids=""; for f in *.fastq; do gzip -1 -f "$f" & pids="$pids $!"; done; for p in $pids; do wait $p || exit 1; done`
+
 var fastqParity = regexp.MustCompile(`.*(1|2)\.f.*q(\.gz)?$`)
 
 // Per-URL retry policy inside downloadFastqs. Three attempts (base
@@ -264,6 +273,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			err := fb.fetchFromSRA_sratool(runAccession, absPath, onlyRead1)
 			sraToolTested = true
 			if err == nil {
+				logFetched(runAccession, option)
 				recordChannelSuccess(option)
 				return nil
 			} else {
@@ -277,6 +287,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 			err := fb.fetchFromSRA_AWS(runAccession, absPath, onlyRead1)
 			sraToolTested = true
 			if err == nil {
+				logFetched(runAccession, option)
 				recordChannelSuccess(option)
 				return nil
 			} else {
@@ -293,7 +304,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 				runAccession,
 			)
 
-			apiResponse, err := http.Get(ebiURL)
+			apiResponse, err := enaAPI.Get(ebiURL)
 			if err != nil {
 				return fmt.Errorf("failed to query ENA API: %v", err)
 			}
@@ -347,6 +358,7 @@ func (fb *FastqBackend) Copy(otherFs FileSystemInterface, src, dst URI, selfIsSo
 		urlList := strings.Split(urls, ";")
 		success := fb.downloadFastqs(method, urlList, md5s, dst, otherFs, onlyRead1)
 		if success {
+			logFetched(runAccession, option)
 			recordChannelSuccess(option)
 			return nil
 		}
@@ -491,12 +503,27 @@ func (fb *FastqBackend) fetchFromSRA(runAccession, destination string, onlyRead1
 	// First try AWS srapath method
 	err := fb.fetchFromSRA_AWS(runAccession, destination, onlyRead1)
 	if err == nil {
+		logFetched(runAccession, "sra-aws")
 		return nil
 	}
 	log.Printf("SRA fetch via AWS srapath failed: %v, falling back to standard sra-tools method", err)
 
 	// Fallback to standard sra-tools method
-	return fb.fetchFromSRA_sratool(runAccession, destination, onlyRead1)
+	if err := fb.fetchFromSRA_sratool(runAccession, destination, onlyRead1); err != nil {
+		return err
+	}
+	logFetched(runAccession, "sra-tools")
+	return nil
+}
+
+// logFetched records which method delivered a run: ENA's files are checked
+// against ENA's MD5 (when ENA gives one), SRA's conversions are not.
+func logFetched(run, method string) {
+	check := "MD5 checked against ENA"
+	if strings.HasPrefix(method, "sra-") {
+		check = "converted by fasterq-dump, no checksum"
+	}
+	log.Printf("📥 fastq %s fetched with %s (%s)", run, method, check)
 }
 
 // fetchFromSRA downloads a FASTQ file using SRA toolkit inside Docker.
@@ -514,8 +541,8 @@ func (fb *FastqBackend) fetchFromSRA_sratool(runAccession, destination string, o
 		"ncbi/sra-tools",
 		"sh", "-c",
 		fmt.Sprintf(
-			"cd /destination && prefetch -X 9999999999999 %s && fasterq-dump -f --split-files %s && (%sfor f in *.fastq; do gzip -1 \"$f\" & done; wait; rm -fr %s) || exit 1",
-			runAccession, runAccession, dropR2, runAccession,
+			"cd /destination && prefetch -X 9999999999999 %s && fasterq-dump -f --split-files %s && (%s%s) && rm -fr %s || exit 1",
+			runAccession, runAccession, dropR2, compressFastqs, runAccession,
 		),
 	)
 
@@ -555,15 +582,14 @@ func (fb *FastqBackend) fetchFromSRA_AWS(runAccession, destination string, onlyR
 		SRAPATH=$(srapath $RUNACCESSION | grep 's3.amazonaws.com' | head -n 1)
 		if [ -z "$SRAPATH" ]; then exit 1; fi
 
-		wget -q "$SRAPATH" -O "$RUNACCESSION"
+		wget -q --timeout=60 --tries=3 "$SRAPATH" -O "$RUNACCESSION"
 		fasterq-dump -f --split-files "./$RUNACCESSION"
 		%s
 
-		for f in *.fastq; do gzip -1 "$f" & done
-		wait
+		%s
 
 		rm -f "$RUNACCESSION"
-	`, runAccession, dropR2)
+	`, runAccession, dropR2, compressFastqs)
 
 	cmd := exec.Command(
 		"docker", "run", "--rm",

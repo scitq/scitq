@@ -700,7 +700,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
          FROM inserted
          LEFT JOIN step ON inserted.step_id = step.step_id`,
 		req.Command, req.Shell, req.Container, req.ContainerOptions, req.StepId,
-		req.Input, req.Resource, req.Output, req.Retry, req.IsFinal, req.UsesCache,
+		req.Input, req.Resource, req.Output, req.GetRetry(), req.IsFinal, req.UsesCache,
 		req.DownloadTimeout, req.RunningTimeout, req.UploadTimeout,
 		initialStatus, req.TaskName, req.SkipIfExists, req.Publish, req.ReuseKey, req.GetConsumeReuse(), req.GetScitqAuth(), req.Numa,
 		req.MinCpu, req.MinMem, req.MinDisk, req.MinGpu, req.GetGpuAll(),
@@ -742,7 +742,7 @@ func (s *taskQueueServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (
 				FROM task_dependencies d
 				JOIN task t ON d.prerequisite_task_id = t.task_id
 				WHERE d.dependent_task_id = $1
-				  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+				  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND (t.retry = 0 OR t.failure_class = 'upstream')))
 			)
 		`, taskID).Scan(&allDone); err != nil {
 			return nil, fmt.Errorf("failed to check prerequisites: %w", err)
@@ -884,10 +884,11 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 	// accept_failure on its edges is almost always a leaf; when it
 	// finishes S, it has already honored the accept_failure contract and
 	// the upstream F is considered forgiven. So the workflow is S when
-	// every leaf-step task is S and the whole workflow has reached a
-	// terminal shape (S / F, or W that will never move because an F
-	// upstream was not accepted). The workflow is F when some failure or
-	// permanently-stuck task remains and leaves did not all succeed.
+	// every task is S or F and every leaf-step task is S. It is F when
+	// every task is S or F, some failed, and leaves did not all succeed.
+	// A W task is never final: if a prerequisite fails for good through
+	// a dependency that does not accept it, the W task fails too
+	// (cascadeUpstream).
 	err := s.db.QueryRowContext(ctx, `
 		WITH wf_tasks AS (
 			SELECT t.task_id, t.status, t.step_id
@@ -910,7 +911,7 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 			SELECT
 				COUNT(*)                                              AS total,
 				COUNT(*) FILTER (WHERE status = 'F')                  AS failed,
-				COUNT(*) FILTER (WHERE status IN ('S','F','W'))       AS terminal_or_wait,
+				COUNT(*) FILTER (WHERE status IN ('S','F'))           AS terminal,
 				(SELECT COUNT(*) FROM leaf_tasks)                     AS leaf_total,
 				(SELECT COUNT(*) FROM leaf_tasks WHERE status = 'S')  AS leaf_succeeded
 			FROM wf_tasks
@@ -918,10 +919,10 @@ func (s *taskQueueServer) recomputeWorkflowStatus(ctx context.Context, workflowI
 		desired AS (
 			SELECT
 				CASE
-					WHEN total > 0 AND terminal_or_wait = total
+					WHEN total > 0 AND terminal = total
 					              AND leaf_total > 0
 					              AND leaf_succeeded = leaf_total THEN 'S'
-					WHEN total > 0 AND terminal_or_wait = total
+					WHEN total > 0 AND terminal = total
 					              AND failed > 0                  THEN 'F'
 					ELSE NULL
 				END AS new_status
@@ -1098,6 +1099,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	var didUpdate bool
 	var shouldRecomputeWorkflow bool
 	var promotedWaitingTasks bool
+	var doomedDependents []int32
 
 	if req.Duration == nil {
 		log.Printf("🔔 Updating task %d status to %s (duration null)", req.TaskId, req.NewStatus)
@@ -1466,11 +1468,22 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
                         FROM task_dependencies d
                         JOIN task t ON d.prerequisite_task_id = t.task_id
                         WHERE d.dependent_task_id = $1
-                          AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+                          AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND (t.retry = 0 OR t.failure_class = 'upstream')))
                     )
                 `, depTaskID).Scan(&allDone)
 				if err != nil {
 					log.Printf("⚠️ failed to check dependencies for task %d: %v", depTaskID, err)
+					continue
+				}
+
+				if !allDone && req.NewStatus == "F" {
+					// A final failure that this dependent does not accept
+					// means it can never run: it fails too (cascadeUpstream).
+					if doomed, err := s.cannotRun(ctx, int32(depTaskID)); err != nil {
+						log.Printf("⚠️ failed to check failed prerequisites of task %d: %v", depTaskID, err)
+					} else if doomed {
+						doomedDependents = append(doomedDependents, int32(depTaskID))
+					}
 					continue
 				}
 
@@ -1544,6 +1557,8 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		}
 	}
 
+	s.cascadeUpstream(ctx, req.TaskId, doomedDependents)
+
 	if shouldTriggerAssignFor(req.NewStatus) {
 		s.triggerAssign()
 	}
@@ -1555,6 +1570,11 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	}
 	if req.FreeRetry != nil && *req.FreeRetry {
 		effectiveRetry++
+	}
+	if req.NewStatus == "F" && req.GetFailureClass() == "upstream" {
+		// The task never ran: running it again cannot help until its
+		// prerequisite is retried, which reopens it (reopenUpstream).
+		effectiveRetry = 0
 	}
 	// Definitive-failure gate: when the worker classified this failure
 	// as "definitive" (exit code in step.definitive_exit_codes, or
@@ -2357,6 +2377,14 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 	if err != nil {
 		return nil, fmt.Errorf("failed to rewire dependents: %w", err)
 	}
+	dependents, err := dependentsOf(ctx, tx, newID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list dependents of task %d: %w", newID, err)
+	}
+	reopened, err := reopenUpstream(ctx, tx, dependents)
+	if err != nil {
+		return nil, err
+	}
 
 	_, err = tx.ExecContext(ctx, `
 		DELETE FROM task_dependencies
@@ -2394,7 +2422,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		     FROM task_dependencies d
 		     JOIN task t ON d.prerequisite_task_id = t.task_id
 		     WHERE d.dependent_task_id = $1
-		       AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+		       AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND (t.retry = 0 OR t.failure_class = 'upstream')))
 		   )
 		RETURNING TRUE
 	`, newID).Scan(&demoted); err != nil && err != sql.ErrNoRows {
@@ -2407,6 +2435,7 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit retry transaction: %w", err)
 	}
+	s.afterReopen(ctx, newID, reopened)
 
 	// Watchdog fix-up. Normally s.watchdog.TaskFinished fires from
 	// UpdateTaskStatus on the S/F transition; but the retry path
@@ -2500,24 +2529,9 @@ func (s *taskQueueServer) retryTaskInternal(ctx context.Context, req *pb.RetryTa
 		})
 	}
 
-	// Auto-resume a Succeeded workflow when one of its tasks is retried.
-	// Without this, the retried task sits in Pending forever because the
-	// assignment loop skips workflows in S. The user just told the server
-	// "this task isn't actually done" — that's an implicit "this workflow
-	// isn't actually done either."
-	if wfID.Valid && wfStatus.String == "S" {
-		if _, err := s.db.ExecContext(ctx, `UPDATE workflow SET status = 'R' WHERE workflow_id = $1`, wfID.Int32); err != nil {
-			log.Printf("⚠️ retry: failed to flip workflow %d back to R: %v", wfID.Int32, err)
-		} else {
-			ws.EmitWS("workflow", wfID.Int32, "status", struct {
-				WorkflowId int32  `json:"workflowId"`
-				Status     string `json:"status"`
-			}{
-				WorkflowId: wfID.Int32,
-				Status:     "R",
-			})
-			s.triggerAssign()
-		}
+	// The retried task is not done, so neither is its workflow.
+	if wfID.Valid {
+		s.reopenWorkflow(ctx, wfID.Int32)
 	}
 
 	// Step-stats delta emit removed as part of the transitions pilot
@@ -2710,6 +2724,10 @@ func (s *taskQueueServer) ForceRunTask(ctx context.Context, req *pb.ForceRunTask
 		return nil, fmt.Errorf("task %d is not in waiting (W) status", req.TaskId)
 	}
 	log.Printf("⚡ Task %d forced from W → P (dependency check bypassed)", req.TaskId)
+	var wfID int32
+	if err := s.db.QueryRowContext(ctx, `SELECT s.workflow_id FROM task t JOIN step s ON s.step_id = t.step_id WHERE t.task_id = $1`, req.TaskId).Scan(&wfID); err == nil {
+		s.reopenWorkflow(ctx, wfID)
+	}
 	s.audit(ctx, "task.force_run", "task", req.TaskId, nil)
 	ws.EmitWS("task", req.TaskId, "status", struct {
 		TaskId    int32  `json:"taskId"`
@@ -7053,7 +7071,7 @@ func (s *taskQueueServer) DebugAssignTask(ctx context.Context, req *pb.DebugAssi
 			FROM task_dependencies d
 			JOIN task t ON d.prerequisite_task_id = t.task_id
 			WHERE d.dependent_task_id = $1
-			  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND t.retry = 0))
+			  AND NOT (t.status = 'S' OR (t.status = 'F' AND d.accept_failure AND (t.retry = 0 OR t.failure_class = 'upstream')))
 		)
 	`, req.TaskId).Scan(&depsSatisfied)
 	if err != nil {
@@ -7541,13 +7559,31 @@ func (s *taskQueueServer) DeleteTask(ctx context.Context, req *pb.TaskId) (*pb.A
 		}
 	}
 
-	res, err := s.db.ExecContext(ctx, `DELETE FROM task WHERE task_id = $1`, req.TaskId)
+	// Its dependents that failed because of it may run once it is gone.
+	dependents, err := dependentsOf(ctx, s.db, req.TaskId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list dependents of task %d: %w", req.TaskId, err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete task %d: %w", req.TaskId, err)
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `DELETE FROM task WHERE task_id = $1`, req.TaskId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete task %d: %w", req.TaskId, err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return nil, status.Error(codes.NotFound, "task not found")
 	}
+	reopened, err := reopenUpstream(ctx, tx, dependents)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to delete task %d: %w", req.TaskId, err)
+	}
+	s.afterReopen(ctx, req.TaskId, reopened)
 
 	payload := struct {
 		TaskId   int32  `json:"taskId"`
