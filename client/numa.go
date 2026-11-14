@@ -1,11 +1,7 @@
 package client
 
 import (
-	"context"
-	"fmt"
-	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -77,10 +73,10 @@ func DiscoverNumaTopology() *NumaTopology {
 }
 
 // NumaAllocator tracks which NUMA node currently hosts which task. The
-// map is purely in-memory: a worker restart rebuilds it from
-// `docker inspect` of still-running scitq containers (see
-// RebuildFromDocker). All methods are concurrency-safe — both the
-// fetcher goroutine and the executer goroutine touch this.
+// map is purely in-memory: a client starts with no task container
+// running (removeLeftoverContainers), so every node starts free. All
+// methods are concurrency-safe — both the fetcher goroutine and the
+// executer goroutine touch this.
 type NumaAllocator struct {
 	mu       sync.Mutex
 	topology *NumaTopology
@@ -226,119 +222,3 @@ func (a *NumaAllocator) Release(taskID int32) {
 	}
 }
 
-// MarkAllocated forces nodes into the bound state. Used by restart
-// recovery: when the worker comes back up, it consults docker for
-// containers still running and records their NUMA assignment so the
-// allocator doesn't hand the same slots out again.
-func (a *NumaAllocator) MarkAllocated(taskID int32, nodeIDs []int) {
-	if a == nil || a.topology == nil {
-		return
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, id := range nodeIDs {
-		if _, ok := a.slot[id]; ok {
-			a.slot[id] = taskID
-		} else {
-			log.Printf("⚠️ NUMA recovery: task %d claims node %d which is not in the host topology — skipping", taskID, id)
-		}
-	}
-}
-
-// RebuildFromDocker scans this worker's still-running scitq containers
-// and re-claims any NUMA slots they hold. Used on worker startup so a
-// process restart in the middle of a task doesn't release node IDs that
-// are still genuinely in use by a running container.
-//
-// Container name format (set in executeTask): "scitq-<workerName>-task-<id>".
-// We read HostConfig.CpusetMems and translate it back into node IDs.
-func (a *NumaAllocator) RebuildFromDocker(ctx context.Context, workerName string) {
-	if a == nil || a.topology == nil {
-		return
-	}
-	// `docker ps -q` is cheap and avoids parsing free-form `ps` output.
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-q",
-		"--filter", "name=scitq-"+workerName+"-task-",
-	).Output()
-	if err != nil {
-		log.Printf("⚠️ NUMA recovery: docker ps failed: %v — proceeding with empty slot map", err)
-		return
-	}
-	ids := strings.Fields(string(out))
-	if len(ids) == 0 {
-		return
-	}
-	args := append([]string{"inspect", "--format",
-		`{{.Name}}|{{if .HostConfig}}{{.HostConfig.CpusetMems}}{{end}}`,
-	}, ids...)
-	out, err = exec.CommandContext(ctx, "docker", args...).Output()
-	if err != nil {
-		log.Printf("⚠️ NUMA recovery: docker inspect failed: %v", err)
-		return
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		name := strings.TrimPrefix(parts[0], "/")
-		mems := parts[1]
-		if mems == "" {
-			continue // container has no cpuset-mems = not NUMA-bound
-		}
-		// Name shape: scitq-<workerName>-task-<id>
-		idx := strings.LastIndex(name, "-task-")
-		if idx < 0 {
-			continue
-		}
-		taskID64, err := strconv.ParseInt(name[idx+len("-task-"):], 10, 32)
-		if err != nil {
-			continue
-		}
-		nodeIDs, err := ParseCpusetMems(mems)
-		if err != nil {
-			log.Printf("⚠️ NUMA recovery: bad cpuset-mems %q on %s: %v", mems, name, err)
-			continue
-		}
-		if len(nodeIDs) == 0 {
-			continue
-		}
-		log.Printf("🧩 NUMA recovery: task %d still holds nodes %v", int32(taskID64), nodeIDs)
-		a.MarkAllocated(int32(taskID64), nodeIDs)
-	}
-}
-
-// ParseCpusetMems parses docker's --cpuset-mems output ("0,2,3") back
-// into a slice of node IDs. Used by restart recovery.
-func ParseCpusetMems(s string) ([]int, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	var ids []int
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if strings.Contains(part, "-") {
-			// Range form, e.g. "0-3"
-			bounds := strings.SplitN(part, "-", 2)
-			lo, err := strconv.Atoi(bounds[0])
-			if err != nil {
-				return nil, fmt.Errorf("invalid cpuset-mems range: %q", part)
-			}
-			hi, err := strconv.Atoi(bounds[1])
-			if err != nil {
-				return nil, fmt.Errorf("invalid cpuset-mems range: %q", part)
-			}
-			for i := lo; i <= hi; i++ {
-				ids = append(ids, i)
-			}
-		} else {
-			id, err := strconv.Atoi(part)
-			if err != nil {
-				return nil, fmt.Errorf("invalid cpuset-mems id: %q", part)
-			}
-			ids = append(ids, id)
-		}
-	}
-	return ids, nil
-}

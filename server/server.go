@@ -3519,6 +3519,7 @@ func (s *taskQueueServer) tryRecoverWorkerRegion(workerID int32, name string) {
 
 func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo) (*pb.WorkerId, error) {
 	var workerID int32
+	var keptTaskIDs []int32 // re-registration: tasks the client re-attaches to
 	var isPermanent bool
 	var recoveryNeeded bool
 
@@ -3601,10 +3602,13 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		//	log.Printf("⚠️ Failed to update worker %s: %v", req.Name, err)
 		//	return nil, fmt.Errorf("failed to update worker: %w", err)
 		//}
-		// Collect the tasks the previous client process held and mark them
-		// for failure after commit using UpdateTaskStatus. A tasks stay: the
-		// new process receives them on its next ping.
-		rows, err := tx.Query(`SELECT task_id FROM task WHERE status IN ('C','D','O','R','U','V') AND worker_id=$1 AND NOT hidden`, workerID)
+		// Collect the tasks the previous client process held. Those whose
+		// container the new process found still on the worker
+		// (running_task_ids) stay assigned: it re-attaches to them. The
+		// others are failed after commit using UpdateTaskStatus. A tasks
+		// stay: the new process receives them on its next ping.
+		rows, err := tx.Query(`SELECT task_id, COALESCE(task_id = ANY($2), false) FROM task
+			WHERE status IN ('C','D','O','R','U','V') AND worker_id=$1 AND NOT hidden`, workerID, pq.Array(req.RunningTaskIds))
 		if err != nil {
 			return nil, fmt.Errorf("failed to list tasks that were running when client %d crashed: %w", workerID, err)
 		}
@@ -3612,10 +3616,15 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 		var failedTaskIDs []int32
 		for rows.Next() {
 			var id int32
-			if err := rows.Scan(&id); err != nil {
+			var kept bool
+			if err := rows.Scan(&id, &kept); err != nil {
 				return nil, fmt.Errorf("failed to scan running task for worker %d: %w", workerID, err)
 			}
-			failedTaskIDs = append(failedTaskIDs, id)
+			if kept {
+				keptTaskIDs = append(keptTaskIDs, id)
+			} else {
+				failedTaskIDs = append(failedTaskIDs, id)
+			}
 		}
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("error iterating running tasks for worker %d: %w", workerID, err)
@@ -3678,8 +3687,9 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	if v := ctx.Value(struct{ k string }{"reRegFailTaskIDs"}); v != nil {
 		if ids, ok := v.([]int32); ok {
 			eviction := "eviction"
+			auditCtx := withSchedulerActor(context.Background(), fmt.Sprintf("worker %d re-registration", workerID))
 			for _, tid := range ids {
-				if _, upErr := s.UpdateTaskStatus(context.Background(), &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true), FailureClass: &eviction}); upErr != nil {
+				if _, upErr := s.UpdateTaskStatus(auditCtx, &pb.TaskStatusUpdate{TaskId: tid, NewStatus: "F", FreeRetry: proto.Bool(true), FailureClass: &eviction}); upErr != nil {
 					log.Printf("❌ failed to set task %d to 'F' on worker re-registration: %v", tid, upErr)
 				} else {
 					log.Printf("🔄 task %d failed due to worker %d re-registration", tid, workerID)
@@ -3743,7 +3753,7 @@ func (s *taskQueueServer) RegisterWorker(ctx context.Context, req *pb.WorkerInfo
 	// **Trigger task assignment**
 	s.triggerAssign()
 
-	return &pb.WorkerId{WorkerId: workerID}, nil
+	return &pb.WorkerId{WorkerId: workerID, KeptTaskIds: keptTaskIDs}, nil
 }
 
 // FetchWorkersForWatchdog reads workers and builds WorkerInfo list

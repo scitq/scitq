@@ -46,6 +46,11 @@ sessions now expire after 30 days without use.
 - **Branding**: an installation's name, logo (optionally a second one for
   dark backgrounds), two brand colors and the sidebar's background per
   theme (`ui:` in `scitq.yaml`), shown from the first render.
+- **Tasks survive a client restart.** A restarted worker client re-attaches
+  to the containers its tasks still run in: the tasks keep their id, their
+  run and their log, and finish normally. Output printed while no client
+  was running is sent when it re-attaches; a few lines may repeat.
+  `RegisterWorker` takes `running_task_ids` and returns `kept_task_ids`.
 - A force-run button on waiting tasks in the UI's task list (runs the task
   without waiting for its prerequisites).
 - The UI's worker events panel filters by level (all, warnings, errors;
@@ -124,3 +129,15 @@ sessions now expire after 30 days without use.
   (`InvalidParameter`) was retried and never blacklisted the flavor. It now
   disables the flavor in that region at the first refusal, like the other
   permanent VM-size refusals; `scitq flavor enable` re-enables it.
+- When a worker's client restarted (an automatic package upgrade restarts
+  it, for one), the containers of its running tasks kept running: the
+  server failed and retried those tasks, and the worker took new ones on
+  top, overcommitting its memory. The new client now re-attaches to them
+  (see Added), and removes those the server no longer assigns to it.
+- Tasks failed because their worker re-registered are now in the audit
+  trail, with the re-registration as the actor.
+- A task that a worker still held when it was recycled to another step ran
+  with `$CPU` and `$MEM` from the new step's concurrency: a 16-CPU task
+  moved onto a 1-CPU step ran with `CPU=1`. A task now gets its share of
+  the worker (its weight over the concurrency), which recycling preserves.
+  Recycling also rescales the weight of tasks downloaded ahead (O).

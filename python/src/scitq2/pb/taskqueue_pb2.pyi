@@ -14,7 +14,7 @@ class TaskResponse(_message.Message):
     def __init__(self, task_id: _Optional[int] = ...) -> None: ...
 
 class WorkerInfo(_message.Message):
-    __slots__ = ("name", "concurrency", "is_permanent", "provider", "region", "version", "commit", "build_arch", "gpu_count")
+    __slots__ = ("name", "concurrency", "is_permanent", "provider", "region", "version", "commit", "build_arch", "gpu_count", "running_task_ids")
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     IS_PERMANENT_FIELD_NUMBER: _ClassVar[int]
@@ -24,6 +24,7 @@ class WorkerInfo(_message.Message):
     COMMIT_FIELD_NUMBER: _ClassVar[int]
     BUILD_ARCH_FIELD_NUMBER: _ClassVar[int]
     GPU_COUNT_FIELD_NUMBER: _ClassVar[int]
+    RUNNING_TASK_IDS_FIELD_NUMBER: _ClassVar[int]
     name: str
     concurrency: int
     is_permanent: bool
@@ -33,7 +34,8 @@ class WorkerInfo(_message.Message):
     commit: str
     build_arch: str
     gpu_count: int
-    def __init__(self, name: _Optional[str] = ..., concurrency: _Optional[int] = ..., is_permanent: bool = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ..., gpu_count: _Optional[int] = ...) -> None: ...
+    running_task_ids: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, name: _Optional[str] = ..., concurrency: _Optional[int] = ..., is_permanent: bool = ..., provider: _Optional[str] = ..., region: _Optional[str] = ..., version: _Optional[str] = ..., commit: _Optional[str] = ..., build_arch: _Optional[str] = ..., gpu_count: _Optional[int] = ..., running_task_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class ServerVersionResponse(_message.Message):
     __slots__ = ("version", "commit", "build_arch")
@@ -599,10 +601,12 @@ class TaskId(_message.Message):
     def __init__(self, task_id: _Optional[int] = ...) -> None: ...
 
 class WorkerId(_message.Message):
-    __slots__ = ("worker_id",)
+    __slots__ = ("worker_id", "kept_task_ids")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
+    KEPT_TASK_IDS_FIELD_NUMBER: _ClassVar[int]
     worker_id: int
-    def __init__(self, worker_id: _Optional[int] = ...) -> None: ...
+    kept_task_ids: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, worker_id: _Optional[int] = ..., kept_task_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class WorkerDeletion(_message.Message):
     __slots__ = ("worker_id", "undeployed")

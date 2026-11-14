@@ -409,9 +409,10 @@ The worker has to *force* an idle window:
 ```
 
 Docker re-attach (worker exits while leaving `R` containers alive,
-re-attaches after restart) is a Phase 2.5 optimisation. Out of scope
-for v1: simpler to wait or kill. We can add it when measured drain
-latency justifies the state-file invariant cost.
+re-attaches after restart) is implemented for any client restart, not
+only upgrades: see `client/reattach.go`. Upgrades still drain first, so
+an upgrade never relies on it. No state file is needed: the container
+name carries the task id.
 
 ### Distribution: existing endpoint, plus checksum
 

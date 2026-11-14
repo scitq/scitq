@@ -861,7 +861,7 @@ func recycleWorkers(
                 UPDATE task
                 SET weight = weight * $1
                 WHERE worker_id = $2
-                  AND status IN ('A','C','R','D','U')
+                  AND status IN ('A','C','D','O','R','U','V')
             `, scale, id)
 			if err != nil {
 				log.Printf("⚠️ Failed to update task weights for worker %d: %v", id, err)

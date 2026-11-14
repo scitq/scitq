@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -202,7 +203,10 @@ func (w *WorkerConfig) registerSpecs(client pb.TaskQueueClient) {
 }
 
 // registerWorker registers the client worker with the server.
-func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
+// registerWorker registers the worker, reporting the tasks whose container
+// a previous client run left (running), and returns those the server keeps
+// assigned to it.
+func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient, running []int32) []int32 {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -233,16 +237,17 @@ func (w *WorkerConfig) registerWorker(client pb.TaskQueueClient) {
 			Version:     &workerVersion,
 			Commit:      &workerCommit,
 			BuildArch:   &buildArch,
-			GpuCount:    &gpuCount,
+			GpuCount:       &gpuCount,
+			RunningTaskIds: running,
 		})
 	if err != nil {
 		log.Fatalf("Failed to register worker: %v", err)
-	} else {
-		w.WorkerId = res.WorkerId
 	}
+	w.WorkerId = res.WorkerId
 	w.registerSpecs(client)
 	log.Printf("✅ Worker %s registered with concurrency %d (version %s, commit %s, arch %s)",
 		w.Name, w.Concurrency, workerVersion, shortSha(workerCommit), buildArch)
+	return res.KeptTaskIds
 }
 
 // shortSha returns the first 7 chars of a git SHA, or the original if shorter.
@@ -312,8 +317,12 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	defer wg.Done()
 	log.Printf("🚀 Executing task %d: %s", task.TaskId, task.Command)
 
+	// A task whose container a previous client run left: follow it instead
+	// of launching it (reattach.go).
+	since, reattach := reattached.LoadAndDelete(task.TaskId)
+
 	// 🛑 Only proceed if the task is Accepted (C), Downloading (D), or On hold (O)
-	if task.Status != "C" && task.Status != "D" && task.Status != "O" {
+	if !reattach && task.Status != "C" && task.Status != "D" && task.Status != "O" {
 		log.Printf("⚠️ Task %d is not in C/D/O but %s, skipping.", task.TaskId, task.Status)
 		reporter.Event("E", "task", fmt.Sprintf("task %d is not in accepted state", task.TaskId), map[string]any{
 			"task_id": task.TaskId,
@@ -366,18 +375,23 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		}
 	}
 
-	// Promote to Running locally and on the server
-	reporter.Event("I", "phase", "promoting to R (start exec)", map[string]any{
-		"task_id": task.TaskId,
-	})
+	// Promote to Running locally and on the server. A re-attached task is
+	// running already; the server may not have heard it.
+	if !reattach || task.Status == "C" || task.Status == "D" || task.Status == "O" {
+		reporter.Event("I", "phase", "promoting to R (start exec)", map[string]any{
+			"task_id": task.TaskId,
+		})
+		reporter.UpdateTaskAsync(task.TaskId, "R", "", nil, "")
+	}
 	task.Status = "R"
-	reporter.UpdateTaskAsync(task.TaskId, "R", "", nil, "")
 
 	runStart := time.Now()
 
 	//TODO: linking resource
-	for _, r := range task.Resource {
-		dm.resourceLink(r, store+"/tasks/"+fmt.Sprint(task.TaskId)+"/resource")
+	if !reattach {
+		for _, r := range task.Resource {
+			dm.resourceLink(r, store+"/tasks/"+fmt.Sprint(task.TaskId)+"/resource")
+		}
 	}
 
 	if task.Status == "F" {
@@ -420,7 +434,19 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		taskAuthToken = workerToken
 	}
 
-	if isBare {
+	if reattach {
+		// Follow the running container: `docker logs --follow` streams its
+		// stdout and stderr apart, and returns when the container stops.
+		args := []string{"logs", "--follow"}
+		if since.(string) != "" {
+			args = append(args, "--since", since.(string))
+		}
+		cmd = exec.Command("docker", append(args, containerName)...)
+		if started := containerStartedAt(containerName); !started.IsZero() {
+			runStart = started
+		}
+		log.Printf("🔗 Following container %s: docker %s", containerName, strings.Join(cmd.Args[1:], " "))
+	} else if isBare {
 		// Bare execution: run command directly without Docker
 		shell := "sh"
 		if task.Shell != nil {
@@ -709,6 +735,11 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 		}
 	}
 
+	if reattach {
+		_ = stream.Send(&pb.TaskLog{TaskId: task.TaskId, LogType: "stderr", LogText: fmt.Sprintf(
+			"scitq-client: the worker's client restarted; following the running container again, its output since %q is sent again and may repeat lines.", since)})
+	}
+
 	// Stream logs concurrently
 	logWg.Add(2)
 	go sendLogs(stdout, stream, "stdout", nil)
@@ -722,6 +753,11 @@ func executeTask(client pb.TaskQueueClient, reporter *event.Reporter, task *pb.T
 	// CloseAndRecv waits for the server to confirm all log messages are written,
 	// ensuring logs are on disk before we send the status update.
 	stream.CloseAndRecv()
+	if reattach {
+		// `docker logs` succeeds whatever the task did: the container
+		// holds the outcome.
+		err = reattachedOutcome(containerName, hooks)
+	}
 
 	// If recoverTask phase 2 had to SIGKILL cmd but successfully captured
 	// the container's real exit code via `docker inspect` first, override
@@ -1553,6 +1589,7 @@ func workerLoop(ctx context.Context, client pb.TaskQueueClient, reporter *event.
 			return
 		default:
 		}
+		markAlive(store)
 
 		// Drain any failed-download notifications; perform centralized failure handling
 		for {
@@ -1751,6 +1788,20 @@ func excuterThread(
 		}
 
 		go func(t *pb.Task, w float64) {
+			// A re-attached task's container is already running: count it
+			// without waiting for a slot. It keeps the NUMA nodes and GPUs
+			// it was started with; the allocators don't know them.
+			if _, ok := reattached.Load(t.TaskId); ok {
+				sem.Claim(w, t.TaskId)
+				executingTasks.Store(t.TaskId, struct{}{})
+				executeTask(client, reporter, t, &wg, store, dm, 0, 0, workerName, noBare, serverAddr, workerToken, Allocation{}, false, nil)
+				sem.ReleaseTask(t.TaskId)
+				um.EnqueueTaskOutput(t)
+				executingTasks.Delete(t.TaskId)
+				activeSince.Delete(t.TaskId)
+				taskWeights.Delete(t.TaskId)
+				return
+			}
 			// mark that we are attempting to execute (post-download, i.e. leaving O)
 			reporter.Event("I", "phase", "attempting to acquire slots for execution", map[string]any{
 				"task_id": t.TaskId,
@@ -1783,12 +1834,16 @@ func excuterThread(
 			// partial-contribution worker would expose more resources to
 			// each task than it actually offered. Reads through caps so
 			// a server-pushed change takes effect on the *next* task
-			// without restarting the client.
+			// without restarting the client. Each task gets its share of
+			// them (weight / concurrency): a task held when the worker is
+			// recycled to a step with another concurrency keeps the share
+			// it was assigned with.
+			share := sem.Share(t.TaskId)
 			advertisedCPU := float64(runtime.NumCPU())
 			if c := caps.CPU(); c > 0 {
 				advertisedCPU = float64(c)
 			}
-			cpu := max(int32(advertisedCPU/sem.Size()), 1)
+			cpu := max(int32(advertisedCPU*share), 1)
 			var memGB int32
 			advertisedMem := float64(0)
 			if m := caps.Mem(); m > 0 {
@@ -1797,7 +1852,7 @@ func excuterThread(
 				advertisedMem = float64(vmem.Total) / (1024 * 1024 * 1024)
 			}
 			if advertisedMem > 0 {
-				memGB = max(int32(advertisedMem/sem.Size()), 1)
+				memGB = max(int32(advertisedMem*share), 1)
 			}
 			// NUMA binding (optional). When task.Numa is set, try to
 			// reserve that many NUMA nodes; on success the docker
@@ -1943,7 +1998,31 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 		}
 	}
 
-	config.registerWorker(qclient.Client)
+	// Task containers a previous client run left (see reattach.go): the
+	// server keeps the tasks it still assigns to us, and we re-attach to
+	// them once the executor runs; the other containers are removed.
+	leftover, err := taskContainers(config.Name)
+	if err != nil {
+		log.Printf("⚠️ Could not list task containers left by a previous run: %v", err)
+	}
+	leftoverIDs := make([]int32, 0, len(leftover))
+	for id := range leftover {
+		leftoverIDs = append(leftoverIDs, id)
+	}
+	keptIDs := config.registerWorker(qclient.Client, leftoverIDs)
+	var orphans []string
+	for id, name := range leftover {
+		if !slices.Contains(keptIDs, id) {
+			orphans = append(orphans, name)
+		}
+	}
+	if err := removeContainers(orphans); err != nil {
+		log.Printf("⚠️ Could not remove task containers left by a previous run: %v", err)
+	} else if len(orphans) > 0 {
+		log.Printf("🧹 Removed %d task container(s) the server no longer assigns to us: %v", len(orphans), orphans)
+		event.SendRuntimeEventWithRetry(config.ServerAddr, config.Token, config.WorkerId, config.Name, "W", "lifecycle",
+			"removed task containers left by a previous client run", map[string]any{"containers": orphans})
+	}
 	createHelpers(config.Store)
 	sem := utils.NewResizableSemaphore(float64(config.Concurrency))
 
@@ -1973,22 +2052,15 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 	numaAlloc := NewNumaAllocator(numaTopo)
 	if numaTopo != nil {
 		log.Printf("🧩 NUMA topology: %d nodes detected", len(numaTopo.Nodes))
-		// If a previous client process is still draining tasks
-		// (e.g. systemd Restart=on-failure after an in-place upgrade),
-		// inherit their NUMA assignments so we don't double-book a node.
-		numaAlloc.RebuildFromDocker(ctx, config.Name)
 	}
 
 	// GPU device allocator. Runs nvidia-smi once at startup to count
 	// devices; the allocator partitions them per-task at execution
 	// time via CUDA_VISIBLE_DEVICES injection. On CPU-only flavors
 	// the count is 0 and Allocate() always fails — the executor's
-	// guard skips the inject path entirely. No equivalent of NUMA's
-	// RebuildFromDocker because a restart can't easily learn which
-	// CUDA_VISIBLE_DEVICES value an in-flight container received
-	// (it's an env var inside the container, not a docker label);
-	// drained tasks finishing under the new allocator will release
-	// no slots and finished naturally — same orphan risk as NUMA.
+	// guard skips the inject path entirely. Like the NUMA allocator, it
+	// starts with every device free: no task container survives a
+	// client restart (removeLeftoverContainers).
 	gpuAlloc := NewGPUAllocator(DiscoverGPUCount())
 	// Per-step memory for the numa→concurrency auto-derivation in
 	// fetchTasks. Stores the step_id we last derived for; the auto-
@@ -2012,6 +2084,7 @@ func Run(ctx context.Context, serverAddr string, concurrency int32, name, store,
 
 	// Launching execution thread
 	go excuterThread(dm.ExecQueue, qclient.Client, reporter, sem, store, dm, um, taskWeights, activeTasks, config.Name, config.NoBare, config.ServerAddr, config.Token, caps, numaAlloc, gpuAlloc)
+	reattachTasks(qclient.Client, reporter, keptIDs, leftover, store, dm.ExecQueue, activeTasks, taskWeights)
 
 	// Start processing tasks
 	go workerLoop(ctx, qclient.Client, reporter, config, caps, sem, dm, um, taskWeights, activeTasks, numaAlloc, &lastDerivedStep, throttle, peaks)

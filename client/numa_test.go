@@ -20,40 +20,6 @@ func TestCountCPUsInList(t *testing.T) {
 	}
 }
 
-func TestParseCpusetMems(t *testing.T) {
-	cases := []struct {
-		in   string
-		want []int
-		ok   bool
-	}{
-		{"0", []int{0}, true},
-		{"0,2,3", []int{0, 2, 3}, true},
-		{"0-3", []int{0, 1, 2, 3}, true},
-		{"0,2-3", []int{0, 2, 3}, true},
-		{"", nil, true},
-		{"garbage", nil, false},
-	}
-	for _, c := range cases {
-		got, err := ParseCpusetMems(c.in)
-		if (err == nil) != c.ok {
-			t.Errorf("ParseCpusetMems(%q) err = %v, want ok=%v", c.in, err, c.ok)
-			continue
-		}
-		if err != nil {
-			continue
-		}
-		if len(got) != len(c.want) {
-			t.Errorf("ParseCpusetMems(%q) = %v, want %v", c.in, got, c.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != c.want[i] {
-				t.Errorf("ParseCpusetMems(%q)[%d] = %d, want %d", c.in, i, got[i], c.want[i])
-			}
-		}
-	}
-}
-
 func fakeTopology() *NumaTopology {
 	return &NumaTopology{Nodes: []NumaNode{
 		{ID: 0, CPUList: "0-5"},
@@ -111,11 +77,3 @@ func TestAllocator_TooManyNodesRequested(t *testing.T) {
 	}
 }
 
-func TestAllocator_MarkAllocated(t *testing.T) {
-	a := NewNumaAllocator(fakeTopology())
-	a.MarkAllocated(42, []int{0, 1})
-	alloc, ok := a.Allocate(43, 1)
-	if !ok || alloc.Memset != "2" {
-		t.Fatalf("MarkAllocated should reserve nodes 0,1; next free is 2; got %+v ok=%v", alloc, ok)
-	}
-}

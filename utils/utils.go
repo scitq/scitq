@@ -52,6 +52,30 @@ func (s *ResizableSemaphore) AcquireWithWeight(ctx context.Context, weight float
 	return nil
 }
 
+// Claim takes weight for taskID without waiting, even beyond the size: for
+// a task whose work is already running (re-attached after a client
+// restart), which the semaphore must count but cannot hold back.
+func (s *ResizableSemaphore) Claim(weight float64, taskID int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens -= weight
+	s.runningTasks[taskID] = weight
+}
+
+// Share is the fraction of the semaphore that taskID holds: its weight over
+// the size, read together so a concurrent resize cannot mix the two. A task
+// keeps its share of the worker when the worker is recycled to another step,
+// because the server scales the weights of the tasks it holds with the
+// concurrency. It is 1 when the size is 0.
+func (s *ResizableSemaphore) Share(taskID int32) float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.maxSize <= 0 {
+		return 1
+	}
+	return s.runningTasks[taskID] / s.maxSize
+}
+
 // reset the tokens based on the current running tasks
 // this is called when a task is released to avoid drifting
 func (s *ResizableSemaphore) resetTokensUnsafe() {

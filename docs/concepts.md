@@ -89,6 +89,17 @@ The YAML reference describes these settings:
 [definitive failures](usage/yaml-templates.md#definitive-failures-skip-retry-when-the-error-cant-recover)
 and [retry curves](usage/yaml-templates.md#per-attempt-resource-escalation-retry-curves).
 
+## When a worker's client restarts
+
+A task's container runs under Docker, not under the scitq client, so it
+outlives a restart of the client (an upgrade of the host's packages can
+trigger one). The restarted client finds its task containers and
+re-attaches to them: the tasks keep running, then finish and upload as
+usual. Their output printed while no client was running reaches the server
+when the client re-attaches, and a few lines before the restart may appear
+twice. A task that was downloading or uploading at the moment of the
+restart cannot be resumed: it fails as an eviction and is retried.
+
 ## Dependencies
 
 A task with prerequisites starts in W, and becomes P when every prerequisite

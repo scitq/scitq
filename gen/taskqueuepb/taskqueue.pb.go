@@ -84,9 +84,14 @@ type WorkerInfo struct {
 	// (set by the catalog sync) and emits a W-level worker_event on
 	// mismatch — operators see catalog drift without polling. 0 when
 	// nvidia-smi is missing or fails (CPU-only flavors, mostly).
-	GpuCount      *int32 `protobuf:"varint,9,opt,name=gpu_count,json=gpuCount,proto3,oneof" json:"gpu_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	GpuCount *int32 `protobuf:"varint,9,opt,name=gpu_count,json=gpuCount,proto3,oneof" json:"gpu_count,omitempty"`
+	// Tasks whose container is still on the worker, left by a previous run
+	// of the client (it restarted). The server keeps those it still
+	// assigns to this worker instead of failing them, and lists them in
+	// WorkerId.kept_task_ids; the client re-attaches to their containers.
+	RunningTaskIds []int32 `protobuf:"varint,10,rep,packed,name=running_task_ids,json=runningTaskIds,proto3" json:"running_task_ids,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkerInfo) Reset() {
@@ -180,6 +185,13 @@ func (x *WorkerInfo) GetGpuCount() int32 {
 		return *x.GpuCount
 	}
 	return 0
+}
+
+func (x *WorkerInfo) GetRunningTaskIds() []int32 {
+	if x != nil {
+		return x.RunningTaskIds
+	}
+	return nil
 }
 
 type ServerVersionResponse struct {
@@ -3244,8 +3256,11 @@ func (x *TaskId) GetTaskId() int32 {
 }
 
 type WorkerId struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkerId      int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	WorkerId int32                  `protobuf:"varint,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	// RegisterWorker only: the reported running_task_ids the server keeps
+	// assigned to this worker. Their other active tasks are failed.
+	KeptTaskIds   []int32 `protobuf:"varint,2,rep,packed,name=kept_task_ids,json=keptTaskIds,proto3" json:"kept_task_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3285,6 +3300,13 @@ func (x *WorkerId) GetWorkerId() int32 {
 		return x.WorkerId
 	}
 	return 0
+}
+
+func (x *WorkerId) GetKeptTaskIds() []int32 {
+	if x != nil {
+		return x.KeptTaskIds
+	}
+	return nil
 }
 
 type WorkerDeletion struct {
@@ -12948,7 +12970,7 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\n" +
 	"\x0ftaskqueue.proto\x12\ttaskqueue\x1a\x1bgoogle/protobuf/empty.proto\"'\n" +
 	"\fTaskResponse\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\x9c\x03\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"\xc6\x03\n" +
 	"\n" +
 	"WorkerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
@@ -12960,7 +12982,9 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\x06commit\x18\a \x01(\tH\x05R\x06commit\x88\x01\x01\x12\"\n" +
 	"\n" +
 	"build_arch\x18\b \x01(\tH\x06R\tbuildArch\x88\x01\x01\x12 \n" +
-	"\tgpu_count\x18\t \x01(\x05H\aR\bgpuCount\x88\x01\x01B\x0e\n" +
+	"\tgpu_count\x18\t \x01(\x05H\aR\bgpuCount\x88\x01\x01\x12(\n" +
+	"\x10running_task_ids\x18\n" +
+	" \x03(\x05R\x0erunningTaskIdsB\x0e\n" +
 	"\f_concurrencyB\x0f\n" +
 	"\r_is_permanentB\v\n" +
 	"\t_providerB\t\n" +
@@ -13416,9 +13440,10 @@ const file_taskqueue_proto_rawDesc = "" +
 	"\aTaskIds\x12\x19\n" +
 	"\btask_ids\x18\x01 \x03(\x05R\ataskIds\"!\n" +
 	"\x06TaskId\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"'\n" +
+	"\atask_id\x18\x01 \x01(\x05R\x06taskId\"K\n" +
 	"\bWorkerId\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\"a\n" +
+	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12\"\n" +
+	"\rkept_task_ids\x18\x02 \x03(\x05R\vkeptTaskIds\"a\n" +
 	"\x0eWorkerDeletion\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\x05R\bworkerId\x12#\n" +
 	"\n" +

@@ -174,6 +174,11 @@ message WorkerInfo {
     // mismatch — operators see catalog drift without polling. 0 when
     // nvidia-smi is missing or fails (CPU-only flavors, mostly).
     optional int32 gpu_count = 9;
+    // Tasks whose container is still on the worker, left by a previous run
+    // of the client (it restarted). The server keeps those it still
+    // assigns to this worker instead of failing them, and lists them in
+    // WorkerId.kept_task_ids; the client re-attaches to their containers.
+    repeated int32 running_task_ids = 10;
 }
 
 message ServerVersionResponse {
@@ -727,6 +732,9 @@ message TaskId {
 
 message WorkerId {
     int32 worker_id = 1;
+    // RegisterWorker only: the reported running_task_ids the server keeps
+    // assigned to this worker. Their other active tasks are failed.
+    repeated int32 kept_task_ids = 2;
 }
 
 message WorkerDeletion {

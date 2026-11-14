@@ -71,6 +71,15 @@ export interface WorkerInfo {
      * @generated from protobuf field: optional int32 gpu_count = 9
      */
     gpuCount?: number;
+    /**
+     * Tasks whose container is still on the worker, left by a previous run
+     * of the client (it restarted). The server keeps those it still
+     * assigns to this worker instead of failing them, and lists them in
+     * WorkerId.kept_task_ids; the client re-attaches to their containers.
+     *
+     * @generated from protobuf field: repeated int32 running_task_ids = 10
+     */
+    runningTaskIds: number[];
 }
 /**
  * @generated from protobuf message taskqueue.ServerVersionResponse
@@ -1388,6 +1397,13 @@ export interface WorkerId {
      * @generated from protobuf field: int32 worker_id = 1
      */
     workerId: number;
+    /**
+     * RegisterWorker only: the reported running_task_ids the server keeps
+     * assigned to this worker. Their other active tasks are failed.
+     *
+     * @generated from protobuf field: repeated int32 kept_task_ids = 2
+     */
+    keptTaskIds: number[];
 }
 /**
  * @generated from protobuf message taskqueue.WorkerDeletion
@@ -4803,12 +4819,14 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
             { no: 6, name: "version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 7, name: "commit", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "build_arch", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 9, name: "gpu_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 9, name: "gpu_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "running_task_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerInfo>): WorkerInfo {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.name = "";
+        message.runningTaskIds = [];
         if (value !== undefined)
             reflectionMergePartial<WorkerInfo>(this, message, value);
         return message;
@@ -4844,6 +4862,13 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
                     break;
                 case /* optional int32 gpu_count */ 9:
                     message.gpuCount = reader.int32();
+                    break;
+                case /* repeated int32 running_task_ids */ 10:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.runningTaskIds.push(reader.int32());
+                    else
+                        message.runningTaskIds.push(reader.int32());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4884,6 +4909,13 @@ class WorkerInfo$Type extends MessageType<WorkerInfo> {
         /* optional int32 gpu_count = 9; */
         if (message.gpuCount !== undefined)
             writer.tag(9, WireType.Varint).int32(message.gpuCount);
+        /* repeated int32 running_task_ids = 10; */
+        if (message.runningTaskIds.length) {
+            writer.tag(10, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.runningTaskIds.length; i++)
+                writer.int32(message.runningTaskIds[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7861,12 +7893,14 @@ export const TaskId = new TaskId$Type();
 class WorkerId$Type extends MessageType<WorkerId> {
     constructor() {
         super("taskqueue.WorkerId", [
-            { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 1, name: "worker_id", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "kept_task_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<WorkerId>): WorkerId {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.workerId = 0;
+        message.keptTaskIds = [];
         if (value !== undefined)
             reflectionMergePartial<WorkerId>(this, message, value);
         return message;
@@ -7878,6 +7912,13 @@ class WorkerId$Type extends MessageType<WorkerId> {
             switch (fieldNo) {
                 case /* int32 worker_id */ 1:
                     message.workerId = reader.int32();
+                    break;
+                case /* repeated int32 kept_task_ids */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.keptTaskIds.push(reader.int32());
+                    else
+                        message.keptTaskIds.push(reader.int32());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -7894,6 +7935,13 @@ class WorkerId$Type extends MessageType<WorkerId> {
         /* int32 worker_id = 1; */
         if (message.workerId !== 0)
             writer.tag(1, WireType.Varint).int32(message.workerId);
+        /* repeated int32 kept_task_ids = 2; */
+        if (message.keptTaskIds.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.keptTaskIds.length; i++)
+                writer.int32(message.keptTaskIds[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
