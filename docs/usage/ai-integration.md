@@ -220,6 +220,8 @@ The endpoint accepts JSON-RPC 2.0 messages per the MCP Streamable HTTP specifica
 | `delete_recruiter` | Delete a recruiter |
 | **Flavors** | |
 | `list_flavors` | List instance flavors with filter (e.g. cpu>=8:mem>=30) |
+| **Quotas** | |
+| `list_quotas` | Each provider/region's CPU, memory and instance limits, what workers consume of them, the free room, the provider's refusals of the last hour, and a state: available, full, cooldown, refusing or unconfigured |
 | **Files** | |
 | `file_list` | List files at a remote URI |
 | **Events** | |

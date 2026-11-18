@@ -103,6 +103,10 @@ cli module upload --as:string
 cli module upload --force optional
 cli module upload --force:bool
 cli module upload --path:string
+cli quota
+cli quota list
+cli quota list --long optional
+cli quota list --long:bool
 cli recruiter
 cli recruiter create
 cli recruiter create --concurrency optional

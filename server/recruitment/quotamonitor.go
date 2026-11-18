@@ -28,6 +28,7 @@ type RegionalQuota struct {
 	MaxCPU       int32
 	MaxMemGB     float32
 	MaxInstances int32 // 0 = unlimited (learned from failures)
+	Learned      bool  // MaxInstances was learned from a provider refusal
 }
 
 type RegionalUsage struct {
@@ -39,6 +40,7 @@ type RegionalUsage struct {
 }
 
 type QuotaManager struct {
+	mu          sync.RWMutex             // guards Quotas
 	Quotas      map[string]RegionalQuota // keyed by region/provider
 	Usage       sync.Map                 // key = region/provider string, value = RegionalUsage
 	BadFlavors  sync.Map                 // key = region/provider/flavorName, value = bool (blacklisted)
@@ -51,7 +53,9 @@ func quotaKey(region, provider string) string {
 
 func (qm *QuotaManager) CanLaunch(region, provider string, cpu int32, memGB float64) bool {
 	key := quotaKey(region, provider)
+	qm.mu.RLock()
 	quota, ok := qm.Quotas[key]
+	qm.mu.RUnlock()
 	if !ok {
 		return false // unknown quota, deny by default
 	}
@@ -98,10 +102,13 @@ func (qm *QuotaManager) RegisterLaunch(region, provider string, cpu int32, memGB
 	usage.UsedMemGB += memGB
 	usage.Instances++
 
+	qm.mu.RLock()
+	quota := qm.Quotas[key]
+	qm.mu.RUnlock()
 	log.Printf("[DEBUG] QuotaManager: after launch in %s/%s, usage is now CPU %d/%d, Mem %.1f/%.1f GB, Instances %d",
 		region, provider,
-		usage.UsedCPU, qm.Quotas[key].MaxCPU,
-		usage.UsedMemGB, qm.Quotas[key].MaxMemGB,
+		usage.UsedCPU, quota.MaxCPU,
+		usage.UsedMemGB, quota.MaxMemGB,
 		usage.Instances,
 	)
 	qm.Usage.Store(key, usage)
@@ -158,9 +165,12 @@ func (qm *QuotaManager) RegisterInstanceLimit(db *sql.DB, region, provider strin
 		return
 	}
 
+	qm.mu.Lock()
 	quota := qm.Quotas[key]
 	quota.MaxInstances = dbCount
+	quota.Learned = true
 	qm.Quotas[key] = quota
+	qm.mu.Unlock()
 	qm.CooldownEnd.Store(key, time.Now().Add(InstanceLimitCooldown))
 	log.Printf("⚠️ QuotaManager: learned instance limit for %s/%s: %d (from DB worker count); cooling down for %s to let provider reclaim resources",
 		region, provider, dbCount, InstanceLimitCooldown)
@@ -205,6 +215,45 @@ func (qm *QuotaManager) ReconcileFromDB(db *sql.DB) error {
 		log.Printf("QuotaManager: reconciled %s/%s — instances=%d cpu=%d mem=%.1f GB (from DB)", region, provider, instances, cpu, memGB)
 	}
 	return rows.Err()
+}
+
+// RegionStatus is one provider/region as the recruiter sees it: its limits,
+// what scitq's workers consume of them, and any cooldown in force.
+type RegionStatus struct {
+	RegionalQuota
+	Configured    bool // false: no quota in the configuration, nothing is deployed there
+	Usage         RegionalUsage
+	CooldownUntil time.Time // zero when no cooldown is in force
+}
+
+// Snapshot returns the status of every region that has a quota or a
+// worker.
+func (qm *QuotaManager) Snapshot() []RegionStatus {
+	byKey := map[string]*RegionStatus{}
+	qm.mu.RLock()
+	for key, q := range qm.Quotas {
+		byKey[key] = &RegionStatus{RegionalQuota: q, Configured: true}
+	}
+	qm.mu.RUnlock()
+	qm.Usage.Range(func(k, v any) bool {
+		u := v.(RegionalUsage)
+		st, ok := byKey[k.(string)]
+		if !ok {
+			st = &RegionStatus{RegionalQuota: RegionalQuota{Region: u.Region, Provider: u.Provider}}
+			byKey[k.(string)] = st
+		}
+		st.Usage = u
+		return true
+	})
+	now := time.Now()
+	out := make([]RegionStatus, 0, len(byKey))
+	for key, st := range byKey {
+		if v, ok := qm.CooldownEnd.Load(key); ok && v.(time.Time).After(now) {
+			st.CooldownUntil = v.(time.Time)
+		}
+		out = append(out, *st)
+	}
+	return out
 }
 
 // BlacklistFlavor marks a flavor as permanently incompatible with the given

@@ -194,6 +194,13 @@ type Attr struct {
 		} `arg:"subcommand:list" help:"List server-internal jobs (worker create / delete / restart). Use to spot persistent provider failures (auth, quota, capacity)."`
 	} `arg:"subcommand:job" help:"Inspect server-internal jobs"`
 
+	// Quota commands
+	Quota *struct {
+		List *struct {
+			Long bool `arg:"-l,--long" help:"Also show cooldowns and the provider's last refusal"`
+		} `arg:"subcommand:list" help:"Each provider/region's limits, what workers consume of them, and whether it can take more workers"`
+	} `arg:"subcommand:quota" help:"Inspect provider/region quotas"`
+
 	// User commands
 	User *struct {
 		List   *struct{} `arg:"subcommand:list" help:"List all users"`
@@ -1323,6 +1330,58 @@ func (c *CLI) FlavorSetAvailability(enable bool) error {
 // creates were failing. The error_class column makes the failure mode
 // visible at a glance ("auth", "quota", "capacity", ...) without
 // having to grep journalctl.
+// QuotaList prints one line per provider/region: its state, and used/max
+// for CPU, memory and instances ("-" = no limit). The refusals column counts
+// worker creations the provider refused for quota or capacity in the last
+// hour.
+func (c *CLI) QuotaList() error {
+	ctx, cancel := c.WithTimeout()
+	defer cancel()
+	res, err := c.QC.Client.ListQuotas(ctx, &emptypb.Empty{})
+	if err != nil {
+		return fmt.Errorf("ListQuotas: %w", err)
+	}
+	if c.Attr.JSON {
+		c.jsonOut(res.GetQuotas())
+		return nil
+	}
+	limit := func(used, max float64) string {
+		if max <= 0 {
+			return fmt.Sprintf("%g/-", used)
+		}
+		return fmt.Sprintf("%g/%g", used, max)
+	}
+	fmt.Printf("%-20s %-20s %-13s %-13s %-15s %-10s %s\n",
+		"PROVIDER", "REGION", "STATE", "CPU", "MEM GB", "INSTANCES", "REFUSALS (1h)")
+	learned := false
+	for _, q := range res.GetQuotas() {
+		instances := limit(float64(q.UsedInstances), float64(q.MaxInstances))
+		if q.InstancesLearned {
+			instances += "*"
+			learned = true
+		}
+		fmt.Printf("%-20s %-20s %-13s %-13s %-15s %-10s %d\n",
+			q.Provider, q.Region, q.State,
+			limit(float64(q.UsedCpu), float64(q.MaxCpu)),
+			limit(float64(q.UsedMemGb), float64(q.MaxMemGb)),
+			instances, q.RecentRefusals)
+		if !c.Attr.Quota.List.Long {
+			continue
+		}
+		if q.CooldownUntil != nil {
+			fmt.Printf("    cooldown until %s\n", q.GetCooldownUntil())
+		}
+		if q.LastRefusalAt != nil {
+			fmt.Printf("    last refusal %s [%s]: %s\n", q.GetLastRefusalAt(), q.GetLastRefusalClass(),
+				strings.SplitN(q.GetLastRefusalMessage(), "\n", 2)[0])
+		}
+	}
+	if learned {
+		fmt.Println("* instance limit learned from a provider refusal")
+	}
+	return nil
+}
+
 func (c *CLI) JobList() error {
 	ctx, cancel := c.WithTimeout()
 	defer cancel()
@@ -3546,6 +3605,11 @@ func Run(c CLI) error {
 		switch {
 		case c.Attr.Job.List != nil:
 			err = c.JobList()
+		}
+	case c.Attr.Quota != nil:
+		switch {
+		case c.Attr.Quota.List != nil:
+			err = c.QuotaList()
 		}
 	// In Run(), after handling Flavor, add:
 	case c.Attr.User != nil:

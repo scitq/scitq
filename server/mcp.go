@@ -290,6 +290,7 @@ When writing new YAML templates:
 
 ### Check flavors first
 - Before launching a workflow, use list_flavors with appropriate filters (e.g. "cpu>=8:mem>=60:cost>0") to verify suitable instance types exist in the target provider/region.
+- Then use list_quotas to check that the region has room for them: a region whose state is not 'available' deploys nothing until it frees up, so pick another region or expect a wait.
 
 ### Prefetch tuning
 Prefetch is key to scitq performance but tricky to set right. Diagnose live:
@@ -930,6 +931,15 @@ func (h *mcpHandler) listTools() []mcpTool {
 				},
 			},
 		},
+		{
+			Name: "list_quotas",
+			Description: "Whether each provider/region can take more workers: its limits (CPU, memory, instances), what scitq's workers consume of them, and the free room. " +
+				"state is one of: 'available'; 'full' (free CPU or memory at 0, or the instance limit reached); 'cooldown' (the provider refused an instance recently: nothing is deployed before cooldown_until); " +
+				"'refusing' (scitq's numbers leave room, but the provider refused worker creations for quota or capacity in the last hour: a limit scitq does not know, such as an Azure VM family quota or a stockout — see last_refusal_message); " +
+				"'unconfigured' (no quota in the server configuration: recruiters deploy nothing there). " +
+				"A flavor fits a region when its cpu is at most free_cpu and its mem at most free_mem_gb (absent = no memory limit). Limits are those of scitq.yaml, except an instance limit learned from a provider refusal (instances_learned).",
+			InputSchema: inputSchema{Type: "object"},
+		},
 		// --- File operations ---
 		{
 			Name:        "file_list",
@@ -1125,6 +1135,8 @@ func (h *mcpHandler) callTool(ctx context.Context, session *mcpSession, raw json
 		return h.toolDeleteRecruiter(authCtx, call.Arguments)
 	case "list_flavors":
 		return h.toolListFlavors(authCtx, call.Arguments)
+	case "list_quotas":
+		return h.toolListQuotas(authCtx)
 	case "file_list":
 		return h.toolFileList(authCtx, call.Arguments)
 	case "list_worker_events":
@@ -2227,6 +2239,33 @@ func (h *mcpHandler) toolListFlavors(ctx context.Context, args json.RawMessage) 
 		return errorResult(err), nil
 	}
 	return jsonResult(res.Flavors), nil
+}
+
+func (h *mcpHandler) toolListQuotas(ctx context.Context) (any, *rpcError) {
+	res, err := h.server.ListQuotas(ctx, &emptypb.Empty{})
+	if err != nil {
+		return errorResult(err), nil
+	}
+	type region struct {
+		*pb.RegionQuota
+		FreeCPU       int32    `json:"free_cpu"`
+		FreeMemGB     *float32 `json:"free_mem_gb,omitempty"`
+		FreeInstances *int32   `json:"free_instances,omitempty"`
+	}
+	out := make([]region, 0, len(res.GetQuotas()))
+	for _, q := range res.GetQuotas() {
+		r := region{RegionQuota: q, FreeCPU: max(q.MaxCpu-q.UsedCpu, 0)}
+		if q.MaxMemGb > 0 {
+			free := max(q.MaxMemGb-q.UsedMemGb, 0)
+			r.FreeMemGB = &free
+		}
+		if q.MaxInstances > 0 {
+			free := max(q.MaxInstances-q.UsedInstances, 0)
+			r.FreeInstances = &free
+		}
+		out = append(out, r)
+	}
+	return jsonResult(out), nil
 }
 
 func (h *mcpHandler) toolListAudit(ctx context.Context, args json.RawMessage) (any, *rpcError) {

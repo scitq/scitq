@@ -2235,6 +2235,48 @@ class RegionList(_message.Message):
     regions: _containers.RepeatedCompositeFieldContainer[Region]
     def __init__(self, regions: _Optional[_Iterable[_Union[Region, _Mapping]]] = ...) -> None: ...
 
+class RegionQuota(_message.Message):
+    __slots__ = ("provider", "region", "configured", "max_cpu", "used_cpu", "max_mem_gb", "used_mem_gb", "max_instances", "used_instances", "instances_learned", "cooldown_until", "recent_refusals", "last_refusal_class", "last_refusal_message", "last_refusal_at", "state")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    REGION_FIELD_NUMBER: _ClassVar[int]
+    CONFIGURED_FIELD_NUMBER: _ClassVar[int]
+    MAX_CPU_FIELD_NUMBER: _ClassVar[int]
+    USED_CPU_FIELD_NUMBER: _ClassVar[int]
+    MAX_MEM_GB_FIELD_NUMBER: _ClassVar[int]
+    USED_MEM_GB_FIELD_NUMBER: _ClassVar[int]
+    MAX_INSTANCES_FIELD_NUMBER: _ClassVar[int]
+    USED_INSTANCES_FIELD_NUMBER: _ClassVar[int]
+    INSTANCES_LEARNED_FIELD_NUMBER: _ClassVar[int]
+    COOLDOWN_UNTIL_FIELD_NUMBER: _ClassVar[int]
+    RECENT_REFUSALS_FIELD_NUMBER: _ClassVar[int]
+    LAST_REFUSAL_CLASS_FIELD_NUMBER: _ClassVar[int]
+    LAST_REFUSAL_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    LAST_REFUSAL_AT_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    region: str
+    configured: bool
+    max_cpu: int
+    used_cpu: int
+    max_mem_gb: float
+    used_mem_gb: float
+    max_instances: int
+    used_instances: int
+    instances_learned: bool
+    cooldown_until: str
+    recent_refusals: int
+    last_refusal_class: str
+    last_refusal_message: str
+    last_refusal_at: str
+    state: str
+    def __init__(self, provider: _Optional[str] = ..., region: _Optional[str] = ..., configured: bool = ..., max_cpu: _Optional[int] = ..., used_cpu: _Optional[int] = ..., max_mem_gb: _Optional[float] = ..., used_mem_gb: _Optional[float] = ..., max_instances: _Optional[int] = ..., used_instances: _Optional[int] = ..., instances_learned: bool = ..., cooldown_until: _Optional[str] = ..., recent_refusals: _Optional[int] = ..., last_refusal_class: _Optional[str] = ..., last_refusal_message: _Optional[str] = ..., last_refusal_at: _Optional[str] = ..., state: _Optional[str] = ...) -> None: ...
+
+class QuotaList(_message.Message):
+    __slots__ = ("quotas",)
+    QUOTAS_FIELD_NUMBER: _ClassVar[int]
+    quotas: _containers.RepeatedCompositeFieldContainer[RegionQuota]
+    def __init__(self, quotas: _Optional[_Iterable[_Union[RegionQuota, _Mapping]]] = ...) -> None: ...
+
 class FlavorCreateRequest(_message.Message):
     __slots__ = ("provider_name", "config_name", "flavor_name", "cpu", "memory", "disk", "bandwidth", "gpu", "gpumem", "has_gpu", "has_quick_disks", "region_names", "costs", "evictions")
     PROVIDER_NAME_FIELD_NUMBER: _ClassVar[int]

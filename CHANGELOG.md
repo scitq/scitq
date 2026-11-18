@@ -57,6 +57,11 @@ sessions now expire after 30 days without use.
   a click on the unread warnings count shows the warnings) and loads older
   events on demand. `ListWorkerEvents` takes `before_event_id` to page.
 - MCP `update_recruiter` takes `rounds` and `timeout`.
+- **`scitq quota list`, MCP `list_quotas`** (gRPC `ListQuotas`): whether each provider/region
+  can take more workers — its CPU, memory and instance limits, what scitq's
+  workers consume of them, the free room, any deployment cooldown, and the
+  provider's quota or capacity refusals of the last hour, which reveal
+  limits scitq is not configured with.
 - Each `job.created` event carries the complete job row.
 - Step-stats snapshots carry the workflow's totals.
 

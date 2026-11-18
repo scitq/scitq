@@ -200,6 +200,11 @@ class TaskQueueStub(object):
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=taskqueue__pb2.RegionList.FromString,
                 _registered_method=True)
+        self.ListQuotas = channel.unary_unary(
+                '/taskqueue.TaskQueue/ListQuotas',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=taskqueue__pb2.QuotaList.FromString,
+                _registered_method=True)
         self.CreateFlavor = channel.unary_unary(
                 '/taskqueue.TaskQueue/CreateFlavor',
                 request_serializer=taskqueue__pb2.FlavorCreateRequest.SerializeToString,
@@ -776,6 +781,16 @@ class TaskQueueServicer(object):
 
     def ListRegions(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListQuotas(self, request, context):
+        """Each provider/region's limits (scitq.yaml quotas, or an instance
+        limit learned from a provider refusal), what scitq's workers consume
+        of them, any deployment cooldown, and the provider's recent quota or
+        capacity refusals.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -1409,6 +1424,11 @@ def add_TaskQueueServicer_to_server(servicer, server):
                     servicer.ListRegions,
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=taskqueue__pb2.RegionList.SerializeToString,
+            ),
+            'ListQuotas': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListQuotas,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=taskqueue__pb2.QuotaList.SerializeToString,
             ),
             'CreateFlavor': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateFlavor,
@@ -2662,6 +2682,33 @@ class TaskQueue(object):
             '/taskqueue.TaskQueue/ListRegions',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             taskqueue__pb2.RegionList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListQuotas(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/taskqueue.TaskQueue/ListQuotas',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            taskqueue__pb2.QuotaList.FromString,
             options,
             channel_credentials,
             insecure,

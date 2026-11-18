@@ -50,6 +50,11 @@ service TaskQueue {
     rpc ListFlavors (ListFlavorsRequest) returns (FlavorsList);
     rpc ListProviders(google.protobuf.Empty) returns (ProviderList);
     rpc ListRegions(google.protobuf.Empty) returns (RegionList);
+    // Each provider/region's limits (scitq.yaml quotas, or an instance
+    // limit learned from a provider refusal), what scitq's workers consume
+    // of them, any deployment cooldown, and the provider's recent quota or
+    // capacity refusals.
+    rpc ListQuotas(google.protobuf.Empty) returns (QuotaList);
     rpc CreateFlavor(FlavorCreateRequest) returns (FlavorId);
     // Operator: mark a flavor as (un)available for new recruitment in a
     // specific provider/region (or all regions of that provider).
@@ -1984,6 +1989,32 @@ message Region {
 
 message RegionList {
   repeated Region regions = 1;
+}
+
+message RegionQuota {
+  string provider = 1;               // e.g. azure.primary
+  string region = 2;
+  bool configured = 3;               // false: no quota in scitq.yaml, recruiters deploy nothing here
+  int32 max_cpu = 4;
+  int32 used_cpu = 5;
+  float max_mem_gb = 6;              // 0 = no limit
+  float used_mem_gb = 7;
+  int32 max_instances = 8;           // 0 = no limit
+  int32 used_instances = 9;
+  bool instances_learned = 10;       // max_instances was learned from a provider refusal
+  optional string cooldown_until = 11; // RFC3339; no deployment here before then
+  int32 recent_refusals = 12;        // worker creations refused for quota or capacity in the last hour
+  optional string last_refusal_class = 13;   // quota or capacity
+  optional string last_refusal_message = 14; // provider error text
+  optional string last_refusal_at = 15;      // RFC3339
+  // available; full (CPU or memory used up, or the instance limit reached);
+  // cooldown (see cooldown_until); refusing (room left, but the provider
+  // refused creations in the last hour); unconfigured.
+  string state = 16;
+}
+
+message QuotaList {
+  repeated RegionQuota quotas = 1;
 }
 
 message FlavorCreateRequest {

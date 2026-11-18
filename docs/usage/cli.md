@@ -321,6 +321,26 @@ Filters can contain other criteria:
 
 NB: if a `scitq flavor list` without filter gives you an empty list, it's likely that the providers’ updates are not properly configured in `scitq.yaml`, see [configuration](../reference/configuration.md).
 
+### `quota`
+
+#### `quota list`
+
+Lists every provider/region with what scitq's workers consume of its CPU, memory and instance limits (`used/max`, `-` when there is no limit), the number of worker creations the provider refused for quota or capacity in the last hour, and a state:
+
+| State | Meaning |
+|---|---|
+| `available` | Room left, no recent refusal |
+| `full` | CPU or memory used up, or the instance limit reached |
+| `cooldown` | The provider refused an instance recently: nothing is deployed there for a few minutes |
+| `refusing` | scitq's numbers leave room, but the provider refused creations in the last hour: a limit scitq is not configured with, such as an Azure VM family quota, or a stockout |
+| `unconfigured` | No quota in `scitq.yaml` for this region: recruiters deploy nothing there |
+
+Limits come from the `quotas` of each provider in `scitq.yaml`, except an instance limit learned from a provider refusal, marked `*`. `--long` adds the cooldown's end and the provider's last refusal; `--json` prints the raw records.
+
+```sh
+scitq quota list --long
+```
+
 ### `worker`
 
 Workers are the compute units that actually execute tasks. They can be deployed automatically by the recruiter engine or manually through the CLI.  

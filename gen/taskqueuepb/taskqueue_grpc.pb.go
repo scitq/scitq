@@ -53,6 +53,7 @@ const (
 	TaskQueue_ListFlavors_FullMethodName               = "/taskqueue.TaskQueue/ListFlavors"
 	TaskQueue_ListProviders_FullMethodName             = "/taskqueue.TaskQueue/ListProviders"
 	TaskQueue_ListRegions_FullMethodName               = "/taskqueue.TaskQueue/ListRegions"
+	TaskQueue_ListQuotas_FullMethodName                = "/taskqueue.TaskQueue/ListQuotas"
 	TaskQueue_CreateFlavor_FullMethodName              = "/taskqueue.TaskQueue/CreateFlavor"
 	TaskQueue_SetFlavorAvailability_FullMethodName     = "/taskqueue.TaskQueue/SetFlavorAvailability"
 	TaskQueue_GetRcloneConfig_FullMethodName           = "/taskqueue.TaskQueue/GetRcloneConfig"
@@ -174,6 +175,11 @@ type TaskQueueClient interface {
 	ListFlavors(ctx context.Context, in *ListFlavorsRequest, opts ...grpc.CallOption) (*FlavorsList, error)
 	ListProviders(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ProviderList, error)
 	ListRegions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RegionList, error)
+	// Each provider/region's limits (scitq.yaml quotas, or an instance
+	// limit learned from a provider refusal), what scitq's workers consume
+	// of them, any deployment cooldown, and the provider's recent quota or
+	// capacity refusals.
+	ListQuotas(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*QuotaList, error)
 	CreateFlavor(ctx context.Context, in *FlavorCreateRequest, opts ...grpc.CallOption) (*FlavorId, error)
 	// Operator: mark a flavor as (un)available for new recruitment in a
 	// specific provider/region (or all regions of that provider).
@@ -629,6 +635,16 @@ func (c *taskQueueClient) ListRegions(ctx context.Context, in *emptypb.Empty, op
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegionList)
 	err := c.cc.Invoke(ctx, TaskQueue_ListRegions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskQueueClient) ListQuotas(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*QuotaList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QuotaList)
+	err := c.cc.Invoke(ctx, TaskQueue_ListQuotas_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1402,6 +1418,11 @@ type TaskQueueServer interface {
 	ListFlavors(context.Context, *ListFlavorsRequest) (*FlavorsList, error)
 	ListProviders(context.Context, *emptypb.Empty) (*ProviderList, error)
 	ListRegions(context.Context, *emptypb.Empty) (*RegionList, error)
+	// Each provider/region's limits (scitq.yaml quotas, or an instance
+	// limit learned from a provider refusal), what scitq's workers consume
+	// of them, any deployment cooldown, and the provider's recent quota or
+	// capacity refusals.
+	ListQuotas(context.Context, *emptypb.Empty) (*QuotaList, error)
 	CreateFlavor(context.Context, *FlavorCreateRequest) (*FlavorId, error)
 	// Operator: mark a flavor as (un)available for new recruitment in a
 	// specific provider/region (or all regions of that provider).
@@ -1610,6 +1631,9 @@ func (UnimplementedTaskQueueServer) ListProviders(context.Context, *emptypb.Empt
 }
 func (UnimplementedTaskQueueServer) ListRegions(context.Context, *emptypb.Empty) (*RegionList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRegions not implemented")
+}
+func (UnimplementedTaskQueueServer) ListQuotas(context.Context, *emptypb.Empty) (*QuotaList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListQuotas not implemented")
 }
 func (UnimplementedTaskQueueServer) CreateFlavor(context.Context, *FlavorCreateRequest) (*FlavorId, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateFlavor not implemented")
@@ -2413,6 +2437,24 @@ func _TaskQueue_ListRegions_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TaskQueueServer).ListRegions(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TaskQueue_ListQuotas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskQueueServer).ListQuotas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskQueue_ListQuotas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskQueueServer).ListQuotas(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3839,6 +3881,10 @@ var TaskQueue_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRegions",
 			Handler:    _TaskQueue_ListRegions_Handler,
+		},
+		{
+			MethodName: "ListQuotas",
+			Handler:    _TaskQueue_ListQuotas_Handler,
 		},
 		{
 			MethodName: "CreateFlavor",

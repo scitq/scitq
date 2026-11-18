@@ -4648,6 +4648,88 @@ export interface RegionList {
     regions: Region[];
 }
 /**
+ * @generated from protobuf message taskqueue.RegionQuota
+ */
+export interface RegionQuota {
+    /**
+     * @generated from protobuf field: string provider = 1
+     */
+    provider: string; // e.g. azure.primary
+    /**
+     * @generated from protobuf field: string region = 2
+     */
+    region: string;
+    /**
+     * @generated from protobuf field: bool configured = 3
+     */
+    configured: boolean; // false: no quota in scitq.yaml, recruiters deploy nothing here
+    /**
+     * @generated from protobuf field: int32 max_cpu = 4
+     */
+    maxCpu: number;
+    /**
+     * @generated from protobuf field: int32 used_cpu = 5
+     */
+    usedCpu: number;
+    /**
+     * @generated from protobuf field: float max_mem_gb = 6
+     */
+    maxMemGb: number; // 0 = no limit
+    /**
+     * @generated from protobuf field: float used_mem_gb = 7
+     */
+    usedMemGb: number;
+    /**
+     * @generated from protobuf field: int32 max_instances = 8
+     */
+    maxInstances: number; // 0 = no limit
+    /**
+     * @generated from protobuf field: int32 used_instances = 9
+     */
+    usedInstances: number;
+    /**
+     * @generated from protobuf field: bool instances_learned = 10
+     */
+    instancesLearned: boolean; // max_instances was learned from a provider refusal
+    /**
+     * @generated from protobuf field: optional string cooldown_until = 11
+     */
+    cooldownUntil?: string; // RFC3339; no deployment here before then
+    /**
+     * @generated from protobuf field: int32 recent_refusals = 12
+     */
+    recentRefusals: number; // worker creations refused for quota or capacity in the last hour
+    /**
+     * @generated from protobuf field: optional string last_refusal_class = 13
+     */
+    lastRefusalClass?: string; // quota or capacity
+    /**
+     * @generated from protobuf field: optional string last_refusal_message = 14
+     */
+    lastRefusalMessage?: string; // provider error text
+    /**
+     * @generated from protobuf field: optional string last_refusal_at = 15
+     */
+    lastRefusalAt?: string; // RFC3339
+    /**
+     * available; full (CPU or memory used up, or the instance limit reached);
+     * cooldown (see cooldown_until); refusing (room left, but the provider
+     * refused creations in the last hour); unconfigured.
+     *
+     * @generated from protobuf field: string state = 16
+     */
+    state: string;
+}
+/**
+ * @generated from protobuf message taskqueue.QuotaList
+ */
+export interface QuotaList {
+    /**
+     * @generated from protobuf field: repeated taskqueue.RegionQuota quotas = 1
+     */
+    quotas: RegionQuota[];
+}
+/**
  * @generated from protobuf message taskqueue.FlavorCreateRequest
  */
 export interface FlavorCreateRequest {
@@ -17218,6 +17300,216 @@ class RegionList$Type extends MessageType<RegionList> {
  */
 export const RegionList = new RegionList$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class RegionQuota$Type extends MessageType<RegionQuota> {
+    constructor() {
+        super("taskqueue.RegionQuota", [
+            { no: 1, name: "provider", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "region", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "configured", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "max_cpu", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "used_cpu", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "max_mem_gb", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 7, name: "used_mem_gb", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 8, name: "max_instances", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 9, name: "used_instances", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "instances_learned", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 11, name: "cooldown_until", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 12, name: "recent_refusals", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 13, name: "last_refusal_class", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 14, name: "last_refusal_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 15, name: "last_refusal_at", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 16, name: "state", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RegionQuota>): RegionQuota {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.provider = "";
+        message.region = "";
+        message.configured = false;
+        message.maxCpu = 0;
+        message.usedCpu = 0;
+        message.maxMemGb = 0;
+        message.usedMemGb = 0;
+        message.maxInstances = 0;
+        message.usedInstances = 0;
+        message.instancesLearned = false;
+        message.recentRefusals = 0;
+        message.state = "";
+        if (value !== undefined)
+            reflectionMergePartial<RegionQuota>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RegionQuota): RegionQuota {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string provider */ 1:
+                    message.provider = reader.string();
+                    break;
+                case /* string region */ 2:
+                    message.region = reader.string();
+                    break;
+                case /* bool configured */ 3:
+                    message.configured = reader.bool();
+                    break;
+                case /* int32 max_cpu */ 4:
+                    message.maxCpu = reader.int32();
+                    break;
+                case /* int32 used_cpu */ 5:
+                    message.usedCpu = reader.int32();
+                    break;
+                case /* float max_mem_gb */ 6:
+                    message.maxMemGb = reader.float();
+                    break;
+                case /* float used_mem_gb */ 7:
+                    message.usedMemGb = reader.float();
+                    break;
+                case /* int32 max_instances */ 8:
+                    message.maxInstances = reader.int32();
+                    break;
+                case /* int32 used_instances */ 9:
+                    message.usedInstances = reader.int32();
+                    break;
+                case /* bool instances_learned */ 10:
+                    message.instancesLearned = reader.bool();
+                    break;
+                case /* optional string cooldown_until */ 11:
+                    message.cooldownUntil = reader.string();
+                    break;
+                case /* int32 recent_refusals */ 12:
+                    message.recentRefusals = reader.int32();
+                    break;
+                case /* optional string last_refusal_class */ 13:
+                    message.lastRefusalClass = reader.string();
+                    break;
+                case /* optional string last_refusal_message */ 14:
+                    message.lastRefusalMessage = reader.string();
+                    break;
+                case /* optional string last_refusal_at */ 15:
+                    message.lastRefusalAt = reader.string();
+                    break;
+                case /* string state */ 16:
+                    message.state = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RegionQuota, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string provider = 1; */
+        if (message.provider !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.provider);
+        /* string region = 2; */
+        if (message.region !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.region);
+        /* bool configured = 3; */
+        if (message.configured !== false)
+            writer.tag(3, WireType.Varint).bool(message.configured);
+        /* int32 max_cpu = 4; */
+        if (message.maxCpu !== 0)
+            writer.tag(4, WireType.Varint).int32(message.maxCpu);
+        /* int32 used_cpu = 5; */
+        if (message.usedCpu !== 0)
+            writer.tag(5, WireType.Varint).int32(message.usedCpu);
+        /* float max_mem_gb = 6; */
+        if (message.maxMemGb !== 0)
+            writer.tag(6, WireType.Bit32).float(message.maxMemGb);
+        /* float used_mem_gb = 7; */
+        if (message.usedMemGb !== 0)
+            writer.tag(7, WireType.Bit32).float(message.usedMemGb);
+        /* int32 max_instances = 8; */
+        if (message.maxInstances !== 0)
+            writer.tag(8, WireType.Varint).int32(message.maxInstances);
+        /* int32 used_instances = 9; */
+        if (message.usedInstances !== 0)
+            writer.tag(9, WireType.Varint).int32(message.usedInstances);
+        /* bool instances_learned = 10; */
+        if (message.instancesLearned !== false)
+            writer.tag(10, WireType.Varint).bool(message.instancesLearned);
+        /* optional string cooldown_until = 11; */
+        if (message.cooldownUntil !== undefined)
+            writer.tag(11, WireType.LengthDelimited).string(message.cooldownUntil);
+        /* int32 recent_refusals = 12; */
+        if (message.recentRefusals !== 0)
+            writer.tag(12, WireType.Varint).int32(message.recentRefusals);
+        /* optional string last_refusal_class = 13; */
+        if (message.lastRefusalClass !== undefined)
+            writer.tag(13, WireType.LengthDelimited).string(message.lastRefusalClass);
+        /* optional string last_refusal_message = 14; */
+        if (message.lastRefusalMessage !== undefined)
+            writer.tag(14, WireType.LengthDelimited).string(message.lastRefusalMessage);
+        /* optional string last_refusal_at = 15; */
+        if (message.lastRefusalAt !== undefined)
+            writer.tag(15, WireType.LengthDelimited).string(message.lastRefusalAt);
+        /* string state = 16; */
+        if (message.state !== "")
+            writer.tag(16, WireType.LengthDelimited).string(message.state);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.RegionQuota
+ */
+export const RegionQuota = new RegionQuota$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class QuotaList$Type extends MessageType<QuotaList> {
+    constructor() {
+        super("taskqueue.QuotaList", [
+            { no: 1, name: "quotas", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => RegionQuota }
+        ]);
+    }
+    create(value?: PartialMessage<QuotaList>): QuotaList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.quotas = [];
+        if (value !== undefined)
+            reflectionMergePartial<QuotaList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: QuotaList): QuotaList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated taskqueue.RegionQuota quotas */ 1:
+                    message.quotas.push(RegionQuota.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: QuotaList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated taskqueue.RegionQuota quotas = 1; */
+        for (let i = 0; i < message.quotas.length; i++)
+            RegionQuota.internalBinaryWrite(message.quotas[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message taskqueue.QuotaList
+ */
+export const QuotaList = new QuotaList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class FlavorCreateRequest$Type extends MessageType<FlavorCreateRequest> {
     constructor() {
         super("taskqueue.FlavorCreateRequest", [
@@ -17634,6 +17926,7 @@ export const TaskQueue = new ServiceType("taskqueue.TaskQueue", [
     { name: "ListFlavors", options: {}, I: ListFlavorsRequest, O: FlavorsList },
     { name: "ListProviders", options: {}, I: Empty, O: ProviderList },
     { name: "ListRegions", options: {}, I: Empty, O: RegionList },
+    { name: "ListQuotas", options: {}, I: Empty, O: QuotaList },
     { name: "CreateFlavor", options: {}, I: FlavorCreateRequest, O: FlavorId },
     { name: "SetFlavorAvailability", options: {}, I: FlavorAvailability, O: FlavorAvailabilityReply },
     { name: "GetRcloneConfig", options: {}, I: Empty, O: RcloneRemotes },

@@ -136,6 +136,7 @@ mcp list_jobs limit:integer
 mcp list_jobs status optional
 mcp list_jobs status:string
 mcp list_modules
+mcp list_quotas
 mcp list_recruiters
 mcp list_recruiters step_id optional
 mcp list_recruiters step_id:integer
