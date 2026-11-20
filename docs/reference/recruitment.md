@@ -102,6 +102,16 @@ needs (see below). Workers deployed or recycled by a workflow's recruiters
 get scope `W`; when the workflow finishes they become `G`, available to any
 workflow.
 
+Before that, another workflow may recycle a `W` worker its own workflow has
+no use for. A step of the workflow that is short of workers, and whose
+recruiters could take the worker, keeps as many such workers as cover its
+shortfall (each counted at the concurrency it would get there), and no more
+than its `max_workers` still allows. The other `W` workers of the workflow
+are open to any workflow. Waiting tasks do not keep workers: when the task
+they wait for ends, the worker that ran it is free to take them. A one-step
+recruitment forced through the `DebugRecruitStep` call recycles `W` workers
+within their workflow only.
+
 ## Concurrency of recruited workers
 
 A recruiter either sets a fixed `concurrency`, or derives it from per-task

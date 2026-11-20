@@ -161,6 +161,12 @@ sessions now expire after 30 days without use.
 - Forcing a waiting task to run (`force_run_task`) or retrying a task in a
   failed workflow left the workflow F, so nothing assigned the task or
   recruited for it. Both now set the workflow back to running.
+- A workflow kept its idle workers until it finished: another workflow
+  short of the same machines could not recycle them, and deployed new ones
+  — or could not, when the region's quota was full — while the idle
+  watchdog deleted them. A workflow now keeps only the workers one of its
+  short steps could take, as many as cover that step's shortfall; the
+  others are open to any workflow.
 - SRA downloads (`run+fastq://` falling back to `sra-aws` or `sra-tools`)
   ignored a failed compression, and could keep a `.gz` left by a failed ENA
   transfer of the same run. A failed compression now fails the download,

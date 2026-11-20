@@ -616,6 +616,9 @@ type RecyclableWorker struct {
 	// different one mid-flight.
 	ExtraStorageGB   *int32
 	ExtraStorageType *string
+	// Lendable: a 'W' worker its own workflow has no use for this cycle,
+	// which any workflow may recycle (see markLendable).
+	Lendable bool
 }
 
 // Note: This function now returns each worker's recyclability scope ('G' or 'W') and
@@ -1099,6 +1102,43 @@ func selectWorkersForRecruiter(
 	r Recruiter,
 	cfgDefaultSwap float32,
 ) []int32 {
+	selected := make([]int32, 0)
+	totalTaskrate := 0
+	for _, w := range recyclable {
+		// Honor recyclability scope:
+		// - 'G' (global): no restriction
+		// - 'W' (workflow): within the same workflow, or by any workflow
+		//   once its own workflow has no use for it (Lendable)
+		// - others already filtered out at SQL level
+		if w.Scope == "W" && !w.Lendable {
+			if w.WorkflowID == nil || *w.WorkflowID != recruiterWorkflowID {
+				continue
+			}
+		}
+		if w.StepID != nil && *w.StepID == recruiterStepID {
+			continue
+		}
+		if !workerFits(w, r, flavorIDs, regionIDs, cfgDefaultSwap) {
+			continue
+		}
+		selected = append(selected, w.WorkerID)
+		totalTaskrate += computeConcurrencyForRecruiterWorker(r, w)
+		if totalTaskrate >= neededTaskrate {
+			break
+		}
+	}
+	return selected
+}
+
+// workerFits tells whether a worker's flavor, region, swap and extra
+// storage are what the recruiter asks for.
+func workerFits(w RecyclableWorker, r Recruiter, flavorIDs, regionIDs map[int32]struct{}, cfgDefaultSwap float32) bool {
+	if _, ok := flavorIDs[w.FlavorID]; !ok {
+		return false
+	}
+	if _, ok := regionIDs[w.RegionID]; !ok {
+		return false
+	}
 	// Resolve the recruiter's effective swap_proportion against the
 	// server config default. A worker whose own effective value differs
 	// is not recyclable (its /scratch is sized for a different workload
@@ -1114,76 +1154,97 @@ func selectWorkersForRecruiter(
 	if r.SwapProportion != nil {
 		recruiterSwap = float64(*r.SwapProportion)
 	}
-	const swapEpsilon = 1e-4
-	swapMatches := func(a, b float64) bool {
-		d := a - b
-		if d < 0 {
-			d = -d
-		}
-		return d < swapEpsilon
+	workerSwap := float64(cfgDefaultSwap)
+	if w.SwapProportion != nil {
+		workerSwap = *w.SwapProportion
 	}
+	if math.Abs(workerSwap-recruiterSwap) >= 1e-4 {
+		return false
+	}
+	// Extra block storage match. Both the size (GB) and the volume type
+	// must agree; unset on either side is treated as 0 / empty string.
+	// Volume type comparison is literal because provider-specific class
+	// names are opaque — "classic" vs "high-speed" is a real difference
+	// the operator opted into.
+	var recruiterGB, workerGB int32
+	if r.ExtraStorageGB != nil {
+		recruiterGB = *r.ExtraStorageGB
+	}
+	if w.ExtraStorageGB != nil {
+		workerGB = *w.ExtraStorageGB
+	}
+	var recruiterType, workerType string
+	if r.ExtraStorageType != nil {
+		recruiterType = *r.ExtraStorageType
+	}
+	if w.ExtraStorageType != nil {
+		workerType = *w.ExtraStorageType
+	}
+	return recruiterGB == workerGB && recruiterType == workerType
+}
 
-	selected := make([]int32, 0)
-	totalTaskrate := 0
-	for _, w := range recyclable {
-		if _, ok := flavorIDs[w.FlavorID]; !ok {
-			continue
+// markLendable lets other workflows recycle the workflow-scoped workers
+// their own workflow has no use for. A step of the workflow that is short
+// of workers (an active recruiter, on another step than the worker's)
+// keeps as many of the workers it could take as cover its shortfall —
+// counting each at the concurrency it would get there, and no more workers
+// than its ranks' max_workers still allow. The others are lent.
+//
+// The worker's own step needs no check here: findRecyclableWorkers already
+// keeps a worker on its step while that step has more pending tasks than
+// free slots. Waiting tasks are not a use: they become pending when a
+// running task ends, and the worker that ran it is then free to take them.
+//
+// recruiters must be ordered by (step_id, rank); a step's ranks share its
+// shortfall, as in recruitStep.
+func markLendable(workers []RecyclableWorker, recruiters []Recruiter, recyclingMap map[RecruiterKey][]FlavorDetail, cfgDefaultSwap float32) {
+	for i := range workers {
+		workers[i].Lendable = workers[i].Scope == "W"
+	}
+	for start := 0; start < len(recruiters); {
+		end := start + 1
+		for end < len(recruiters) && recruiters[end].StepID == recruiters[start].StepID {
+			end++
 		}
-		if _, ok := regionIDs[w.RegionID]; !ok {
-			continue
+		step := recruiters[start:end]
+		start = end
+
+		need := step[0].TargetTaskrate - step[0].PotentialTaskrate
+		// Workers the step may still take: under the highest max_workers
+		// of its ranks; -1 = no limit.
+		room := 0
+		for _, r := range step {
+			if r.MaximumWorkers == nil {
+				room = -1
+				break
+			}
+			room = max(room, *r.MaximumWorkers-r.CurrentWorkers)
 		}
-		// Honor recyclability scope:
-		// - 'G' (global): no restriction
-		// - 'W' (workflow): only recyclable within the same workflow
-		// - others already filtered out at SQL level
-		if w.Scope == "W" {
-			if w.WorkflowID == nil || *w.WorkflowID != recruiterWorkflowID {
+		for i := range workers {
+			if need <= 0 || room == 0 {
+				break
+			}
+			w := &workers[i]
+			if !w.Lendable || w.WorkflowID == nil || *w.WorkflowID != step[0].WorkflowID ||
+				(w.StepID != nil && *w.StepID == step[0].StepID) {
 				continue
 			}
-		}
-		if w.StepID != nil && *w.StepID == recruiterStepID {
-			continue
-		}
-		workerSwap := float64(cfgDefaultSwap)
-		if w.SwapProportion != nil {
-			workerSwap = *w.SwapProportion
-		}
-		if !swapMatches(workerSwap, recruiterSwap) {
-			continue
-		}
-		// Extra block storage match. Both the size (GB) and the
-		// volume type must agree; unset on either side is treated as
-		// 0 / empty string. Volume type comparison is literal because
-		// provider-specific class names are opaque — "classic" vs
-		// "high-speed" is a real difference the operator opted into.
-		var recruiterGB int32
-		if r.ExtraStorageGB != nil {
-			recruiterGB = *r.ExtraStorageGB
-		}
-		var workerGB int32
-		if w.ExtraStorageGB != nil {
-			workerGB = *w.ExtraStorageGB
-		}
-		if recruiterGB != workerGB {
-			continue
-		}
-		var recruiterType, workerType string
-		if r.ExtraStorageType != nil {
-			recruiterType = *r.ExtraStorageType
-		}
-		if w.ExtraStorageType != nil {
-			workerType = *w.ExtraStorageType
-		}
-		if recruiterType != workerType {
-			continue
-		}
-		selected = append(selected, w.WorkerID)
-		totalTaskrate += computeConcurrencyForRecruiterWorker(r, w)
-		if totalTaskrate >= neededTaskrate {
-			break
+			for _, r := range step {
+				flavorIDs := map[int32]struct{}{}
+				regionIDs := map[int32]struct{}{}
+				for _, fr := range recyclingMap[RecruiterKey{StepID: r.StepID, Rank: r.Rank}] {
+					flavorIDs[fr.FlavorID] = struct{}{}
+					regionIDs[fr.RegionID] = struct{}{}
+				}
+				if workerFits(*w, r, flavorIDs, regionIDs, cfgDefaultSwap) {
+					w.Lendable = false
+					need -= computeConcurrencyForRecruiterWorker(r, *w)
+					room--
+					break
+				}
+			}
 		}
 	}
-	return selected
 }
 
 type WorkerCreator interface {
@@ -1380,6 +1441,12 @@ func recruitSteps(
 	}
 	if len(recyclableWorkers) == 0 {
 		log.Printf("No recyclable workers")
+	}
+	// Lending needs every active recruiter to see which workflow still has
+	// a use for its workers; an explicit debug recruit (nil timers) lists
+	// only its own step's, so it lends nothing.
+	if recruiterTimers != nil {
+		markLendable(recyclableWorkers, recruiters, recyclingMap, cfgDefaultSwap)
 	}
 
 	sc := stepContext{
