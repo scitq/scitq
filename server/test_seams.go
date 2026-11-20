@@ -84,6 +84,10 @@ type StepAggSnapshot struct {
 	Failed       int32
 	ReallyFailed int32
 	Retrying     int32
+	Download     Accumulator
+	Upload       Accumulator
+	SuccessRun   Accumulator
+	FailRun      Accumulator
 }
 
 // SnapshotCounters returns a deep-copied snapshot of every step's
@@ -109,6 +113,10 @@ func (a *StepStatsAgg) SnapshotCounters() map[int32]map[int32]StepAggSnapshot {
 				Failed:       agg.Failed,
 				ReallyFailed: agg.ReallyFailed,
 				Retrying:     agg.Retrying,
+				Download:     agg.Download,
+				Upload:       agg.Upload,
+				SuccessRun:   agg.SuccessRun,
+				FailRun:      agg.FailRun,
 			}
 		}
 		out[wfID] = copied

@@ -1092,7 +1092,6 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	// in stepAgg.RunningTasks. bigint truncation caused the UI to show
 	// min=max=avg for whole assignment bursts.
 	var runStartedEpoch sql.NullFloat64
-	var dlDur, runDur, upDur sql.NullInt32
 	var startEpoch, endEpoch sql.NullInt64
 	var wasHidden bool
 	var sameStatus bool
@@ -1125,9 +1124,14 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 	// Use new CTE and scan fields for aggregator
 	err := s.db.QueryRowContext(ctx, `
         WITH prior AS (
+			-- FOR UPDATE: wait for any concurrent update of this task and
+			-- read its committed status. A plain read sees the status from
+			-- before that update, so both updates would take the task out
+			-- of the same counter bucket.
 			SELECT status AS old_status, retry, step_id, run_started_at, hidden
 			FROM task
 			WHERE task_id = $2
+			FOR UPDATE
 		),
 		upd AS (
 			UPDATE task
@@ -1181,9 +1185,6 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			s.workflow_id,
 			p.run_started_at AS prev_run_started_at,
 			EXTRACT(EPOCH FROM u.run_started_at)::double precision AS run_started_epoch,
-			COALESCE(u.download_duration,0) AS dl_dur,
-			COALESCE(u.run_duration,0)      AS run_dur,
-			COALESCE(u.upload_duration,0)   AS up_dur,
 			CASE
 			WHEN u.run_started_at IS NOT NULL THEN
 				(EXTRACT(EPOCH FROM u.run_started_at)::bigint - COALESCE(u.download_duration,0))
@@ -1213,7 +1214,7 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 		req.ProducedFiles, req.ProducedBytes, req.UploadedFiles,
 	).Scan(
 		&workerID, &oldStatus, &curRetry, &stepID, &workflowID, &prevRunStartedAt,
-		&runStartedEpoch, &dlDur, &runDur, &upDur, &startEpoch, &endEpoch,
+		&runStartedEpoch, &startEpoch, &endEpoch,
 		&wasHidden, &sameStatus, &didUpdate,
 	)
 
@@ -1337,69 +1338,21 @@ func (s *taskQueueServer) UpdateTaskStatus(ctx context.Context, req *pb.TaskStat
 			}
 		}
 
-		// Accumulators (prefer req.Duration, otherwise fall back to DB-derived values)
-		switch req.NewStatus {
-		case "O":
-			var dur float64
-			if req.Duration != nil {
-				dur = float64(*req.Duration)
-			} else if dlDur.Valid {
-				dur = float64(dlDur.Int32)
-			}
-			if dur > 0 {
-				acc := &stepAgg.Download
-				acc.Sum += dur
-				acc.Count++
-				if acc.Min == 0 || dur < acc.Min {
-					acc.Min = dur
-				}
-				if dur > acc.Max {
-					acc.Max = dur
-				}
-			}
-		case "U":
-			if req.Duration != nil {
-				dur := float64(*req.Duration)
-				acc := &stepAgg.SuccessRun
-				acc.Sum += dur
-				acc.Count++
-				if acc.Min == 0 || dur < acc.Min {
-					acc.Min = dur
-				}
-				if dur > acc.Max {
-					acc.Max = dur
-				}
-			}
-		case "V":
-			if req.Duration != nil {
-				dur := float64(*req.Duration)
-				acc := &stepAgg.FailRun
-				acc.Sum += dur
-				acc.Count++
-				if acc.Min == 0 || dur < acc.Min {
-					acc.Min = dur
-				}
-				if dur > acc.Max {
-					acc.Max = dur
-				}
-			}
-		case "S", "F":
-			var dur float64
-			if req.Duration != nil {
-				dur = float64(*req.Duration)
-			} else if upDur.Valid {
-				dur = float64(upDur.Int32)
-			}
-			if dur > 0 {
-				acc := &stepAgg.Upload
-				acc.Sum += dur
-				acc.Count++
-				if acc.Min == 0 || dur < acc.Min {
-					acc.Min = dur
-				}
-				if dur > acc.Max {
-					acc.Max = dur
-				}
+		// Duration accumulators, fed exactly when the UPDATE above stores
+		// the duration (req.Duration set): download on O, run on U (success)
+		// or V (failure), upload on S/F. The 5-minute Reconcile rebuilds the
+		// same accumulators from those columns.
+		if req.Duration != nil {
+			dur := float64(*req.Duration)
+			switch req.NewStatus {
+			case "O":
+				stepAgg.Download.Add(dur)
+			case "U":
+				stepAgg.SuccessRun.Add(dur)
+			case "V":
+				stepAgg.FailRun.Add(dur)
+			case "S", "F":
+				stepAgg.Upload.Add(dur)
 			}
 		}
 		// StartTime/EndTime from DB-derived epochs

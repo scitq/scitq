@@ -22,18 +22,6 @@ func NewStepAgg() *StepAgg {
 	return &StepAgg{
 		RunningTasks: make(map[int32]time.Time),
 		RetryingSet:  make(map[int32]bool),
-		Download: Accumulator{
-			Min: math.MaxFloat64,
-		},
-		Upload: Accumulator{
-			Min: math.MaxFloat64,
-		},
-		SuccessRun: Accumulator{
-			Min: math.MaxFloat64,
-		},
-		FailRun: Accumulator{
-			Min: math.MaxFloat64,
-		},
 	}
 }
 
@@ -42,8 +30,21 @@ func NewStepAgg() *StepAgg {
 type Accumulator struct {
 	Count int32
 	Sum   float64
-	Min   float64
+	Min   float64 // meaningful only when Count > 0
 	Max   float64
+}
+
+// Add records one duration. 0 is a real duration (a task that ran in under
+// a second), so the first value sets Min whatever it is.
+func (a *Accumulator) Add(d float64) {
+	if a.Count == 0 || d < a.Min {
+		a.Min = d
+	}
+	if a.Count == 0 || d > a.Max {
+		a.Max = d
+	}
+	a.Count++
+	a.Sum += d
 }
 
 // StepAgg aggregates statistics for a step within a workflow.
@@ -151,20 +152,23 @@ func NewStepStatsAgg(db *sql.DB) (*StepStatsAgg, error) {
 			COUNT(*) FILTER (WHERE t.upload_duration IS NOT NULL) AS up_count,
 
 			-- run accumulators split by outcome
-			COUNT(*) FILTER (WHERE t.status = 'S') AS run_s_count,
+			-- durations are NULL until recorded (a task skipped or reused
+			-- has no run duration): count only recorded ones, as the live
+			-- path does
+			COUNT(t.run_duration) FILTER (WHERE t.status = 'S') AS run_s_count,
 			COALESCE(SUM(t.run_duration) FILTER (WHERE t.status = 'S'), 0) AS run_s_sum,
 			COALESCE(MIN(t.run_duration) FILTER (WHERE t.status = 'S'), 0) AS run_s_min,
 			COALESCE(MAX(t.run_duration) FILTER (WHERE t.status = 'S'), 0) AS run_s_max,
 
-			COUNT(*) FILTER (WHERE t.status IN ('F','V')) AS run_f_count,
+			COUNT(t.run_duration) FILTER (WHERE t.status = 'F') AS run_f_count,
 			COALESCE(SUM(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_sum,
 			COALESCE(MIN(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_min,
 			COALESCE(MAX(t.run_duration) FILTER (WHERE t.status = 'F'), 0) AS run_f_max,
 
 			-- time bounds (epoch seconds), NULL for a step none of whose
 			-- tasks ran (e.g. skipped)
-			MIN(EXTRACT(EPOCH FROM t.run_started_at) - t.download_duration)::bigint AS start_epoch,
-			(MAX(EXTRACT(EPOCH FROM t.run_started_at) + t.run_duration + t.upload_duration)
+			MIN(EXTRACT(EPOCH FROM t.run_started_at) - COALESCE(t.download_duration, 0))::bigint AS start_epoch,
+			(MAX(EXTRACT(EPOCH FROM t.run_started_at) + COALESCE(t.run_duration, 0) + COALESCE(t.upload_duration, 0))
 				FILTER (WHERE t.status IN ('S','F') AND t.run_started_at IS NOT NULL))::bigint AS end_epoch,
 
 			-- running tasks as separate arrays (NOT hidden, same reason as
@@ -716,14 +720,10 @@ func toStepRunStats(a Accumulator) stepRunStats {
 	if a.Count == 0 {
 		return stepRunStats{}
 	}
-	minV := a.Min
-	if minV == math.MaxFloat64 {
-		minV = 0
-	}
 	return stepRunStats{
 		Count:   a.Count,
 		Average: float32(a.Sum / float64(a.Count)),
-		Min:     float32(minV),
+		Min:     float32(a.Min),
 		Max:     float32(a.Max),
 	}
 }

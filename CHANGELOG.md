@@ -167,6 +167,16 @@ sessions now expire after 30 days without use.
   watchdog deleted them. A workflow now keeps only the workers one of its
   short steps could take, as many as cover that step's shortfall; the
   others are open to any workflow.
+- Step durations (UI, `scitq step stats`) could show an average below the
+  minimum: a duration of 0 (a task run in under a second) was taken for
+  "no value yet", so the next task's duration replaced it as the minimum.
+  Tasks that never ran (skipped or reused) also counted as runs of 0 s.
+  The duration of a phase that did not happen is now absent rather than 0
+  (migration 59), and the MCP task list shows recorded durations of 0.
+- The step counters could drift until the next 5-minute rebuild (the UI
+  showed -1 tasks starting) when two status updates of the same task
+  overlapped: both read the status from before the other, and took the
+  task out of the same counter twice.
 - SRA downloads (`run+fastq://` falling back to `sra-aws` or `sra-tools`)
   ignored a failed compression, and could keep a `.gz` left by a failed ENA
   transfer of the same run. A failed compression now fails the download,

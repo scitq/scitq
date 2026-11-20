@@ -1333,9 +1333,9 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		Resource         []string `json:"resource,omitempty"`
 		Weight           float64  `json:"weight,omitempty"`
 		RetryCount       int32    `json:"retry_count,omitempty"`
-		DownloadDuration int32    `json:"download_duration,omitempty"`
-		RunDuration      int32    `json:"run_duration,omitempty"`
-		UploadDuration   int32    `json:"upload_duration,omitempty"`
+		DownloadDuration *int32   `json:"download_duration,omitempty"` // absent: not recorded; 0: under a second
+		RunDuration      *int32   `json:"run_duration,omitempty"`
+		UploadDuration   *int32   `json:"upload_duration,omitempty"`
 		QualityScore     *float64 `json:"quality_score,omitempty"`
 		QualityVars      string   `json:"quality_vars,omitempty"`
 		ReuseKey         string   `json:"reuse_key,omitempty"`
@@ -1393,9 +1393,9 @@ func (h *mcpHandler) toolListTasks(ctx context.Context, args json.RawMessage) (a
 		if t.Output != nil { s.Output = *t.Output }
 		if t.Publish != nil { s.Publish = *t.Publish }
 		if t.Weight != nil { s.Weight = *t.Weight }
-		if t.DownloadDuration != nil { s.DownloadDuration = *t.DownloadDuration }
-		if t.RunDuration != nil { s.RunDuration = *t.RunDuration }
-		if t.UploadDuration != nil { s.UploadDuration = *t.UploadDuration }
+		s.DownloadDuration = t.DownloadDuration
+		s.RunDuration = t.RunDuration
+		s.UploadDuration = t.UploadDuration
 		if t.QualityScore != nil { s.QualityScore = t.QualityScore }
 		if t.QualityVars != nil { s.QualityVars = *t.QualityVars }
 		if t.ReuseKey != nil { s.ReuseKey = *t.ReuseKey }

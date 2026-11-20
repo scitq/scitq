@@ -17,6 +17,7 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -172,4 +173,99 @@ func TestTransitionsAggregatorParity_Smoke(t *testing.T) {
 	// Guard: workflow ID is used above; keep the reference alive so
 	// the go compiler doesn't flag it as unused during pilot iteration.
 	_ = wfID
+}
+
+// TestTransitionsAggregatorParity_Durations checks the duration accumulators
+// against a rebuild from the DB: a run of 0 s stays the minimum, a task that
+// succeeds without running (skipped) adds no run duration, and a failed run
+// counts in FailRun.
+func TestTransitionsAggregatorParity_Durations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	qc, stepID, cleanup := paritySetup(t, ctx)
+	defer cleanup()
+
+	submit := func(status string) int32 {
+		shell := "sh"
+		r, err := qc.SubmitTask(ctx, &pb.TaskRequest{Command: "true", Shell: &shell, Container: "bare", Status: status, StepId: &stepID})
+		require.NoError(t, err)
+		return r.TaskId
+	}
+	move := func(taskID int32, status string, dur *int32) {
+		_, err := qc.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: taskID, NewStatus: status, Duration: dur})
+		require.NoError(t, err)
+	}
+	d := func(v int32) *int32 { return &v }
+
+	for _, run := range []int32{0, 719, 128} {
+		id := submit("P")
+		move(id, "A", nil)
+		move(id, "O", d(4))
+		move(id, "R", nil)
+		move(id, "U", d(run))
+		move(id, "S", d(3))
+	}
+	failed := submit("P")
+	move(failed, "A", nil)
+	move(failed, "R", nil)
+	move(failed, "V", d(12))
+	move(failed, "F", d(1))
+	submit("S") // succeeded without running, like a skipped task
+
+	assertAggregatorParity(t, "runs of 0, 719 and 128 s, a failure and a skip")
+	run := srv.StatsAggForTest().SnapshotCounters()
+	for _, steps := range run {
+		if s, ok := steps[stepID]; ok {
+			require.Equal(t, srv.Accumulator{Count: 3, Sum: 847, Min: 0, Max: 719}, s.SuccessRun)
+			require.Equal(t, srv.Accumulator{Count: 1, Sum: 12, Min: 12, Max: 12}, s.FailRun)
+			return
+		}
+	}
+	t.Fatal("step missing from the aggregator")
+}
+
+// TestTransitionsAggregatorParity_ConcurrentUpdates sends overlapping status
+// updates for the same task: each must take the task out of the bucket it is
+// really in, so the counters stay equal to a rebuild from the DB.
+func TestTransitionsAggregatorParity_ConcurrentUpdates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	qc, stepID, cleanup := paritySetup(t, ctx)
+	defer cleanup()
+
+	shell := "sh"
+	for i := 0; i < 10; i++ {
+		r, err := qc.SubmitTask(ctx, &pb.TaskRequest{Command: "true", Shell: &shell, Container: "bare", Status: "P", StepId: &stepID})
+		require.NoError(t, err)
+		_, err = qc.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: r.TaskId, NewStatus: "A"})
+		require.NoError(t, err)
+		var wg sync.WaitGroup
+		for _, st := range []string{"C", "D", "O", "R", "U", "R", "O"} {
+			wg.Add(1)
+			go func(st string) {
+				defer wg.Done()
+				qc.UpdateTaskStatus(ctx, &pb.TaskStatusUpdate{TaskId: r.TaskId, NewStatus: st})
+			}(st)
+		}
+		wg.Wait()
+	}
+	assertAggregatorParity(t, "overlapping status updates")
+}
+
+// paritySetup starts a server and creates one workflow with one step.
+func paritySetup(t *testing.T, ctx context.Context) (pb.TaskQueueClient, int32, func()) {
+	t.Helper()
+	serverAddr, _, adminUser, adminPassword, cleanup := startServerForTest(t, nil)
+	var c cli.CLI
+	c.Attr.Server = serverAddr
+	out, err := runCLICommand(c, []string{"login", "--user", adminUser, "--password", adminPassword})
+	require.NoError(t, err)
+	qclient, err := lib.CreateClient(serverAddr, extractToken(out))
+	require.NoError(t, err)
+	wfName := fmt.Sprintf("parity-%d", time.Now().UnixNano())
+	_, err = qclient.Client.CreateWorkflow(ctx, &pb.WorkflowRequest{Name: wfName})
+	require.NoError(t, err)
+	stepResp, err := qclient.Client.CreateStep(ctx, &pb.StepRequest{WorkflowName: &wfName, Name: "parity-step"})
+	require.NoError(t, err)
+	return qclient.Client, stepResp.StepId, func() { qclient.Close(); cleanup() }
 }
